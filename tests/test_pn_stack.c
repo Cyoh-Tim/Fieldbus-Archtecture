@@ -503,6 +503,43 @@ static void test_dcp_identify_filter(void)
         }
     }
     expect(found, "Identify with matching NameOfStation is answered");
+
+    /* DeviceID match / mismatch */
+    memset(pay, 0, sizeof(pay));
+    pn_wr_be16(pay, PN_FRAMEID_DCP_ID_REQ);
+    pay[2] = PN_DCP_IDENTIFY;
+    pay[3] = PN_DCP_REQ;
+    pn_wr_be32(pay + 4, 0x3);
+    pn_wr_be16(pay + 8, 0);
+    pay[12] = PN_DCP_OPT_DEV;
+    pay[13] = PN_DCP_SUB_DEV_ID;
+    pn_wr_be16(pay + 14, 4);
+    pn_wr_be16(pay + 16, 0x0001);
+    pn_wr_be16(pay + 18, 0x0001);
+    pn_wr_be16(pay + 10, 8);
+    flen = pn_eth_build(frame, PN_FRAME_MAX, mc, src, PN_ETHTYPE_PN, pay, 20);
+    cap.n = 0;
+    pn_stack_handle_eth(s, frame, flen);
+    found = 0;
+    for (int i = 0; i < cap.n; i++) {
+        if (contains(cap.frames[i], cap.lens[i], "sensor-line1")) {
+            found = 1;
+        }
+    }
+    expect(!found, "Identify with other DeviceID is ignored");
+
+    pn_wr_be16(pay + 16, 0xABCD);
+    pn_wr_be16(pay + 18, 0x0001);
+    flen = pn_eth_build(frame, PN_FRAME_MAX, mc, src, PN_ETHTYPE_PN, pay, 20);
+    cap.n = 0;
+    pn_stack_handle_eth(s, frame, flen);
+    found = 0;
+    for (int i = 0; i < cap.n; i++) {
+        if (contains(cap.frames[i], cap.lens[i], "sensor-line1")) {
+            found = 1;
+        }
+    }
+    expect(found, "Identify with matching DeviceID is answered");
     pn_stack_destroy(s);
 }
 
@@ -849,6 +886,24 @@ static void test_cm_pdev_expected(void)
     pn_stack_destroy(s);
 }
 
+static void test_lldp_start(void)
+{
+    tx_cap_t cap;
+    pn_stack_t *s = mock_stack(&cap);
+    int saw = 0;
+    for (int i = 0; i < cap.n; i++) {
+        if (cap.lens[i] < 14) {
+            continue;
+        }
+        if (pn_rd_be16(cap.frames[i] + 12) == PN_ETHTYPE_LLDP &&
+            contains(cap.frames[i], cap.lens[i], "sensor-line1")) {
+            saw = 1;
+        }
+    }
+    expect(saw, "LLDP sent on start with station name");
+    pn_stack_destroy(s);
+}
+
 static void test_watchdog(void)
 {
     tx_cap_t cap;
@@ -873,6 +928,7 @@ int main(void)
     test_cm_connect_prmend();
     test_cm_write_read();
     test_cm_pdev_expected();
+    test_lldp_start();
     test_watchdog();
     if (g_fail) {
         fprintf(stderr, "pn stack tests FAILED\n");

@@ -122,6 +122,10 @@ if(ENABLE_PN_TESTS)
     add_executable(pn_controller_sim tests/pn_controller_sim.c)
     target_include_directories(pn_controller_sim PRIVATE stacks/profinet/include include core)
     target_link_libraries(pn_controller_sim PRIVATE pn_stack)
+
+    add_executable(pn_pi_pretest tests/pn_pi_pretest.c)
+    target_include_directories(pn_pi_pretest PRIVATE stacks/profinet/include include core)
+    target_link_libraries(pn_pi_pretest PRIVATE pn_stack)
 endif()
 
 # ---- 데몬 실행파일 ----

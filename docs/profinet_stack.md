@@ -51,7 +51,10 @@ PLC 없이 Device↔Controller 기동 시퀀스는 veth 위에서 컨트롤러 �
 ```
 ./build/test_pn_stack
 bash tests/run_pn_veth.sh
+bash tests/run_pn_fulltest.sh
 ```
+
+`run_pn_fulltest.sh` 는 PI Test Bundle 공개 Readme의 RT Device 그룹(DCP / LLDP / SNMP / CM / RTC1)을 이 환경에서 돌리는 **랩 프리테스트**다. 공식 ART / SPIRTA / ETS (`2025_08_21_PN-Test-V246.zip`) 는 PI 회원 전용·Windows ETS 기반이라 이 봇에서 받을 수 없고, PITL 인증을 대체하지 않는다.
 
 시뮬레이터는 DCP Identify → Connect (ARServerBlock) → Write / WriteMultiple → Read I&M0 / RealIdent → PrmEnd → ApplicationReady → RTC1 cyclic 을 실제 Ethernet/UDP 로 주고받는다. Siemens TIA 와 같은 CM 순서이며, 벤더 분기는 없다.
 
