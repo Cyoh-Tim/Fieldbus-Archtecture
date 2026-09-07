@@ -1083,6 +1083,21 @@ int main(int argc, char **argv)
         memcpy(junk + 6, mymac, 6);
         pn_wr_be16(junk + 12, 0x0800);
         send_raw(raw, ifindex, junk, 60);
+        if ((i % 16) == 0) {
+            uint8_t opay[48];
+            memset(opay, 0, sizeof(opay));
+            pn_wr_be16(opay, out_fid);
+            memset(opay + 2, 0xA5, 8);
+            opay[10] = PN_IOPS_GOOD;
+            opay[44] = PN_DATASTATUS_PRIMARY | PN_DATASTATUS_VALID |
+                       PN_DATASTATUS_RUN;
+            uint8_t fr[64];
+            memcpy(fr, devmac, 6);
+            memcpy(fr + 6, mymac, 6);
+            pn_wr_be16(fr + 12, PN_ETHTYPE_PN);
+            memcpy(fr + 14, opay, 46);
+            send_raw(raw, ifindex, fr, 60);
+        }
     }
     int after_load = 0;
     uint64_t load_end = now_ms() + 250;
