@@ -634,7 +634,7 @@ int main(int argc, char **argv)
         n = dcp_wait_getset(raw, rx, sizeof(rx), 800, expect_name, 0xA1000011);
         int saw_vid = 0;
         if (n > 20) {
-            for (int i = 0; i + 4 < n; i++) {
+            for (int i = 0; i + 4 <= n; i++) {
                 if (pn_rd_be16(rx + i) == 0xABCD &&
                     pn_rd_be16(rx + i + 2) == 0x0001) {
                     saw_vid = 1;

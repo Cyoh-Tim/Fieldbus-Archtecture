@@ -573,6 +573,22 @@ static void test_dcp_get(void)
     }
     expect(found_name, "DCP Get NameOfStation returns station name");
     (void)found_ip_mac;
+
+    pay[13] = PN_DCP_SUB_DEV_ID;
+    pn_wr_be32(pay + 4, 0x3);
+    cap.n = 0;
+    flen = pn_eth_build(frame, PN_FRAME_MAX, dst, src, PN_ETHTYPE_PN, pay, 16);
+    pn_stack_handle_eth(s, frame, flen);
+    int found_id = 0;
+    for (int i = 0; i < cap.n; i++) {
+        for (size_t j = 0; j + 4 <= cap.lens[i]; j++) {
+            if (pn_rd_be16(cap.frames[i] + j) == 0xABCD &&
+                pn_rd_be16(cap.frames[i] + j + 2) == 0x0001) {
+                found_id = 1;
+            }
+        }
+    }
+    expect(found_id, "DCP Get DeviceID returns vendor/device");
     pn_stack_destroy(s);
 }
 
