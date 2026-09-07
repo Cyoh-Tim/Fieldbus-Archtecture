@@ -238,14 +238,16 @@ static int parse_connect_block(uint16_t type, const uint8_t *body, uint16_t blen
             off += 4; /* API */
             uint16_t slot = pn_rd_be16(body + off);
             off += 2;
-            off += 4; /* ModuleIdent */
+            uint32_t mod_ident = pn_rd_be32(body + off);
+            off += 4;
             off += 2; /* ModuleProperties */
             uint16_t nsub = pn_rd_be16(body + off);
             off += 2;
             for (uint16_t i = 0; i < nsub && off + 8 <= blen; i++) {
                 uint16_t subslot = pn_rd_be16(body + off);
                 off += 2;
-                off += 4; /* SubmoduleIdent */
+                uint32_t sub_ident = pn_rd_be32(body + off);
+                off += 4;
                 uint16_t props = pn_rd_be16(body + off);
                 off += 2;
                 uint16_t stype = (uint16_t)(props & 0x3u);
@@ -254,6 +256,15 @@ static int parse_connect_block(uint16_t type, const uint8_t *body, uint16_t blen
                 memset(&sm, 0, sizeof(sm));
                 sm.slot = slot;
                 sm.subslot = subslot;
+                sm.module_ident = mod_ident ? mod_ident
+                                            : (slot == 0 ? 1u : 0x10u);
+                sm.submodule_ident =
+                    sub_ident ? sub_ident
+                              : (subslot == 0x8000
+                                     ? 2u
+                                     : (subslot == 0x8001
+                                            ? 3u
+                                            : (slot == 0 ? 1u : 0x11u)));
                 sm.iops_len = 1;
                 sm.iocs_len = 1;
                 for (int d = 0; d < ndesc && off + 6 <= blen; d++) {
@@ -294,21 +305,55 @@ static int parse_connect_block(uint16_t type, const uint8_t *body, uint16_t blen
     return 0;
 }
 
+static void add_sub(pn_ar_t *a, uint16_t slot, uint16_t subslot, uint32_t mid,
+                    uint32_t sid, uint16_t in_len, uint16_t out_len)
+{
+    if (a->n_sub >= PN_SUBMOD_MAX) {
+        return;
+    }
+    pn_submod_t sm;
+    memset(&sm, 0, sizeof(sm));
+    sm.slot = slot;
+    sm.subslot = subslot;
+    sm.module_ident = mid;
+    sm.submodule_ident = sid;
+    sm.in_len = in_len;
+    sm.out_len = out_len;
+    sm.in_pi = a->in_data_len;
+    sm.out_pi = a->out_data_len;
+    sm.iops_len = 1;
+    sm.iocs_len = 1;
+    if ((uint32_t)a->in_data_len + in_len <= PN_IO_MAX) {
+        a->in_data_len = (uint16_t)(a->in_data_len + in_len);
+    }
+    if ((uint32_t)a->out_data_len + out_len <= PN_IO_MAX) {
+        a->out_data_len = (uint16_t)(a->out_data_len + out_len);
+    }
+    a->sub[a->n_sub++] = sm;
+}
+
+static const pn_submod_t *first_io_sub(const pn_ar_t *a, int want_in)
+{
+    for (int i = 0; i < a->n_sub; i++) {
+        if (want_in && a->sub[i].in_len) {
+            return &a->sub[i];
+        }
+        if (!want_in && a->sub[i].out_len) {
+            return &a->sub[i];
+        }
+    }
+    return a->n_sub ? &a->sub[0] : NULL;
+}
+
 static void finalize_ar(pn_stack_t *s)
 {
     pn_ar_t *a = &s->ar;
     if (a->n_sub == 0) {
-        a->sub[0].slot = 1;
-        a->sub[0].subslot = 1;
-        a->sub[0].in_len = s->cfg.input_len;
-        a->sub[0].out_len = s->cfg.output_len;
-        a->sub[0].in_pi = 0;
-        a->sub[0].out_pi = 0;
-        a->sub[0].iops_len = 1;
-        a->sub[0].iocs_len = 1;
-        a->n_sub = 1;
-        a->in_data_len = s->cfg.input_len;
-        a->out_data_len = s->cfg.output_len;
+        /* GSDML DAP + Interface(0x8000) + Port(0x8001) + slot 1 IO. */
+        add_sub(a, 0, 1, 1, 1, 0, 0);
+        add_sub(a, 0, 0x8000, 1, 2, 0, 0);
+        add_sub(a, 0, 0x8001, 1, 3, 0, 0);
+        add_sub(a, 1, 1, 0x10, 0x11, s->cfg.input_len, s->cfg.output_len);
     }
     if (a->in_data_len == 0) {
         a->in_data_len = s->cfg.input_len;
@@ -332,17 +377,23 @@ static void finalize_ar(pn_stack_t *s)
     if (a->iocr_out.data_len == 0) {
         a->iocr_out.data_len = (uint16_t)(a->out_data_len + 1);
     }
-    if (a->iocr_in.n_data == 0 && a->n_sub > 0) {
-        a->iocr_in.data[0].slot = a->sub[0].slot;
-        a->iocr_in.data[0].subslot = a->sub[0].subslot;
-        a->iocr_in.data[0].frame_off = 0;
-        a->iocr_in.n_data = 1;
+    if (a->iocr_in.n_data == 0) {
+        const pn_submod_t *sm = first_io_sub(a, 1);
+        if (sm) {
+            a->iocr_in.data[0].slot = sm->slot;
+            a->iocr_in.data[0].subslot = sm->subslot;
+            a->iocr_in.data[0].frame_off = 0;
+            a->iocr_in.n_data = 1;
+        }
     }
-    if (a->iocr_out.n_data == 0 && a->n_sub > 0) {
-        a->iocr_out.data[0].slot = a->sub[0].slot;
-        a->iocr_out.data[0].subslot = a->sub[0].subslot;
-        a->iocr_out.data[0].frame_off = 0;
-        a->iocr_out.n_data = 1;
+    if (a->iocr_out.n_data == 0) {
+        const pn_submod_t *sm = first_io_sub(a, 0);
+        if (sm) {
+            a->iocr_out.data[0].slot = sm->slot;
+            a->iocr_out.data[0].subslot = sm->subslot;
+            a->iocr_out.data[0].frame_off = 0;
+            a->iocr_out.n_data = 1;
+        }
     }
     if (a->send_clock_factor == 0) {
         a->send_clock_factor = 32;
@@ -370,6 +421,25 @@ static size_t wr_block(uint8_t *p, uint16_t type, const uint8_t *body,
     if (n & 1u) {
         p[n++] = 0;
     }
+    return n;
+}
+
+static size_t wr_arserver(uint8_t *p, const char *name)
+{
+    size_t nlen = strlen(name);
+    if (nlen > PN_STATION_NAME_MAX) {
+        nlen = PN_STATION_NAME_MAX;
+    }
+    pn_wr_be16(p, PN_BLOCK_ARSERVER_RES);
+    p[4] = 1;
+    p[5] = 0;
+    pn_wr_be16(p + 6, (uint16_t)nlen);
+    memcpy(p + 8, name, nlen);
+    size_t n = 8 + nlen;
+    while (n & 3u) {
+        p[n++] = 0;
+    }
+    pn_wr_be16(p + 2, (uint16_t)(n - 4));
     return n;
 }
 
@@ -403,6 +473,8 @@ static size_t build_connect_res_blocks(pn_stack_t *s, uint8_t *out, size_t cap)
     pn_wr_be16(alarm + 2, 1);
     pn_wr_be16(alarm + 4, 200);
     n += wr_block(out + n, PN_BLOCK_ALARMCR_RES, alarm, sizeof(alarm));
+
+    n += wr_arserver(out + n, s->cfg.station_name);
 
     return n > cap ? 0 : n;
 }
@@ -547,7 +619,7 @@ static size_t build_read_res(pn_stack_t *s, const uint8_t *body, uint16_t blen,
         sub = pn_rd_be16(body + 24);
         index = pn_rd_be16(body + 28);
     }
-    uint8_t rec[256];
+    uint8_t rec[512];
     size_t rlen = 0;
     if (pn_record_read(s, slot, sub, index, rec, sizeof(rec), &rlen) != 0) {
         rlen = 0;
@@ -561,8 +633,7 @@ static size_t build_read_res(pn_stack_t *s, const uint8_t *body, uint16_t blen,
     pn_wr_be16(hdr + 24, sub);
     pn_wr_be16(hdr + 28, index);
     pn_wr_be32(hdr + 30, (uint32_t)rlen);
-    /* additionalValue1/2 + 20 pad already zero */
-    uint8_t blk[64 + 256];
+    uint8_t blk[64 + 512];
     size_t bn = wr_block(blk, PN_BLOCK_READ_RES, hdr, 58);
     memcpy(blk + bn, rec, rlen);
     bn += rlen;
@@ -573,16 +644,116 @@ static size_t build_read_res(pn_stack_t *s, const uint8_t *body, uint16_t blen,
     return bn;
 }
 
-static size_t build_write_res(const uint8_t *body, uint16_t blen, uint8_t *out,
-                              size_t cap)
+typedef struct {
+    uint16_t seq;
+    uint8_t uuid[16];
+    uint32_t api;
+    uint16_t slot;
+    uint16_t subslot;
+    uint16_t index;
+    uint32_t rec_len;
+} pn_iodrw_t;
+
+static int parse_iodrw(const uint8_t *body, uint16_t blen, pn_iodrw_t *w)
 {
-    uint8_t hdr[64];
+    if (blen < 34) {
+        return -1;
+    }
+    memset(w, 0, sizeof(*w));
+    w->seq = pn_rd_be16(body);
+    memcpy(w->uuid, body + 2, 16);
+    w->api = pn_rd_be32(body + 18);
+    w->slot = pn_rd_be16(body + 22);
+    w->subslot = pn_rd_be16(body + 24);
+    w->index = pn_rd_be16(body + 28);
+    w->rec_len = pn_rd_be32(body + 30);
+    return 0;
+}
+
+static size_t put_write_res(uint8_t *out, size_t cap, const pn_iodrw_t *w,
+                            uint32_t rec_len)
+{
+    uint8_t hdr[58];
     memset(hdr, 0, sizeof(hdr));
-    size_t copy = blen < 58 ? blen : 58;
-    memcpy(hdr, body, copy);
-    pn_wr_be32(hdr + 30, 0); /* recordDataLength */
+    pn_wr_be16(hdr, w->seq);
+    memcpy(hdr + 2, w->uuid, 16);
+    pn_wr_be32(hdr + 18, w->api);
+    pn_wr_be16(hdr + 22, w->slot);
+    pn_wr_be16(hdr + 24, w->subslot);
+    pn_wr_be16(hdr + 28, w->index);
+    pn_wr_be32(hdr + 30, rec_len);
     size_t n = wr_block(out, PN_BLOCK_WRITE_RES, hdr, 58);
     return n > cap ? 0 : n;
+}
+
+static int parse_write_block(const uint8_t *p, size_t n, pn_iodrw_t *w,
+                             size_t *hdr_sz)
+{
+    if (n < 6) {
+        return -1;
+    }
+    uint16_t type = pn_rd_be16(p);
+    uint16_t blen = pn_rd_be16(p + 2);
+    if (type != PN_BLOCK_WRITE_REQ || blen < 2 || 4u + blen > n) {
+        return -1;
+    }
+    if (parse_iodrw(p + 6, (uint16_t)(blen - 2), w) != 0) {
+        return -1;
+    }
+    *hdr_sz = 4u + blen;
+    return 0;
+}
+
+static size_t build_write_res_all(const uint8_t *blocks, size_t n, uint8_t *out,
+                                  size_t cap)
+{
+    pn_iodrw_t w;
+    size_t hdr_sz = 0;
+    if (parse_write_block(blocks, n, &w, &hdr_sz) != 0) {
+        uint8_t z[4] = {0};
+        if (cap < 4) {
+            return 0;
+        }
+        memcpy(out, z, 4);
+        return 4;
+    }
+    if (w.index != PN_INDEX_WRITE_MULTI) {
+        return put_write_res(out, cap, &w, 0);
+    }
+    size_t pos = put_write_res(out, cap, &w, 0);
+    if (pos == 0) {
+        return 0;
+    }
+    size_t inner_off = hdr_sz;
+    size_t inner_end = hdr_sz + w.rec_len;
+    if (inner_end > n) {
+        inner_end = n;
+    }
+    size_t inner_bytes = 0;
+    while (inner_off + 6 <= inner_end) {
+        pn_iodrw_t iw;
+        size_t ih = 0;
+        if (parse_write_block(blocks + inner_off, inner_end - inner_off, &iw,
+                              &ih) != 0) {
+            break;
+        }
+        size_t next = inner_off + ih + iw.rec_len;
+        if (next > inner_end) {
+            break;
+        }
+        size_t wn = put_write_res(out + pos, cap - pos, &iw, 0);
+        if (wn == 0) {
+            break;
+        }
+        pos += wn;
+        inner_bytes += wn;
+        inner_off = next;
+        if (inner_off < inner_end) {
+            inner_off = (inner_off + 3u) & ~3u;
+        }
+    }
+    pn_wr_be32(out + 36, (uint32_t)inner_bytes);
+    return pos;
 }
 
 int pn_rpc_handle_from(pn_stack_t *s, const uint8_t *pdu, size_t len,
@@ -612,7 +783,7 @@ int pn_rpc_handle_from(pn_stack_t *s, const uint8_t *pdu, size_t len,
         slen = declared;
     }
 
-    uint8_t stub_out[2048];
+    uint8_t stub_out[4096];
     size_t so = 0;
 
     if (op == OP_CONNECT) {
@@ -686,13 +857,13 @@ int pn_rpc_handle_from(pn_stack_t *s, const uint8_t *pdu, size_t len,
         const uint8_t *blocks = ndr_blocks(stub, slen, &blen, le);
         uint16_t btype = 0, body_len = 0;
         const uint8_t *body = NULL;
-        uint8_t rec_blk[512];
+        uint8_t rec_blk[1024];
         size_t rn = 0;
         if (blocks && first_block_type(blocks, blen, &btype, &body, &body_len) ==
                           0) {
             rn = build_read_res(s, body, body_len, rec_blk, sizeof(rec_blk));
         } else {
-            uint8_t rec[256];
+            uint8_t rec[512];
             size_t rlen = 0;
             pn_record_read(s, 0, 1, PN_INDEX_IM0, rec, sizeof(rec), &rlen);
             memcpy(rec_blk, rec, rlen);
@@ -702,15 +873,12 @@ int pn_rpc_handle_from(pn_stack_t *s, const uint8_t *pdu, size_t len,
     } else if (op == OP_WRITE) {
         size_t blen = 0;
         const uint8_t *blocks = ndr_blocks(stub, slen, &blen, le);
-        uint16_t btype = 0, body_len = 0;
-        const uint8_t *body = NULL;
-        uint8_t wblk[80];
+        uint8_t wblk[2048];
         size_t wn = 4;
         uint8_t z[4] = {0};
         memcpy(wblk, z, 4);
-        if (blocks && first_block_type(blocks, blen, &btype, &body, &body_len) ==
-                          0) {
-            wn = build_write_res(body, body_len, wblk, sizeof(wblk));
+        if (blocks && blen >= 6) {
+            wn = build_write_res_all(blocks, blen, wblk, sizeof(wblk));
         }
         so = ndr_wrap(stub_out, wblk, wn, le);
     } else {
@@ -750,7 +918,7 @@ void pn_rpc_poll(pn_stack_t *s)
     if (s->fd_rpc < 0) {
         return;
     }
-    uint8_t buf[2048];
+    uint8_t buf[4096];
     struct sockaddr_in src;
     socklen_t sl = sizeof(src);
     ssize_t n = recvfrom(s->fd_rpc, buf, sizeof(buf), MSG_DONTWAIT,
@@ -760,7 +928,7 @@ void pn_rpc_poll(pn_stack_t *s)
     }
     uint32_t ip = ntohl(src.sin_addr.s_addr);
     uint16_t port = ntohs(src.sin_port);
-    uint8_t resp[2048];
+    uint8_t resp[4096];
     size_t rlen = 0;
     if (pn_rpc_handle_from(s, buf, (size_t)n, ip, port, resp, sizeof(resp),
                            &rlen) == 0 &&

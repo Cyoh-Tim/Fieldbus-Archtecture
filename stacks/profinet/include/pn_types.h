@@ -59,9 +59,15 @@
 #define PN_BLOCK_AR_RES       0x8101u
 #define PN_BLOCK_IOCR_RES     0x8102u
 #define PN_BLOCK_ALARMCR_RES  0x8103u
+#define PN_BLOCK_MODDIFF      0x8104u
+#define PN_BLOCK_ARSERVER_RES 0x8106u
 #define PN_BLOCK_PRMEND_RES   0x8110u
 #define PN_BLOCK_APPRDY_RES   0x8112u
 #define PN_BLOCK_RELEASE_RES  0x8114u
+#define PN_BLOCK_REALIDENT    0x0013u
+#define PN_BLOCK_IM0          0x0020u
+#define PN_BLOCK_PDPORT_REAL  0x020Fu
+#define PN_BLOCK_PDIF_REAL    0x0240u
 #define PN_BLOCK_SEC_INT      0x0E01u /* stack-local integrity block */
 
 #define PN_IOCR_INPUT         0x0001u
@@ -84,7 +90,15 @@
 #define PN_DATASTATUS_RUN     0x20u
 #define PN_DATASTATUS_PROBLEM 0x40u
 
-#define PN_INDEX_IM0          0xAFF0u
+#define PN_INDEX_IM0            0xAFF0u
+#define PN_INDEX_REALIDENT_SUB  0x8001u
+#define PN_INDEX_PDPORT_REAL    0x802Au
+#define PN_INDEX_PDIF_REAL      0x8080u
+#define PN_INDEX_REALIDENT_SLOT 0xC001u
+#define PN_INDEX_EXPIDENT_AR    0xE000u
+#define PN_INDEX_REALIDENT_AR   0xE001u
+#define PN_INDEX_WRITE_MULTI    0xE040u
+#define PN_INDEX_REALIDENT_API  0xF000u
 
 #define PN_STATION_NAME_MAX   240
 #define PN_IO_MAX             256
@@ -94,7 +108,7 @@
 #define PN_UUID_LEN           16
 #define PN_IOCR_MAX           2
 #define PN_IOBJ_MAX           8
-#define PN_SUBMOD_MAX         8
+#define PN_SUBMOD_MAX         16
 
 #define PN_CONFORMANCE_CLASS_B  2
 #define PN_RT_CLASS_1           1

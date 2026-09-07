@@ -10,8 +10,8 @@
  * PROFINET IO Device stack (Fieldbus Architecture profile)
  *
  * Scope:
- *   - Device-side DCP, CM (Connect/Write/PrmEnd/ApplicationReady),
- *     RTC1 cyclic IO, record (I&M0), LLDP, minimal SNMP
+ *   - Device-side DCP, CM (Connect/Write/WriteMultiple/PrmEnd/ApplicationReady),
+ *     RTC1 cyclic IO, record (I&M0, RealIdent, PD*), LLDP, minimal SNMP
  *   - RT Class 1 only (unsynchronized cyclic IO). IRT / RT Class 3: no.
  *   - Optional stack-local HMAC-SHA256 PSK on DCP Set and CM Connect.
  *     This is not PI Security Class 1.

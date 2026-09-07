@@ -285,6 +285,86 @@ static int rpc_call(int fd, uint32_t dst_ip, const uint8_t *req, size_t req_len,
     return -ETIMEDOUT;
 }
 
+static size_t put_iod_write_hdr(uint8_t *p, uint16_t seq, uint32_t api,
+                                uint16_t slot, uint16_t sub, uint16_t index,
+                                uint32_t dlen)
+{
+    pn_wr_be16(p, PN_BLOCK_WRITE_REQ);
+    pn_wr_be16(p + 2, 60);
+    p[4] = 1;
+    p[5] = 0;
+    memset(p + 6, 0, 58);
+    pn_wr_be16(p + 6, seq);
+    pn_wr_be32(p + 6 + 18, api);
+    pn_wr_be16(p + 6 + 22, slot);
+    pn_wr_be16(p + 6 + 24, sub);
+    pn_wr_be16(p + 6 + 28, index);
+    pn_wr_be32(p + 6 + 30, dlen);
+    return 64;
+}
+
+static size_t build_write(uint8_t *pdu)
+{
+    uint8_t data[4] = {0, 0, 0, 0};
+    uint8_t blocks[80];
+    size_t n = put_iod_write_hdr(blocks, 1, 0, 1, 1, 1, 4);
+    memcpy(blocks + n, data, 4);
+    n += 4;
+    uint8_t stub[160];
+    size_t sn = ndr_wrap_le(stub, blocks, n);
+    return rpc_req(pdu, 3, stub, sn);
+}
+
+static size_t build_write_multiple(uint8_t *pdu)
+{
+    uint8_t data[4] = {0, 0, 0, 0};
+    uint8_t inner[160];
+    size_t in = 0;
+    in += put_iod_write_hdr(inner + in, 2, 0, 0, 0x8000, 0x8071, 4);
+    memcpy(inner + in, data, 4);
+    in += 4;
+    in += put_iod_write_hdr(inner + in, 3, 0, 0, 0x8001, 0x802F, 4);
+    memcpy(inner + in, data, 4);
+    in += 4;
+    uint8_t blocks[256];
+    size_t n = put_iod_write_hdr(blocks, 1, 0xffffffffu, 0xffff, 0xffff,
+                                 PN_INDEX_WRITE_MULTI, (uint32_t)in);
+    memcpy(blocks + n, inner, in);
+    n += in;
+    uint8_t stub[320];
+    size_t sn = ndr_wrap_le(stub, blocks, n);
+    return rpc_req(pdu, 3, stub, sn);
+}
+
+static size_t build_read(uint8_t *pdu, uint16_t slot, uint16_t sub,
+                         uint16_t index)
+{
+    uint8_t body[58];
+    memset(body, 0, sizeof(body));
+    pn_wr_be16(body + 22, slot);
+    pn_wr_be16(body + 24, sub);
+    pn_wr_be16(body + 28, index);
+    uint8_t blk[80];
+    size_t bn = wr_pn_block(blk, PN_BLOCK_READ_REQ, body, 58);
+    uint8_t stub[160];
+    size_t sn = ndr_wrap_le(stub, blk, bn);
+    return rpc_req(pdu, 2, stub, sn);
+}
+
+static int rpc_contains(const uint8_t *resp, size_t n, const char *needle)
+{
+    size_t m = strlen(needle);
+    if (m == 0 || m > n) {
+        return 0;
+    }
+    for (size_t i = 0; i + m <= n; i++) {
+        if (memcmp(resp + i, needle, m) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static size_t build_connect(uint8_t *pdu, const uint8_t mac[6])
 {
     static const uint8_t uuid[16] = {1, 2, 3, 4, 5, 6, 7, 8,
@@ -353,11 +433,25 @@ static size_t build_connect(uint8_t *pdu, const uint8_t mac[6])
     exp[34] = 1;
     exp[35] = 1;
 
+    uint8_t pdev[40];
+    memset(pdev, 0, sizeof(pdev));
+    pn_wr_be16(pdev + 0, 1);
+    pn_wr_be16(pdev + 6, 0);
+    pn_wr_be32(pdev + 8, 1);
+    pn_wr_be16(pdev + 14, 3);
+    pn_wr_be16(pdev + 16, 1);
+    pn_wr_be32(pdev + 18, 1);
+    pn_wr_be16(pdev + 24, 0x8000);
+    pn_wr_be32(pdev + 26, 2);
+    pn_wr_be16(pdev + 32, 0x8001);
+    pn_wr_be32(pdev + 34, 3);
+
     uint8_t blocks[512];
     size_t n = 0;
     n += wr_pn_block(blocks + n, PN_BLOCK_AR_REQ, ar, sizeof(ar));
     n += wr_pn_block(blocks + n, PN_BLOCK_IOCR_REQ, iin, sizeof(iin));
     n += wr_pn_block(blocks + n, PN_BLOCK_IOCR_REQ, iout, sizeof(iout));
+    n += wr_pn_block(blocks + n, PN_BLOCK_EXPSUB_REQ, pdev, sizeof(pdev));
     n += wr_pn_block(blocks + n, PN_BLOCK_EXPSUB_REQ, exp, sizeof(exp));
     uint8_t stub[600];
     size_t sn = ndr_wrap_le(stub, blocks, n);
@@ -442,7 +536,7 @@ int main(int argc, char **argv)
 
     int rpc = udp_bind(iface_ipv4(iface), PN_RPC_PORT);
 
-    uint8_t pdu[800], resp[1024];
+    uint8_t pdu[1200], resp[2048];
     size_t plen = build_connect(pdu, mymac);
     int rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     if (rn < 80) {
@@ -451,7 +545,49 @@ int main(int argc, char **argv)
         return fail("Connect.res timeout");
     }
     uint16_t out_fid = parse_out_frame_id(resp, (size_t)rn);
-    fprintf(stderr, "Connect.res ok out_fid=0x%04x\n", out_fid);
+    fprintf(stderr, "Connect.res ok out_fid=0x%04x arserver=%s\n", out_fid,
+            rpc_contains(resp, (size_t)rn, expect_name) ? "yes" : "NO");
+    if (!rpc_contains(resp, (size_t)rn, expect_name)) {
+        close(rpc);
+        close(raw);
+        return fail("Connect.res missing ARServer StationName");
+    }
+
+    plen = build_write(pdu);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    if (rn < 80) {
+        close(rpc);
+        close(raw);
+        return fail("Write.res timeout");
+    }
+    fprintf(stderr, "Write.res ok\n");
+
+    plen = build_write_multiple(pdu);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    if (rn < 80) {
+        close(rpc);
+        close(raw);
+        return fail("WriteMultiple.res timeout");
+    }
+    fprintf(stderr, "WriteMultiple.res ok\n");
+
+    plen = build_read(pdu, 0, 1, PN_INDEX_IM0);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    if (rn < 80 || !rpc_contains(resp, (size_t)rn, "FB-ARCH-PN-DEV")) {
+        close(rpc);
+        close(raw);
+        return fail("Read I&M0 failed");
+    }
+    fprintf(stderr, "Read I&M0 ok\n");
+
+    plen = build_read(pdu, 0, 1, PN_INDEX_REALIDENT_API);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    if (rn < 80) {
+        close(rpc);
+        close(raw);
+        return fail("Read RealIdent timeout");
+    }
+    fprintf(stderr, "Read RealIdent ok (%d bytes)\n", rn);
 
     plen = build_prmend(pdu);
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);

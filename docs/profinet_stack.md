@@ -10,7 +10,7 @@ PI 인증 대상이 아니다.
 | CM 기동 | Connect → Write(ACK) → PrmEnd → ApplicationReady → cyclic |
 | RT Class 1 | 비동기 cyclic. C_SDU 에 데이터+IOPS/IOCS. `SendClock×ReductionRatio` |
 | DCP | Identify(필터), Get(요청 속성), Set(Name/IP). Set 시 `apply_os_ip` 이면 OS 주소 적용 |
-| Record | I&M0 (`0xAFF0`) |
+| Record | I&M0 (`0xAFF0`), RealIdent (`0xF000`/`0xE001`/`0xC001`/`0x8001`), PDPort/PDInterface Real 스텁. Write / WriteMultiple (`0xE040`) ACK |
 | LLDP | Chassis/Port/TTL/SysName/MgmtAddr + PN Chassis MAC / Port Status |
 | SNMP | Get 에 대해 sysName, request-id 반사 |
 | Watchdog | output CR 가 끊기면 AR down, output image 클리어 |
@@ -53,7 +53,7 @@ PLC 없이 Device↔Controller 기동 시퀀스는 veth 위에서 컨트롤러 �
 bash tests/run_pn_veth.sh
 ```
 
-시뮬레이터는 DCP Identify → Connect → PrmEnd → ApplicationReady → RTC1 cyclic 을 실제 Ethernet/UDP 로 주고받는다.
+시뮬레이터는 DCP Identify → Connect (ARServerBlock) → Write / WriteMultiple → Read I&M0 / RealIdent → PrmEnd → ApplicationReady → RTC1 cyclic 을 실제 Ethernet/UDP 로 주고받는다. Siemens TIA 와 같은 CM 순서이며, 벤더 분기는 없다.
 
 GSDML 은 `stacks/profinet/gsdml/` 에 있다. TIA 등에서 여는 출발점이며 VendorID `0xABCD` 는 PI 할당이 아니다. 최소 사이클은 8ms (`MinDeviceInterval=256`).
 

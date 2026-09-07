@@ -35,6 +35,8 @@ typedef struct {
     uint16_t out_len;
     uint16_t in_pi;
     uint16_t out_pi;
+    uint32_t module_ident;
+    uint32_t submodule_ident;
     uint8_t iops_len;
     uint8_t iocs_len;
 } pn_submod_t;
