@@ -41,6 +41,7 @@ cmake -DENABLE_ETHERNETIP=ON ..
 ./build/multiproto_daemon config/example.modbus.json
 ./build/test_pn_stack
 ./build/multiproto_daemon config/example.profinet.json
+bash tests/run_pn_fulltest.sh   # PROFINET 랩 프리테스트 (PI ART/PITL 아님)
 ```
 
 ## 새 프로토콜(예: EtherCAT) 추가하는 법

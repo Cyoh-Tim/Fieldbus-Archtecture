@@ -31,6 +31,7 @@ static const uint8_t k_dcp_mc[6] = {0x01, 0x0E, 0xCF, 0x00, 0x00, 0x00};
 static int g_pass;
 static int g_fail;
 static int g_saw_lldp;
+static int g_saw_lldp_pn;
 
 static uint64_t now_ms(void)
 {
@@ -152,9 +153,16 @@ static void note_frame(const uint8_t *rx, int n, const char *expect_name)
     if (n < 14) {
         return;
     }
-    if (pn_rd_be16(rx + 12) == PN_ETHTYPE_LLDP &&
-        contains(rx, (size_t)n, expect_name)) {
-        g_saw_lldp = 1;
+    if (pn_rd_be16(rx + 12) == PN_ETHTYPE_LLDP) {
+        if (contains(rx, (size_t)n, expect_name)) {
+            g_saw_lldp = 1;
+        }
+        for (int i = 14; i + 3 <= n; i++) {
+            if (rx[i] == 0x00 && rx[i + 1] == 0x0C && rx[i + 2] == 0xCF) {
+                g_saw_lldp_pn = 1;
+                break;
+            }
+        }
     }
 }
 
@@ -303,6 +311,64 @@ static int dcp_wait_getset(int fd, uint8_t *rx, size_t cap, int timeout_ms,
         }
     }
     return -1;
+}
+
+static size_t dcp_put_getset(uint8_t *frame, const uint8_t dst[6],
+                             const uint8_t src[6], uint8_t sid, uint32_t xid,
+                             const uint8_t *blocks, size_t blen)
+{
+    uint8_t pay[256];
+    pn_wr_be16(pay, PN_FRAMEID_DCP_GETSET);
+    pay[2] = sid;
+    pay[3] = PN_DCP_REQ;
+    pn_wr_be32(pay + 4, xid);
+    pn_wr_be16(pay + 8, 0);
+    pn_wr_be16(pay + 10, (uint16_t)blen);
+    memcpy(pay + 12, blocks, blen);
+    memcpy(frame, dst, 6);
+    memcpy(frame + 6, src, 6);
+    pn_wr_be16(frame + 12, PN_ETHTYPE_PN);
+    memcpy(frame + 14, pay, 12 + blen);
+    size_t n = 14 + 12 + blen;
+    while (n < 60) {
+        frame[n++] = 0;
+    }
+    return n;
+}
+
+static size_t dcp_name_set_block(uint8_t *blk, const char *name)
+{
+    size_t nlen = strlen(name);
+    blk[0] = PN_DCP_OPT_DEV;
+    blk[1] = PN_DCP_SUB_DEV_NAME;
+    pn_wr_be16(blk + 2, (uint16_t)(2 + nlen));
+    pn_wr_be16(blk + 4, 1); /* qualifier */
+    memcpy(blk + 6, name, nlen);
+    size_t n = 6 + nlen;
+    if (n & 1u) {
+        blk[n++] = 0;
+    }
+    return n;
+}
+
+static uint32_t dcp_parse_ip(const uint8_t *rx, int n)
+{
+    if (n < 26) {
+        return 0;
+    }
+    uint16_t dlen = pn_rd_be16(rx + 14 + 10);
+    const uint8_t *blocks = rx + 26;
+    size_t off = 0;
+    while (off + 4 <= dlen && 26 + (int)off + 4 <= n) {
+        uint8_t opt = blocks[off];
+        uint8_t sub = blocks[off + 1];
+        uint16_t bl = pn_rd_be16(blocks + off + 2);
+        if (opt == PN_DCP_OPT_IP && sub == PN_DCP_SUB_IP_PARAM && bl >= 12) {
+            return pn_rd_be32(blocks + off + 4);
+        }
+        off += 4u + bl + (bl & 1u);
+    }
+    return 0;
 }
 
 static size_t put_iod_write_hdr(uint8_t *p, uint16_t seq, uint32_t api,
@@ -643,16 +709,28 @@ int main(int argc, char **argv)
             }
         }
         check(saw_vid, "LAB-DCP-GET-ID", "Get DeviceID 0xABCD/0x0001");
+
+        gpay[12] = PN_DCP_OPT_IP;
+        gpay[13] = PN_DCP_SUB_IP_PARAM;
+        pn_wr_be32(gpay + 4, 0xA1000012);
+        memcpy(frame + 14, gpay, 16);
+        send_raw(raw, ifindex, frame, 30);
+        n = dcp_wait_getset(raw, rx, sizeof(rx), 800, expect_name, 0xA1000012);
+        uint32_t got_ip = dcp_parse_ip(rx, n);
+        check(got_ip != 0 && got_ip == dev_ip, "LAB-DCP-GET-IP",
+              "Get IPParameter matches Identify");
     }
 
     /* LLDP: device sends at start and every 5s. Frames may have been seen
      * already while waiting for DCP. */
-    uint64_t lldp_end = now_ms() + (g_saw_lldp ? 0 : 5500);
-    while (!g_saw_lldp && now_ms() < lldp_end) {
+    uint64_t lldp_end =
+        now_ms() + ((g_saw_lldp && g_saw_lldp_pn) ? 0 : 5500);
+    while ((!g_saw_lldp || !g_saw_lldp_pn) && now_ms() < lldp_end) {
         n = wait_recv(raw, rx, sizeof(rx), 200);
         note_frame(rx, n, expect_name);
     }
     check(g_saw_lldp, "LAB-LLDP-SYSNAME", "LLDP chassis/sysName");
+    check(g_saw_lldp_pn, "LAB-LLDP-PN-TLV", "LLDP PN OUI 00:0C:CF");
 
     /* SNMP sysName */
     int snmp = socket(AF_INET, SOCK_DGRAM, 0);
@@ -687,6 +765,47 @@ int main(int argc, char **argv)
         close(snmp);
     }
     check(snmp_ok, "LAB-SNMP-SYSNAME", "SNMP Get sysName / request-id");
+
+    /* DCP Set NameOfStation round-trip (unsigned; lab security_class 0). */
+    if (devmac[0] | devmac[5]) {
+        const char *tmp_name = "lab-tmp1";
+        uint8_t nblk[64];
+        size_t nblen = dcp_name_set_block(nblk, tmp_name);
+        size_t slen =
+            dcp_put_getset(frame, devmac, mymac, PN_DCP_SET, 0xA1000020, nblk,
+                           nblen);
+        send_raw(raw, ifindex, frame, slen);
+        n = dcp_wait_getset(raw, rx, sizeof(rx), 800, tmp_name, 0xA1000020);
+        check(n > 26, "LAB-DCP-SET-ACK", "Set NameOfStation ACK");
+
+        uint8_t npay[48];
+        pn_wr_be16(npay, PN_FRAMEID_DCP_ID_REQ);
+        npay[2] = PN_DCP_IDENTIFY;
+        npay[3] = PN_DCP_REQ;
+        pn_wr_be32(npay + 4, 0xA1000021);
+        pn_wr_be16(npay + 8, 0);
+        size_t tn = strlen(tmp_name);
+        npay[12] = PN_DCP_OPT_DEV;
+        npay[13] = PN_DCP_SUB_DEV_NAME;
+        pn_wr_be16(npay + 14, (uint16_t)tn);
+        memcpy(npay + 16, tmp_name, tn);
+        pn_wr_be16(npay + 10, (uint16_t)(4 + tn + (tn & 1)));
+        memcpy(frame, k_dcp_mc, 6);
+        memcpy(frame + 6, mymac, 6);
+        pn_wr_be16(frame + 12, PN_ETHTYPE_PN);
+        memcpy(frame + 14, npay, 16 + tn);
+        send_raw(raw, ifindex, frame, 14 + 16 + tn);
+        n = dcp_wait_ident(raw, rx, sizeof(rx), 800, tmp_name);
+        check(n > 26 && contains(rx, (size_t)n, tmp_name), "LAB-DCP-SET-NAME",
+              "Identify sees renamed station");
+
+        nblen = dcp_name_set_block(nblk, expect_name);
+        slen = dcp_put_getset(frame, devmac, mymac, PN_DCP_SET, 0xA1000022,
+                              nblk, nblen);
+        send_raw(raw, ifindex, frame, slen);
+        n = dcp_wait_getset(raw, rx, sizeof(rx), 800, expect_name, 0xA1000022);
+        check(n > 26, "LAB-DCP-SET-RESTORE", "Set NameOfStation back");
+    }
 
     int rpc = udp_bind(iface_ipv4(iface), PN_RPC_PORT);
     uint8_t pdu[1200], resp[2048];
@@ -755,6 +874,17 @@ int main(int argc, char **argv)
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     check(rn > 80 && contains(resp, (size_t)rn, "port-001"), "LAB-CM-READ-PDPORT",
           "PDPortDataReal stub");
+
+    plen = build_read(pdu, 0, 0x8000, PN_INDEX_PDIF_REAL);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80 && contains(resp, (size_t)rn, expect_name),
+          "LAB-CM-READ-PDIF", "PDInterfaceDataReal station name");
+
+    plen = build_read(pdu, 0, 1, 0x1234);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80 && resp[1] == 2 &&
+              count_block(resp, (size_t)rn, PN_BLOCK_READ_RES) >= 1,
+          "LAB-CM-READ-UNKNOWN", "unknown record index empty success");
 
     plen = build_prmend(pdu);
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);

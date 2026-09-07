@@ -54,9 +54,20 @@ bash tests/run_pn_veth.sh
 bash tests/run_pn_fulltest.sh
 ```
 
-`run_pn_fulltest.sh` 는 PI Test Bundle 공개 Readme의 RT Device 그룹(DCP / LLDP / SNMP / CM / RTC1)을 이 환경에서 돌리는 **랩 프리테스트**다. 공식 ART / SPIRTA / ETS (`2025_08_21_PN-Test-V246.zip`) 는 PI 회원 전용·Windows ETS 기반이라 이 봇에서 받을 수 없고, PITL 인증을 대체하지 않는다.
+`run_pn_fulltest.sh` 는 PI Test Bundle 공개 Readme의 RT Device 그룹을 이 환경에서 돌리는 **랩 프리테스트**다. 공식 ART / SPIRTA / ETS 는 PI 회원 전용·Windows ETS 기반이다. 회원 포털에서 계정 권한이 열리기 전에는 zip을 받을 수 없고, 받아도 이 Linux 에이전트에서 ETS를 실행하지 않는다. PITL 인증을 대체하지 않는다.
 
-시뮬레이터는 DCP Identify → Connect (ARServerBlock) → Write / WriteMultiple → Read I&M0 / RealIdent → PrmEnd → ApplicationReady → RTC1 cyclic 을 실제 Ethernet/UDP 로 주고받는다. Siemens TIA 와 같은 CM 순서이며, 벤더 분기는 없다.
+공개 Readme 기준으로 여기서 하는 것 / 안 하는 것:
+
+| 그룹 | 랩 프리테스트 | 공식 번들 없이 못 하는 것 |
+|------|----------------|---------------------------|
+| DCP | Identify All/Name/DeviceID 필터, Get Name/ID/IP, Set Name 왕복 | DCP Set IP를 OS에 쓰는 경우, Hello |
+| LLDP | sysName + PN OUI `00:0C:CF` 송신 | LLDP-MIB / neighbor 테이블 |
+| SNMP | Get sysName, request-id 반사 | MIB-II 전체, LLDP-MIB |
+| CM | Connect ARServer, Write / WriteMultiple, I&M0, RealIdent, PDPort/PDIF, unknown index 빈 성공, PrmEnd, AppReady, Release, Reconnect | Alarm/RTA, 전체 TCS |
+| RTC1 | cyclic + IOPS GOOD, Release 후 송신 중단 | Netload, IRT/SPIRTA |
+| GSDML | well-formed, VendorID/DeviceID, PDev, RT1, no IRT, SNMP;LLDP, MIB2, NumberOfAR | TEDCheck / GSD Checker 바이너리 |
+
+시뮬레이터는 DCP Identify → Set Name 왕복 → Connect (ARServerBlock) → Write / WriteMultiple → Read I&M0 / RealIdent / PD* → PrmEnd → ApplicationReady → RTC1 cyclic 을 실제 Ethernet/UDP 로 주고받는다. Siemens TIA 와 같은 CM 순서이며, 벤더 분기는 없다.
 
 GSDML 은 `stacks/profinet/gsdml/` 에 있다. TIA 등에서 여는 출발점이며 VendorID `0xABCD` 는 PI 할당이 아니다. 최소 사이클은 8ms (`MinDeviceInterval=256`).
 

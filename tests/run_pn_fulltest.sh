@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Full lab pretest for the PROFINET Device stack.
-# Official PI Test Bundle (ART/SPIRTA/ETS) is member-only and Windows/ETS based;
-# this script runs the closest in-tree suite on this agent:
+# Official PI Test Bundle (ART/SPIRTA/ETS) is member-only and Windows/ETS based.
+# Member zip stays locked until PI maps the company account; this script is the
+# in-tree substitute:
 #   1) unit tests (mock Ethernet)
 #   2) GSDML well-formed + required DAP/PDev fields
-#   3) on-wire PI-group pretest over veth (DCP/LLDP/SNMP/CM/RTC1)
+#   3) on-wire RT Device groups over veth (DCP/LLDP/SNMP/CM/RTC1)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -53,6 +54,11 @@ chk("SubslotNumber=\"32768\"" in text and "SubslotNumber=\"32769\"" in text,
 chk("RT_CLASS_1" in text, "LAB-GSD-RT1", "SupportedRT_Classes includes RT_CLASS_1")
 chk("IsochroneModeSupported=\"false\"" in text, "LAB-GSD-NO-IRT",
     "IsochroneModeSupported=false")
+chk("SupportedProtocols=\"SNMP;LLDP\"" in text, "LAB-GSD-PROTO",
+    "SupportedProtocols SNMP;LLDP")
+chk("SupportedMibs=\"MIB2\"" in text, "LAB-GSD-MIB2", "SupportedMibs=MIB2")
+chk("NumberOfAR=\"1\"" in text, "LAB-GSD-AR", "NumberOfAR=1")
+chk("DNS_CompatibleName=" in text, "LAB-GSD-DNS", "DNS_CompatibleName present")
 sys.exit(0 if ok else 1)
 PY
 
@@ -78,7 +84,7 @@ sudo ip addr add "${CTL_IP}/24" dev "${CTL_IF}"
 sudo ip link set "${DEV_IF}" up
 sudo ip link set "${CTL_IF}" up
 
-sudo "${BIN}/pn_device_run" "${DEV_IF}" "${DEV_IP}" 30 &
+sudo "${BIN}/pn_device_run" "${DEV_IF}" "${DEV_IP}" 45 &
 DEV_PID=$!
 sleep 0.5
 

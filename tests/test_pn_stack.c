@@ -202,6 +202,46 @@ static void test_dcp_set_sec(void)
     pn_stack_destroy(s);
 }
 
+static void test_dcp_set_unsigned(void)
+{
+    pn_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    snprintf(cfg.iface, sizeof(cfg.iface), "mock");
+    snprintf(cfg.station_name, sizeof(cfg.station_name), "old-name");
+    cfg.security_class = 0;
+    pn_stack_t *s = pn_stack_create(&cfg);
+    tx_cap_t cap;
+    memset(&cap, 0, sizeof(cap));
+    pn_eth_ops_t ops = {.send = cap_send, .recv = NULL, .ctx = &cap};
+    pn_stack_set_eth_ops(s, ops);
+    pn_stack_start(s);
+
+    static const uint8_t dst[6] = {0x02, 0xFB, 0x00, 0x00, 0x00, 0x01};
+    static const uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t nameblk[2 + 8];
+    pn_wr_be16(nameblk, 1);
+    memcpy(nameblk + 2, "new-name", 8);
+    uint8_t blocks[32];
+    size_t bn = append_dcp_block(blocks, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME,
+                                 nameblk, 10);
+    uint8_t pay[64];
+    pn_wr_be16(pay, PN_FRAMEID_DCP_GETSET);
+    pay[2] = PN_DCP_SET;
+    pay[3] = PN_DCP_REQ;
+    pn_wr_be32(pay + 4, 0xAABB0001);
+    pn_wr_be16(pay + 8, 0);
+    pn_wr_be16(pay + 10, (uint16_t)bn);
+    memcpy(pay + 12, blocks, bn);
+    uint8_t frame[PN_FRAME_MAX];
+    size_t flen =
+        pn_eth_build(frame, sizeof(frame), dst, src, PN_ETHTYPE_PN, pay,
+                     12 + bn);
+    pn_stack_handle_eth(s, frame, flen);
+    expect(strcmp(pn_stack_cfg(s)->station_name, "new-name") == 0,
+           "unsigned DCP Set accepted when security_class is 0");
+    pn_stack_destroy(s);
+}
+
 static void test_connect_sec(void)
 {
     pn_cfg_t cfg;
@@ -820,6 +860,22 @@ static void test_cm_write_read(void)
     expect(rc == 0 && rlen > 80, "Read PDPortDataReal returned");
     expect(contains(resp, rlen, "port-001"), "PDPortDataReal OwnPortID");
 
+    plen = build_read_pdu(pdu, 0, 0x8000, PN_INDEX_PDIF_REAL);
+    rlen = 0;
+    rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
+    expect(rc == 0 && rlen > 80, "Read PDInterfaceDataReal returned");
+    expect(contains(resp, rlen, "sensor-line1"),
+           "PDInterfaceDataReal station name");
+    expect(count_block(resp, rlen, PN_BLOCK_PDIF_REAL) == 1,
+           "PDInterfaceDataReal block type 0x0240");
+
+    plen = build_read_pdu(pdu, 0, 1, 0x1234);
+    rlen = 0;
+    rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
+    expect(rc == 0 && rlen > 80, "unknown record index still succeeds");
+    expect(count_block(resp, rlen, PN_BLOCK_READ_RES) >= 1,
+           "unknown index wrapped as IODReadRes");
+
     do_prmend(s);
     expect(pn_stack_ar_up(s), "AR up after Write/Read then PrmEnd");
     pn_stack_destroy(s);
@@ -940,6 +996,7 @@ int main(void)
     test_dcp_identify_filter();
     test_dcp_get();
     test_dcp_set_sec();
+    test_dcp_set_unsigned();
     test_connect_sec();
     test_cm_connect_prmend();
     test_cm_write_read();
