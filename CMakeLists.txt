@@ -110,6 +110,18 @@ if(ENABLE_PN_TESTS)
     add_executable(test_pn_stack tests/test_pn_stack.c)
     target_include_directories(test_pn_stack PRIVATE stacks/profinet/include include core)
     target_link_libraries(test_pn_stack PRIVATE pn_stack)
+
+    add_executable(pn_device_run tests/pn_device_run.c)
+    target_include_directories(pn_device_run PRIVATE stacks/profinet/include include core)
+    target_link_libraries(pn_device_run PRIVATE pn_stack)
+
+    add_executable(dcp_probe tests/dcp_probe.c)
+    target_include_directories(dcp_probe PRIVATE stacks/profinet/include include core)
+    target_link_libraries(dcp_probe PRIVATE pn_stack)
+
+    add_executable(pn_controller_sim tests/pn_controller_sim.c)
+    target_include_directories(pn_controller_sim PRIVATE stacks/profinet/include include core)
+    target_link_libraries(pn_controller_sim PRIVATE pn_stack)
 endif()
 
 # ---- 데몬 실행파일 ----

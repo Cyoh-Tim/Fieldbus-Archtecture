@@ -46,6 +46,15 @@ DCP Set 으로 받은 IP 를 인터페이스에 쓰려면 `apply_os_ip: true` �
 ./build/test_pn_stack
 ```
 
+PLC 없이 Device↔Controller 기동 시퀀스는 veth 위에서 컨트롤러 시뮬레이터가 검증한다:
+
+```
+./build/test_pn_stack
+bash tests/run_pn_veth.sh
+```
+
+시뮬레이터는 DCP Identify → Connect → PrmEnd → ApplicationReady → RTC1 cyclic 을 실제 Ethernet/UDP 로 주고받는다.
+
 GSDML 은 `stacks/profinet/gsdml/` 에 있다. TIA 등에서 여는 출발점이며 VendorID `0xABCD` 는 PI 할당이 아니다. 최소 사이클은 8ms (`MinDeviceInterval=256`).
 
 ## 점대점 매핑

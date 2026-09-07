@@ -136,13 +136,13 @@ int pn_stack_start(pn_stack_t *s)
         return rc;
     }
     if (!s->use_eth_ops) {
-        s->fd_rpc = pn_udp_open(PN_RPC_PORT);
+        s->fd_rpc = pn_udp_open_ip(s->cfg.ip, PN_RPC_PORT);
         if (s->fd_rpc < 0) {
             LOG_WARN("pn_stack", "RPC UDP %d bind 실패 (%d)", PN_RPC_PORT,
                      s->fd_rpc);
             s->fd_rpc = -1;
         }
-        s->fd_snmp = pn_udp_open(PN_SNMP_PORT);
+        s->fd_snmp = pn_udp_open_ip(s->cfg.ip, PN_SNMP_PORT);
         if (s->fd_snmp < 0) {
             LOG_WARN("pn_stack", "SNMP UDP bind 실패 — neighbor 진단은 제한됨");
             s->fd_snmp = -1;

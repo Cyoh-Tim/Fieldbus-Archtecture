@@ -190,6 +190,11 @@ int pn_eth_recv(pn_stack_t *s, uint8_t *frame, size_t cap)
 
 int pn_udp_open(uint16_t port)
 {
+    return pn_udp_open_ip(0, port);
+}
+
+int pn_udp_open_ip(uint32_t ip_host, uint16_t port)
+{
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) {
         return -errno;
@@ -199,7 +204,7 @@ int pn_udp_open(uint16_t port)
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_addr.s_addr = ip_host ? htonl(ip_host) : htonl(INADDR_ANY);
     addr.sin_port = htons(port);
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         int e = errno;

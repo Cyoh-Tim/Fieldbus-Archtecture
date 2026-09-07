@@ -136,6 +136,7 @@ void pn_rpc_flush_tx(pn_stack_t *s);
 
 void pn_snmp_poll(pn_stack_t *s);
 int pn_udp_open(uint16_t port);
+int pn_udp_open_ip(uint32_t ip_host, uint16_t port);
 
 int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                    uint16_t index, uint8_t *out, size_t cap, size_t *out_len);
