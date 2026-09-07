@@ -25,11 +25,10 @@ void pn_lldp_send(pn_stack_t *s)
     uint8_t pdu[512];
     size_t n = 0;
 
-    uint8_t chassis[1 + PN_STATION_NAME_MAX];
-    chassis[0] = 7; /* locally assigned */
-    size_t namelen = strlen(s->cfg.station_name);
-    memcpy(chassis + 1, s->cfg.station_name, namelen);
-    tlv(pdu, &n, sizeof(pdu), 1, chassis, 1 + namelen);
+    uint8_t chassis[7];
+    chassis[0] = 4; /* MAC address */
+    memcpy(chassis + 1, s->cfg.mac, 6);
+    tlv(pdu, &n, sizeof(pdu), 1, chassis, 7);
 
     uint8_t port[7];
     port[0] = 3; /* MAC address */
@@ -40,18 +39,46 @@ void pn_lldp_send(pn_stack_t *s)
     pn_wr_be16(ttl, 20);
     tlv(pdu, &n, sizeof(pdu), 3, ttl, 2);
 
+    size_t namelen = strlen(s->cfg.station_name);
     tlv(pdu, &n, sizeof(pdu), 5, (const uint8_t *)s->cfg.station_name, namelen);
 
-    /* IEEE 802.3 / PN org-specific: chassis MAC (00-0C-CF, subtype 5) */
-    uint8_t org[10];
-    org[0] = 0x00;
-    org[1] = 0x0C;
-    org[2] = 0xCF;
-    org[3] = 5;
-    memcpy(org + 4, s->cfg.mac, 6);
-    tlv(pdu, &n, sizeof(pdu), 127, org, 10);
+    uint8_t mgmt[12];
+    mgmt[0] = 5; /* subtype + IPv4 */
+    mgmt[1] = 1; /* IANA IPv4 */
+    pn_wr_be32(mgmt + 2, s->cfg.ip);
+    mgmt[6] = 1; /* unknown if numbering */
+    pn_wr_be32(mgmt + 7, 0);
+    mgmt[11] = 0; /* OID length */
+    tlv(pdu, &n, sizeof(pdu), 8, mgmt, 12);
 
-    /* End of LLDPDU */
+    /* IEEE 802.3 MAC/PHY Configuration/Status */
+    uint8_t phy[9];
+    phy[0] = 0x00;
+    phy[1] = 0x12;
+    phy[2] = 0x0F;
+    phy[3] = 1;
+    phy[4] = 0x03; /* autoneg supported + enabled */
+    pn_wr_be16(phy + 5, 0);
+    pn_wr_be16(phy + 7, 0x0010); /* 100BASE-TX FD */
+    tlv(pdu, &n, sizeof(pdu), 127, phy, 9);
+
+    uint8_t chassis_mac[10];
+    chassis_mac[0] = 0x00;
+    chassis_mac[1] = 0x0C;
+    chassis_mac[2] = 0xCF;
+    chassis_mac[3] = 5;
+    memcpy(chassis_mac + 4, s->cfg.mac, 6);
+    tlv(pdu, &n, sizeof(pdu), 127, chassis_mac, 10);
+
+    uint8_t pst[8];
+    pst[0] = 0x00;
+    pst[1] = 0x0C;
+    pst[2] = 0xCF;
+    pst[3] = 2;
+    pn_wr_be16(pst + 4, 0);
+    pn_wr_be16(pst + 6, 0);
+    tlv(pdu, &n, sizeof(pdu), 127, pst, 8);
+
     tlv(pdu, &n, sizeof(pdu), 0, NULL, 0);
 
     uint8_t frame[PN_FRAME_MAX];

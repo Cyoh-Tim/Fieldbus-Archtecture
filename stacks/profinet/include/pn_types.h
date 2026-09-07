@@ -29,7 +29,7 @@
 #define PN_DCP_OPT_DHCP       0x03u
 #define PN_DCP_OPT_CTRL       0x05u
 #define PN_DCP_OPT_ALL        0xFFu
-/* Stack Security Class 1 profile (not a PI-assigned option). */
+/* Stack-local HMAC profile (not a PI-assigned Security Class 1 option). */
 #define PN_DCP_OPT_SEC        0xF0u
 #define PN_DCP_SUB_SEC_HMAC   0x01u
 
@@ -40,26 +40,51 @@
 #define PN_DCP_SUB_DEV_ID     0x03u
 #define PN_DCP_SUB_DEV_ROLE   0x04u
 #define PN_DCP_SUB_DEV_OPTS   0x05u
+#define PN_DCP_SUB_CTRL_RESP  0x04u
 
 #define PN_RPC_PORT           34964
 #define PN_SNMP_PORT          161
 
+#define PN_BLOCK_WRITE_REQ    0x0008u
+#define PN_BLOCK_READ_REQ     0x0009u
+#define PN_BLOCK_WRITE_RES    0x8008u
+#define PN_BLOCK_READ_RES     0x8009u
 #define PN_BLOCK_AR_REQ       0x0101u
 #define PN_BLOCK_IOCR_REQ     0x0102u
 #define PN_BLOCK_ALARMCR_REQ  0x0103u
 #define PN_BLOCK_EXPSUB_REQ   0x0104u
+#define PN_BLOCK_PRMEND_REQ   0x0110u
+#define PN_BLOCK_APPRDY_REQ   0x0112u
+#define PN_BLOCK_RELEASE_REQ  0x0114u
 #define PN_BLOCK_AR_RES       0x8101u
 #define PN_BLOCK_IOCR_RES     0x8102u
 #define PN_BLOCK_ALARMCR_RES  0x8103u
-#define PN_BLOCK_SEC_INT      0x0E01u /* stack Security Class 1 integrity block */
+#define PN_BLOCK_PRMEND_RES   0x8110u
+#define PN_BLOCK_APPRDY_RES   0x8112u
+#define PN_BLOCK_RELEASE_RES  0x8114u
+#define PN_BLOCK_SEC_INT      0x0E01u /* stack-local integrity block */
 
 #define PN_IOCR_INPUT         0x0001u
 #define PN_IOCR_OUTPUT        0x0002u
 
+#define PN_CTRL_PRM_END       0x0001u
+#define PN_CTRL_APP_RDY       0x0002u
+#define PN_CTRL_RELEASE       0x0004u
+#define PN_CTRL_DONE          0x0008u
+
+#define PN_CM_OFFLINE         0
+#define PN_CM_CONNECTED       1
+#define PN_CM_W_APPRDY        2
+#define PN_CM_DATAEX          3
+
 #define PN_IOPS_GOOD          0x80u
+#define PN_IOPS_BAD           0x00u
 #define PN_DATASTATUS_PRIMARY 0x01u
 #define PN_DATASTATUS_VALID   0x04u
 #define PN_DATASTATUS_RUN     0x20u
+#define PN_DATASTATUS_PROBLEM 0x40u
+
+#define PN_INDEX_IM0          0xAFF0u
 
 #define PN_STATION_NAME_MAX   240
 #define PN_IO_MAX             256
@@ -67,6 +92,9 @@
 #define PN_HMAC_LEN           32
 #define PN_PSK_LEN            32
 #define PN_UUID_LEN           16
+#define PN_IOCR_MAX           2
+#define PN_IOBJ_MAX           8
+#define PN_SUBMOD_MAX         8
 
 #define PN_CONFORMANCE_CLASS_B  2
 #define PN_RT_CLASS_1           1

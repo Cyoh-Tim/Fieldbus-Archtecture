@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Minimal GSDML for the Fieldbus Architecture PROFINET Device.
-  Conformance Class B, RT_CLASS_1. Not IRT. Not PI-certified.
-  Import is a starting point for engineering; expect to extend before a real PLC project.
+  GSDML for the Fieldbus Architecture PROFINET Device.
+  RT_CLASS_1 only. Not IRT. Not PI-certified. VendorID 0xABCD is not PI-assigned.
+  Slot 0 = DAP + Interface(0x8000) + Port(0x8001). Slot 1 = 32-byte input / 8-byte output.
 -->
 <ISO15745Profile xmlns="http://www.profibus.com/GSDML/2003/11/DeviceProfile">
   <ProfileHeader>
@@ -27,9 +27,15 @@
     </DeviceFunction>
     <ApplicationProcess>
       <DeviceAccessPointList>
-        <DeviceAccessPointItem ID="DAP1" PhysicalSlots="0..1" ModuleIdentNumber="0x00000001"
-                               MinDeviceInterval="32" DNS_CompatibleName="fb-arch-pn"
-                               FixedInSlots="0" ObjectUUID_LocalIndex="1"
+        <DeviceAccessPointItem ID="DAP1" PhysicalSlots="0..1"
+                               ModuleIdentNumber="0x00000001"
+                               MinDeviceInterval="256"
+                               DNS_CompatibleName="fb-arch-pn"
+                               FixedInSlots="0"
+                               ObjectUUID_LocalIndex="1"
+                               PNIO_Version="V2.35"
+                               ImplementationType="software"
+                               DeviceAccessSupported="true"
                                RequiredSchemaVersion="2.35">
           <ModuleInfo>
             <Name TextId="T_DAP"/>
@@ -39,13 +45,39 @@
             <HardwareRelease Value="1"/>
             <SoftwareRelease Value="V1.0.0"/>
           </ModuleInfo>
-          <SubslotList>
-            <SubslotItem SubslotNumber="1" TextId="T_DAP_SUB"/>
-          </SubslotList>
-          <SystemDefinedSubmoduleList>
-            <SubmoduleItem ID="PORT1" SubmoduleIdentNumber="0x0002" SubslotNumber="32768">
+          <IOConfigData MaxInputLength="256" MaxOutputLength="256"/>
+          <UseableModules>
+                        <ModuleItemRef ModuleItemTarget="MOD_IO" AllowedInSlots="1"/>
+          </UseableModules>
+          <VirtualSubmoduleList>
+            <VirtualSubmoduleItem ID="DAP_IF" SubmoduleIdentNumber="0x00000001"
+                                  SubslotNumber="1" FixedInSubslots="1">
               <IOData/>
-            </SubmoduleItem>
+              <ModuleInfo>
+                <Name TextId="T_DAP_SUB"/>
+                <InfoText TextId="T_DAP_INFO"/>
+              </ModuleInfo>
+            </VirtualSubmoduleItem>
+          </VirtualSubmoduleList>
+          <SystemDefinedSubmoduleList>
+            <InterfaceSubmoduleItem ID="IF1" SubslotNumber="32768"
+                                    SubmoduleIdentNumber="0x00000002"
+                                    TextId="T_IF"
+                                    SupportedRT_Classes="RT_CLASS_1"
+                                    SupportedProtocols="SNMP;LLDP"
+                                    SupportedMibs="MIB2"
+                                    IsochroneModeSupported="false">
+              <ApplicationRelations NumberOfAR="1" StartupMode="Legacy">
+                <TimingProperties SendClock="32"
+                                  ReductionRatio="8 16 32 64 128 256 512"/>
+              </ApplicationRelations>
+            </InterfaceSubmoduleItem>
+            <PortSubmoduleItem ID="PORT1" SubslotNumber="32769"
+                               SubmoduleIdentNumber="0x00000003"
+                               MAUTypes="16"
+                               MaxPortRxDelay="1000"
+                               MaxPortTxDelay="1000"
+                               TextId="T_PORT1"/>
           </SystemDefinedSubmoduleList>
         </DeviceAccessPointItem>
       </DeviceAccessPointList>
@@ -69,6 +101,10 @@
               <RecordDataList>
                 <ParameterRecordDataItem Index="1" Length="0"/>
               </RecordDataList>
+              <ModuleInfo>
+                <Name TextId="T_IO"/>
+                <InfoText TextId="T_IO_INFO"/>
+              </ModuleInfo>
             </VirtualSubmoduleItem>
           </VirtualSubmoduleList>
         </ModuleItem>
@@ -77,8 +113,10 @@
         <PrimaryLanguage>
           <Text TextId="T_ID" Value="FB-ARCH PN Device"/>
           <Text TextId="T_DAP" Value="DAP"/>
-          <Text TextId="T_DAP_INFO" Value="Device access point, RT Class 1"/>
-          <Text TextId="T_DAP_SUB" Value="Interface"/>
+          <Text TextId="T_DAP_INFO" Value="Device access point, RT Class 1, 8 ms min cycle"/>
+          <Text TextId="T_DAP_SUB" Value="DAP submodule"/>
+          <Text TextId="T_IF" Value="Interface"/>
+          <Text TextId="T_PORT1" Value="Port 1"/>
           <Text TextId="T_IO" Value="IO module"/>
           <Text TextId="T_IO_INFO" Value="32 byte input, 8 byte output"/>
           <Text TextId="T_IN" Value="Input image"/>

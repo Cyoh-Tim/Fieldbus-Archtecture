@@ -22,9 +22,3 @@ int pn_sec_ok(const pn_stack_t *s, const uint8_t *data, size_t len,
     }
     return pn_ct_eq(expect, mac, PN_HMAC_LEN);
 }
-
-int pn_alarm_send_dummy(pn_stack_t *s)
-{
-    (void)s;
-    return 0;
-}

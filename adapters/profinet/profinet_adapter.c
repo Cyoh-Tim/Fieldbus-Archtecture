@@ -121,7 +121,7 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
 
     pn_cfg_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    cfg.security_class = PN_SECURITY_CLASS_1;
+    cfg.security_class = 0; /* lab default: unsigned */
     cfg.cycle_us = 8000;
     cfg.input_len = 32;
     cfg.output_len = 8;
@@ -186,6 +186,12 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
         if (cJSON_IsNumber(cycle)) {
             cfg.cycle_us = (uint32_t)cycle->valueint;
         }
+        cJSON *apply_ip = cJSON_GetObjectItemCaseSensitive(params, "apply_os_ip");
+        if (cJSON_IsBool(apply_ip)) {
+            cfg.apply_os_ip = cJSON_IsTrue(apply_ip) ? 1 : 0;
+        } else if (cJSON_IsNumber(apply_ip)) {
+            cfg.apply_os_ip = apply_ip->valueint ? 1 : 0;
+        }
         cJSON_Delete(params);
     }
 
@@ -203,8 +209,8 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
         return -ENOMEM;
     }
     self->ctx = ctx;
-    LOG_INFO("profinet", "init CC-B/RT1/SecClass1 device=%s points=%d (IRT 없음)",
-             cfg.station_name, ctx->point_count);
+    LOG_INFO("profinet", "init RT1 device=%s points=%d sec=%d (IRT 없음)",
+             cfg.station_name, ctx->point_count, cfg.security_class);
     return 0;
 }
 

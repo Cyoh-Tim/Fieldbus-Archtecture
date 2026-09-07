@@ -4,7 +4,7 @@ Modbus / SLMP / CC-Link / EtherNet-IP / PROFINET 중 **한 번에 하나의 프�
 config.json 설정만으로 선택해 동작시키는 필드버스 런타임.
 
 PROFINET 은 구매 스택 래핑이 아니라 `stacks/profinet/` 자체 Device 스택이다.
-범위는 **CC-B + RT Class 1 + Security Class 1(HMAC integrity)**. IRT 없음.
+범위는 **RT Class 1 Device** (DCP / CM / RTC1). IRT 없음. PI 인증 아님.
 자세한 내용은 [`docs/profinet_stack.md`](docs/profinet_stack.md).
 
 전체 설계 배경은 [`docs/design.md`](docs/design.md).

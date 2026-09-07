@@ -50,6 +50,71 @@ static size_t ber_oid_sysname(uint8_t *p)
     return ber_tlv(p, 0x06, oid, sizeof(oid));
 }
 
+/* Walk a BER INTEGER; returns value and bytes consumed, or 0 on fail. */
+static int ber_parse_int(const uint8_t *p, size_t n, int *out, size_t *used)
+{
+    if (n < 2 || p[0] != 0x02) {
+        return -1;
+    }
+    size_t ln = p[1];
+    size_t hdr = 2;
+    if (ln & 0x80) {
+        return -1;
+    }
+    if (hdr + ln > n || ln == 0 || ln > 4) {
+        return -1;
+    }
+    int v = 0;
+    for (size_t i = 0; i < ln; i++) {
+        v = (v << 8) | p[hdr + i];
+    }
+    *out = v;
+    *used = hdr + ln;
+    return 0;
+}
+
+static int snmp_request_id(const uint8_t *buf, size_t n)
+{
+    /* SEQUENCE { version INTEGER, community OCTET STRING, PDU } */
+    if (n < 2 || buf[0] != 0x30) {
+        return 1;
+    }
+    size_t off = 2;
+    if (buf[1] & 0x80) {
+        off += (size_t)(buf[1] & 0x7f);
+    }
+    if (off >= n) {
+        return 1;
+    }
+    int ver = 0;
+    size_t used = 0;
+    if (ber_parse_int(buf + off, n - off, &ver, &used) != 0) {
+        return 1;
+    }
+    off += used;
+    if (off >= n || buf[off] != 0x04) {
+        return 1;
+    }
+    size_t clen = buf[off + 1];
+    off += 2 + clen;
+    if (off >= n) {
+        return 1;
+    }
+    /* PDU: GetRequest 0xA0 / GetNext 0xA1 / Set 0xA3 */
+    if ((buf[off] & 0xF0) != 0xA0) {
+        return 1;
+    }
+    off += 2;
+    if (buf[off - 1] & 0x80) {
+        off += (size_t)(buf[off - 1] & 0x7f) - 1;
+    }
+    int rid = 1;
+    if (off < n && ber_parse_int(buf + off, n - off, &rid, &used) == 0) {
+        return rid;
+    }
+    return 1;
+}
+
 void pn_snmp_poll(pn_stack_t *s)
 {
     if (s->fd_snmp < 0) {
@@ -63,6 +128,8 @@ void pn_snmp_poll(pn_stack_t *s)
     if (n <= 0) {
         return;
     }
+    int req_id = snmp_request_id(buf, (size_t)n);
+
     uint8_t inner[256];
     size_t i = 0;
     inner[i++] = 0x30;
@@ -84,7 +151,7 @@ void pn_snmp_poll(pn_stack_t *s)
     size_t p = 0;
     pdu[p++] = 0xA2;
     size_t pdu_len_at = p++;
-    p += ber_int(pdu + p, 1);
+    p += ber_int(pdu + p, req_id);
     p += ber_int(pdu + p, 0);
     p += ber_int(pdu + p, 0);
     memcpy(pdu + p, vbl, v);

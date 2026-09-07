@@ -119,7 +119,7 @@ interface ProtocolAdapter {
 | SLMP | 자체 디코더/인코더 | 클라이언트 | 3E 프레임 기준, 디바이스 코드(D/M/X/Y 등) 파싱 |
 | CC-Link | 스텁 → 추후 구현 | TBD | 인터페이스 자리만 확보, `NotImplementedAdapter` |
 | EtherNet/IP | 구매 스택(Pyramid 등) 래핑 | 서버/클라이언트 (스택 지원 범위에 따름) | 어댑터가 스택의 콜백 모델을 poll_cycle로 흡수 |
-| PROFINET | 자체 Device 스택 `stacks/profinet/` | 디바이스(슬레이브) | CC-B + RT Class 1 + Security Class 1(HMAC). IRT 없음. PI 인증 아님. 상세는 `docs/profinet_stack.md` |
+| PROFINET | 자체 Device 스택 `stacks/profinet/` | 디바이스(슬레이브) | RT Class 1 Device (DCP/CM/RTC1). IRT 없음. PI 인증 아님. `docs/profinet_stack.md` |
 | EtherCAT(추후) | 미정 | TBD | 인터페이스만 남겨둠 |
 
 ## 5. 비기능 요구사항

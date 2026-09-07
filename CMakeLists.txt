@@ -84,7 +84,7 @@ if(ENABLE_ETHERNETIP)
     message(STATUS "ENABLE_ETHERNETIP=ON: third_party/ethernetip_stack 연동은 아직 TODO")
 endif()
 
-# ---- PROFINET IO Device 스택 (자체 구현, CC-B / RT Class 1 / Sec Class 1) ----
+# ---- PROFINET IO Device 스택 (자체 구현, RT Class 1) ----
 add_library(pn_stack STATIC
     stacks/profinet/src/pn_crypto.c
     stacks/profinet/src/pn_eth.c

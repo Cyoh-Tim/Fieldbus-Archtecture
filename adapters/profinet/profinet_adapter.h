@@ -5,8 +5,8 @@
 
 /*
  * 자체 PROFINET IO Device 스택 (stacks/profinet) 어댑터.
- * CC-B + RT Class 1 + Security Class 1 (HMAC-SHA256 integrity).
- * IRT / RT Class 3 는 지원하지 않는다.
+ * Device, RT Class 1 cyclic IO. IRT / RT Class 3 는 지원하지 않는다.
+ * HMAC integrity 는 protocol_params.security_class=1 일 때만 (PI Sec Class 1 아님).
  */
 protocol_adapter_t *profinet_adapter_create(void);
 

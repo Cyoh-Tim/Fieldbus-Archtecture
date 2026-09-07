@@ -1,6 +1,7 @@
 #include "pn_internal.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -9,6 +10,46 @@
 #include "pn_endian.h"
 
 static const uint8_t k_dcp_mc[6] = {0x01, 0x0E, 0xCF, 0x00, 0x00, 0x00};
+
+void pn_ar_reset(pn_stack_t *s)
+{
+    memset(&s->ar, 0, sizeof(s->ar));
+    pthread_mutex_lock(&s->io_lock);
+    memset(s->output_image, 0, sizeof(s->output_image));
+    pthread_mutex_unlock(&s->io_lock);
+    s->last_rt_ns = 0;
+    s->last_cpm_ns = 0;
+    s->rpc_tx_pending = 0;
+    s->rpc_tx_len = 0;
+}
+
+uint64_t pn_ar_cycle_ns(const pn_ar_t *ar, uint32_t fallback_us)
+{
+    uint64_t sc = ar->send_clock_factor ? ar->send_clock_factor : 32;
+    uint64_t rr = ar->reduction_ratio ? ar->reduction_ratio : 1;
+    uint64_t ns = sc * rr * 31250ull;
+    if (ns == 0) {
+        ns = (uint64_t)(fallback_us ? fallback_us : 8000) * 1000ull;
+    }
+    return ns;
+}
+
+uint64_t pn_ar_watchdog_ns(const pn_ar_t *ar, uint32_t fallback_us)
+{
+    uint64_t wf = ar->watchdog_factor ? ar->watchdog_factor : 3;
+    return pn_ar_cycle_ns(ar, fallback_us) * wf;
+}
+
+const pn_submod_t *pn_find_sub(const pn_ar_t *ar, uint16_t slot,
+                               uint16_t subslot)
+{
+    for (int i = 0; i < ar->n_sub; i++) {
+        if (ar->sub[i].slot == slot && ar->sub[i].subslot == subslot) {
+            return &ar->sub[i];
+        }
+    }
+    return NULL;
+}
 
 pn_stack_t *pn_stack_create(const pn_cfg_t *cfg)
 {
@@ -52,7 +93,6 @@ pn_stack_t *pn_stack_create(const pn_cfg_t *cfg)
         s->cfg.device_id = 0x0001;
     }
     if (!s->cfg.mac_set) {
-        /* locally administered default */
         s->cfg.mac[0] = 0x02;
         s->cfg.mac[1] = 0xFB;
         s->cfg.mac[2] = 0x00;
@@ -104,13 +144,17 @@ int pn_stack_start(pn_stack_t *s)
         }
         s->fd_snmp = pn_udp_open(PN_SNMP_PORT);
         if (s->fd_snmp < 0) {
-            LOG_WARN("pn_stack", "SNMP UDP bind 실패 — CC-B neighbor 는 제한됨");
+            LOG_WARN("pn_stack", "SNMP UDP bind 실패 — neighbor 진단은 제한됨");
             s->fd_snmp = -1;
+        }
+        if (s->cfg.apply_os_ip && s->cfg.ip) {
+            pn_if_apply_ipv4(s->cfg.iface, s->cfg.ip, s->cfg.netmask,
+                             s->cfg.gateway);
         }
     }
     s->running = 1;
     LOG_INFO("pn_stack",
-             "start CC-B RT1 sec=%d name=%s iface=%s in=%u out=%u cycle=%uus",
+             "start RT1 sec=%d name=%s iface=%s in=%u out=%u cycle=%uus",
              s->cfg.security_class, s->cfg.station_name,
              s->cfg.iface[0] ? s->cfg.iface : "mock", s->cfg.input_len,
              s->cfg.output_len, s->cfg.cycle_us);
@@ -122,7 +166,7 @@ int pn_stack_start(pn_stack_t *s)
 void pn_stack_stop(pn_stack_t *s)
 {
     s->running = 0;
-    s->ar.established = 0;
+    pn_ar_reset(s);
     pn_eth_close(s);
     if (s->fd_rpc >= 0) {
         close(s->fd_rpc);
@@ -156,9 +200,7 @@ int pn_stack_handle_eth(pn_stack_t *s, const uint8_t *frame, size_t len)
         }
         return 0;
     }
-    if (et == PN_ETHTYPE_LLDP) {
-        return 0;
-    }
+    (void)et;
     return 0;
 }
 
@@ -166,6 +208,36 @@ int pn_stack_handle_rpc(pn_stack_t *s, const uint8_t *udp_payload, size_t len,
                         uint8_t *resp, size_t resp_cap, size_t *resp_len)
 {
     return pn_rpc_handle(s, udp_payload, len, resp, resp_cap, resp_len);
+}
+
+int pn_stack_handle_rpc_from(pn_stack_t *s, const uint8_t *udp_payload,
+                             size_t len, uint32_t src_ip, uint16_t src_port,
+                             uint8_t *resp, size_t resp_cap, size_t *resp_len)
+{
+    return pn_rpc_handle_from(s, udp_payload, len, src_ip, src_port, resp,
+                              resp_cap, resp_len);
+}
+
+int pn_stack_take_rpc_tx(pn_stack_t *s, uint8_t *out, size_t cap, size_t *len,
+                         uint32_t *dst_ip, uint16_t *dst_port)
+{
+    if (!s->rpc_tx_pending || s->rpc_tx_len == 0) {
+        return -EAGAIN;
+    }
+    if (cap < s->rpc_tx_len) {
+        return -ENOSPC;
+    }
+    memcpy(out, s->rpc_tx, s->rpc_tx_len);
+    *len = s->rpc_tx_len;
+    if (dst_ip) {
+        *dst_ip = s->rpc_tx_ip;
+    }
+    if (dst_port) {
+        *dst_port = s->rpc_tx_port;
+    }
+    s->rpc_tx_pending = 0;
+    s->rpc_tx_len = 0;
+    return 0;
 }
 
 void pn_stack_poll(pn_stack_t *s)
@@ -185,8 +257,10 @@ void pn_stack_poll(pn_stack_t *s)
             break;
         }
     }
+    pn_rpc_flush_tx(s);
     pn_rpc_poll(s);
     pn_snmp_poll(s);
+    pn_rt_watchdog(s);
     pn_rt_send_if_due(s);
 
     uint64_t now = pn_now_ns();
@@ -198,7 +272,12 @@ void pn_stack_poll(pn_stack_t *s)
 
 int pn_stack_ar_up(const pn_stack_t *s)
 {
-    return s && s->ar.established;
+    return s && s->ar.established && s->ar.cm_state == PN_CM_DATAEX;
+}
+
+int pn_stack_cm_state(const pn_stack_t *s)
+{
+    return s ? s->ar.cm_state : PN_CM_OFFLINE;
 }
 
 int pn_stack_read_output(pn_stack_t *s, size_t off, uint8_t *dst, size_t len)
