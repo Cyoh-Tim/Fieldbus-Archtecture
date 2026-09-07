@@ -287,7 +287,7 @@ static int dcp_wait_ident(int fd, uint8_t *rx, size_t cap, int timeout_ms,
 }
 
 static int dcp_wait_getset(int fd, uint8_t *rx, size_t cap, int timeout_ms,
-                           const char *expect_name)
+                           const char *expect_name, uint32_t xid)
 {
     uint64_t deadline = now_ms() + (uint64_t)timeout_ms;
     while (now_ms() < deadline) {
@@ -297,7 +297,8 @@ static int dcp_wait_getset(int fd, uint8_t *rx, size_t cap, int timeout_ms,
         }
         note_frame(rx, n, expect_name);
         if (n >= 26 && pn_rd_be16(rx + 12) == PN_ETHTYPE_PN &&
-            pn_rd_be16(rx + 14) == PN_FRAMEID_DCP_GETSET && rx[17] != 0) {
+            pn_rd_be16(rx + 14) == PN_FRAMEID_DCP_GETSET && rx[17] != 0 &&
+            pn_rd_be32(rx + 18) == xid) {
             return n;
         }
     }
@@ -622,7 +623,7 @@ int main(int argc, char **argv)
         pn_wr_be16(frame + 12, PN_ETHTYPE_PN);
         memcpy(frame + 14, gpay, 16);
         send_raw(raw, ifindex, frame, 30);
-        n = dcp_wait_getset(raw, rx, sizeof(rx), 800, expect_name);
+        n = dcp_wait_getset(raw, rx, sizeof(rx), 800, expect_name, 0xA1000010);
         check(n > 26 && contains(rx, (size_t)n, expect_name), "LAB-DCP-GET-NAME",
               "Get NameOfStation");
 
@@ -630,7 +631,7 @@ int main(int argc, char **argv)
         pn_wr_be32(gpay + 4, 0xA1000011);
         memcpy(frame + 14, gpay, 16);
         send_raw(raw, ifindex, frame, 30);
-        n = dcp_wait_getset(raw, rx, sizeof(rx), 800, expect_name);
+        n = dcp_wait_getset(raw, rx, sizeof(rx), 800, expect_name, 0xA1000011);
         int saw_vid = 0;
         if (n > 20) {
             for (int i = 0; i + 4 < n; i++) {
