@@ -75,6 +75,7 @@ int pn_stack_take_rpc_tx(pn_stack_t *s, uint8_t *out, size_t cap, size_t *len,
                          uint32_t *dst_ip, uint16_t *dst_port);
 
 const pn_cfg_t *pn_stack_cfg(const pn_stack_t *s);
+int pn_stack_lldp_remote_name(const pn_stack_t *s, char *out, size_t cap);
 
 size_t pn_eth_build(uint8_t *out, size_t cap, const uint8_t dst[6],
                     const uint8_t src[6], uint16_t ethertype,

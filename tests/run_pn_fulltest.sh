@@ -59,6 +59,10 @@ chk("SupportedProtocols=\"SNMP;LLDP\"" in text, "LAB-GSD-PROTO",
 chk("SupportedMibs=\"MIB2\"" in text, "LAB-GSD-MIB2", "SupportedMibs=MIB2")
 chk("NumberOfAR=\"1\"" in text, "LAB-GSD-AR", "NumberOfAR=1")
 chk("DNS_CompatibleName=" in text, "LAB-GSD-DNS", "DNS_CompatibleName present")
+chk('Length="32"' in text and 'Length="8"' in text, "LAB-GSD-IO",
+    "IO module 32-byte input / 8-byte output")
+chk("MAUTypes=\"16\"" in text, "LAB-GSD-MAU", "Port MAUTypes=16 (100BaseTXFD)")
+chk("OrderNumber" in text, "LAB-GSD-ORDER", "ModuleInfo OrderNumber")
 sys.exit(0 if ok else 1)
 PY
 

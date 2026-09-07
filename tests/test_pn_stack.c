@@ -452,7 +452,7 @@ static int do_connect(pn_stack_t *s)
     expect(!pn_stack_ar_up(s), "cyclic not up before PrmEnd");
     expect(contains(resp, rlen, "sensor-line1"),
            "Connect.res ARServerBlock has CMResponderStationName");
-    int saw_arsrv = 0, saw_moddiff = 0;
+    int saw_arsrv = 0, saw_moddiff = 0, saw_alarm = 0;
     if (rlen > 100) {
         const uint8_t *p = resp + 100;
         size_t left = rlen - 100;
@@ -466,6 +466,9 @@ static int do_connect(pn_stack_t *s)
             if (type == PN_BLOCK_MODDIFF) {
                 saw_moddiff = 1;
             }
+            if (type == PN_BLOCK_ALARMCR_RES) {
+                saw_alarm = 1;
+            }
             if (blen < 2 || off + 4u + blen > left) {
                 break;
             }
@@ -476,6 +479,7 @@ static int do_connect(pn_stack_t *s)
         }
     }
     expect(saw_arsrv, "Connect.res contains ARServerBlockRes 0x8106");
+    expect(saw_alarm, "Connect.res contains AlarmCRBlockRes 0x8103");
     expect(!saw_moddiff, "Connect.res omits ModuleDiff when ExpectedSubmodule matches");
     return rc;
 }
@@ -976,6 +980,46 @@ static void test_lldp_start(void)
     pn_stack_destroy(s);
 }
 
+static void test_lldp_remote(void)
+{
+    tx_cap_t cap;
+    pn_stack_t *s = mock_stack(&cap);
+    static const uint8_t dst[6] = {0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E};
+    static const uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t pdu[64];
+    size_t n = 0;
+    pdu[n++] = 0x02;
+    pdu[n++] = 0x07;
+    pdu[n++] = 4;
+    memcpy(pdu + n, src, 6);
+    n += 6; /* Chassis ID */
+    pdu[n++] = 0x04;
+    pdu[n++] = 0x07;
+    pdu[n++] = 3;
+    memcpy(pdu + n, src, 6);
+    n += 6; /* Port ID */
+    pdu[n++] = 0x06;
+    pdu[n++] = 0x02;
+    pdu[n++] = 0x00;
+    pdu[n++] = 0x14; /* TTL */
+    const char *nm = "ctl-lab1";
+    pdu[n++] = 0x0A;
+    pdu[n++] = (uint8_t)strlen(nm);
+    memcpy(pdu + n, nm, strlen(nm));
+    n += strlen(nm);
+    pdu[n++] = 0x00;
+    pdu[n++] = 0x00;
+    uint8_t frame[PN_FRAME_MAX];
+    size_t flen =
+        pn_eth_build(frame, sizeof(frame), dst, src, PN_ETHTYPE_LLDP, pdu, n);
+    pn_stack_handle_eth(s, frame, flen);
+    char rem[64];
+    expect(pn_stack_lldp_remote_name(s, rem, sizeof(rem)) == 0 &&
+               strcmp(rem, "ctl-lab1") == 0,
+           "LLDP RX stores remote sysName");
+    pn_stack_destroy(s);
+}
+
 static void test_watchdog(void)
 {
     tx_cap_t cap;
@@ -1002,6 +1046,7 @@ int main(void)
     test_cm_write_read();
     test_cm_pdev_expected();
     test_lldp_start();
+    test_lldp_remote();
     test_watchdog();
     if (g_fail) {
         fprintf(stderr, "pn stack tests FAILED\n");

@@ -129,6 +129,19 @@ const pn_cfg_t *pn_stack_cfg(const pn_stack_t *s)
     return &s->cfg;
 }
 
+int pn_stack_lldp_remote_name(const pn_stack_t *s, char *out, size_t cap)
+{
+    if (!s || !out || cap == 0) {
+        return -EINVAL;
+    }
+    if (!s->lldp_rem_set || !s->lldp_rem_name[0]) {
+        out[0] = '\0';
+        return -ENOENT;
+    }
+    snprintf(out, cap, "%s", s->lldp_rem_name);
+    return 0;
+}
+
 int pn_stack_start(pn_stack_t *s)
 {
     int rc = pn_eth_open(s);
@@ -200,7 +213,10 @@ int pn_stack_handle_eth(pn_stack_t *s, const uint8_t *frame, size_t len)
         }
         return 0;
     }
-    (void)et;
+    if (et == PN_ETHTYPE_LLDP) {
+        pn_lldp_on_frame(s, src, payload, plen);
+        return 0;
+    }
     return 0;
 }
 

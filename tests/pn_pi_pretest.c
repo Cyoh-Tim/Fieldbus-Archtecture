@@ -371,6 +371,130 @@ static uint32_t dcp_parse_ip(const uint8_t *rx, int n)
     return 0;
 }
 
+static size_t snmp_build_get(uint8_t *out, uint8_t rid, const uint8_t *oid,
+                             size_t olen)
+{
+    uint8_t vb[80];
+    size_t i = 0;
+    vb[i++] = 0x30;
+    size_t vb_len_at = i++;
+    vb[i++] = 0x06;
+    vb[i++] = (uint8_t)olen;
+    memcpy(vb + i, oid, olen);
+    i += olen;
+    vb[i++] = 0x05;
+    vb[i++] = 0x00;
+    vb[vb_len_at] = (uint8_t)(i - vb_len_at - 1);
+
+    uint8_t vbl[96];
+    size_t v = 0;
+    vbl[v++] = 0x30;
+    vbl[v++] = (uint8_t)i;
+    memcpy(vbl + v, vb, i);
+    v += i;
+
+    uint8_t pdu[160];
+    size_t p = 0;
+    pdu[p++] = 0xa0;
+    size_t pdu_len_at = p++;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = rid;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = 0x00;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = 0x00;
+    memcpy(pdu + p, vbl, v);
+    p += v;
+    pdu[pdu_len_at] = (uint8_t)(p - pdu_len_at - 1);
+
+    size_t m = 0;
+    out[m++] = 0x30;
+    size_t msg_len_at = m++;
+    out[m++] = 0x02;
+    out[m++] = 0x01;
+    out[m++] = 0x00;
+    out[m++] = 0x04;
+    out[m++] = 0x06;
+    memcpy(out + m, "public", 6);
+    m += 6;
+    memcpy(out + m, pdu, p);
+    m += p;
+    out[msg_len_at] = (uint8_t)(m - msg_len_at - 1);
+    return m;
+}
+
+static int snmp_query(uint32_t dst_ip, const uint8_t *oid, size_t olen,
+                      uint8_t rid, const char *expect)
+{
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0 || !dst_ip) {
+        if (fd >= 0) {
+            close(fd);
+        }
+        return 0;
+    }
+    uint8_t req[256];
+    size_t rn = snmp_build_get(req, rid, oid, olen);
+    struct sockaddr_in dst;
+    memset(&dst, 0, sizeof(dst));
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(PN_SNMP_PORT);
+    dst.sin_addr.s_addr = htonl(dst_ip);
+    sendto(fd, req, rn, 0, (struct sockaddr *)&dst, sizeof(dst));
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(fd, &rfds);
+    struct timeval tv = {.tv_sec = 1, .tv_usec = 0};
+    int ok = 0;
+    if (select(fd + 1, &rfds, NULL, NULL, &tv) > 0) {
+        uint8_t srx[512];
+        ssize_t sn = recv(fd, srx, sizeof(srx), 0);
+        if (sn > 0 && contains(srx, (size_t)sn, expect)) {
+            ok = 1;
+        }
+    }
+    close(fd);
+    return ok;
+}
+
+static void send_lldp_neighbor(int raw, int ifindex, const uint8_t dst[6],
+                               const uint8_t src[6], const char *sysname)
+{
+    uint8_t pdu[128];
+    size_t n = 0;
+    pdu[n++] = 0x02;
+    pdu[n++] = 0x07;
+    pdu[n++] = 4;
+    memcpy(pdu + n, src, 6);
+    n += 6;
+    pdu[n++] = 0x04;
+    pdu[n++] = 0x07;
+    pdu[n++] = 3;
+    memcpy(pdu + n, src, 6);
+    n += 6;
+    pdu[n++] = 0x06;
+    pdu[n++] = 0x02;
+    pdu[n++] = 0x00;
+    pdu[n++] = 0x14;
+    size_t nlen = strlen(sysname);
+    uint16_t th = (uint16_t)((5u << 9) | (nlen & 0x1FFu));
+    pdu[n++] = (uint8_t)(th >> 8);
+    pdu[n++] = (uint8_t)th;
+    memcpy(pdu + n, sysname, nlen);
+    n += nlen;
+    pdu[n++] = 0x00;
+    pdu[n++] = 0x00;
+    uint8_t frame[256];
+    memcpy(frame, dst, 6);
+    memcpy(frame + 6, src, 6);
+    pn_wr_be16(frame + 12, PN_ETHTYPE_LLDP);
+    memcpy(frame + 14, pdu, n);
+    send_raw(raw, ifindex, frame, 14 + n);
+}
+
 static size_t put_iod_write_hdr(uint8_t *p, uint16_t seq, uint32_t api,
                                 uint16_t slot, uint16_t sub, uint16_t index,
                                 uint32_t dlen)
@@ -732,39 +856,34 @@ int main(int argc, char **argv)
     check(g_saw_lldp, "LAB-LLDP-SYSNAME", "LLDP chassis/sysName");
     check(g_saw_lldp_pn, "LAB-LLDP-PN-TLV", "LLDP PN OUI 00:0C:CF");
 
-    /* SNMP sysName */
-    int snmp = socket(AF_INET, SOCK_DGRAM, 0);
-    int snmp_ok = 0;
-    if (snmp >= 0 && dev_ip) {
-        static const uint8_t snmp_get[] = {
-            0x30, 0x26, 0x02, 0x01, 0x00, 0x04, 0x06, 'p',  'u',  'b',
-            'l',  'i',  'c',  0xa0, 0x19, 0x02, 0x01, 0x2a, 0x02, 0x01,
-            0x00, 0x02, 0x01, 0x00, 0x30, 0x0e, 0x30, 0x0c, 0x06, 0x08,
-            0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x05, 0x00, 0x05, 0x00};
-        struct sockaddr_in dst;
-        memset(&dst, 0, sizeof(dst));
-        dst.sin_family = AF_INET;
-        dst.sin_port = htons(PN_SNMP_PORT);
-        dst.sin_addr.s_addr = htonl(dev_ip);
-        sendto(snmp, snmp_get, sizeof(snmp_get), 0, (struct sockaddr *)&dst,
-               sizeof(dst));
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(snmp, &rfds);
-        struct timeval tv = {.tv_sec = 1, .tv_usec = 0};
-        if (select(snmp + 1, &rfds, NULL, NULL, &tv) > 0) {
-            uint8_t srx[512];
-            ssize_t sn = recv(snmp, srx, sizeof(srx), 0);
-            if (sn > 0 && contains(srx, (size_t)sn, expect_name) &&
-                contains(srx, (size_t)sn, "\x02\x01\x2a")) {
-                snmp_ok = 1;
-            } else if (sn > 0 && contains(srx, (size_t)sn, expect_name)) {
-                snmp_ok = 1; /* name present even if request-id encoding differs */
-            }
-        }
-        close(snmp);
+    static const uint8_t oid_sysname[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x01,
+                                          0x05, 0x00};
+    static const uint8_t oid_sysdescr[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x01,
+                                           0x01, 0x00};
+    static const uint8_t oid_lldp_loc[] = {0x28, 0xc4, 0x6a, 0x01, 0x01, 0x02,
+                                           0x01, 0x03, 0x03, 0x00};
+    static const uint8_t oid_lldp_rem[] = {0x28, 0xc4, 0x6a, 0x01, 0x01, 0x02,
+                                           0x01, 0x04, 0x01, 0x01, 0x09, 0x00,
+                                           0x01, 0x01};
+    check(snmp_query(dev_ip, oid_sysname, sizeof(oid_sysname), 0x2a,
+                     expect_name),
+          "LAB-SNMP-SYSNAME", "SNMP Get sysName");
+    check(snmp_query(dev_ip, oid_sysdescr, sizeof(oid_sysdescr), 0x2b,
+                     "Fieldbus PN Device"),
+          "LAB-SNMP-SYSDESCR", "SNMP Get sysDescr / MIB-II");
+    check(snmp_query(dev_ip, oid_lldp_loc, sizeof(oid_lldp_loc), 0x2c,
+                     expect_name),
+          "LAB-SNMP-LLDP-LOC", "SNMP lldpLocSysName");
+
+    static const uint8_t lldp_mc[6] = {0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E};
+    send_lldp_neighbor(raw, ifindex, lldp_mc, mymac, "ctl-lab1");
+    if (devmac[0] | devmac[5]) {
+        send_lldp_neighbor(raw, ifindex, devmac, mymac, "ctl-lab1");
     }
-    check(snmp_ok, "LAB-SNMP-SYSNAME", "SNMP Get sysName / request-id");
+    usleep(80000);
+    check(snmp_query(dev_ip, oid_lldp_rem, sizeof(oid_lldp_rem), 0x2d,
+                     "ctl-lab1"),
+          "LAB-SNMP-LLDP-REM", "SNMP lldpRemSysName after LLDP RX");
 
     /* DCP Set NameOfStation round-trip (unsigned; lab security_class 0). */
     if (devmac[0] | devmac[5]) {
@@ -819,6 +938,8 @@ int main(int argc, char **argv)
     int rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     check(rn > 80 && contains(resp, (size_t)rn, expect_name),
           "LAB-CM-CONNECT-ARSERVER", "Connect.res ARServerBlock station name");
+    check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_ALARMCR_RES) >= 1,
+          "LAB-CM-CONNECT-ALARMCR", "Connect.res AlarmCRBlockRes 0x8103");
     check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_MODDIFF) == 0,
           "LAB-CM-CONNECT-NO-MODDIFF", "no ModuleDiff on matching ExpectedSub");
     uint16_t out_fid = parse_out_frame_id(resp, rn > 0 ? (size_t)rn : 0);
@@ -954,6 +1075,47 @@ int main(int argc, char **argv)
     }
     check(cyclic_in >= 3, "LAB-RT-CYCLIC", "RTC1 input frames");
     check(iops_ok, "LAB-RT-IOPS", "IOPS GOOD");
+
+    for (int i = 0; i < 400; i++) {
+        uint8_t junk[64];
+        memset(junk, 0xA5, sizeof(junk));
+        memcpy(junk, devmac, 6);
+        memcpy(junk + 6, mymac, 6);
+        pn_wr_be16(junk + 12, 0x0800);
+        send_raw(raw, ifindex, junk, 60);
+    }
+    int after_load = 0;
+    uint64_t load_end = now_ms() + 250;
+    last_out = 0;
+    while (now_ms() < load_end) {
+        uint64_t t = now_ms();
+        if (t - last_out >= 8) {
+            uint8_t opay[48];
+            memset(opay, 0, sizeof(opay));
+            pn_wr_be16(opay, out_fid);
+            memset(opay + 2, 0xA5, 8);
+            opay[10] = PN_IOPS_GOOD;
+            pn_wr_be16(opay + 42, (uint16_t)t);
+            opay[44] = PN_DATASTATUS_PRIMARY | PN_DATASTATUS_VALID |
+                       PN_DATASTATUS_RUN;
+            uint8_t fr[64];
+            memcpy(fr, devmac, 6);
+            memcpy(fr + 6, mymac, 6);
+            pn_wr_be16(fr + 12, PN_ETHTYPE_PN);
+            memcpy(fr + 14, opay, 46);
+            send_raw(raw, ifindex, fr, 60);
+            last_out = t;
+        }
+        ssize_t rnraw = recv(raw, rx, sizeof(rx), MSG_DONTWAIT);
+        if (rnraw >= 18 && pn_rd_be16(rx + 12) == PN_ETHTYPE_PN &&
+            pn_rd_be16(rx + 14) == 0x8123) {
+            after_load++;
+        } else if (rnraw < 0) {
+            usleep(1000);
+        }
+    }
+    check(after_load >= 1, "LAB-RT-NETLOAD",
+          "RTC1 continues under ingress flood");
 
     plen = build_release(pdu);
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);

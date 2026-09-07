@@ -12,8 +12,9 @@ PI 인증 대상이 아니다.
 | DCP | Identify(필터), Get(요청 속성), Set(Name/IP). Set 시 `apply_os_ip` 이면 OS 주소 적용 |
 | Record | I&M0 (`0xAFF0`), RealIdent (`0xF000`/`0xE001`/`0xC001`/`0x8001`), PDPort/PDInterface Real 스텁. Write / WriteMultiple (`0xE040`) ACK |
 | LLDP | Chassis/Port/TTL/SysName/MgmtAddr + PN Chassis MAC / Port Status |
-| SNMP | Get 에 대해 sysName, request-id 반사 |
+| SNMP | Get 에 대해 sysName / sysDescr / lldpLocSysName / lldpRemSysName |
 | Watchdog | output CR 가 끊기면 AR down, output image 클리어 |
+| Alarm CR | Connect.res 에 AlarmCRBlockRes. RTA Notify/Ack 시퀀스는 없음 |
 | RT Class 3 / IRT | 구현하지 않음 |
 | PI Security Class 1 | 아님. `security_class: 1` 은 스택 로컬 HMAC-SHA256 PSK |
 | PI 인증 / CRA/CE | 아님. 제품 프로세스 |
@@ -61,11 +62,11 @@ bash tests/run_pn_fulltest.sh
 | 그룹 | 랩 프리테스트 | 공식 번들 없이 못 하는 것 |
 |------|----------------|---------------------------|
 | DCP | Identify All/Name/DeviceID 필터, Get Name/ID/IP, Set Name 왕복 | DCP Set IP를 OS에 쓰는 경우, Hello |
-| LLDP | sysName + PN OUI `00:0C:CF` 송신 | LLDP-MIB / neighbor 테이블 |
-| SNMP | Get sysName, request-id 반사 | MIB-II 전체, LLDP-MIB |
-| CM | Connect ARServer, Write / WriteMultiple, I&M0, RealIdent, PDPort/PDIF, unknown index 빈 성공, PrmEnd, AppReady, Release, Reconnect | Alarm/RTA, 전체 TCS |
-| RTC1 | cyclic + IOPS GOOD, Release 후 송신 중단 | Netload, IRT/SPIRTA |
-| GSDML | well-formed, VendorID/DeviceID, PDev, RT1, no IRT, SNMP;LLDP, MIB2, NumberOfAR | TEDCheck / GSD Checker 바이너리 |
+| LLDP | sysName + PN OUI `00:0C:CF` 송신, 이웃 LLDP 수신 | 전체 LLDP-MIB 테이블/LastChange |
+| SNMP | sysName, sysDescr, lldpLocSysName, lldpRemSysName | MIB-II 전 객체, SNMP v2c 예외 |
+| CM | Connect ARServer + AlarmCR.res, Write / WriteMultiple, I&M0, RealIdent, PDPort/PDIF, unknown index 빈 성공, PrmEnd, AppReady, Release, Reconnect | RTA Alarm Notify/Ack 시퀀스, 공식 TCS |
+| RTC1 | cyclic + IOPS GOOD, Release 후 송신 중단, ingress flood 중 cyclic 유지 | 공식 Netload 프로파일, IRT/SPIRTA |
+| GSDML | well-formed, VendorID/DeviceID, PDev, RT1, no IRT, SNMP;LLDP, MIB2, NumberOfAR, IO 길이, MAUTypes | TEDCheck / GSD Checker 바이너리 |
 
 시뮬레이터는 DCP Identify → Set Name 왕복 → Connect (ARServerBlock) → Write / WriteMultiple → Read I&M0 / RealIdent / PD* → PrmEnd → ApplicationReady → RTC1 cyclic 을 실제 Ethernet/UDP 로 주고받는다. Siemens TIA 와 같은 CM 순서이며, 벤더 분기는 없다.
 

@@ -88,3 +88,37 @@ void pn_lldp_send(pn_stack_t *s)
         pn_eth_send(s, frame, flen);
     }
 }
+
+void pn_lldp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
+                      size_t plen)
+{
+    if (!s || !payload) {
+        return;
+    }
+    size_t off = 0;
+    while (off + 2 <= plen) {
+        uint16_t hdr = pn_rd_be16(payload + off);
+        uint8_t type = (uint8_t)(hdr >> 9);
+        uint16_t len = (uint16_t)(hdr & 0x1FFu);
+        off += 2;
+        if (type == 0) {
+            break;
+        }
+        if (off + len > plen) {
+            break;
+        }
+        const uint8_t *val = payload + off;
+        if (type == 1 && len >= 7 && val[0] == 4) {
+            memcpy(s->lldp_rem_mac, val + 1, 6);
+        } else if (type == 5 && len > 0) {
+            size_t n = len < PN_STATION_NAME_MAX ? len : PN_STATION_NAME_MAX;
+            memcpy(s->lldp_rem_name, val, n);
+            s->lldp_rem_name[n] = '\0';
+            s->lldp_rem_set = 1;
+        }
+        off += len;
+    }
+    if (!s->lldp_rem_set && src) {
+        memcpy(s->lldp_rem_mac, src, 6);
+    }
+}

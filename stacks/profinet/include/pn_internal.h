@@ -85,6 +85,10 @@ struct pn_stack {
     uint64_t last_lldp_ns;
     uint64_t start_ns;
 
+    char lldp_rem_name[PN_STATION_NAME_MAX + 1];
+    uint8_t lldp_rem_mac[6];
+    int lldp_rem_set;
+
     uint8_t rpc_tx[PN_FRAME_MAX];
     size_t rpc_tx_len;
     uint32_t rpc_tx_ip;
@@ -123,6 +127,8 @@ void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
 int pn_dcp_verify_set(const pn_stack_t *s, const uint8_t *payload, size_t plen);
 
 void pn_lldp_send(pn_stack_t *s);
+void pn_lldp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
+                      size_t plen);
 
 void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen);
 void pn_rt_send_if_due(pn_stack_t *s);
