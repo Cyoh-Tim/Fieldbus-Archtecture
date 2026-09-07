@@ -112,12 +112,29 @@ static void test_dcp_identify(void)
     pn_stack_handle_eth(s, frame, flen);
 
     int found = 0;
+    int valid_res = 0;
     for (int i = 0; i < cap.n; i++) {
-        if (contains(cap.frames[i], cap.lens[i], "sensor-line1")) {
+        const uint8_t *f = cap.frames[i];
+        size_t n = cap.lens[i];
+        if (n < 16) {
+            continue;
+        }
+        uint16_t et = pn_rd_be16(f + 12);
+        uint16_t fid = pn_rd_be16(f + 14);
+        uint8_t sid = f[16];
+        uint8_t st = f[17];
+        if (et == PN_ETHTYPE_PN && fid == PN_FRAMEID_DCP_ID_RES &&
+            sid == PN_DCP_IDENTIFY && st == PN_DCP_RESP_SUCCESS &&
+            contains(f, n, "sensor-line1")) {
+            valid_res = 1;
+        }
+        if (contains(f, n, "sensor-line1")) {
             found = 1;
         }
     }
     expect(found, "DCP Identify response contains NameOfStation");
+    expect(valid_res,
+           "DCP Identify.Res FrameID=0xFEFF service=Identify success");
     pn_stack_destroy(s);
 }
 
