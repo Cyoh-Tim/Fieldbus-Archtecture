@@ -1,0 +1,12 @@
+build/
+*.o
+*.a
+*.so
+compile_commands.json
+
+# 벤더 라이선스 코드 - 저장소에 커밋하지 않음
+third_party/ethernetip_stack/*
+third_party/profinet_stack/*
+!third_party/ethernetip_stack/.gitkeep
+!third_party/profinet_stack/.gitkeep
+!third_party/README.md

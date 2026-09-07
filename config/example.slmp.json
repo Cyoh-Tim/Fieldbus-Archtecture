@@ -1,0 +1,26 @@
+{
+  "protocol": "slmp",
+  "device": {
+    "name": "barcode_sensor_1",
+    "role": "client"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "plc_ip": "192.168.0.20",
+    "port": 5000,
+    "network_no": 0,
+    "pc_no": 255,
+    "frame": "3E"
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "write",
+      "data_type": "string",
+      "length": 32,
+      "address": {
+        "slmp": { "device_code": "D", "start": 100 }
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "protocol": "modbus_tcp",
+  "device": {
+    "name": "barcode_sensor_1",
+    "role": "server"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "ip": "192.168.0.10",
+    "port": 502,
+    "unit_id": 1
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "read",
+      "data_type": "string",
+      "length": 32,
+      "address": {
+        "modbus": { "register_type": "holding", "start": 40001 }
+      }
+    },
+    {
+      "name": "trigger",
+      "access": "write",
+      "data_type": "bool",
+      "address": {
+        "modbus": { "register_type": "coil", "start": 1 }
+      }
+    }
+  ]
+}

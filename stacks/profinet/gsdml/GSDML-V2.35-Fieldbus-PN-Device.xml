@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Minimal GSDML for the Fieldbus Architecture PROFINET Device.
+  Conformance Class B, RT_CLASS_1. Not IRT. Not PI-certified.
+  Import is a starting point for engineering; expect to extend before a real PLC project.
+-->
+<ISO15745Profile xmlns="http://www.profibus.com/GSDML/2003/11/DeviceProfile">
+  <ProfileHeader>
+    <ProfileIdentification>PROFINET Device Profile</ProfileIdentification>
+    <ProfileRevision>1.00</ProfileRevision>
+    <ProfileName>FB-ARCH PN Device</ProfileName>
+    <ProfileSource>Fieldbus Architecture</ProfileSource>
+    <ProfileClassID>Device</ProfileClassID>
+    <ISO15745Reference>
+      <ISO15745Part>4</ISO15745Part>
+      <ISO15745Edition>1</ISO15745Edition>
+      <ProfileTechnology>GSDML</ProfileTechnology>
+    </ISO15745Reference>
+  </ProfileHeader>
+  <ProfileBody>
+    <DeviceIdentity VendorID="0xABCD" DeviceID="0x0001">
+      <InfoText TextId="T_ID"/>
+      <VendorName Value="Fieldbus-Architecture"/>
+    </DeviceIdentity>
+    <DeviceFunction>
+      <Family MainFamily="I/O" ProductFamily="FB-ARCH"/>
+    </DeviceFunction>
+    <ApplicationProcess>
+      <DeviceAccessPointList>
+        <DeviceAccessPointItem ID="DAP1" PhysicalSlots="0..1" ModuleIdentNumber="0x00000001"
+                               MinDeviceInterval="32" DNS_CompatibleName="fb-arch-pn"
+                               FixedInSlots="0" ObjectUUID_LocalIndex="1"
+                               RequiredSchemaVersion="2.35">
+          <ModuleInfo>
+            <Name TextId="T_DAP"/>
+            <InfoText TextId="T_DAP_INFO"/>
+            <VendorName Value="Fieldbus-Architecture"/>
+            <OrderNumber Value="FB-ARCH-PN-DEV"/>
+            <HardwareRelease Value="1"/>
+            <SoftwareRelease Value="V1.0.0"/>
+          </ModuleInfo>
+          <SubslotList>
+            <SubslotItem SubslotNumber="1" TextId="T_DAP_SUB"/>
+          </SubslotList>
+          <SystemDefinedSubmoduleList>
+            <SubmoduleItem ID="PORT1" SubmoduleIdentNumber="0x0002" SubslotNumber="32768">
+              <IOData/>
+            </SubmoduleItem>
+          </SystemDefinedSubmoduleList>
+        </DeviceAccessPointItem>
+      </DeviceAccessPointList>
+      <ModuleList>
+        <ModuleItem ID="MOD_IO" ModuleIdentNumber="0x00000010">
+          <ModuleInfo>
+            <Name TextId="T_IO"/>
+            <InfoText TextId="T_IO_INFO"/>
+          </ModuleInfo>
+          <VirtualSubmoduleList>
+            <VirtualSubmoduleItem ID="SUB_IO" SubmoduleIdentNumber="0x00000011"
+                                  FixedInSubslots="1">
+              <IOData>
+                <Input>
+                  <DataItem DataType="OctetString" Length="32" TextId="T_IN"/>
+                </Input>
+                <Output>
+                  <DataItem DataType="OctetString" Length="8" TextId="T_OUT"/>
+                </Output>
+              </IOData>
+              <RecordDataList>
+                <ParameterRecordDataItem Index="1" Length="0"/>
+              </RecordDataList>
+            </VirtualSubmoduleItem>
+          </VirtualSubmoduleList>
+        </ModuleItem>
+      </ModuleList>
+      <ExternalTextList>
+        <PrimaryLanguage>
+          <Text TextId="T_ID" Value="FB-ARCH PN Device"/>
+          <Text TextId="T_DAP" Value="DAP"/>
+          <Text TextId="T_DAP_INFO" Value="Device access point, RT Class 1"/>
+          <Text TextId="T_DAP_SUB" Value="Interface"/>
+          <Text TextId="T_IO" Value="IO module"/>
+          <Text TextId="T_IO_INFO" Value="32 byte input, 8 byte output"/>
+          <Text TextId="T_IN" Value="Input image"/>
+          <Text TextId="T_OUT" Value="Output image"/>
+        </PrimaryLanguage>
+      </ExternalTextList>
+    </ApplicationProcess>
+  </ProfileBody>
+</ISO15745Profile>

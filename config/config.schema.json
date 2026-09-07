@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "multiproto-daemon config",
+  "type": "object",
+  "required": ["protocol", "device", "points"],
+  "properties": {
+    "protocol": {
+      "type": "string",
+      "enum": ["modbus_tcp", "slmp", "cclink", "ethernetip", "profinet"]
+    },
+    "device": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["server", "client"] }
+      }
+    },
+    "cycle_ms": { "type": "integer", "minimum": 1, "default": 8 },
+    "protocol_params": {
+      "type": "object",
+      "description": "프로토콜별 연결 파라미터. 코어는 해석하지 않고 선택된 어댑터에 그대로 전달한다. docs/design.md 3.3 절 참고."
+    },
+    "points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "access", "address"],
+        "properties": {
+          "name": { "type": "string" },
+          "access": { "type": "string", "enum": ["read", "write"] },
+          "data_type": {
+            "type": "string",
+            "enum": ["uint16", "int16", "uint32", "int32", "float32", "bool", "string"]
+          },
+          "length": { "type": "integer" },
+          "scale": { "type": "number", "default": 1.0 },
+          "offset": { "type": "number", "default": 0.0 },
+          "byte_order": { "type": "string", "enum": ["big", "little"] },
+          "address": {
+            "type": "object",
+            "description": "선택된 protocol 에 해당하는 서브키만 있으면 됨 (modbus/slmp/cclink/ethernetip/profinet)"
+          }
+        }
+      }
+    }
+  }
+}
