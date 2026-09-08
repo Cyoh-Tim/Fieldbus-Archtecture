@@ -793,9 +793,10 @@ int pn_rpc_handle_from(pn_stack_t *s, const uint8_t *pdu, size_t len,
     int le = rpc_le(pdu);
     uint8_t ptype = pdu[1];
     if (ptype == RPC_PT_RESPONSE) {
-        /* ApplicationReady confirmation */
         if (s->ar.cm_state == PN_CM_W_APPRDY) {
             enter_dataex(s);
+            *out_len = 0;
+            return 0;
         }
         return -EINVAL;
     }
@@ -879,9 +880,9 @@ int pn_rpc_handle_from(pn_stack_t *s, const uint8_t *pdu, size_t len,
             LOG_INFO("pn_rpc", "AR released (Control)");
         } else if (prm_end && s->ar.cm_state >= PN_CM_CONNECTED) {
             s->ar.cm_state = PN_CM_W_APPRDY;
+            s->ar.established = 0;
             queue_apprdy(s);
-            LOG_INFO("pn_rpc", "PrmEnd → ApplicationReady");
-            enter_dataex(s);
+            LOG_INFO("pn_rpc", "PrmEnd → ApplicationReady (DATAEX after ACK)");
             res_type = PN_BLOCK_PRMEND_RES;
         }
         uint8_t blk[64];

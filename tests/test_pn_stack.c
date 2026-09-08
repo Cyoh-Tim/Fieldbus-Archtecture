@@ -635,6 +635,25 @@ static int do_prmend(pn_stack_t *s)
     return rc;
 }
 
+static int do_apprdy_ack(pn_stack_t *s)
+{
+    uint8_t tx[PN_FRAME_MAX];
+    size_t tlen = 0;
+    uint32_t dip = 0;
+    uint16_t dport = 0;
+    int trc = pn_stack_take_rpc_tx(s, tx, sizeof(tx), &tlen, &dip, &dport);
+    expect(trc == 0 && tlen > 80, "ApplicationReady RPC queued");
+    if (trc != 0 || tlen < 2) {
+        return -1;
+    }
+    tx[1] = 2;
+    uint8_t resp[512];
+    size_t rlen = 0;
+    int rc = pn_stack_handle_rpc(s, tx, tlen, resp, sizeof(resp), &rlen);
+    expect(rc == 0 && pn_stack_ar_up(s), "DATAEX after ApplicationReady ACK");
+    return rc;
+}
+
 static void test_dcp_identify_filter(void)
 {
     tx_cap_t cap;
@@ -802,8 +821,8 @@ static void test_cm_connect_prmend(void)
     pn_stack_write_input(s, 0, pattern, 4);
 
     do_prmend(s);
-    expect(pn_stack_ar_up(s), "AR up after PrmEnd / ApplicationReady");
-    expect(pn_stack_cm_state(s) == PN_CM_DATAEX, "CM DATAEX");
+    expect(!pn_stack_ar_up(s), "cyclic not up before ApplicationReady ACK");
+    expect(pn_stack_cm_state(s) == PN_CM_W_APPRDY, "CM W_APPRDY after PrmEnd");
 
     uint8_t tx[PN_FRAME_MAX];
     size_t tlen = 0;
@@ -820,6 +839,15 @@ static void test_cm_connect_prmend(void)
     }
     expect(saw_apprdy, "queued RPC contains IOXBlock ApplicationReady");
     expect(dport == PN_RPC_PORT, "ApplicationReady dest port 34964");
+    tx[1] = 2;
+    {
+        uint8_t rbuf[512];
+        size_t rlen = 0;
+        expect(pn_stack_handle_rpc(s, tx, tlen, rbuf, sizeof(rbuf), &rlen) == 0,
+               "ApplicationReady ACK accepted");
+    }
+    expect(pn_stack_ar_up(s), "AR up after ApplicationReady ACK");
+    expect(pn_stack_cm_state(s) == PN_CM_DATAEX, "CM DATAEX");
 
     cap.n = 0;
     pn_stack_poll(s);
@@ -1116,7 +1144,8 @@ static void test_cm_write_read(void)
            "unknown index wrapped as IODReadRes");
 
     do_prmend(s);
-    expect(pn_stack_ar_up(s), "AR up after Write/Read then PrmEnd");
+    do_apprdy_ack(s);
+    expect(pn_stack_ar_up(s), "AR up after Write/Read then AppReady");
     pn_stack_destroy(s);
 }
 
@@ -1178,6 +1207,7 @@ static void test_cm_pdev_expected(void)
     uint8_t pattern[4] = {0xAA, 0xBB, 0xCC, 0xDD};
     pn_stack_write_input(s, 0, pattern, 4);
     do_prmend(s);
+    do_apprdy_ack(s);
     cap.n = 0;
     pn_stack_poll(s);
     int saw_fid = 0;
@@ -1533,6 +1563,20 @@ static void test_snmp_mib(void)
         expect(contains(resp, rlen, "Fieldbus PN Device"),
                "SNMP GetBulk includes sysDescr");
     }
+    static const uint8_t oid_tcp[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x06, 0x01,
+                                      0x00};
+    qn = snmp_pdu(req, 30, 0xa0, oid_tcp, sizeof(oid_tcp));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               snmp_has(resp, rlen, "\x02\x01\x04", 3),
+           "SNMP Get tcpRtoAlgorithm");
+    static const uint8_t oid_at[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x03, 0x01,
+                                     0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00};
+    qn = snmp_pdu(req, 31, 0xa0, oid_at, sizeof(oid_at));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               snmp_has(resp, rlen, "\x02\x01\x01", 3),
+           "SNMP Get atIfIndex");
 
     inject_lldp_neighbor(s, "ctl-lab1");
     qn = snmp_pdu(req, 6, 0xa0, oid_lldp_rem, sizeof(oid_lldp_rem));
@@ -1576,6 +1620,18 @@ static void test_rta_alarm(void)
     pn_stack_t *s = mock_stack(&cap);
     do_connect(s);
     do_prmend(s);
+    do_apprdy_ack(s);
+    cap.n = 0;
+    pn_stack_poll(s);
+    int saw_idle = 0;
+    for (int i = 0; i < cap.n; i++) {
+        if (cap.lens[i] >= 16 &&
+            pn_rd_be16(cap.frames[i] + 14) == PN_FRAMEID_ALARM_HIGH) {
+            saw_idle = 1;
+        }
+    }
+    expect(!saw_idle, "no diagnosis RTA until appear is requested");
+    pn_stack_diag_appear(s);
     cap.n = 0;
     pn_stack_poll(s);
     int saw = 0;
@@ -1643,14 +1699,12 @@ static void test_rta_alarm(void)
                    rlen > 80 &&
                    count_block(rresp, rlen, PN_BLOCK_DIAGNOSIS) >= 1,
                "QualifiedChannelDiagnosis 0x8011");
-        for (int i = 0; i < 80; i++) {
-            pump_output_cr(s);
-            usleep(10000);
-        }
+        pump_output_cr(s);
+        pn_stack_diag_clear(s);
         cap.n = 0;
         pn_stack_poll(s);
         int didx = -1;
-        expect(find_rta_data(&cap, &didx), "RTA disappear after appear ACK");
+        expect(find_rta_data(&cap, &didx), "RTA disappear after diag_clear");
         if (didx >= 0) {
             const uint8_t *df = cap.frames[didx];
             uint16_t spec = pn_rd_be16(df + 14 + 14 + 30);
@@ -1661,30 +1715,47 @@ static void test_rta_alarm(void)
             rlen = 0;
             expect(pn_stack_handle_rpc(s, rpdu, plen, rresp, sizeof(rresp),
                                        &rlen) == 0 &&
-                       rlen > 80 &&
-                       count_block(rresp, rlen, PN_BLOCK_DIAGNOSIS) >= 1,
-                   "ChannelDiagnosis remains after first disappear");
-            for (int i = 0; i < 80; i++) {
-                pump_output_cr(s);
-                usleep(10000);
-            }
+                       count_block(rresp, rlen, PN_BLOCK_DIAGNOSIS) == 0,
+                   "ChannelDiagnosis cleared after disappear ACK");
+            pn_stack_alarm_process(s);
             cap.n = 0;
             pn_stack_poll(s);
             int pidx = -1;
-            expect(find_rta_data(&cap, &pidx), "RTA process alarm after disappear");
+            expect(find_rta_data(&cap, &pidx), "RTA process alarm on request");
             if (pidx >= 0) {
                 uint16_t altype = pn_rd_be16(cap.frames[pidx] + 14 + 14 + 6);
                 expect(altype == PN_ALARM_TYPE_PROCESS,
                        "process AlarmType 0x0002");
                 ack_rta_frame(s, cap.frames[pidx]);
-                plen = build_read_pdu(rpdu, 0, 0x8001, PN_INDEX_CHAN_DIAG);
-                rlen = 0;
-                expect(pn_stack_handle_rpc(s, rpdu, plen, rresp, sizeof(rresp),
-                                           &rlen) == 0 &&
-                           count_block(rresp, rlen, PN_BLOCK_DIAGNOSIS) == 0,
-                       "ChannelDiagnosis cleared after process ACK");
             }
         }
+        /* Controller → device RTA Data must be ACKed. */
+        static const uint8_t dst[6] = {0x02, 0xFB, 0x00, 0x00, 0x00, 0x01};
+        static const uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+        uint8_t pay[32];
+        memset(pay, 0, sizeof(pay));
+        pn_wr_be16(pay, PN_FRAMEID_ALARM_HIGH);
+        pn_wr_be16(pay + 2, 1);
+        pn_wr_be16(pay + 4, 3);
+        pay[6] = 0x11;
+        pay[7] = 0x21;
+        pn_wr_be16(pay + 8, 7);
+        pn_wr_be16(pay + 10, 0xFFFF);
+        pn_wr_be16(pay + 12, 0);
+        uint8_t cfr[PN_FRAME_MAX];
+        size_t clen =
+            pn_eth_build(cfr, sizeof(cfr), dst, src, PN_ETHTYPE_PN, pay, 14);
+        cap.n = 0;
+        pn_stack_handle_eth(s, cfr, clen);
+        int saw_ack = 0;
+        for (int i = 0; i < cap.n; i++) {
+            if (cap.lens[i] >= 22 &&
+                pn_rd_be16(cap.frames[i] + 14) == PN_FRAMEID_ALARM_HIGH &&
+                (cap.frames[i][20] & 0x0Fu) == 3) {
+                saw_ack = 1;
+            }
+        }
+        expect(saw_ack, "device ACKs controller RTA Data");
     }
     pn_stack_destroy(s);
 }
@@ -1792,6 +1863,7 @@ static void test_watchdog(void)
     pn_stack_t *s = mock_stack(&cap);
     do_connect(s);
     do_prmend(s);
+    do_apprdy_ack(s);
     expect(pn_stack_ar_up(s), "AR up before watchdog");
     usleep(40000); /* 40ms > 8ms * watchdog 3 */
     pn_stack_poll(s);

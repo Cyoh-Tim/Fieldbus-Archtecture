@@ -52,9 +52,15 @@ int main(int argc, char **argv)
     }
     fprintf(stderr, "device up on %s name=%s ip=%s\n", argv[1],
             pn_stack_cfg(s)->station_name, argc > 2 ? argv[2] : "192.168.0.10");
+    int inject = getenv("PN_INJECT_DIAG") != NULL;
+    int injected = 0;
     int loops = seconds * 50;
     for (int i = 0; i < loops && g_run; i++) {
         pn_stack_poll(s);
+        if (inject && !injected && pn_stack_ar_up(s)) {
+            pn_stack_diag_appear(s);
+            injected = 1;
+        }
         usleep(20000);
     }
     pn_stack_destroy(s);

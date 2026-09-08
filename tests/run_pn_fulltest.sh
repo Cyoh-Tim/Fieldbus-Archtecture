@@ -99,7 +99,7 @@ sudo ip addr add "${CTL_IP}/24" dev "${CTL_IF}"
 sudo ip link set "${DEV_IF}" up
 sudo ip link set "${CTL_IF}" up
 
-sudo "${BIN}/pn_device_run" "${DEV_IF}" "${DEV_IP}" 45 &
+sudo env PN_INJECT_DIAG=1 "${BIN}/pn_device_run" "${DEV_IF}" "${DEV_IP}" 45 &
 DEV_PID=$!
 sleep 0.5
 

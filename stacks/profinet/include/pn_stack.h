@@ -10,15 +10,13 @@
  * PROFINET IO Device stack (Fieldbus Architecture profile)
  *
  * Scope:
- *   - Device-side DCP, CM (Connect/Write/WriteMultiple/PrmEnd/ApplicationReady),
- *     RTC1 cyclic IO, record (I&M0–4, RealIdent, PD* + statistics),
- *     LLDP, SNMP (MIB-II ifTable/ifXTable, ip/udp/snmp, LLDP-MIB,
- *     LLDP-EXT-PNO loc/rem delays; Get/GetNext/Set/GetBulk), AlarmCR + RTA
- *     appear/disappear/process Data/Ack
- *   - Lab Conformance Class B subset: RT Class 1, DCP, CM, alarms,
- *     SNMP (MIB-II ip/icmp/udp/snmp + LLDP-MIB + Set + GetBulk), LLDP
- *     topology, ChannelDiagnosis ASE, PDEV CheckNeighbors/FSU store.
- *     Not PI-certified.
+ *   - Device-side DCP, CM (Connect/Write/WriteMultiple/PrmEnd/ApplicationReady
+ *     ACK then DATAEX), RTC1 cyclic IO, record (I&M0–4, RealIdent, PD*),
+ *     LLDP, SNMP (MIB-II system/interfaces/at/ip/icmp/tcp/udp/snmp + ifX,
+ *     LLDP-MIB, LLDP-EXT-PNO; Get/GetNext/Set/GetBulk with non-repeaters),
+ *     AlarmCR + event-driven RTA appear/disappear/process
+ *   - Lab Conformance Class B: RT Class 1, DCP, CM, alarms, SNMP MIB-II +
+ *     LLDP-MIB, ChannelDiagnosis ASE, PDEV. Not PI-certified.
  *   - CC-C / IRT (RT Class 3, PTCP, SPIRTA) is not implemented; Connect
  *     with RT_CLASS_3 is rejected.
  *   - MRP is a CC-B optional (media redundancy), not CC-C. Not implemented;
@@ -71,6 +69,11 @@ int pn_stack_read_output(pn_stack_t *s, size_t off, uint8_t *dst, size_t len);
 int pn_stack_read_input(pn_stack_t *s, size_t off, uint8_t *dst, size_t len);
 int pn_stack_write_input(pn_stack_t *s, size_t off, const uint8_t *src,
                          size_t len);
+
+/* Diagnosis ASE: appear / disappear / process RTA. Idle has no diagnosis. */
+int pn_stack_diag_appear(pn_stack_t *s);
+int pn_stack_diag_clear(pn_stack_t *s);
+int pn_stack_alarm_process(pn_stack_t *s);
 
 /* Test / mock Ethernet. Replaces AF_PACKET. */
 void pn_stack_set_eth_ops(pn_stack_t *s, pn_eth_ops_t ops);

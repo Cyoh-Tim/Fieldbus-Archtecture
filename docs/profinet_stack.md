@@ -23,14 +23,14 @@ MRP를 CC-C로 부르지 않는다. 진단/알람은 A/B/C 공통이다.
 
 | 항목 | 상태 | 클래스 |
 |------|------|--------|
-| CM 기동 | Connect → Write(ACK) → PrmEnd → ApplicationReady → cyclic | A/B |
+| CM 기동 | Connect → Write(ACK) → PrmEnd → ApplicationReady.req → **ACK 후 DATAEX** → cyclic | A/B |
 | RT Class 1 | 비동기 cyclic. C_SDU 에 데이터+IOPS/IOCS. `SendClock×ReductionRatio` | A |
 | DCP | Identify(필터: All / Name / DeviceID), Get(요청 속성), Set(Name/IP). 기동 시 Hello. `apply_os_ip` 이면 기동·Set 시 OS 주소 적용 후 UDP 바인드. Set IP 후 RPC/SNMP 재바인드, 열린 AR 은 리셋 | A |
 | Record | I&M0–4 (1–4 writable), RealIdent, PDPort/PDIF Real/Adjust/Check/FSU 저장, PD*Statistic, Channel/Ext/Qualified Diagnosis. FSU **CM**(ParameterizationSpeedup) 은 클레임하지 않음 | A/B |
 | LLDP | Chassis/Port/TTL/SysName/MgmtAddr + PN Chassis MAC / Port Status | A (이웃), B (LLDP-MIB) |
-| SNMP | MIB-II system + ifTable/ifXTable + ipAddrTable + icmp + udp/snmp, LLDP-MIB loc/rem/stats/cap, LLDP-EXT-PNO loc/rem delay. Get/GetNext/Set/GetBulk | **B** |
+| SNMP | MIB-II system + ifTable/ifXTable + at + ipAddrTable/ipNetToMedia + icmp + tcp + udp/snmp, LLDP-MIB loc/rem/stats/cap, LLDP-EXT-PNO loc/rem delay. Get/GetNext/Set/GetBulk (non-repeaters) | **B** |
 | Watchdog | output CR 가 끊기면 AR down, output image 클리어 | A |
-| Alarm CR | AlarmCR_REQ 파싱, RTA appear → disappear → process Data + ACK. 랩 ASE 데모이며 process ACK 후 진단은 비움 | A/B/C |
+| Alarm CR | AlarmCR_REQ 파싱(RTATimeout/Retries), 컨트롤러 RTA Data ACK. 진단 appear/disappear/process 는 API로 발생 (유휴 시 진단 없음) | A/B/C |
 | RT Class 3 / IRT / PTCP | Connect 에서 거부. 구현하지 않음 | **C — 미구현** |
 | MRP | 이더타입 `0x88E3` 무시. 링 클라이언트 미구현 | **B 옵션 — 미구현** |
 | PI Security Class 1 | 아님. `security_class: 1` 은 스택 로컬 HMAC-SHA256 PSK | 클래스 아님 |
@@ -78,8 +78,8 @@ bash tests/run_pn_fulltest.sh
 
 | 항목 | 클래스 | 랩에서 하는 일 | 그게 아닌 것 |
 |------|--------|----------------|--------------|
-| diagnosis ASE | A/B/C | Channel + Ext + Qualified + Maintenance demanded 레코드, appear → disappear → process | 전체 상태기계, 공식 TCS |
-| SNMP / LLDP-MIB | **B** | Get+GetNext+Set+GetBulk, ifTable/ifXTable, ipAddrTable/icmp/udp/snmp, loc/rem/stats/cap, PNO delays | 전체 MIB-II, SNMPv3, 공식 ART TCS |
+| diagnosis ASE | A/B/C | Channel + Ext + Qualified 레코드, appear/disappear/process RTA (이벤트). 유휴 AR 은 진단 없음 | 공식 TCS 전체 시나리오 |
+| SNMP / LLDP-MIB | **B** | Get+GetNext+Set+GetBulk(non-repeaters), if/at/ip/icmp/tcp/udp/snmp, LLDP loc/rem | SNMPv3, 공식 ART TCS |
 | MRP | **B 옵션** | `0x88E3` 무시 + GSDML 미선언 + flood 중 RTC1 유지 | MRP Client/Manager 링. CC-B(PA) TCS도 아님 |
 | DCP Hello | A | 기동·IP Set 후 Hello.req | Hello 타이밍 공식 프로파일 |
 | Netload | A/B 부하 | unicast junk + MRP ethertype flood 중 cyclic | 공식 Netload 프로파일 / ETS 계측 |
@@ -90,7 +90,7 @@ bash tests/run_pn_fulltest.sh
 |------|----------------|---------------------------|
 | DCP | Identify All/Name/DeviceID, Get Name/ID/IP, Set Name, Hello | DCP Set IP를 OS에 쓰는 경우의 공식 프로파일 |
 | LLDP | sysName + PN OUI, 이웃 Chassis/Port/SysName, Port ID `port-001` | 멀티포트, 공식 LLDP 프로파일 |
-| SNMP | Get+GetNext+Set+GetBulk: MIB-II system/if/ip/icmp, LLDP loc/rem/cap, LastChange, sysUpTime | 전체 MIB-II, SNMP v3, 공식 ART TCS |
+| SNMP | Get+GetNext+Set+GetBulk: MIB-II system/if/at/ip/icmp/tcp/udp/snmp, LLDP loc/rem/cap | SNMPv3, 공식 ART TCS |
 | CM | Connect ARServer + AlarmCR, CC-C IRT Connect 거부, WriteMultiple, I&M0, RealIdent, PD*, ChannelDiagnosis, PrmEnd, AppReady, RTA Data/USI/Ack, Release, Reconnect | 공식 TCS XML |
 | RTC1 | cyclic + IOPS GOOD, Release 후 중단, junk/MRP flood 중 유지 | 공식 Netload. IRT/SPIRTA 는 CC-C라 여기 없음 |
 | GSDML | well-formed, PDev, RT1, CC-C IRT/RT3 미선언, MRP 미선언, SNMP;LLDP, MIB2;LLDP | TEDCheck 바이너리 |

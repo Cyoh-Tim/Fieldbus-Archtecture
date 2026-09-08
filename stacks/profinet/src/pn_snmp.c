@@ -319,6 +319,47 @@ enum {
     L_IFX_CONN,
     L_IFX_ALIAS,
     L_IFX_DISC,
+    L_AT_IF,
+    L_AT_PHYS,
+    L_AT_NET,
+    L_IP_NTM_IF,
+    L_IP_NTM_PHYS,
+    L_IP_NTM_NET,
+    L_IP_NTM_TYPE,
+    L_ICMP_INDST,
+    L_ICMP_INTIME,
+    L_ICMP_INPARM,
+    L_ICMP_INQUENCH,
+    L_ICMP_INREDIR,
+    L_ICMP_INTS,
+    L_ICMP_INTSREP,
+    L_ICMP_INMASK,
+    L_ICMP_INMASKREP,
+    L_ICMP_OUTERR,
+    L_ICMP_OUTDST,
+    L_ICMP_OUTTIME,
+    L_ICMP_OUTPARM,
+    L_ICMP_OUTQUENCH,
+    L_ICMP_OUTREDIR,
+    L_ICMP_OUTECHOREP,
+    L_ICMP_OUTTS,
+    L_ICMP_OUTTSREP,
+    L_ICMP_OUTMASK,
+    L_ICMP_OUTMASKREP,
+    L_TCP_RTOALG,
+    L_TCP_RTOMIN,
+    L_TCP_RTOMAX,
+    L_TCP_MAXCONN,
+    L_TCP_ACTIVE,
+    L_TCP_PASSIVE,
+    L_TCP_ATTEMPT,
+    L_TCP_ESTABRST,
+    L_TCP_CURRESTAB,
+    L_TCP_INSEG,
+    L_TCP_OUTSEG,
+    L_TCP_RETRANS,
+    L_TCP_INERR,
+    L_TCP_OUTRST,
     L_COUNT
 };
 
@@ -419,6 +460,47 @@ static uint32_t k_oids[][OID_MAX] = {
     [L_IFX_CONN] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 17, 1},
     [L_IFX_ALIAS] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 18, 1},
     [L_IFX_DISC] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 19, 1},
+    [L_AT_IF] = {1, 3, 6, 1, 2, 1, 3, 1, 1, 1, 1, 0, 0, 0, 0},
+    [L_AT_PHYS] = {1, 3, 6, 1, 2, 1, 3, 1, 1, 2, 1, 0, 0, 0, 0},
+    [L_AT_NET] = {1, 3, 6, 1, 2, 1, 3, 1, 1, 3, 1, 0, 0, 0, 0},
+    [L_IP_NTM_IF] = {1, 3, 6, 1, 2, 1, 4, 22, 1, 1, 1, 0, 0, 0, 0},
+    [L_IP_NTM_PHYS] = {1, 3, 6, 1, 2, 1, 4, 22, 1, 2, 1, 0, 0, 0, 0},
+    [L_IP_NTM_NET] = {1, 3, 6, 1, 2, 1, 4, 22, 1, 3, 1, 0, 0, 0, 0},
+    [L_IP_NTM_TYPE] = {1, 3, 6, 1, 2, 1, 4, 22, 1, 4, 1, 0, 0, 0, 0},
+    [L_ICMP_INDST] = {1, 3, 6, 1, 2, 1, 5, 3, 0},
+    [L_ICMP_INTIME] = {1, 3, 6, 1, 2, 1, 5, 4, 0},
+    [L_ICMP_INPARM] = {1, 3, 6, 1, 2, 1, 5, 5, 0},
+    [L_ICMP_INQUENCH] = {1, 3, 6, 1, 2, 1, 5, 6, 0},
+    [L_ICMP_INREDIR] = {1, 3, 6, 1, 2, 1, 5, 7, 0},
+    [L_ICMP_INTS] = {1, 3, 6, 1, 2, 1, 5, 10, 0},
+    [L_ICMP_INTSREP] = {1, 3, 6, 1, 2, 1, 5, 11, 0},
+    [L_ICMP_INMASK] = {1, 3, 6, 1, 2, 1, 5, 12, 0},
+    [L_ICMP_INMASKREP] = {1, 3, 6, 1, 2, 1, 5, 13, 0},
+    [L_ICMP_OUTERR] = {1, 3, 6, 1, 2, 1, 5, 15, 0},
+    [L_ICMP_OUTDST] = {1, 3, 6, 1, 2, 1, 5, 16, 0},
+    [L_ICMP_OUTTIME] = {1, 3, 6, 1, 2, 1, 5, 17, 0},
+    [L_ICMP_OUTPARM] = {1, 3, 6, 1, 2, 1, 5, 18, 0},
+    [L_ICMP_OUTQUENCH] = {1, 3, 6, 1, 2, 1, 5, 19, 0},
+    [L_ICMP_OUTREDIR] = {1, 3, 6, 1, 2, 1, 5, 20, 0},
+    [L_ICMP_OUTECHOREP] = {1, 3, 6, 1, 2, 1, 5, 22, 0},
+    [L_ICMP_OUTTS] = {1, 3, 6, 1, 2, 1, 5, 23, 0},
+    [L_ICMP_OUTTSREP] = {1, 3, 6, 1, 2, 1, 5, 24, 0},
+    [L_ICMP_OUTMASK] = {1, 3, 6, 1, 2, 1, 5, 25, 0},
+    [L_ICMP_OUTMASKREP] = {1, 3, 6, 1, 2, 1, 5, 26, 0},
+    [L_TCP_RTOALG] = {1, 3, 6, 1, 2, 1, 6, 1, 0},
+    [L_TCP_RTOMIN] = {1, 3, 6, 1, 2, 1, 6, 2, 0},
+    [L_TCP_RTOMAX] = {1, 3, 6, 1, 2, 1, 6, 3, 0},
+    [L_TCP_MAXCONN] = {1, 3, 6, 1, 2, 1, 6, 4, 0},
+    [L_TCP_ACTIVE] = {1, 3, 6, 1, 2, 1, 6, 5, 0},
+    [L_TCP_PASSIVE] = {1, 3, 6, 1, 2, 1, 6, 6, 0},
+    [L_TCP_ATTEMPT] = {1, 3, 6, 1, 2, 1, 6, 7, 0},
+    [L_TCP_ESTABRST] = {1, 3, 6, 1, 2, 1, 6, 8, 0},
+    [L_TCP_CURRESTAB] = {1, 3, 6, 1, 2, 1, 6, 9, 0},
+    [L_TCP_INSEG] = {1, 3, 6, 1, 2, 1, 6, 10, 0},
+    [L_TCP_OUTSEG] = {1, 3, 6, 1, 2, 1, 6, 11, 0},
+    [L_TCP_RETRANS] = {1, 3, 6, 1, 2, 1, 6, 12, 0},
+    [L_TCP_INERR] = {1, 3, 6, 1, 2, 1, 6, 14, 0},
+    [L_TCP_OUTRST] = {1, 3, 6, 1, 2, 1, 6, 15, 0},
 };
 
 static const uint8_t k_oidn[L_COUNT] = {
@@ -457,6 +539,21 @@ static const uint8_t k_oidn[L_COUNT] = {
     [L_IFX_OUTMCAST] = 12, [L_IFX_OUTBCAST] = 12, [L_IFX_HCIN] = 12,
     [L_IFX_HCOUT] = 12, [L_IFX_TRAP] = 12, [L_IFX_HSPEED] = 12, [L_IFX_PROM] = 12,
     [L_IFX_CONN] = 12, [L_IFX_ALIAS] = 12, [L_IFX_DISC] = 12,
+    [L_AT_IF] = 15, [L_AT_PHYS] = 15, [L_AT_NET] = 15,
+    [L_IP_NTM_IF] = 15, [L_IP_NTM_PHYS] = 15, [L_IP_NTM_NET] = 15,
+    [L_IP_NTM_TYPE] = 15,
+    [L_ICMP_INDST] = 9, [L_ICMP_INTIME] = 9, [L_ICMP_INPARM] = 9,
+    [L_ICMP_INQUENCH] = 9, [L_ICMP_INREDIR] = 9, [L_ICMP_INTS] = 9,
+    [L_ICMP_INTSREP] = 9, [L_ICMP_INMASK] = 9, [L_ICMP_INMASKREP] = 9,
+    [L_ICMP_OUTERR] = 9, [L_ICMP_OUTDST] = 9, [L_ICMP_OUTTIME] = 9,
+    [L_ICMP_OUTPARM] = 9, [L_ICMP_OUTQUENCH] = 9, [L_ICMP_OUTREDIR] = 9,
+    [L_ICMP_OUTECHOREP] = 9, [L_ICMP_OUTTS] = 9, [L_ICMP_OUTTSREP] = 9,
+    [L_ICMP_OUTMASK] = 9, [L_ICMP_OUTMASKREP] = 9,
+    [L_TCP_RTOALG] = 9, [L_TCP_RTOMIN] = 9, [L_TCP_RTOMAX] = 9,
+    [L_TCP_MAXCONN] = 9, [L_TCP_ACTIVE] = 9, [L_TCP_PASSIVE] = 9,
+    [L_TCP_ATTEMPT] = 9, [L_TCP_ESTABRST] = 9, [L_TCP_CURRESTAB] = 9,
+    [L_TCP_INSEG] = 9, [L_TCP_OUTSEG] = 9, [L_TCP_RETRANS] = 9,
+    [L_TCP_INERR] = 9, [L_TCP_OUTRST] = 9,
 };
 
 static int leaf_needs_rem(int id)
@@ -475,8 +572,10 @@ static void bind_ip_oids(const pn_stack_t *s)
     uint32_t b = (ip >> 16) & 0xffu;
     uint32_t c = (ip >> 8) & 0xffu;
     uint32_t d = ip & 0xffu;
-    static const int ids[] = {L_IP_ADENT_ADDR, L_IP_ADENT_IF, L_IP_ADENT_MASK,
-                              L_IP_ADENT_BCAST};
+    static const int ids[] = {
+        L_IP_ADENT_ADDR, L_IP_ADENT_IF, L_IP_ADENT_MASK, L_IP_ADENT_BCAST,
+        L_AT_IF, L_AT_PHYS, L_AT_NET, L_IP_NTM_IF, L_IP_NTM_PHYS, L_IP_NTM_NET,
+        L_IP_NTM_TYPE};
     for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
         uint8_t n = k_oidn[ids[i]];
         if (n < 4) {
@@ -884,6 +983,85 @@ static int leaf_value(pn_stack_t *s, int id, uint8_t *asn, uint8_t *val,
         *asn = ASN_TICKS;
         *vlen = ber_uint(val, ASN_TICKS, 0);
         return 0;
+    case L_AT_IF:
+    case L_IP_NTM_IF:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 1);
+        return 0;
+    case L_AT_PHYS:
+    case L_IP_NTM_PHYS:
+        *asn = ASN_OCT;
+        memcpy(val, s->cfg.mac, 6);
+        *vlen = 6;
+        return 0;
+    case L_AT_NET:
+    case L_IP_NTM_NET:
+        *asn = ASN_OCT;
+        put_ip_oct(val, s->cfg.ip);
+        *vlen = 4;
+        return 0;
+    case L_IP_NTM_TYPE:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 3);
+        return 0;
+    case L_ICMP_INDST:
+    case L_ICMP_INTIME:
+    case L_ICMP_INPARM:
+    case L_ICMP_INQUENCH:
+    case L_ICMP_INREDIR:
+    case L_ICMP_INTS:
+    case L_ICMP_INTSREP:
+    case L_ICMP_INMASK:
+    case L_ICMP_INMASKREP:
+    case L_ICMP_OUTERR:
+    case L_ICMP_OUTDST:
+    case L_ICMP_OUTTIME:
+    case L_ICMP_OUTPARM:
+    case L_ICMP_OUTQUENCH:
+    case L_ICMP_OUTREDIR:
+    case L_ICMP_OUTECHOREP:
+    case L_ICMP_OUTTS:
+    case L_ICMP_OUTTSREP:
+    case L_ICMP_OUTMASK:
+    case L_ICMP_OUTMASKREP:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, 0);
+        return 0;
+    case L_TCP_RTOALG:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 4);
+        return 0;
+    case L_TCP_RTOMIN:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 200);
+        return 0;
+    case L_TCP_RTOMAX:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 120000);
+        return 0;
+    case L_TCP_MAXCONN:
+        *asn = ASN_INT;
+        {
+            uint8_t m = 0xff;
+            *vlen = ber_tlv(val, ASN_INT, &m, 1);
+        }
+        return 0;
+    case L_TCP_CURRESTAB:
+        *asn = ASN_GAUGE;
+        *vlen = ber_uint(val, ASN_GAUGE, 0);
+        return 0;
+    case L_TCP_ACTIVE:
+    case L_TCP_PASSIVE:
+    case L_TCP_ATTEMPT:
+    case L_TCP_ESTABRST:
+    case L_TCP_INSEG:
+    case L_TCP_OUTSEG:
+    case L_TCP_RETRANS:
+    case L_TCP_INERR:
+    case L_TCP_OUTRST:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, 0);
+        return 0;
     default:
         return -1;
     }
@@ -913,20 +1091,35 @@ static int match_get(pn_stack_t *s, const uint32_t *req, uint8_t rn)
 
 static int match_next(pn_stack_t *s, const uint32_t *req, uint8_t rn)
 {
+    int best = -1;
     for (int i = 0; i < L_COUNT; i++) {
         if (!leaf_present(s, i)) {
             continue;
         }
         if (oid_cmp(req, rn, k_oids[i], k_oidn[i]) < 0) {
-            return i;
+            if (best < 0 ||
+                oid_cmp(k_oids[i], k_oidn[i], k_oids[best], k_oidn[best]) <
+                    0) {
+                best = i;
+            }
         }
     }
-    return -1;
+    return best;
 }
 
+#define SNMP_VB_MAX 8
+
+typedef struct {
+    uint32_t oid[OID_MAX];
+    uint8_t n;
+    uint8_t vtag;
+    uint8_t vbuf[LEAF_VAL_MAX];
+    size_t vlen;
+} snmp_vb_t;
+
 static int snmp_parse(const uint8_t *buf, size_t n, int *rid, int *pdu_type,
-                      int *ver, uint32_t *oid, uint8_t *oid_n, uint8_t *vtag,
-                      uint8_t *vbuf, size_t *vlen, int *nonrep, int *maxrep)
+                      int *ver, snmp_vb_t *vbs, int *nvb, int *nonrep,
+                      int *maxrep, char *community, size_t ccap)
 {
     if (n < 2 || buf[0] != 0x30) {
         return -1;
@@ -960,6 +1153,11 @@ static int snmp_parse(const uint8_t *buf, size_t n, int *rid, int *pdu_type,
     }
     if (1 + cused + clen > n - off) {
         return -1;
+    }
+    if (community && ccap > 0) {
+        size_t cn = clen < ccap - 1 ? clen : ccap - 1;
+        memcpy(community, buf + off + 1 + cused, cn);
+        community[cn] = '\0';
     }
     off += 1 + cused + clen;
     if (off >= n) {
@@ -995,32 +1193,89 @@ static int snmp_parse(const uint8_t *buf, size_t n, int *rid, int *pdu_type,
         *maxrep = tmp;
         off += used;
     }
-    const uint8_t *found = NULL;
-    size_t found_n = 0;
-    size_t found_at = 0;
-    for (size_t i = off; i + 2 < n; i++) {
-        if (buf[i] == ASN_OID && buf[i + 1] < 128 &&
-            i + 2 + buf[i + 1] <= n) {
-            found = buf + i + 2;
-            found_n = buf[i + 1];
-            found_at = i + 2 + found_n;
-            break;
+    *nvb = 0;
+    if (off < n && buf[off] == 0x30) {
+        size_t vblen = 0, vbused = 0;
+        if (ber_read_len(buf + off + 1, n - off - 1, &vblen, &vbused) == 0 &&
+            1 + vbused + vblen <= n - off) {
+            size_t vend = off + 1 + vbused + vblen;
+            size_t vo = off + 1 + vbused;
+            while (vo < vend && *nvb < SNMP_VB_MAX) {
+                if (buf[vo] != 0x30) {
+                    break;
+                }
+                size_t sl = 0, su = 0;
+                if (ber_read_len(buf + vo + 1, vend - vo - 1, &sl, &su) != 0) {
+                    break;
+                }
+                size_t so = vo + 1 + su;
+                size_t se = so + sl;
+                if (se > vend) {
+                    break;
+                }
+                snmp_vb_t *vb = &vbs[*nvb];
+                memset(vb, 0, sizeof(*vb));
+                vb->vtag = ASN_NULL;
+                if (so < se && buf[so] == ASN_OID) {
+                    size_t olen = 0, oused = 0;
+                    if (ber_read_len(buf + so + 1, se - so - 1, &olen,
+                                    &oused) == 0 &&
+                        1 + oused + olen <= se - so) {
+                        oid_decode(buf + so + 1 + oused, olen, vb->oid,
+                                   &vb->n);
+                        size_t val_at = so + 1 + oused + olen;
+                        if (val_at < se) {
+                            vb->vtag = buf[val_at];
+                            size_t ln = 0, lused = 0;
+                            if (val_at + 1 < se &&
+                                ber_read_len(buf + val_at + 1, se - val_at - 1,
+                                             &ln, &lused) == 0 &&
+                                1 + lused + ln <= se - val_at) {
+                                if (ln > LEAF_VAL_MAX) {
+                                    ln = LEAF_VAL_MAX;
+                                }
+                                memcpy(vb->vbuf, buf + val_at + 1 + lused, ln);
+                                vb->vlen = ln;
+                            }
+                        }
+                    }
+                }
+                (*nvb)++;
+                vo = se;
+            }
         }
     }
-    if (!found || oid_decode(found, found_n, oid, oid_n) != 0) {
-        *oid_n = 0;
-    }
-    *vtag = ASN_NULL;
-    *vlen = 0;
-    if (found_at + 2 <= n) {
-        *vtag = buf[found_at];
-        size_t ln = buf[found_at + 1];
-        if (!(ln & 0x80) && found_at + 2 + ln <= n) {
-            if (ln > LEAF_VAL_MAX) {
-                ln = LEAF_VAL_MAX;
+    if (*nvb == 0) {
+        /* Fallback: first OID anywhere in the PDU (short-form length). */
+        const uint8_t *found = NULL;
+        size_t found_n = 0;
+        size_t found_at = 0;
+        for (size_t i = off; i + 2 < n; i++) {
+            if (buf[i] == ASN_OID && buf[i + 1] < 128 &&
+                i + 2 + buf[i + 1] <= n) {
+                found = buf + i + 2;
+                found_n = buf[i + 1];
+                found_at = i + 2 + found_n;
+                break;
             }
-            memcpy(vbuf, buf + found_at + 2, ln);
-            *vlen = ln;
+        }
+        if (found) {
+            snmp_vb_t *vb = &vbs[0];
+            memset(vb, 0, sizeof(*vb));
+            oid_decode(found, found_n, vb->oid, &vb->n);
+            vb->vtag = ASN_NULL;
+            if (found_at + 2 <= n) {
+                vb->vtag = buf[found_at];
+                size_t ln = buf[found_at + 1];
+                if (!(ln & 0x80) && found_at + 2 + ln <= n) {
+                    if (ln > LEAF_VAL_MAX) {
+                        ln = LEAF_VAL_MAX;
+                    }
+                    memcpy(vb->vbuf, buf + found_at + 2, ln);
+                    vb->vlen = ln;
+                }
+            }
+            *nvb = 1;
         }
     }
     return 0;
@@ -1087,16 +1342,54 @@ static int apply_set(pn_stack_t *s, int leaf, uint8_t vtag, const uint8_t *v,
     return -1;
 }
 
+static int encode_leaf(pn_stack_t *s, const uint32_t *req, uint8_t rn,
+                       int is_next, uint8_t *out, size_t cap, size_t *used,
+                       uint32_t *walk, uint8_t *wn, int *this_err)
+{
+    int leaf = is_next ? match_next(s, req, rn) : match_get(s, req, rn);
+    uint8_t asn = ASN_NULL;
+    uint8_t val[LEAF_VAL_MAX + 16];
+    size_t vlen = 0;
+    uint32_t out_oid[OID_MAX];
+    uint8_t out_n = rn;
+    memcpy(out_oid, req, sizeof(uint32_t) * rn);
+    *this_err = 0;
+    if (leaf >= 0 && leaf_value(s, leaf, &asn, val, &vlen) == 0) {
+        memcpy(out_oid, k_oids[leaf], sizeof(uint32_t) * k_oidn[leaf]);
+        out_n = k_oidn[leaf];
+        if (walk && wn) {
+            memcpy(walk, out_oid, sizeof(uint32_t) * out_n);
+            *wn = out_n;
+        }
+    } else {
+        *this_err = SNMP_ERR_NOSUCHNAME;
+        asn = ASN_NULL;
+        vlen = 0;
+    }
+    size_t n = encode_varbind(out, out_oid, out_n, *this_err, asn, val, vlen);
+    if (n > cap) {
+        return -ENOSPC;
+    }
+    *used = n;
+    return 0;
+}
+
 int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
                    size_t cap, size_t *out_len)
 {
-    int rid = 1, pdu_type = 0xA0, ver = 0, nonrep = 0, maxrep = 0;
-    uint32_t req_oid[OID_MAX];
-    uint8_t req_n = 0, vtag = ASN_NULL;
-    uint8_t setv[LEAF_VAL_MAX];
-    size_t setn = 0;
-    if (snmp_parse(req, n, &rid, &pdu_type, &ver, req_oid, &req_n, &vtag, setv,
-                   &setn, &nonrep, &maxrep) != 0) {
+    int rid = 1, pdu_type = 0xA0, ver = 0, nonrep = 0, maxrep = 0, nvb = 0;
+    snmp_vb_t in_vb[SNMP_VB_MAX];
+    char community[64];
+    memset(in_vb, 0, sizeof(in_vb));
+    community[0] = '\0';
+    if (snmp_parse(req, n, &rid, &pdu_type, &ver, in_vb, &nvb, &nonrep,
+                   &maxrep, community, sizeof(community)) != 0) {
+        return -EINVAL;
+    }
+    if (community[0] && strcmp(community, "public") != 0) {
+        return -EPERM;
+    }
+    if (nvb < 1) {
         return -EINVAL;
     }
     bind_ip_oids(s);
@@ -1121,25 +1414,26 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
         if (nonrep < 0) {
             nonrep = 0;
         }
+        if (nonrep > nvb) {
+            nonrep = nvb;
+        }
     }
 
     uint8_t vbs[900];
     size_t vbs_n = 0;
     int err = 0;
-    uint32_t walk[OID_MAX];
-    uint8_t wn = req_n;
-    memcpy(walk, req_oid, sizeof(uint32_t) * req_n);
 
     if (is_set) {
-        int leaf = match_get(s, req_oid, req_n);
+        int leaf = match_get(s, in_vb[0].oid, in_vb[0].n);
         uint8_t asn = ASN_NULL;
         uint8_t val[LEAF_VAL_MAX + 16];
         size_t vlen = 0;
         uint32_t out_oid[OID_MAX];
-        uint8_t out_n = req_n;
-        memcpy(out_oid, req_oid, sizeof(uint32_t) * req_n);
+        uint8_t out_n = in_vb[0].n;
+        memcpy(out_oid, in_vb[0].oid, sizeof(uint32_t) * in_vb[0].n);
         if (leaf >= 0 && leaf_writable(leaf) &&
-            apply_set(s, leaf, vtag, setv, setn) == 0 &&
+            apply_set(s, leaf, in_vb[0].vtag, in_vb[0].vbuf, in_vb[0].vlen) ==
+                0 &&
             leaf_value(s, leaf, &asn, val, &vlen) == 0) {
             memcpy(out_oid, k_oids[leaf], sizeof(uint32_t) * k_oidn[leaf]);
             out_n = k_oidn[leaf];
@@ -1156,39 +1450,74 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
         }
         vbs_n += encode_varbind(vbs + vbs_n, out_oid, out_n, err, asn, val,
                                 vlen);
-    } else {
-        int produced = 0;
-        for (int r = 0; r < reps; r++) {
-            int leaf = (r == 0 && !is_next) ? match_get(s, walk, wn)
-                                            : match_next(s, walk, wn);
-            uint8_t asn = ASN_NULL;
-            uint8_t val[LEAF_VAL_MAX + 16];
-            size_t vlen = 0;
-            uint32_t out_oid[OID_MAX];
-            uint8_t out_n = wn;
-            memcpy(out_oid, walk, sizeof(uint32_t) * wn);
+    } else if (is_bulk) {
+        uint32_t walks[SNMP_VB_MAX][OID_MAX];
+        uint8_t wns[SNMP_VB_MAX];
+        for (int i = 0; i < nvb; i++) {
+            memcpy(walks[i], in_vb[i].oid, sizeof(uint32_t) * in_vb[i].n);
+            wns[i] = in_vb[i].n;
+        }
+        for (int i = 0; i < nonrep; i++) {
+            size_t used = 0;
             int this_err = 0;
-            if (leaf >= 0 && leaf_value(s, leaf, &asn, val, &vlen) == 0) {
-                memcpy(out_oid, k_oids[leaf], sizeof(uint32_t) * k_oidn[leaf]);
-                out_n = k_oidn[leaf];
-                memcpy(walk, out_oid, sizeof(uint32_t) * out_n);
-                wn = out_n;
-            } else {
-                this_err = SNMP_ERR_NOSUCHNAME;
-                asn = ASN_NULL;
-                vlen = 0;
-            }
             if (vbs_n + 208 > sizeof(vbs)) {
                 break;
             }
-            vbs_n += encode_varbind(vbs + vbs_n, out_oid, out_n, this_err, asn,
-                                    val, vlen);
-            produced++;
-            if (this_err) {
-                if (!is_bulk || produced <= 1) {
-                    err = this_err;
-                }
+            if (encode_leaf(s, walks[i], wns[i], 1, vbs + vbs_n,
+                            sizeof(vbs) - vbs_n, &used, walks[i], &wns[i],
+                            &this_err) != 0) {
                 break;
+            }
+            vbs_n += used;
+            if (this_err && err == 0) {
+                err = this_err;
+            }
+        }
+        int repeating = nvb - nonrep;
+        for (int r = 0; r < reps && repeating > 0; r++) {
+            int stop = 0;
+            for (int i = 0; i < repeating; i++) {
+                int idx = nonrep + i;
+                size_t used = 0;
+                int this_err = 0;
+                if (vbs_n + 208 > sizeof(vbs)) {
+                    stop = 1;
+                    break;
+                }
+                if (encode_leaf(s, walks[idx], wns[idx], 1, vbs + vbs_n,
+                                sizeof(vbs) - vbs_n, &used, walks[idx],
+                                &wns[idx], &this_err) != 0) {
+                    stop = 1;
+                    break;
+                }
+                vbs_n += used;
+                if (this_err) {
+                    if (r == 0 && err == 0) {
+                        err = this_err;
+                    }
+                    stop = 1;
+                    break;
+                }
+            }
+            if (stop) {
+                break;
+            }
+        }
+    } else {
+        for (int i = 0; i < nvb; i++) {
+            size_t used = 0;
+            int this_err = 0;
+            if (vbs_n + 208 > sizeof(vbs)) {
+                break;
+            }
+            if (encode_leaf(s, in_vb[i].oid, in_vb[i].n, is_next, vbs + vbs_n,
+                            sizeof(vbs) - vbs_n, &used, NULL, NULL,
+                            &this_err) != 0) {
+                break;
+            }
+            vbs_n += used;
+            if (this_err && err == 0) {
+                err = this_err;
             }
         }
     }

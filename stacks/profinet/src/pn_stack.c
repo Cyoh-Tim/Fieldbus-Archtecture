@@ -25,13 +25,15 @@ void pn_ar_reset(pn_stack_t *s)
     s->alarm_peer_ref = 0;
     s->alarm_cr_ok = 0;
     s->alarm_rta_sent = 0;
-    s->alarm_rta_acked = 0;
+    s->alarm_rta_acked = 1;
     s->alarm_send_seq = 0;
     s->alarm_retries = 0;
     s->last_alarm_ns = 0;
     s->alarm_local_ref = 1;
     s->alarm_max_len = 200;
-    s->alarm_kind = 0;
+    s->alarm_kind = -1;
+    s->alarm_timeout_ns = 200000000ull;
+    s->alarm_max_retry = 3;
     s->diag_present = 0;
     s->n_diag = 0;
     memset(s->diag, 0, sizeof(s->diag));
@@ -145,6 +147,10 @@ pn_stack_t *pn_stack_create(const pn_cfg_t *cfg)
     s->lldp_last_change_ns = s->start_ns;
     s->alarm_local_ref = 1;
     s->alarm_max_len = 200;
+    s->alarm_kind = -1;
+    s->alarm_rta_acked = 1;
+    s->alarm_timeout_ns = 200000000ull;
+    s->alarm_max_retry = 3;
     return s;
 }
 
@@ -425,5 +431,32 @@ int pn_stack_write_input(pn_stack_t *s, size_t off, const uint8_t *src,
     pthread_mutex_lock(&s->io_lock);
     memcpy(s->input_image + off, src, len);
     pthread_mutex_unlock(&s->io_lock);
+    return 0;
+}
+
+int pn_stack_diag_appear(pn_stack_t *s)
+{
+    if (!s) {
+        return -EINVAL;
+    }
+    pn_alarm_request(s, 0);
+    return 0;
+}
+
+int pn_stack_diag_clear(pn_stack_t *s)
+{
+    if (!s) {
+        return -EINVAL;
+    }
+    pn_alarm_request(s, 1);
+    return 0;
+}
+
+int pn_stack_alarm_process(pn_stack_t *s)
+{
+    if (!s) {
+        return -EINVAL;
+    }
+    pn_alarm_request(s, 2);
     return 0;
 }

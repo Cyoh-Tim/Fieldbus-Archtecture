@@ -119,8 +119,10 @@ struct pn_stack {
     int alarm_rta_sent;
     int alarm_rta_acked;
     int alarm_retries;
-    int alarm_kind; /* 0 appear, 1 disappear, 2 process */
+    int alarm_kind; /* -1 idle, 0 appear, 1 disappear, 2 process */
     uint64_t last_alarm_ns;
+    uint64_t alarm_timeout_ns;
+    int alarm_max_retry;
     uint16_t lldp_rem_ttl;
     int diag_present;
     int n_diag;
@@ -222,6 +224,7 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
 void pn_alarm_poll(pn_stack_t *s);
 void pn_alarm_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen);
 void pn_alarm_on_connect(pn_stack_t *s, const uint8_t *body, uint16_t blen);
+void pn_alarm_request(pn_stack_t *s, int kind);
 int pn_udp_open(uint16_t port);
 int pn_udp_open_ip(uint32_t ip_host, uint16_t port);
 void pn_stack_rebind_udp(pn_stack_t *s);
