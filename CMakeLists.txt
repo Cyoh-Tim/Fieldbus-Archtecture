@@ -5,7 +5,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 add_definitions(-D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE)
 
-option(ENABLE_ETHERNETIP "EtherNet/IP 어댑터 빌드 (구매 스택 필요)" OFF)
+option(ENABLE_EIP_TESTS "EtherNet/IP 스택 단위 테스트" ON)
 option(ENABLE_PN_TESTS "PROFINET 스택 단위 테스트" ON)
 
 find_package(Threads REQUIRED)
@@ -72,16 +72,29 @@ add_library(adapter_cclink STATIC adapters/cclink/cclink_adapter.c)
 target_include_directories(adapter_cclink PUBLIC adapters/cclink)
 target_include_directories(adapter_cclink PRIVATE include core)
 
-# ---- 어댑터: EtherNet/IP (구매 스택 필요 - ENABLE_ETHERNETIP=ON 일 때만) ----
+# ---- EtherNet/IP Device(+Originator) 스택 (자체 구현, 벤더 SDK 불필요) ----
+add_library(eip_stack STATIC
+    stacks/ethernetip/src/eip_path_asm.c
+    stacks/ethernetip/src/eip_cip.c
+    stacks/ethernetip/src/eip_cm.c
+    stacks/ethernetip/src/eip_encap.c
+    stacks/ethernetip/src/eip_io.c
+    stacks/ethernetip/src/eip_client.c
+    stacks/ethernetip/src/eip_stack.c
+)
+target_include_directories(eip_stack PUBLIC stacks/ethernetip/include)
+target_include_directories(eip_stack PRIVATE include core)
+target_link_libraries(eip_stack PUBLIC Threads::Threads)
+
 add_library(adapter_ethernetip STATIC adapters/ethernetip/ethernetip_adapter.c)
 target_include_directories(adapter_ethernetip PUBLIC adapters/ethernetip)
-target_include_directories(adapter_ethernetip PRIVATE include core)
-target_link_libraries(adapter_ethernetip PUBLIC ${CJSON_TARGET})
-if(ENABLE_ETHERNETIP)
-    # TODO: third_party/ethernetip_stack/ 배치 후 아래 활성화
-    # target_include_directories(adapter_ethernetip PRIVATE third_party/ethernetip_stack/include)
-    # target_link_libraries(adapter_ethernetip PUBLIC <벤더 라이브러리>)
-    message(STATUS "ENABLE_ETHERNETIP=ON: third_party/ethernetip_stack 연동은 아직 TODO")
+target_include_directories(adapter_ethernetip PRIVATE include core stacks/ethernetip/include)
+target_link_libraries(adapter_ethernetip PUBLIC ${CJSON_TARGET} eip_stack)
+
+if(ENABLE_EIP_TESTS)
+    add_executable(test_eip_stack tests/test_eip_stack.c)
+    target_include_directories(test_eip_stack PRIVATE stacks/ethernetip/include include core)
+    target_link_libraries(test_eip_stack PRIVATE eip_stack)
 endif()
 
 # ---- PROFINET IO Device 스택 (자체 구현, CC-B / RT Class 1 / Sec Class 1) ----

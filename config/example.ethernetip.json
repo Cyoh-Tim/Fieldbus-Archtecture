@@ -1,0 +1,60 @@
+{
+  "protocol": "ethernetip",
+  "device": {
+    "name": "barcode_sensor_1",
+    "role": "server"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "role": "server",
+    "bind_ip": "0.0.0.0",
+    "port": 44818,
+    "udp_io_port": 2222,
+    "vendor_id": 43981,
+    "device_type": 12,
+    "product_code": 1,
+    "serial_number": 305419896,
+    "product_name": "FieldbusSensor",
+    "input_assembly": 150,
+    "output_assembly": 101,
+    "config_assembly": 100,
+    "input_size": 512,
+    "output_size": 128,
+    "rpi_us": 8000,
+    "mock": true
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "read",
+      "data_type": "string",
+      "length": 32,
+      "address": {
+        "ethernetip": {
+          "tag": "Sensor1.Barcode",
+          "assembly": 150,
+          "byte_offset": 0,
+          "length": 32
+        }
+      }
+    },
+    {
+      "name": "status_word",
+      "access": "read",
+      "data_type": "uint16",
+      "length": 2,
+      "address": {
+        "ethernetip": { "assembly": 150, "byte_offset": 32, "length": 2 }
+      }
+    },
+    {
+      "name": "trigger",
+      "access": "write",
+      "data_type": "bool",
+      "length": 1,
+      "address": {
+        "ethernetip": { "assembly": 101, "byte_offset": 0, "length": 1 }
+      }
+    }
+  ]
+}
