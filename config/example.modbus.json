@@ -9,7 +9,10 @@
     "role": "server",
     "ip": "0.0.0.0",
     "port": 1502,
-    "unit_id": 1
+    "unit_id": 1,
+    "unit_id_any": false,
+    "max_clients": 4,
+    "client_timeout_ms": 200
   },
   "points": [
     {
@@ -17,9 +20,11 @@
       "access": "read",
       "data_type": "string",
       "length": 32,
+      "chars_per_register": 2,
+      "trim_null": true,
       "address": {
         "modbus": {
-          "register_type": "holding",
+          "type": "holding",
           "start": 40001,
           "offset": 0,
           "byte_offset": 0
@@ -32,11 +37,11 @@
       "data_type": "uint16",
       "scale": 0.1,
       "offset": 0.0,
-      "byte_order": "big",
+      "endian": "ABCD",
       "address": {
         "modbus": {
-          "register_type": "holding",
-          "start": 40001,
+          "type": "4x",
+          "address": "40001",
           "offset": 16,
           "quantity": 1
         }
@@ -45,16 +50,12 @@
     {
       "name": "pressure",
       "access": "read",
-      "data_type": "float32",
-      "byte_order": "big",
-      "word_order": "ab",
-      "scale": 1.0,
-      "offset": 0.0,
+      "data_type": "float",
+      "endian": "CDAB",
       "address": {
         "modbus": {
           "register_type": "input",
           "start": 30001,
-          "offset": 0,
           "quantity": 2
         }
       }
@@ -63,12 +64,10 @@
       "name": "trigger",
       "access": "write",
       "data_type": "bool",
-      "length": 1,
       "address": {
         "modbus": {
-          "register_type": "coil",
-          "start": 1,
-          "offset": 0
+          "type": "coil",
+          "start": 1
         }
       }
     },
@@ -78,9 +77,23 @@
       "data_type": "bool",
       "address": {
         "modbus": {
-          "register_type": "holding",
+          "type": "hr",
           "start": 40100,
-          "bit": 3
+          "bit": 3,
+          "bit_count": 1
+        }
+      }
+    },
+    {
+      "name": "status_nibble",
+      "access": "write",
+      "data_type": "uint16",
+      "address": {
+        "modbus": {
+          "type": "holding",
+          "start": 40101,
+          "bit": 0,
+          "bit_count": 4
         }
       }
     }

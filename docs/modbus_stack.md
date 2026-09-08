@@ -1,122 +1,113 @@
-# Modbus TCP stack (Fieldbus Architecture)
+# Modbus TCP stack — 센서 범용 매핑
 
-자체 구현 Modbus TCP 스택. **기본 역할은 서버(슬레이브)**.
-PROFINET Device 스택과 같은 배포 모델이다 — PLC/스캐너가 마스터로 접속한다.
+자체 구현 Modbus TCP. 기본 역할 **server(슬레이브)**.
+통신 가이드 문서의 표기를 최대한 그대로 config 에 넣을 수 있게 했다.
 
-libmodbus 등 외부 라이브러리는 쓰지 않는다. (`stacks/modbus/`)
+## 지원 요약
 
-## 왜 자체 구현인가
+| 구분 | 지원 |
+|------|------|
+| 역할 | server(slave) / client(master) |
+| PDU | FC 01–06, 15, 16, **22 mask**, **23 read/write** |
+| 영역 | holding / input / coil / discrete (+ 별칭 4x,3x,hr,ir …) |
+| 주소 | Modicon(40001), PDU/0-based, start+offset, byte_offset, bit/bit_count |
+| 타입 | uint8/16/32/64, int*, float32/64, bool, string/ascii, raw, bcd16/32 |
+| 엔디안 | ABCD / BADC / CDAB / DCBA (+ byte_order/word_order) |
+| 스케일 | eng = raw * scale + offset |
+| 문자열 | chars_per_register 1\|2, string_swap, trim_null |
 
-| 선택지 | 판단 |
+## access (PROFINET과 동일)
+
+| access | 의미 |
 |--------|------|
-| libmodbus | LGPL 의존, 서버/사이클 모델이 프레임워크와 어긋나기 쉽고, 환경에 패키지 필수 |
-| 자체 스택 | PROFINET과 동일한 `stacks/` + thin adapter 구조, 의존성 0, 서버 맵이 process image처럼 동작 |
+| read | PLC가 읽는 값 → 앱 `write_point` |
+| write | PLC가 쓰는 값 → 앱 `read_point` |
+| readwrite | 양쪽 |
 
-## 범위
+## address.modbus 필드 (별칭 포함)
 
-| 항목 | 상태 |
-|------|------|
-| TCP server (slave) | listen + 다중 마스터(최대 4) |
-| TCP client (master) | 선택 — `protocol_params.role: "client"` |
-| Holding / Input / Coil / Discrete | 로컬 맵 + PDU |
-| 주소 offset / byte_offset / bit / quantity | config |
-| scale / offset / byte_order / word_order | config |
-| 인증/암호화 | 없음 (표준 Modbus TCP) |
+| 필드 | 별칭 | 설명 |
+|------|------|------|
+| register_type | type, area, table | holding\|hr\|4x / input\|ir\|3x / coil\|0x / discrete\|1x |
+| start | address, register, addr, reg | `40001` 숫자 또는 문자열 |
+| offset | reg_offset | start 에 더함 |
+| byte_offset | byteOffset, data_offset | 멀티바이트 창 내 위치 |
+| quantity | count, qty | 레지스터/비트 수 |
+| bit | bit_offset, bit_index | 워드 내 비트 |
+| bit_count | bits, bit_length | 연속 비트 수 |
+| zero_based | address_base=zero\|pdu | 정규화 생략 |
 
-## 프레임워크 규칙 (프로토콜을 몰라도 되는 부분)
+## 포인트 공통
 
-PROFINET과 **같은 access 의미**를 쓴다.
+| 필드 | 별칭 | 설명 |
+|------|------|------|
+| data_type | datatype | u16, REAL, float, ascii, bcd16 … |
+| scale | gain | |
+| offset | | 엔지니어링 오프셋 |
+| endian | endianness | ABCD\|BADC\|CDAB\|DCBA |
+| byte_order / word_order | | endian 대신 조합 가능 |
+| chars_per_register | | 1 또는 2 |
+| string_swap / trim_null | | 문자열 팩킹 |
 
-| `access` | 의미 | 앱 API | PLC 동작 |
-|----------|------|--------|----------|
-| `read` | PLC가 읽는 센서 값 | `write_point` 로 맵에 게시 | Holding/Input/Coil 읽기 |
-| `write` | PLC가 쓰는 명령 | `read_point` 로 맵에서 조회 | Coil/Holding 쓰기 |
-
-### 주소 (`address.modbus`)
-
-가이드에 적힌 숫자를 그대로 넣는다. 스택이 정규화한다.
-
-| 필드 | 의미 | 예 |
-|------|------|----|
-| `register_type` | holding / input / coil / discrete | `"holding"` |
-| `start` | 가이드 주소 또는 0-based | `40001` |
-| `offset` | start 에 더할 레지스터/비트 오프셋 | `16` → 실제 40017 |
-| `byte_offset` | 멀티바이트 창 안의 바이트 위치 | 문자열 일부 슬라이스 |
-| `quantity` | 레지스터/비트 개수 (생략 시 타입으로 추론) | `2` |
-| `bit` | holding/input 워드 안의 비트(0..15) | `3` |
-| `zero_based` | true 면 40001 정규화 생략 | `false` |
-
-| 가이드 표기 | `register_type` | `start` 예 | 내부 베이스 |
-|-------------|-----------------|-----------|-------------|
-| 4xxxx Holding | `holding` | `40001` | 0 |
-| 3xxxx Input | `input` | `30001` | 0 |
-| 1xxxx Discrete | `discrete` | `10001` | 0 |
-| Coil 1 | `coil` | `1` | 0 |
-
-### 값 변환 (포인트 공통)
-
-| 필드 | 의미 |
-|------|------|
-| `data_type` | uint16 / int16 / uint32 / int32 / float32 / bool / string |
-| `scale`, `offset` | `eng = raw * scale + offset` (설정 시 read는 float32 eng 반환) |
-| `byte_order` | `big` (기본) / `little` |
-| `word_order` | 32비트: `ab` (기본) / `ba` (워드 스왑, CDAB) |
-| `length` | 문자열 바이트 수 |
-
-문자열은 레지스터당 2바이트(빅엔디안)로 팩한다. `length: 32` → Holding 16워드.
-
-## 설정 예
+## protocol_params
 
 ```json
 {
-  "protocol": "modbus_tcp",
-  "device": { "name": "barcode_sensor_1", "role": "server" },
-  "cycle_ms": 8,
-  "protocol_params": {
-    "role": "server",
-    "ip": "0.0.0.0",
-    "port": 502,
-    "unit_id": 1
-  },
+  "role": "server",
+  "ip": "0.0.0.0",
+  "port": 502,
+  "unit_id": 1,
+  "unit_id_any": false,
+  "max_clients": 4,
+  "client_timeout_ms": 200,
+  "n_holding": 10000,
+  "n_input": 10000,
+  "n_coil": 10000,
+  "n_discrete": 10000
+}
+```
+
+## 예: 가이드가 제각각인 센서들
+
+```json
+{
   "points": [
     {
-      "name": "temperature",
+      "name": "temp_c",
       "access": "read",
       "data_type": "uint16",
       "scale": 0.1,
-      "offset": 0.0,
-      "byte_order": "big",
-      "address": {
-        "modbus": {
-          "register_type": "holding",
-          "start": 40001,
-          "offset": 16
-        }
-      }
+      "address": { "modbus": { "type": "4x", "address": "40001", "offset": 16 } }
     },
     {
-      "name": "trigger",
+      "name": "pressure",
+      "access": "read",
+      "data_type": "float",
+      "endian": "CDAB",
+      "address": { "modbus": { "register_type": "input", "start": 30010 } }
+    },
+    {
+      "name": "serial",
+      "access": "read",
+      "data_type": "ascii",
+      "length": 16,
+      "chars_per_register": 2,
+      "address": { "modbus": { "type": "holding", "start": 40100 } }
+    },
+    {
+      "name": "alarm",
       "access": "write",
       "data_type": "bool",
-      "address": { "modbus": { "register_type": "coil", "start": 1 } }
+      "address": { "modbus": { "type": "hr", "start": 40200, "bit": 3 } }
     }
   ]
 }
 ```
-
-`device.role` 은 문서용이고, 어댑터가 읽는 값은 `protocol_params.role` 이다
-(코어는 protocol_params만 어댑터에 전달). 생략 시 **server**.
 
 ## 실행
 
 ```
 ./build/multiproto_daemon config/example.modbus.json
 ./build/test_mb_stack
+./build/test_mb_adapter
 ```
-
-포트 502는 권한이 필요할 수 있다. 랩에서는 `port: 1502` 로 바꿔도 된다.
-
-## 점대점 매핑
-
-- `poll_cycle`: 서버는 accept/요청 처리. 클라이언트는 등록 포인트를 일괄 읽어 캐시.
-- `read_point` / `write_point`: 로컬 맵 + scale/byte_order 변환.

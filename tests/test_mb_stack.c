@@ -171,12 +171,48 @@ static void test_exception_illegal_address(void)
     mb_stack_destroy(s);
 }
 
+static void test_mask_write(void)
+{
+    mb_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.role = MB_ROLE_SERVER;
+    cfg.unit_id = 1;
+    cfg.n_holding = 16;
+    cfg.n_input = 8;
+    cfg.n_coil = 8;
+    cfg.n_discrete = 8;
+    mb_stack_t *s = mb_stack_create(&cfg);
+    uint16_t seed = 0xFFFF;
+    mb_stack_write_regs(s, MB_REG_HOLDING, 0, &seed, 1);
+
+    uint8_t req[14];
+    wr_be16(req, 9);
+    wr_be16(req + 2, 0);
+    wr_be16(req + 4, 8);
+    req[6] = 1;
+    req[7] = MB_FC_MASK_WRITE_REG;
+    wr_be16(req + 8, 0);
+    wr_be16(req + 10, 0xF0F0); /* and */
+    wr_be16(req + 12, 0x000F); /* or */
+    uint8_t resp[32];
+    size_t resp_len = 0;
+    expect(mb_stack_handle_adu(s, req, sizeof(req), resp, sizeof(resp),
+                               &resp_len) == 0,
+           "mask write");
+    uint16_t out = 0;
+    mb_stack_read_regs(s, MB_REG_HOLDING, 0, &out, 1);
+    /* (0xFFFF & 0xF0F0) | (0x000F & ~0xF0F0) = 0xF0F0 | 0x000F = 0xF0FF */
+    expect(out == 0xF0FF, "mask result");
+    mb_stack_destroy(s);
+}
+
 int main(void)
 {
     test_read_holding();
     test_write_single_coil();
     test_string_bytes();
     test_exception_illegal_address();
+    test_mask_write();
     if (g_fail) {
         fprintf(stderr, "test_mb_stack: FAILED\n");
         return 1;

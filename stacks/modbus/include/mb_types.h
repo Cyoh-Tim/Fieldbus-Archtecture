@@ -14,7 +14,7 @@
 #define MB_PDU_MAX 253
 #define MB_MBAP_LEN 7
 
-/* Function codes */
+/* Function codes — sensors/PLCs 가 흔히 쓰는 범위 */
 #define MB_FC_READ_COILS 0x01
 #define MB_FC_READ_DISCRETE 0x02
 #define MB_FC_READ_HOLDING 0x03
@@ -23,6 +23,8 @@
 #define MB_FC_WRITE_SINGLE_REG 0x06
 #define MB_FC_WRITE_MULTI_COILS 0x0F
 #define MB_FC_WRITE_MULTI_REGS 0x10
+#define MB_FC_MASK_WRITE_REG 0x16
+#define MB_FC_READ_WRITE_REGS 0x17
 
 /* Exception codes */
 #define MB_EX_ILLEGAL_FUNCTION 0x01
@@ -31,8 +33,8 @@
 #define MB_EX_SLAVE_FAILURE 0x04
 
 typedef enum {
-    MB_ROLE_SERVER = 0, /* TCP slave — PLC/마스터가 이 장치에 접속 */
-    MB_ROLE_CLIENT = 1, /* TCP master — 원격 슬레이브에 접속 */
+    MB_ROLE_SERVER = 0,
+    MB_ROLE_CLIENT = 1,
 } mb_role_t;
 
 typedef enum {

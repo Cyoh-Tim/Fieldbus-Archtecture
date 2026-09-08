@@ -13,7 +13,7 @@
 
 #include "logger.h"
 
-#define MB_CLIENTS_MAX 4
+#define MB_CLIENTS_MAX 8
 #define MB_RX_CAP (MB_ADU_MAX * 2)
 
 struct mb_client {
@@ -27,13 +27,14 @@ struct mb_stack {
     int listen_fd;
     int client_fd; /* client-role remote socket */
     struct mb_client clients[MB_CLIENTS_MAX];
+    int max_clients;
     int connected;
     char last_error[128];
 
     uint16_t *holding;
     uint16_t *input;
-    uint8_t *coils;     /* packed bits, ceil(n/8) bytes */
-    uint8_t *discrete;  /* packed bits */
+    uint8_t *coils;    /* packed bits, ceil(n/8) bytes */
+    uint8_t *discrete; /* packed bits */
     uint16_t n_holding;
     uint16_t n_input;
     uint16_t n_coil;
@@ -131,7 +132,7 @@ static size_t handle_pdu(mb_stack_t *s, uint16_t tid, uint8_t unit,
     if (pdu_len < 1 || resp_cap < 9) {
         return 0;
     }
-    if (unit != (uint8_t)s->cfg.unit_id && unit != 0) {
+    if (!s->cfg.unit_id_any && unit != (uint8_t)s->cfg.unit_id && unit != 0) {
         /* Wrong unit — ignore (no response) for TCP multi-drop style. */
         return 0;
     }
@@ -267,6 +268,53 @@ static size_t handle_pdu(mb_stack_t *s, uint16_t tid, uint8_t unit,
         out_len = 5;
         break;
     }
+    case MB_FC_MASK_WRITE_REG: {
+        /* result = (current & and_mask) | (or_mask & ~and_mask) */
+        if (pdu_len < 7) {
+            return build_exception(resp, tid, unit, fc, MB_EX_ILLEGAL_VALUE);
+        }
+        uint16_t addr = rd_be16(pdu + 1);
+        uint16_t and_m = rd_be16(pdu + 3);
+        uint16_t or_m = rd_be16(pdu + 5);
+        if (!map_ok_regs(s, MB_REG_HOLDING, addr, 1)) {
+            return build_exception(resp, tid, unit, fc, MB_EX_ILLEGAL_ADDRESS);
+        }
+        uint16_t cur = s->holding[addr];
+        s->holding[addr] =
+            (uint16_t)((cur & and_m) | (or_m & (uint16_t)~and_m));
+        memcpy(out_pdu, pdu, 7);
+        out_len = 7;
+        break;
+    }
+    case MB_FC_READ_WRITE_REGS: {
+        /* read_addr, read_qty, write_addr, write_qty, bc, data */
+        if (pdu_len < 10) {
+            return build_exception(resp, tid, unit, fc, MB_EX_ILLEGAL_VALUE);
+        }
+        uint16_t raddr = rd_be16(pdu + 1);
+        uint16_t rqty = rd_be16(pdu + 3);
+        uint16_t waddr = rd_be16(pdu + 5);
+        uint16_t wqty = rd_be16(pdu + 7);
+        uint8_t nbytes = pdu[9];
+        if (rqty < 1 || rqty > 125 || wqty < 1 || wqty > 121 ||
+            nbytes != (uint8_t)(wqty * 2) || pdu_len < 10u + nbytes) {
+            return build_exception(resp, tid, unit, fc, MB_EX_ILLEGAL_VALUE);
+        }
+        if (!map_ok_regs(s, MB_REG_HOLDING, raddr, rqty) ||
+            !map_ok_regs(s, MB_REG_HOLDING, waddr, wqty)) {
+            return build_exception(resp, tid, unit, fc, MB_EX_ILLEGAL_ADDRESS);
+        }
+        for (uint16_t i = 0; i < wqty; i++) {
+            s->holding[waddr + i] = rd_be16(pdu + 10 + i * 2);
+        }
+        out_pdu[0] = fc;
+        out_pdu[1] = (uint8_t)(rqty * 2);
+        for (uint16_t i = 0; i < rqty; i++) {
+            wr_be16(out_pdu + 2 + i * 2, s->holding[raddr + i]);
+        }
+        out_len = 2u + (size_t)rqty * 2u;
+        break;
+    }
     default:
         return build_exception(resp, tid, unit, fc, MB_EX_ILLEGAL_FUNCTION);
     }
@@ -322,6 +370,16 @@ mb_stack_t *mb_stack_create(const mb_cfg_t *cfg)
     }
     if (s->cfg.unit_id <= 0) {
         s->cfg.unit_id = MB_UNIT_ID_DEFAULT;
+    }
+    if (s->cfg.client_timeout_ms <= 0) {
+        s->cfg.client_timeout_ms = 200;
+    }
+    s->max_clients = cfg->max_clients;
+    if (s->max_clients < 1) {
+        s->max_clients = 4;
+    }
+    if (s->max_clients > MB_CLIENTS_MAX) {
+        s->max_clients = MB_CLIENTS_MAX;
     }
     s->n_holding = cfg->n_holding ? cfg->n_holding : MB_MAP_REGS_MAX;
     s->n_input = cfg->n_input ? cfg->n_input : MB_MAP_REGS_MAX;
@@ -501,7 +559,7 @@ static void accept_clients(mb_stack_t *s)
         }
         set_nonblock(fd);
         int slot = -1;
-        for (int i = 0; i < MB_CLIENTS_MAX; i++) {
+        for (int i = 0; i < s->max_clients; i++) {
             if (s->clients[i].fd < 0) {
                 slot = i;
                 break;
@@ -590,7 +648,9 @@ static int client_txn(mb_stack_t *s, uint8_t fc, uint16_t addr, uint16_t qty,
     fd_set rfds;
     FD_ZERO(&rfds);
     FD_SET(s->client_fd, &rfds);
-    struct timeval tv = {.tv_sec = 0, .tv_usec = 200000};
+    int to_ms = s->cfg.client_timeout_ms > 0 ? s->cfg.client_timeout_ms : 200;
+    struct timeval tv = {.tv_sec = to_ms / 1000,
+                         .tv_usec = (to_ms % 1000) * 1000};
     if (select(s->client_fd + 1, &rfds, NULL, NULL, &tv) <= 0) {
         snprintf(s->last_error, sizeof(s->last_error), "client read timeout");
         return -ETIMEDOUT;

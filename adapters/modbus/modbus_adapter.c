@@ -1,8 +1,11 @@
 #include "modbus_adapter.h"
 
+#include "modbus_codec.h"
+
+#include <ctype.h>
 #include <errno.h>
 #include <math.h>
-#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -11,34 +14,28 @@
 #include "logger.h"
 #include "mb_stack.h"
 
-#define MAX_POINTS 128
+#define MAX_POINTS 256
 #define MAX_NAME 64
-
-typedef enum {
-    MB_DT_UINT16 = 0,
-    MB_DT_INT16,
-    MB_DT_UINT32,
-    MB_DT_INT32,
-    MB_DT_FLOAT32,
-    MB_DT_BOOL,
-    MB_DT_STRING,
-} mb_data_type_t;
+#define WIRE_CAP 512
 
 typedef struct {
     char name[MAX_NAME];
-    char access[8];
+    char access[12];
     mb_reg_type_t reg_type;
     mb_data_type_t data_type;
-    uint16_t start;      /* 0-based protocol address (start+offset 반영) */
-    uint16_t quantity;   /* registers or bits spanning the value */
-    size_t byte_offset;  /* within the multi-byte window */
-    size_t byte_len;     /* app-facing raw length */
-    int bit;             /* -1 = n/a; else bit in holding/input */
-    int byte_order_le;   /* 1 = little-endian bytes inside value */
-    int word_order_ba;   /* 1 = swap 16-bit words for 32-bit types */
-    double scale;        /* eng = raw * scale + eng_offset */
+    mb_endian_t endian;
+    uint16_t start;
+    uint16_t quantity;
+    size_t byte_offset;
+    size_t byte_len;
+    int bit;
+    int bit_count;
+    int chars_per_reg;
+    int string_swap;
+    int trim_null;
+    double scale;
     double eng_offset;
-    int apply_scale;     /* scale!=1 or eng_offset!=0 */
+    int apply_scale;
 } modbus_point_t;
 
 typedef struct {
@@ -49,59 +46,113 @@ typedef struct {
     char last_error[128];
 } modbus_ctx_t;
 
+static int eqi(const char *a, const char *b)
+{
+    if (!a || !b) {
+        return 0;
+    }
+    while (*a && *b) {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
+            return 0;
+        }
+        a++;
+        b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
 static mb_reg_type_t parse_reg_type(const char *s)
 {
     if (!s) {
         return MB_REG_HOLDING;
     }
-    if (strcmp(s, "input") == 0) {
+    if (eqi(s, "input") || eqi(s, "ir") || eqi(s, "3x") || eqi(s, "3") ||
+        eqi(s, "input_register") || eqi(s, "input_registers") ||
+        eqi(s, "analog_input")) {
         return MB_REG_INPUT;
     }
-    if (strcmp(s, "coil") == 0) {
+    if (eqi(s, "coil") || eqi(s, "coils") || eqi(s, "0x") || eqi(s, "0") ||
+        eqi(s, "do") || eqi(s, "digital_output")) {
         return MB_REG_COIL;
     }
-    if (strcmp(s, "discrete") == 0) {
+    if (eqi(s, "discrete") || eqi(s, "di") || eqi(s, "1x") || eqi(s, "1") ||
+        eqi(s, "discrete_input") || eqi(s, "digital_input")) {
         return MB_REG_DISCRETE;
     }
+    /* holding, hr, 4x, 4, holding_register, ... */
     return MB_REG_HOLDING;
 }
 
-static mb_data_type_t parse_data_type(const char *s)
+static int json_get_int(const cJSON *obj, const char *k1, const char *k2,
+                        const char *k3, int def, int *found)
 {
-    if (!s) {
-        return MB_DT_UINT16;
+    const char *keys[3] = {k1, k2, k3};
+    for (int i = 0; i < 3; i++) {
+        if (!keys[i]) {
+            continue;
+        }
+        const cJSON *it = cJSON_GetObjectItemCaseSensitive(obj, keys[i]);
+        if (cJSON_IsNumber(it)) {
+            if (found) {
+                *found = 1;
+            }
+            return it->valueint;
+        }
+        if (cJSON_IsString(it) && it->valuestring) {
+            char *end = NULL;
+            long v = strtol(it->valuestring, &end, 0);
+            if (end != it->valuestring) {
+                if (found) {
+                    *found = 1;
+                }
+                return (int)v;
+            }
+        }
     }
-    if (strcmp(s, "int16") == 0) {
-        return MB_DT_INT16;
+    if (found) {
+        *found = 0;
     }
-    if (strcmp(s, "uint32") == 0) {
-        return MB_DT_UINT32;
-    }
-    if (strcmp(s, "int32") == 0) {
-        return MB_DT_INT32;
-    }
-    if (strcmp(s, "float32") == 0) {
-        return MB_DT_FLOAT32;
-    }
-    if (strcmp(s, "bool") == 0) {
-        return MB_DT_BOOL;
-    }
-    if (strcmp(s, "string") == 0) {
-        return MB_DT_STRING;
-    }
-    return MB_DT_UINT16;
+    return def;
 }
 
-/*
- * 통신 가이드 주소 → 0-based.
- * zero_based=1 이면 start 를 그대로 쓴다.
- */
-static uint16_t normalize_start(mb_reg_type_t type, int start, int zero_based)
+static double json_get_double(const cJSON *obj, const char *k1, const char *k2,
+                              double def)
+{
+    const char *keys[2] = {k1, k2};
+    for (int i = 0; i < 2; i++) {
+        if (!keys[i]) {
+            continue;
+        }
+        const cJSON *it = cJSON_GetObjectItemCaseSensitive(obj, keys[i]);
+        if (cJSON_IsNumber(it)) {
+            return it->valuedouble;
+        }
+    }
+    return def;
+}
+
+static const char *json_get_str(const cJSON *obj, const char *k1,
+                                const char *k2)
+{
+    const char *keys[2] = {k1, k2};
+    for (int i = 0; i < 2; i++) {
+        if (!keys[i]) {
+            continue;
+        }
+        const cJSON *it = cJSON_GetObjectItemCaseSensitive(obj, keys[i]);
+        if (cJSON_IsString(it)) {
+            return it->valuestring;
+        }
+    }
+    return NULL;
+}
+
+static uint16_t normalize_start(mb_reg_type_t type, int start, int mode_zero)
 {
     if (start < 0) {
         return 0;
     }
-    if (zero_based) {
+    if (mode_zero) {
         return (uint16_t)start;
     }
     switch (type) {
@@ -130,7 +181,8 @@ static uint16_t normalize_start(mb_reg_type_t type, int start, int zero_based)
         }
         break;
     case MB_REG_COIL:
-        if (start >= 1 && start < 10000) {
+        /* 00001..09999 and plain 1..9999 → 0-based */
+        if (start >= 1 && start <= 9999) {
             return (uint16_t)(start - 1);
         }
         break;
@@ -138,251 +190,76 @@ static uint16_t normalize_start(mb_reg_type_t type, int start, int zero_based)
     return (uint16_t)start;
 }
 
-static uint16_t default_quantity(mb_reg_type_t type, mb_data_type_t dt,
-                                 int length, int quantity_field, int bit)
+static int address_mode_zero(const cJSON *mb)
 {
-    if (quantity_field > 0) {
-        return (uint16_t)quantity_field;
-    }
-    if (type == MB_REG_COIL || type == MB_REG_DISCRETE) {
+    int zb = 0;
+    const cJSON *z = cJSON_GetObjectItemCaseSensitive(mb, "zero_based");
+    if (cJSON_IsTrue(z)) {
         return 1;
     }
-    if (bit >= 0) {
-        return 1;
-    }
-    switch (dt) {
-    case MB_DT_STRING: {
-        int len = length > 0 ? length : 2;
-        return (uint16_t)((len + 1) / 2);
-    }
-    case MB_DT_UINT32:
-    case MB_DT_INT32:
-    case MB_DT_FLOAT32:
-        return 2;
-    case MB_DT_BOOL:
-    case MB_DT_UINT16:
-    case MB_DT_INT16:
-    default:
-        return 1;
-    }
-}
-
-static size_t native_byte_len(mb_data_type_t dt, uint16_t quantity, int length,
-                              mb_reg_type_t reg_type)
-{
-    if (reg_type == MB_REG_COIL || reg_type == MB_REG_DISCRETE) {
-        return quantity;
-    }
-    switch (dt) {
-    case MB_DT_BOOL:
-        return 1;
-    case MB_DT_UINT16:
-    case MB_DT_INT16:
-        return 2;
-    case MB_DT_UINT32:
-    case MB_DT_INT32:
-    case MB_DT_FLOAT32:
-        return 4;
-    case MB_DT_STRING:
-        if (length > 0) {
-            return (size_t)length;
-        }
-        return (size_t)quantity * 2u;
-    }
-    return (size_t)quantity * 2u;
-}
-
-static void swap_bytes(uint8_t *p, size_t n)
-{
-    for (size_t i = 0; i + 1 < n; i += 2) {
-        uint8_t t = p[i];
-        p[i] = p[i + 1];
-        p[i + 1] = t;
-    }
-}
-
-static void swap_words32(uint8_t *p)
-{
-    uint8_t t0 = p[0], t1 = p[1];
-    p[0] = p[2];
-    p[1] = p[3];
-    p[2] = t0;
-    p[3] = t1;
-}
-
-/* Canonical host buffer (big-endian numeric layout) <-> wire register bytes. */
-static void wire_to_canonical(const modbus_point_t *pt, uint8_t *buf, size_t n)
-{
-    if (pt->word_order_ba && n >= 4) {
-        swap_words32(buf);
-    }
-    if (pt->byte_order_le) {
-        swap_bytes(buf, n);
-    }
-}
-
-static void canonical_to_wire(const modbus_point_t *pt, uint8_t *buf, size_t n)
-{
-    if (pt->byte_order_le) {
-        swap_bytes(buf, n);
-    }
-    if (pt->word_order_ba && n >= 4) {
-        swap_words32(buf);
-    }
-}
-
-static uint16_t be_u16(const uint8_t *p)
-{
-    return (uint16_t)((p[0] << 8) | p[1]);
-}
-
-static void put_be_u16(uint8_t *p, uint16_t v)
-{
-    p[0] = (uint8_t)(v >> 8);
-    p[1] = (uint8_t)(v & 0xff);
-}
-
-static uint32_t be_u32(const uint8_t *p)
-{
-    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
-}
-
-static void put_be_u32(uint8_t *p, uint32_t v)
-{
-    p[0] = (uint8_t)(v >> 24);
-    p[1] = (uint8_t)(v >> 16);
-    p[2] = (uint8_t)(v >> 8);
-    p[3] = (uint8_t)v;
-}
-
-static double decode_raw_number(const modbus_point_t *pt, const uint8_t *canon,
-                                size_t n)
-{
-    switch (pt->data_type) {
-    case MB_DT_UINT16:
-        return (n >= 2) ? (double)be_u16(canon) : 0.0;
-    case MB_DT_INT16:
-        return (n >= 2) ? (double)(int16_t)be_u16(canon) : 0.0;
-    case MB_DT_UINT32:
-        return (n >= 4) ? (double)be_u32(canon) : 0.0;
-    case MB_DT_INT32:
-        return (n >= 4) ? (double)(int32_t)be_u32(canon) : 0.0;
-    case MB_DT_FLOAT32: {
-        if (n < 4) {
-            return 0.0;
-        }
-        uint32_t u = be_u32(canon);
-        float f;
-        memcpy(&f, &u, sizeof(f));
-        return (double)f;
-    }
-    case MB_DT_BOOL:
-        return (n >= 1 && canon[0]) ? 1.0 : 0.0;
-    default:
-        return 0.0;
-    }
-}
-
-static void encode_raw_number(const modbus_point_t *pt, double raw, uint8_t *canon,
-                              size_t n)
-{
-    memset(canon, 0, n);
-    switch (pt->data_type) {
-    case MB_DT_UINT16:
-        if (n >= 2) {
-            put_be_u16(canon, (uint16_t)lround(raw));
-        }
-        break;
-    case MB_DT_INT16:
-        if (n >= 2) {
-            put_be_u16(canon, (uint16_t)(int16_t)lround(raw));
-        }
-        break;
-    case MB_DT_UINT32:
-        if (n >= 4) {
-            put_be_u32(canon, (uint32_t)llround(raw));
-        }
-        break;
-    case MB_DT_INT32:
-        if (n >= 4) {
-            put_be_u32(canon, (uint32_t)(int32_t)llround(raw));
-        }
-        break;
-    case MB_DT_FLOAT32:
-        if (n >= 4) {
-            float f = (float)raw;
-            uint32_t u;
-            memcpy(&u, &f, sizeof(u));
-            put_be_u32(canon, u);
-        }
-        break;
-    case MB_DT_BOOL:
-        if (n >= 1) {
-            canon[0] = (raw != 0.0) ? 1 : 0;
-        }
-        break;
-    default:
-        break;
-    }
-}
-
-static int map_window_bytes(const modbus_point_t *pt)
-{
-    if (pt->reg_type == MB_REG_COIL || pt->reg_type == MB_REG_DISCRETE) {
-        return (int)pt->quantity;
-    }
-    return (int)pt->quantity * 2;
-}
-
-static int read_map_window(mb_stack_t *stack, const modbus_point_t *pt,
-                           uint8_t *wire, size_t wire_cap)
-{
-    size_t need = (size_t)map_window_bytes(pt);
-    if (need > wire_cap) {
-        return -ENOSPC;
-    }
-    if (pt->bit >= 0 &&
-        (pt->reg_type == MB_REG_HOLDING || pt->reg_type == MB_REG_INPUT)) {
-        uint16_t reg = 0;
-        int rc = mb_stack_read_regs(stack, pt->reg_type, pt->start, &reg, 1);
-        if (rc != 0) {
-            return rc;
-        }
-        wire[0] = (uint8_t)((reg >> (pt->bit & 15)) & 1);
+    if (cJSON_IsBool(z) && cJSON_IsFalse(z)) {
         return 0;
     }
-    return mb_stack_read_bytes(stack, pt->reg_type, pt->start, wire, need);
+    const char *base = json_get_str(mb, "address_base", "addr_base");
+    if (base && (eqi(base, "zero") || eqi(base, "pdu") || eqi(base, "0"))) {
+        return 1;
+    }
+    (void)zb;
+    return 0;
 }
 
-static int write_map_window(mb_stack_t *stack, const modbus_point_t *pt,
-                            const uint8_t *wire, size_t wire_len)
+static uint16_t infer_quantity(const modbus_point_t *pt, int length,
+                               int qty_field)
 {
-    if (pt->bit >= 0 && pt->reg_type == MB_REG_HOLDING) {
-        uint16_t reg = 0;
-        int rc = mb_stack_read_regs(stack, MB_REG_HOLDING, pt->start, &reg, 1);
-        if (rc != 0) {
-            return rc;
-        }
-        uint16_t mask = (uint16_t)(1u << (pt->bit & 15));
-        if (wire_len > 0 && wire[0]) {
-            reg = (uint16_t)(reg | mask);
-        } else {
-            reg = (uint16_t)(reg & (uint16_t)~mask);
-        }
-        return mb_stack_write_regs(stack, MB_REG_HOLDING, pt->start, &reg, 1);
+    if (qty_field > 0) {
+        return (uint16_t)qty_field;
     }
-    size_t need = (size_t)map_window_bytes(pt);
-    if (wire_len < need) {
-        uint8_t tmp[256];
-        if (need > sizeof(tmp)) {
-            return -ENOSPC;
-        }
-        memset(tmp, 0, need);
-        memcpy(tmp, wire, wire_len);
-        return mb_stack_write_bytes(stack, pt->reg_type, pt->start, tmp, need);
+    if (pt->reg_type == MB_REG_COIL || pt->reg_type == MB_REG_DISCRETE) {
+        return (pt->bit_count > 1) ? (uint16_t)pt->bit_count : 1;
     }
-    return mb_stack_write_bytes(stack, pt->reg_type, pt->start, wire, need);
+    if (pt->bit >= 0) {
+        /* bit field inside register(s) */
+        int bits = pt->bit_count > 0 ? pt->bit_count : 1;
+        return (uint16_t)((pt->bit + bits + 15) / 16);
+    }
+    switch (pt->data_type) {
+    case MB_DT_STRING: {
+        int len = length > 0 ? length : 2;
+        int cpr = pt->chars_per_reg == 1 ? 1 : 2;
+        return (uint16_t)((len + cpr - 1) / cpr);
+    }
+    case MB_DT_RAW:
+        if (length > 0) {
+            return (uint16_t)((length + 1) / 2);
+        }
+        return 1;
+    case MB_DT_UINT8:
+    case MB_DT_INT8:
+        return 1;
+    case MB_DT_UINT16:
+    case MB_DT_INT16:
+    case MB_DT_BCD16:
+    case MB_DT_BOOL:
+        return 1;
+    case MB_DT_UINT32:
+    case MB_DT_INT32:
+    case MB_DT_FLOAT32:
+    case MB_DT_BCD32:
+        return 2;
+    case MB_DT_UINT64:
+    case MB_DT_INT64:
+    case MB_DT_FLOAT64:
+        return 4;
+    }
+    return 1;
+}
+
+static size_t map_window_bytes(const modbus_point_t *pt)
+{
+    if (pt->reg_type == MB_REG_COIL || pt->reg_type == MB_REG_DISCRETE) {
+        return pt->quantity;
+    }
+    return (size_t)pt->quantity * 2u;
 }
 
 static int parse_points(modbus_ctx_t *ctx, const char *points_json)
@@ -396,101 +273,134 @@ static int parse_points(modbus_ctx_t *ctx, const char *points_json)
     cJSON_ArrayForEach(p, arr)
     {
         if (ctx->point_count >= MAX_POINTS) {
+            LOG_WARN("modbus", "points 상한(%d) 초과", MAX_POINTS);
             break;
         }
         cJSON *name = cJSON_GetObjectItemCaseSensitive(p, "name");
         cJSON *access = cJSON_GetObjectItemCaseSensitive(p, "access");
-        cJSON *data_type = cJSON_GetObjectItemCaseSensitive(p, "data_type");
-        cJSON *length = cJSON_GetObjectItemCaseSensitive(p, "length");
-        cJSON *scale = cJSON_GetObjectItemCaseSensitive(p, "scale");
-        cJSON *eng_off = cJSON_GetObjectItemCaseSensitive(p, "offset");
-        cJSON *byte_order = cJSON_GetObjectItemCaseSensitive(p, "byte_order");
-        cJSON *word_order = cJSON_GetObjectItemCaseSensitive(p, "word_order");
         cJSON *address = cJSON_GetObjectItemCaseSensitive(p, "address");
         cJSON *mb =
             address ? cJSON_GetObjectItemCaseSensitive(address, "modbus")
                     : NULL;
         if (!cJSON_IsString(name) || !cJSON_IsObject(mb)) {
-            LOG_WARN("modbus",
-                     "포인트 정의 누락(name/address.modbus) - 건너뜀");
+            LOG_WARN("modbus", "포인트 누락(name/address.modbus) - 건너뜀");
             continue;
         }
+
         modbus_point_t *pt = &ctx->points[ctx->point_count];
         memset(pt, 0, sizeof(*pt));
         pt->bit = -1;
+        pt->bit_count = 1;
         pt->scale = 1.0;
+        pt->chars_per_reg = 2;
+        pt->trim_null = 1;
         snprintf(pt->name, sizeof(pt->name), "%s", name->valuestring);
         snprintf(pt->access, sizeof(pt->access), "%s",
                  cJSON_IsString(access) ? access->valuestring : "read");
-        pt->data_type = parse_data_type(
-            cJSON_IsString(data_type) ? data_type->valuestring : NULL);
 
-        if (cJSON_IsNumber(scale)) {
-            pt->scale = scale->valuedouble;
+        const char *dt = json_get_str(p, "data_type", "datatype");
+        pt->data_type = mb_parse_data_type(dt);
+        pt->scale = json_get_double(p, "scale", "gain", 1.0);
+        pt->eng_offset = json_get_double(p, "offset", NULL, 0.0);
+        pt->apply_scale = (pt->scale != 1.0) || (pt->eng_offset != 0.0);
+
+        const char *bo = json_get_str(p, "byte_order", "byteOrder");
+        const char *wo = json_get_str(p, "word_order", "wordOrder");
+        const char *en = json_get_str(p, "endian", "endianness");
+        /* Also allow endian under address.modbus */
+        if (!en) {
+            en = json_get_str(mb, "endian", "endianness");
         }
-        if (cJSON_IsNumber(eng_off)) {
-            pt->eng_offset = eng_off->valuedouble;
+        if (!bo) {
+            bo = json_get_str(mb, "byte_order", "byteOrder");
         }
-        pt->apply_scale =
-            (pt->scale != 1.0) || (pt->eng_offset != 0.0);
-        if (cJSON_IsString(byte_order) &&
-            strcmp(byte_order->valuestring, "little") == 0) {
-            pt->byte_order_le = 1;
+        if (!wo) {
+            wo = json_get_str(mb, "word_order", "wordOrder");
         }
-        if (cJSON_IsString(word_order) &&
-            (strcmp(word_order->valuestring, "ba") == 0 ||
-             strcmp(word_order->valuestring, "BA") == 0 ||
-             strcmp(word_order->valuestring, "cdab") == 0)) {
-            pt->word_order_ba = 1;
+        pt->endian = mb_parse_endian(bo, wo, en);
+
+        int found = 0;
+        int cpr = json_get_int(p, "chars_per_register", "chars_per_reg",
+                               "char_per_register", 2, &found);
+        if (!found) {
+            cpr = json_get_int(mb, "chars_per_register", "chars_per_reg", NULL,
+                               2, &found);
+        }
+        pt->chars_per_reg = (cpr == 1) ? 1 : 2;
+
+        const cJSON *ss = cJSON_GetObjectItemCaseSensitive(p, "string_swap");
+        if (!ss) {
+            ss = cJSON_GetObjectItemCaseSensitive(mb, "string_swap");
+        }
+        pt->string_swap = cJSON_IsTrue(ss) ? 1 : 0;
+        const cJSON *tn = cJSON_GetObjectItemCaseSensitive(p, "trim_null");
+        if (cJSON_IsBool(tn)) {
+            pt->trim_null = cJSON_IsTrue(tn) ? 1 : 0;
         }
 
-        cJSON *reg_type = cJSON_GetObjectItemCaseSensitive(mb, "register_type");
-        cJSON *start = cJSON_GetObjectItemCaseSensitive(mb, "start");
-        cJSON *addr_off = cJSON_GetObjectItemCaseSensitive(mb, "offset");
-        cJSON *byte_off = cJSON_GetObjectItemCaseSensitive(mb, "byte_offset");
-        cJSON *qty = cJSON_GetObjectItemCaseSensitive(mb, "quantity");
-        cJSON *bit = cJSON_GetObjectItemCaseSensitive(mb, "bit");
-        cJSON *zero_based = cJSON_GetObjectItemCaseSensitive(mb, "zero_based");
+        const char *rts = json_get_str(mb, "register_type", "type");
+        if (!rts) {
+            rts = json_get_str(mb, "area", "table");
+        }
+        pt->reg_type = parse_reg_type(rts);
 
-        pt->reg_type = parse_reg_type(
-            cJSON_IsString(reg_type) ? reg_type->valuestring : NULL);
-        int zb = cJSON_IsTrue(zero_based) ? 1 : 0;
-        int start_raw = cJSON_IsNumber(start) ? start->valueint : 0;
-        int add = cJSON_IsNumber(addr_off) ? addr_off->valueint : 0;
+        int start_raw =
+            json_get_int(mb, "start", "address", "register", 0, &found);
+        if (!found) {
+            start_raw = json_get_int(mb, "addr", "reg", NULL, 0, &found);
+        }
+        int add =
+            json_get_int(mb, "offset", "reg_offset", "register_offset", 0, NULL);
+        int mode_zero = address_mode_zero(mb);
         uint32_t abs_addr =
-            (uint32_t)normalize_start(pt->reg_type, start_raw, zb) +
+            (uint32_t)normalize_start(pt->reg_type, start_raw, mode_zero) +
             (uint32_t)add;
         if (abs_addr > 0xFFFF) {
             LOG_WARN("modbus", "point %s address overflow - 건너뜀", pt->name);
             continue;
         }
         pt->start = (uint16_t)abs_addr;
-        pt->byte_offset =
-            cJSON_IsNumber(byte_off) ? (size_t)byte_off->valueint : 0;
-        if (cJSON_IsNumber(bit)) {
-            pt->bit = bit->valueint;
-        }
-        pt->quantity = default_quantity(
-            pt->reg_type, pt->data_type,
-            cJSON_IsNumber(length) ? length->valueint : 0,
-            cJSON_IsNumber(qty) ? qty->valueint : 0, pt->bit);
-        pt->byte_len = native_byte_len(
-            pt->data_type, pt->quantity,
-            cJSON_IsNumber(length) ? length->valueint : 0, pt->reg_type);
+        pt->byte_offset = (size_t)json_get_int(mb, "byte_offset", "byteOffset",
+                                               "data_offset", 0, NULL);
 
-        /* If byte_offset slices a window, expose the remaining bytes. */
-        size_t win = (size_t)map_window_bytes(pt);
-        if (pt->byte_offset > 0 && pt->data_type == MB_DT_STRING) {
-            if (pt->byte_offset >= win) {
-                LOG_WARN("modbus", "point %s byte_offset 과다 - 건너뜀",
-                         pt->name);
-                continue;
+        int bit_found = 0;
+        int bit = json_get_int(mb, "bit", "bit_offset", "bit_index", -1,
+                               &bit_found);
+        pt->bit = bit_found ? bit : -1;
+        pt->bit_count =
+            json_get_int(mb, "bit_count", "bits", "bit_length", 1, NULL);
+        if (pt->bit_count < 1) {
+            pt->bit_count = 1;
+        }
+
+        int length = json_get_int(p, "length", "len", "size", 0, NULL);
+        int qty = json_get_int(mb, "quantity", "count", "qty", 0, NULL);
+        pt->quantity = infer_quantity(pt, length, qty);
+        pt->byte_len = mb_type_native_size(pt->data_type, length, pt->quantity,
+                                           pt->chars_per_reg);
+        if (pt->data_type == MB_DT_BOOL && pt->bit_count > 1) {
+            pt->byte_len = (size_t)((pt->bit_count + 7) / 8);
+            if (pt->byte_len < 1) {
+                pt->byte_len = 1;
             }
-            size_t rem = win - pt->byte_offset;
-            if (pt->byte_len > rem) {
+        }
+
+        size_t win = map_window_bytes(pt);
+        if (pt->byte_offset > 0 && pt->byte_offset >= win &&
+            pt->reg_type != MB_REG_COIL && pt->reg_type != MB_REG_DISCRETE &&
+            pt->bit < 0) {
+            LOG_WARN("modbus", "point %s byte_offset 과다 - 건너뜀", pt->name);
+            continue;
+        }
+        if (pt->byte_offset > 0 &&
+            (pt->data_type == MB_DT_STRING || pt->data_type == MB_DT_RAW ||
+             pt->data_type == MB_DT_UINT8 || pt->data_type == MB_DT_INT8)) {
+            size_t rem = win > pt->byte_offset ? win - pt->byte_offset : 0;
+            if (pt->byte_len > rem && rem > 0) {
                 pt->byte_len = rem;
             }
         }
+
         ctx->point_count++;
     }
     cJSON_Delete(arr);
@@ -510,43 +420,62 @@ static int mb_init(protocol_adapter_t *self, const char *protocol_params_json,
     cfg.role = MB_ROLE_SERVER;
     cfg.port = MB_TCP_DEFAULT_PORT;
     cfg.unit_id = MB_UNIT_ID_DEFAULT;
+    cfg.client_timeout_ms = 200;
+    cfg.max_clients = 4;
     snprintf(cfg.bind_ip, sizeof(cfg.bind_ip), "0.0.0.0");
 
     cJSON *params = cJSON_Parse(protocol_params_json);
     if (params) {
-        cJSON *role = cJSON_GetObjectItemCaseSensitive(params, "role");
-        if (cJSON_IsString(role) && strcmp(role->valuestring, "client") == 0) {
+        const char *role = json_get_str(params, "role", NULL);
+        if (role && (eqi(role, "client") || eqi(role, "master"))) {
             cfg.role = MB_ROLE_CLIENT;
         }
-        cJSON *ip = cJSON_GetObjectItemCaseSensitive(params, "ip");
-        if (cJSON_IsString(ip)) {
+        const char *ip = json_get_str(params, "ip", "host");
+        if (!ip) {
+            ip = json_get_str(params, "remote_ip", "slave_ip");
+        }
+        if (ip) {
             if (cfg.role == MB_ROLE_CLIENT) {
-                snprintf(cfg.remote_ip, sizeof(cfg.remote_ip), "%s",
-                         ip->valuestring);
+                snprintf(cfg.remote_ip, sizeof(cfg.remote_ip), "%s", ip);
             } else {
-                snprintf(cfg.bind_ip, sizeof(cfg.bind_ip), "%s",
-                         ip->valuestring);
+                snprintf(cfg.bind_ip, sizeof(cfg.bind_ip), "%s", ip);
             }
         }
-        cJSON *bind_ip = cJSON_GetObjectItemCaseSensitive(params, "bind_ip");
-        if (cJSON_IsString(bind_ip) && cfg.role == MB_ROLE_SERVER) {
-            snprintf(cfg.bind_ip, sizeof(cfg.bind_ip), "%s",
-                     bind_ip->valuestring);
+        const char *bind = json_get_str(params, "bind_ip", "listen_ip");
+        if (bind && cfg.role == MB_ROLE_SERVER) {
+            snprintf(cfg.bind_ip, sizeof(cfg.bind_ip), "%s", bind);
         }
-        cJSON *port = cJSON_GetObjectItemCaseSensitive(params, "port");
-        if (cJSON_IsNumber(port)) {
-            cfg.port = port->valueint;
+        int f = 0;
+        cfg.port = json_get_int(params, "port", NULL, NULL, cfg.port, &f);
+        cfg.unit_id =
+            json_get_int(params, "unit_id", "slave_id", "device_id", cfg.unit_id,
+                         &f);
+        cfg.client_timeout_ms = json_get_int(params, "client_timeout_ms",
+                                             "timeout_ms", "timeout", 200, &f);
+        cfg.max_clients =
+            json_get_int(params, "max_clients", "max_masters", NULL, 4, &f);
+        cfg.n_holding =
+            (uint16_t)json_get_int(params, "n_holding", "holding_count", NULL,
+                                   0, &f);
+        cfg.n_input =
+            (uint16_t)json_get_int(params, "n_input", "input_count", NULL, 0,
+                                   &f);
+        cfg.n_coil =
+            (uint16_t)json_get_int(params, "n_coil", "coil_count", NULL, 0, &f);
+        cfg.n_discrete =
+            (uint16_t)json_get_int(params, "n_discrete", "discrete_count", NULL,
+                                   0, &f);
+        const cJSON *any =
+            cJSON_GetObjectItemCaseSensitive(params, "unit_id_any");
+        if (!any) {
+            any = cJSON_GetObjectItemCaseSensitive(params, "accept_any_unit");
         }
-        cJSON *unit_id = cJSON_GetObjectItemCaseSensitive(params, "unit_id");
-        if (cJSON_IsNumber(unit_id)) {
-            cfg.unit_id = unit_id->valueint;
-        }
+        cfg.unit_id_any = cJSON_IsTrue(any) ? 1 : 0;
         cJSON_Delete(params);
     }
 
     if (cfg.role == MB_ROLE_CLIENT && !cfg.remote_ip[0]) {
-        LOG_ERROR("modbus",
-                  "client 역할이면 protocol_params.ip (원격 슬레이브) 필요");
+        LOG_ERROR("modbus", "client 이면 protocol_params.ip 필요");
         free(ctx);
         return -EINVAL;
     }
@@ -559,7 +488,8 @@ static int mb_init(protocol_adapter_t *self, const char *protocol_params_json,
         return -ENOMEM;
     }
     self->ctx = ctx;
-    LOG_INFO("modbus", "init %s port=%d unit_id=%d points=%d (자체 스택)",
+    LOG_INFO("modbus",
+             "init %s port=%d unit_id=%d points=%d (범용 매핑, 자체 스택)",
              cfg.role == MB_ROLE_SERVER ? "server" : "client", cfg.port,
              cfg.unit_id, ctx->point_count);
     return 0;
@@ -593,7 +523,6 @@ static void mb_poll_cycle(protocol_adapter_t *self)
         return;
     }
     mb_stack_poll(ctx->stack);
-
     if (ctx->role != MB_ROLE_CLIENT) {
         return;
     }
@@ -619,56 +548,166 @@ static modbus_point_t *find_point(modbus_ctx_t *ctx, const char *name)
     return NULL;
 }
 
-static int extract_app_bytes(const modbus_point_t *pt, uint8_t *wire,
-                             size_t wire_len, uint8_t *out, size_t out_len)
+static int read_map_window(mb_stack_t *stack, const modbus_point_t *pt,
+                           uint8_t *wire, size_t wire_cap)
 {
-    size_t win = (size_t)map_window_bytes(pt);
-    if (wire_len < win) {
-        return -EINVAL;
+    size_t need = map_window_bytes(pt);
+    if (need > wire_cap) {
+        return -ENOSPC;
     }
-    if (pt->bit >= 0) {
-        if (out_len < 1) {
-            return -EINVAL;
+    if (pt->bit >= 0 &&
+        (pt->reg_type == MB_REG_HOLDING || pt->reg_type == MB_REG_INPUT)) {
+        uint16_t regs[4];
+        uint16_t nreg = pt->quantity < 4 ? pt->quantity : 4;
+        int rc = mb_stack_read_regs(stack, pt->reg_type, pt->start, regs, nreg);
+        if (rc != 0) {
+            return rc;
         }
-        out[0] = wire[0] ? 1 : 0;
+        uint64_t word = 0;
+        for (uint16_t i = 0; i < nreg; i++) {
+            word |= (uint64_t)regs[i] << (16 * i);
+        }
+        uint64_t v = mb_extract_bits(word, pt->bit, pt->bit_count);
+        if (pt->bit_count <= 8) {
+            wire[0] = (uint8_t)v;
+        } else if (pt->bit_count <= 16) {
+            wire[0] = (uint8_t)(v >> 8);
+            wire[1] = (uint8_t)v;
+        } else {
+            wire[0] = (uint8_t)(v >> 24);
+            wire[1] = (uint8_t)(v >> 16);
+            wire[2] = (uint8_t)(v >> 8);
+            wire[3] = (uint8_t)v;
+        }
         return 0;
     }
+    return mb_stack_read_bytes(stack, pt->reg_type, pt->start, wire, need);
+}
+
+static int write_map_window(mb_stack_t *stack, const modbus_point_t *pt,
+                            const uint8_t *wire, size_t wire_len)
+{
+    if (pt->bit >= 0 &&
+        (pt->reg_type == MB_REG_HOLDING || pt->reg_type == MB_REG_INPUT)) {
+        uint16_t regs[4];
+        uint16_t nreg = pt->quantity < 4 ? pt->quantity : 4;
+        memset(regs, 0, sizeof(regs));
+        int rc = mb_stack_read_regs(stack, pt->reg_type, pt->start, regs, nreg);
+        if (rc != 0) {
+            return rc;
+        }
+        uint64_t word = 0;
+        for (uint16_t i = 0; i < nreg; i++) {
+            word |= (uint64_t)regs[i] << (16 * i);
+        }
+        uint64_t v = 0;
+        if (pt->bit_count <= 8) {
+            v = wire_len ? wire[0] : 0;
+        } else if (pt->bit_count <= 16) {
+            v = ((uint64_t)(wire_len > 0 ? wire[0] : 0) << 8) |
+                (wire_len > 1 ? wire[1] : 0);
+        } else {
+            v = ((uint64_t)(wire_len > 0 ? wire[0] : 0) << 24) |
+                ((uint64_t)(wire_len > 1 ? wire[1] : 0) << 16) |
+                ((uint64_t)(wire_len > 2 ? wire[2] : 0) << 8) |
+                (wire_len > 3 ? wire[3] : 0);
+        }
+        word = mb_insert_bits(word, pt->bit, pt->bit_count, v);
+        for (uint16_t i = 0; i < nreg; i++) {
+            regs[i] = (uint16_t)((word >> (16 * i)) & 0xFFFF);
+        }
+        return mb_stack_write_regs(stack, pt->reg_type, pt->start, regs, nreg);
+    }
+    size_t need = map_window_bytes(pt);
+    if (wire_len < need) {
+        uint8_t tmp[WIRE_CAP];
+        if (need > sizeof(tmp)) {
+            return -ENOSPC;
+        }
+        memset(tmp, 0, need);
+        memcpy(tmp, wire, wire_len);
+        return mb_stack_write_bytes(stack, pt->reg_type, pt->start, tmp, need);
+    }
+    return mb_stack_write_bytes(stack, pt->reg_type, pt->start, wire, need);
+}
+
+static int app_from_wire(const modbus_point_t *pt, const uint8_t *wire,
+                         size_t wire_len, uint8_t *app, size_t app_len)
+{
+    size_t win = map_window_bytes(pt);
+    if (wire_len < win && pt->bit < 0) {
+        return -EINVAL;
+    }
+    memset(app, 0, app_len);
+
+    if (pt->bit >= 0) {
+        size_t n = app_len < 4 ? app_len : 4;
+        memcpy(app, wire, n);
+        return 0;
+    }
+
+    if (pt->data_type == MB_DT_STRING) {
+        uint8_t tmp[WIRE_CAP];
+        if (win > sizeof(tmp)) {
+            return -ENOSPC;
+        }
+        memcpy(tmp, wire, win);
+        /* string packing is independent of numeric endian; optional swap */
+        mb_unpack_string(app, app_len, tmp + pt->byte_offset,
+                         win > pt->byte_offset ? win - pt->byte_offset : 0,
+                         pt->chars_per_reg, pt->string_swap, pt->trim_null);
+        return 0;
+    }
+
     size_t off = pt->byte_offset;
     if (off >= win) {
         return -EINVAL;
     }
     size_t avail = win - off;
-    size_t n = out_len < avail ? out_len : avail;
-    memcpy(out, wire + off, n);
-    if (n < out_len) {
-        memset(out + n, 0, out_len - n);
-    }
-    wire_to_canonical(pt, out, out_len);
+    size_t n = app_len < avail ? app_len : avail;
+    memcpy(app, wire + off, n);
+    mb_wire_to_canonical(app, app_len, pt->endian);
     return 0;
 }
 
-static int merge_app_bytes(const modbus_point_t *pt, const uint8_t *app,
-                           size_t app_len, uint8_t *wire, size_t wire_cap)
+static int wire_from_app(const modbus_point_t *pt, const uint8_t *app,
+                         size_t app_len, uint8_t *wire, size_t wire_cap)
 {
-    size_t win = (size_t)map_window_bytes(pt);
+    size_t win = map_window_bytes(pt);
     if (win > wire_cap) {
         return -ENOSPC;
     }
     memset(wire, 0, win);
+
     if (pt->bit >= 0) {
-        wire[0] = (app_len > 0 && app[0]) ? 1 : 0;
+        size_t n = app_len < 4 ? app_len : 4;
+        memcpy(wire, app, n);
         return 0;
     }
-    uint8_t tmp[256];
+
+    if (pt->data_type == MB_DT_STRING) {
+        mb_pack_string(wire + pt->byte_offset,
+                       win > pt->byte_offset ? win - pt->byte_offset : 0, app,
+                       app_len, pt->chars_per_reg, pt->string_swap);
+        return 0;
+    }
+
+    uint8_t tmp[WIRE_CAP];
     if (pt->byte_len > sizeof(tmp)) {
         return -ENOSPC;
     }
     memset(tmp, 0, pt->byte_len);
     size_t n = app_len < pt->byte_len ? app_len : pt->byte_len;
     memcpy(tmp, app, n);
-    canonical_to_wire(pt, tmp, pt->byte_len);
+    mb_canonical_to_wire(tmp, pt->byte_len, pt->endian);
     if (pt->byte_offset + pt->byte_len > win) {
-        return -EINVAL;
+        /* allow uint8 at byte_offset inside a register window */
+        if (pt->byte_offset >= win) {
+            return -EINVAL;
+        }
+        size_t rem = win - pt->byte_offset;
+        memcpy(wire + pt->byte_offset, tmp, rem < n ? rem : n);
+        return 0;
     }
     memcpy(wire + pt->byte_offset, tmp, pt->byte_len);
     return 0;
@@ -683,7 +722,7 @@ static int mb_read_point(protocol_adapter_t *self, const char *point_name,
         return -ENOENT;
     }
 
-    uint8_t wire[256];
+    uint8_t wire[WIRE_CAP];
     int rc = read_map_window(ctx->stack, pt, wire, sizeof(wire));
     if (rc != 0) {
         return rc;
@@ -694,16 +733,23 @@ static int mb_read_point(protocol_adapter_t *self, const char *point_name,
     if (!buf) {
         return -ENOMEM;
     }
-    rc = extract_app_bytes(pt, wire, (size_t)map_window_bytes(pt), buf, n);
+    rc = app_from_wire(pt, wire, map_window_bytes(pt), buf, n);
     if (rc != 0) {
         free(buf);
         return rc;
     }
 
-    if (pt->apply_scale && pt->data_type != MB_DT_STRING) {
-        double raw = decode_raw_number(pt, buf, n);
+    if (pt->apply_scale && pt->data_type != MB_DT_STRING &&
+        pt->data_type != MB_DT_RAW) {
+        double raw = mb_decode_number(pt->data_type, buf, n);
+        if (pt->bit >= 0) {
+            /* bit-field already extracted as small integer in wire/app */
+            raw = 0;
+            for (size_t i = 0; i < n; i++) {
+                raw = raw * 256.0 + buf[i];
+            }
+        }
         double eng = raw * pt->scale + pt->eng_offset;
-        /* Engineering value always returned as float32 when scale/offset set. */
         free(buf);
         buf = malloc(4);
         if (!buf) {
@@ -712,7 +758,10 @@ static int mb_read_point(protocol_adapter_t *self, const char *point_name,
         float f = (float)eng;
         uint32_t u;
         memcpy(&u, &f, sizeof(u));
-        put_be_u32(buf, u);
+        buf[0] = (uint8_t)(u >> 24);
+        buf[1] = (uint8_t)(u >> 16);
+        buf[2] = (uint8_t)(u >> 8);
+        buf[3] = (uint8_t)u;
         n = 4;
     }
 
@@ -730,73 +779,86 @@ static int mb_write_point(protocol_adapter_t *self, const char *point_name,
         return -ENOENT;
     }
 
-    uint8_t app[256];
+    uint8_t app[WIRE_CAP];
     size_t app_len = pt->byte_len;
     if (app_len > sizeof(app)) {
         return -ENOSPC;
     }
     memset(app, 0, app_len);
 
-    if (pt->apply_scale && pt->data_type != MB_DT_STRING) {
-        /* Accept engineering float32 (4 bytes) or native raw. */
+    if (pt->apply_scale && pt->data_type != MB_DT_STRING &&
+        pt->data_type != MB_DT_RAW) {
         double eng;
         if (value->len >= 4) {
-            uint32_t u = be_u32(value->data);
+            uint32_t u = ((uint32_t)value->data[0] << 24) |
+                         ((uint32_t)value->data[1] << 16) |
+                         ((uint32_t)value->data[2] << 8) |
+                         (uint32_t)value->data[3];
             float f;
             memcpy(&f, &u, sizeof(f));
             eng = (double)f;
         } else {
-            uint8_t tmp[8];
+            uint8_t tmp[16];
             memset(tmp, 0, sizeof(tmp));
             size_t n = value->len < app_len ? value->len : app_len;
             memcpy(tmp, value->data, n);
-            eng = decode_raw_number(pt, tmp, app_len);
+            eng = mb_decode_number(pt->data_type, tmp, app_len);
         }
-        double raw = (eng - pt->eng_offset) / (pt->scale != 0.0 ? pt->scale : 1.0);
-        encode_raw_number(pt, raw, app, app_len);
+        double raw =
+            (eng - pt->eng_offset) / (pt->scale != 0.0 ? pt->scale : 1.0);
+        if (pt->bit >= 0) {
+            uint64_t iv = (uint64_t)llround(raw);
+            if (pt->bit_count <= 8) {
+                app[0] = (uint8_t)iv;
+            } else if (pt->bit_count <= 16) {
+                app[0] = (uint8_t)(iv >> 8);
+                app[1] = (uint8_t)iv;
+            } else {
+                app[0] = (uint8_t)(iv >> 24);
+                app[1] = (uint8_t)(iv >> 16);
+                app[2] = (uint8_t)(iv >> 8);
+                app[3] = (uint8_t)iv;
+            }
+        } else {
+            mb_encode_number(pt->data_type, raw, app, app_len);
+        }
     } else {
         size_t n = value->len < app_len ? value->len : app_len;
         memcpy(app, value->data, n);
     }
 
-    uint8_t wire[256];
-    int rc = merge_app_bytes(pt, app, app_len, wire, sizeof(wire));
+    uint8_t wire[WIRE_CAP];
+    int rc = wire_from_app(pt, app, app_len, wire, sizeof(wire));
     if (rc != 0) {
         return rc;
     }
 
     if (ctx->role == MB_ROLE_CLIENT) {
-        if (pt->reg_type == MB_REG_HOLDING) {
+        if (pt->reg_type == MB_REG_HOLDING || pt->reg_type == MB_REG_INPUT) {
             if (pt->bit >= 0) {
-                uint16_t reg = 0;
-                /* Read-modify-write remotely: pull, patch, push. */
-                rc = mb_stack_client_read(ctx->stack, MB_REG_HOLDING, pt->start,
-                                          1);
+                rc = mb_stack_client_read(ctx->stack, pt->reg_type, pt->start,
+                                          pt->quantity);
                 if (rc != 0) {
                     return rc;
                 }
-                mb_stack_read_regs(ctx->stack, MB_REG_HOLDING, pt->start, &reg,
-                                   1);
-                uint16_t mask = (uint16_t)(1u << (pt->bit & 15));
-                if (wire[0]) {
-                    reg = (uint16_t)(reg | mask);
-                } else {
-                    reg = (uint16_t)(reg & (uint16_t)~mask);
-                }
-                return mb_stack_client_write_regs(ctx->stack, pt->start, &reg,
-                                                  1);
+            }
+            /* Always write through local map update + client holding write. */
+            rc = write_map_window(ctx->stack, pt, wire, map_window_bytes(pt));
+            if (rc != 0) {
+                return rc;
+            }
+            if (pt->reg_type != MB_REG_HOLDING) {
+                LOG_WARN("modbus", "client 는 input 원격 쓰기 불가: %s",
+                         point_name);
+                return -EINVAL;
             }
             uint16_t qty = pt->quantity;
             uint16_t *regs = calloc(qty, sizeof(uint16_t));
             if (!regs) {
                 return -ENOMEM;
             }
-            for (uint16_t i = 0; i < qty; i++) {
-                size_t off = (size_t)i * 2u;
-                uint8_t hi = wire[off];
-                uint8_t lo = wire[off + 1];
-                regs[i] = (uint16_t)((hi << 8) | lo);
-            }
+            mb_stack_read_regs(ctx->stack, MB_REG_HOLDING, pt->start, regs,
+                               qty);
             rc = mb_stack_client_write_regs(ctx->stack, pt->start, regs, qty);
             free(regs);
             return rc;
@@ -805,12 +867,11 @@ static int mb_write_point(protocol_adapter_t *self, const char *point_name,
             return mb_stack_client_write_bits(ctx->stack, pt->start, wire,
                                               pt->quantity);
         }
-        LOG_WARN("modbus", "client write 는 holding/coil 만 지원: %s",
-                 point_name);
+        LOG_WARN("modbus", "client write 미지원 영역: %s", point_name);
         return -EINVAL;
     }
 
-    return write_map_window(ctx->stack, pt, wire, (size_t)map_window_bytes(pt));
+    return write_map_window(ctx->stack, pt, wire, map_window_bytes(pt));
 }
 
 static int mb_health(protocol_adapter_t *self, int *connected, char *err_buf,

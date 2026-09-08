@@ -64,7 +64,10 @@ target_include_directories(mb_stack PRIVATE include core)
 target_link_libraries(mb_stack PUBLIC Threads::Threads)
 
 # ---- 어댑터: Modbus (항상 빌드, 벤더 의존성 없음) ----
-add_library(adapter_modbus STATIC adapters/modbus/modbus_adapter.c)
+add_library(adapter_modbus STATIC
+    adapters/modbus/modbus_adapter.c
+    adapters/modbus/modbus_codec.c
+)
 target_include_directories(adapter_modbus PUBLIC adapters/modbus)
 target_include_directories(adapter_modbus PRIVATE include core stacks/modbus/include)
 target_link_libraries(adapter_modbus PUBLIC ${CJSON_TARGET} mb_stack m)
