@@ -25,7 +25,8 @@
    SLMP 통신 가이드 문서(사용자가 제공)를 근거로 구현할 것. 문서 없이 임의로
    프레임 포맷을 추측하지 말 것.
 4. EtherNet/IP 어댑터 — 자체 스택 (`stacks/ethernetip/`). Adapter Class 1 +
-   Originator explicit. 상세는 `docs/ethernetip_stack.md`.
+   Originator explicit + Security Class 1/2(HMAC/TLS-PSK). CT/EDS/SOC 초안
+   포함. 공식 ODVA DoC 는 멤버십+랩 제품 프로세스. 상세 `docs/ethernetip_stack.md`.
 5. PROFINET 어댑터 — 자체 스택 (`stacks/profinet/`). RT Class 1 + Security Class 1.
    IRT 는 켜지 않는다. 인증/CRA 는 제품 프로세스.
 6. CC-Link 스텁은 사양이 확정되기 전까지 건드리지 않는다.
