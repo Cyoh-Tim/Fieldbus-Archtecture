@@ -13,9 +13,13 @@
   신호이므로 `protocol_adapter.h` 확장을 먼저 제안할 것.
 - **EtherNet/IP만 벤더 라이선스 코드가 `third_party/` 에 올 수 있다.**
   PROFINET 은 `stacks/profinet/` 자체 구현을 쓴다.
-- 새 프로토콜(CC-Link 확정, EtherCAT 등) 추가는 README의 "새 프로토콜 추가하는
-  법" 절차를 그대로 따른다. `core/adapter_registry.c`에 한 줄 추가하는 것 외에
+- 새 프로토콜(CC-Link 확정 등) 추가는 README의 "새 프로토콜 추가하는 법"
+  절차를 그대로 따른다. `core/adapter_registry.c`에 한 줄 추가하는 것 외에
   코어 파일을 수정하지 않는다.
+- **EtherCAT 은 ESC(ASIC/FPGA) 없이 구현하지 않는다.** 소프트웨어 슬레이브나
+  SOEM 마스터로 우회하지 말 것. 근거는 `docs/ethercat.md`. 스텁
+  (`adapters/ethercat/`)은 `-ENOTSUP` 로 실패해야 하며, ESC 하드웨어가
+  생기기 전에는 SOES 연동으로 채우지 않는다.
 
 ## 우선순위 (docs/design.md 6장과 동일)
 1. 코어 완성/검증 (이미 스캐폴딩됨 — 버그 수정/테스트 위주)
@@ -30,6 +34,8 @@
 5. PROFINET 어댑터 — 자체 스택 (`stacks/profinet/`). RT Class 1 + Security Class 1.
    IRT 는 켜지 않는다. 인증/CRA 는 제품 프로세스.
 6. CC-Link 스텁은 사양이 확정되기 전까지 건드리지 않는다.
+7. EtherCAT 스텁은 ESC 없이 구현하지 않는다는 결정을 코드로 고정한 것이다.
+   `docs/ethercat.md` 재검토 조건이 충족되기 전에는 채우지 않는다.
 
 ## 코딩 컨벤션
 - C11, 각 어댑터는 `protocol_adapter_t*`를 반환하는 `<name>_adapter_create()`

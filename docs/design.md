@@ -1,11 +1,12 @@
 # 멀티프로토콜 필드버스 데몬 구현 프롬프트
 
 ## 0. 배경
-- 대상: Modbus, SLMP, CC-Link, EtherNet/IP, PROFINET (추후 EtherCAT 등 추가 예정)
+- 대상: Modbus, SLMP, CC-Link, EtherNet/IP, PROFINET (EtherCAT 은 ESC ASIC 부재로 범위 밖 — `docs/ethercat.md`)
 - 런타임에는 **한 번에 하나의 프로토콜만** 활성화되어 통신을 수행한다. 프로토콜 선택은 배포 시점의 설정(config)으로 결정된다.
 - 이 다섯(추후 확장 포함) 프로토콜을 위한 **개별 프로그램을 따로 만들지 않고, 하나의 프로젝트/하나의 바이너리(데몬)**로 통합한다.
-- Profinet, EtherNet/IP는 **상용 스택을 이미 구매**한 상태이므로, 자체 구현이 아니라 해당 SDK를 래핑하는 어댑터를 만든다. Modbus(libmodbus), SLMP(자체 디코더)는 오픈소스/자체 구현으로 처리한다. CC-Link, EtherCAT은 아직 미정 — 인터페이스만 비워두고 후속 어댑터로 추가할 수 있는 구조를 지금 만들어야 한다.
+- Profinet, EtherNet/IP는 **상용 스택을 이미 구매**한 상태이므로, 자체 구현이 아니라 해당 SDK를 래핑하는 어댑터를 만든다. Modbus(libmodbus), SLMP(자체 디코더)는 오픈소스/자체 구현으로 처리한다. CC-Link는 아직 미정 — 인터페이스만 비워두고 후속 어댑터로 추가할 수 있는 구조를 지금 만들어야 한다. EtherCAT은 ESC ASIC이 없는 한 추가하지 않는다.
 - **PROFINET 성능 등급 제약**: 타깃이 A-core(Cortex-A급 애플리케이션 프로세서)이고 IRT 전용 ASIC(하드웨어 타임스탬핑/동기 스위칭을 지원하는 칩)이 없으므로, **IRT(Isochronous Real-Time)급은 애초에 목표 범위 밖**이다. PROFINET 어댑터는 **RT(Real-Time) 등급**까지만 보장하는 것으로 설계·문서화하고, 구매한 스택의 스펙도 RT 등급 지원 여부 기준으로 확인해야 한다. 동기 정밀도가 필요한 응용에는 이 데몬을 쓸 수 없다는 점을 config/README에 명시할 것.
+- **EtherCAT 제약**: 센서 역할은 EtherCAT SubDevice(슬레이브)인데, 규격상 ESC(ASIC 또는 FPGA IP)의 on-the-fly 처리가 전제다. 일반 NIC + 소프트웨어 슬레이브/마스터로는 범용 센서 상호운용을 만들 수 없어 **구현하지 않는다**. PREEMPT_RT 여부도 이 결론을 바꾸지 않는다. 상세는 `docs/ethercat.md`.
 - **핵심 요구사항**: 담당자가 Modbus/SLMP/CC-Link/EtherNet-IP/PROFINET에 대한 사전 지식이 전혀 없어도, 대상 PLC/상위 시스템의 "통신 가이드 문서"(레지스터 맵, 디바이스 코드 표 등)만 보고 JSON 설정 파일을 채우면 데몬이 그대로 동작해야 한다. 즉 **프로토콜 지식은 어댑터 코드 안에 캡슐화되고, 사용자는 데이터 매핑만 기술**한다.
 
 ## 1. 아키텍처 원칙
@@ -32,8 +33,10 @@
                              │ ProtocolAdapter interface
         ┌───────────┬───────┼───────┬─────────────┬───────────┐
    ┌────▼───┐  ┌────▼───┐ ┌─▼────┐ ┌▼──────────┐ ┌▼─────────┐
-   │ Modbus │  │  SLMP  │ │CClink│ │EtherNet/IP │ │ PROFINET │  ...(EtherCAT 등 추후)
-   │libmodbus│ │ 자체구현│ │(TBD) │ │(구매 스택) │ │(구매 스택)│
+   │ Modbus │  │  SLMP  │ │CClink│ │EtherNet/IP │ │ PROFINET │
+   │libmodbus│ │ 자체구현│ │(TBD) │ │(구매 스택) │ │(자체 스택)│
+   └────────┘  └────────┘ └──────┘ └───────────┘ └──────────┘
+                         EtherCAT: ESC ASIC 없음 → 구현하지 않음 (docs/ethercat.md)
    └────────┘  └────────┘ └──────┘ └───────────┘ └──────────┘
 ```
 
@@ -50,7 +53,7 @@ interface ProtocolAdapter {
 }
 ```
 - 각 어댑터는 위 인터페이스만 만족하면 되고, 내부적으로 PROFINET/EtherNet-IP는 구매 스택의 콜백/폴링 모델을 이 인터페이스 뒤로 감춘다(어댑터가 "번역기" 역할).
-- CC-Link, EtherCAT은 지금은 `NotImplementedAdapter`(스텁)로 등록해 두고, 레지스트리 구조상 자리만 확보한다.
+- CC-Link는 지금은 `NotImplementedAdapter`(스텁)로 등록해 두고, 레지스트리 구조상 자리만 확보한다. EtherCAT 스텁은 “미구현”이 아니라 **ESC 하드웨어 전제 조건 불충족**을 명시적으로 실패시킨다 (`docs/ethercat.md`).
 
 ## 3. Config(JSON) 설계
 ### 3.1 최상위 구조
@@ -110,6 +113,8 @@ interface ProtocolAdapter {
 
 // profinet (구매 스택 파라미터에 맞춰 조정)
 { "device_name": "sensor1.profinet-device", "gsdml": "GSDML-Vxx-Sensor1.xml" }
+
+// ethercat — 사용하지 않음. ESC ASIC 없이 SubDevice 를 구현하지 않는다.
 ```
 
 ## 4. 프로토콜별 구현 메모
@@ -120,7 +125,7 @@ interface ProtocolAdapter {
 | CC-Link | 스텁 → 추후 구현 | TBD | 인터페이스 자리만 확보, `NotImplementedAdapter` |
 | EtherNet/IP | 구매 스택(Pyramid 등) 래핑 | 서버/클라이언트 (스택 지원 범위에 따름) | 어댑터가 스택의 콜백 모델을 poll_cycle로 흡수 |
 | PROFINET | 자체 Device 스택 `stacks/profinet/` | 디바이스(슬레이브) | CC-B + RT Class 1 + Security Class 1(HMAC). IRT 없음. PI 인증 아님. 상세는 `docs/profinet_stack.md` |
-| EtherCAT(추후) | 미정 | TBD | 인터페이스만 남겨둠 |
+| EtherCAT | 구현하지 않음 | SubDevice가 맞지만 ESC 필수 | 일반 NIC로는 on-the-fly 불가. 소프트웨어 슬레이브/SOEM 마스터로 우회하지 않음. `docs/ethercat.md` |
 
 ## 5. 비기능 요구사항
 - 기준 사이클: 8ms. **에이징 테스트(1~2시간) 결과 PREEMPT_RT 없이도 최대 지연 편차 0.1ms로 확인** — 일반 타이머 기반 스케줄러로 충분한 것으로 판단, PREEMPT_RT는 현재 요구되지 않음(장기 운용/부하 조건 변화 시 재검증 여지는 남겨둠). 지연 측정 로그는 계속 남겨 회귀를 감지할 것.
@@ -135,7 +140,7 @@ interface ProtocolAdapter {
 3. SLMP 어댑터 (자체 디코더, 클라이언트)
 4. EtherNet/IP 어댑터 (구매 스택 래핑)
 5. PROFINET 어댑터 (구매 스택 래핑)
-6. CC-Link / EtherCAT 스텁 어댑터 등록 (레지스트리 확장성 검증용)
+6. CC-Link 스텁 어댑터 등록 (레지스트리 확장성 검증용). EtherCAT 은 ESC 없이 구현하지 않음.
 
 ## 7. Claude Code 등 구현 에이전트에게 넘길 때의 지시문 예시
 > "위 설계에 따라 [언어: C/C++/Rust/Python 중 택1] 로 코어 데몬과 Modbus 어댑터부터 구현해줘. ProtocolAdapter 인터페이스는 추상클래스/트레이트로 만들고, config.json 스키마는 3장 구조를 그대로 따르되 JSON Schema 파일도 함께 생성해줘. 사이클 스케줄러는 cycle_ms 파라미터를 받아 동작하고, 지연 발생 시 경고 로그를 남기게 해줘."

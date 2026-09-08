@@ -6,7 +6,7 @@
   "properties": {
     "protocol": {
       "type": "string",
-      "enum": ["modbus_tcp", "slmp", "cclink", "ethernetip", "profinet"]
+      "enum": ["modbus_tcp", "slmp", "cclink", "ethernetip", "profinet", "ethercat"]
     },
     "device": {
       "type": "object",
@@ -39,7 +39,7 @@
           "byte_order": { "type": "string", "enum": ["big", "little"] },
           "address": {
             "type": "object",
-            "description": "선택된 protocol 에 해당하는 서브키만 있으면 됨 (modbus/slmp/cclink/ethernetip/profinet)"
+            "description": "선택된 protocol 에 해당하는 서브키만 있으면 됨 (modbus/slmp/cclink/ethernetip/profinet). ethercat 은 ESC ASIC 부재로 구현하지 않음 (docs/ethercat.md)."
           }
         }
       }

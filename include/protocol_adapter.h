@@ -8,6 +8,9 @@
  * 모든 프로토콜 어댑터(Modbus/SLMP/CC-Link/EtherNet-IP/PROFINET/...)가
  * 구현해야 하는 공통 인터페이스.
  *
+ * EtherCAT 은 이 인터페이스로 등록되어 있으나 ESC ASIC 없이는 구현하지
+ * 않는다 (adapters/ethercat/, docs/ethercat.md).
+ *
  * 코어(core/)는 이 구조체의 함수 포인터만 호출하며, 각 프로토콜의
  * 세부 사항(레지스터 주소 체계, 프레임 포맷, 벤더 SDK API 등)은
  * 전혀 알지 못한다. 새 프로토콜을 추가할 때는

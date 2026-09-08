@@ -51,6 +51,7 @@ target_include_directories(core PUBLIC
     adapters/cclink
     adapters/ethernetip
     adapters/profinet
+    adapters/ethercat
     ${LIBMODBUS_INCLUDE_DIRS}
 )
 target_link_libraries(core PUBLIC ${CJSON_TARGET})
@@ -71,6 +72,11 @@ target_link_libraries(adapter_slmp PUBLIC ${CJSON_TARGET})
 add_library(adapter_cclink STATIC adapters/cclink/cclink_adapter.c)
 target_include_directories(adapter_cclink PUBLIC adapters/cclink)
 target_include_directories(adapter_cclink PRIVATE include core)
+
+# ---- 어댑터: EtherCAT (ESC ASIC 없음 → 구현하지 않음, 항상 빌드) ----
+add_library(adapter_ethercat STATIC adapters/ethercat/ethercat_adapter.c)
+target_include_directories(adapter_ethercat PUBLIC adapters/ethercat)
+target_include_directories(adapter_ethercat PRIVATE include core)
 
 # ---- 어댑터: EtherNet/IP (구매 스택 필요 - ENABLE_ETHERNETIP=ON 일 때만) ----
 add_library(adapter_ethernetip STATIC adapters/ethernetip/ethernetip_adapter.c)
@@ -122,4 +128,10 @@ target_link_libraries(multiproto_daemon PRIVATE
     adapter_cclink
     adapter_ethernetip
     adapter_profinet
+    adapter_ethercat
 )
+
+# EtherCAT 은 ESC 없이 구현하지 않는다는 계약 테스트
+add_executable(test_ethercat_skip tests/test_ethercat_skip.c)
+target_include_directories(test_ethercat_skip PRIVATE include core adapters/ethercat)
+target_link_libraries(test_ethercat_skip PRIVATE adapter_ethercat)
