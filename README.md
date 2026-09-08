@@ -9,7 +9,7 @@ config.json 설정만으로 선택해 동작시키는 필드버스 런타임.
 - **PROFINET**: `stacks/profinet/` 자체 Device 스택 (CC-B + RT Class 1 + Sec Class 1). IRT 없음.
   상세: [`docs/profinet_stack.md`](docs/profinet_stack.md)
 - **Modbus TCP**: `stacks/modbus/` 자체 스택 (기본 서버/슬레이브, libmodbus 없음).
-  상세: [`docs/modbus_stack.md`](docs/modbus_stack.md)
+  프로토콜을 몰라도 config만으로 쓰는 가이드: [`docs/modbus_stack.md`](docs/modbus_stack.md)
 
 전체 설계 배경은 [`docs/design.md`](docs/design.md).
 
