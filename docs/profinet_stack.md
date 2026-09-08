@@ -24,7 +24,7 @@ MRP를 CC-C로 부르지 않는다. 진단/알람은 A/B/C 공통이다.
 | 항목 | 상태 | 클래스 |
 |------|------|--------|
 | CM 기동 | Connect → Write(ACK) → PrmEnd → ApplicationReady.req → **ACK 후 DATAEX** → cyclic | A/B |
-| RT Class 1 | 비동기 cyclic. C_SDU 에 데이터+IOPS/IOCS. `SendClock×ReductionRatio`. TX 는 `CLOCK_MONOTONIC` `TIMER_ABSTIME` 전용 스레드로 절대 격자에 맞춘다 (IRT/PTCP 아님). 놓친 사이클은 버스트하지 않고 스킵. 랩 veth 20s 측정 mean 8.000 ms, late_max ≈ 0.18 ms (PREEMPT_RT 없음; 코어 스케줄러 0.1 ms와는 별개) | A |
+| RT Class 1 | 비동기 cyclic. C_SDU 에 데이터+IOPS/IOCS. `SendClock×ReductionRatio`. TX 는 절대 `CLOCK_MONOTONIC` 격자에 맞춘다 (due 1 ms 전에 프레임을 만들고 시각에 `sendto`). 놓친 사이클은 스킵. ARM에서 보이던 ~8.1 ms 평균은 ISA가 아니라 `last_send=now` 스트레치. IRT/PTCP 아님 | A |
 | DCP | Identify(필터: All / Name / DeviceID), Get(요청 속성), Set(Name/IP). 기동 시 Hello. `apply_os_ip` 이면 기동·Set 시 OS 주소 적용 후 UDP 바인드. Set IP 후 RPC/SNMP 재바인드, 열린 AR 은 리셋 | A |
 | Record | I&M0–4 (1–4 writable), RealIdent, PDPort/PDIF Real/Adjust/Check/FSU 저장, PD*Statistic, Channel/Ext/Qualified Diagnosis. FSU **CM**(ParameterizationSpeedup) 은 클레임하지 않음 | A/B |
 | LLDP | Chassis/Port/TTL/SysName/MgmtAddr + PN Chassis MAC / Port Status | A (이웃), B (LLDP-MIB) |

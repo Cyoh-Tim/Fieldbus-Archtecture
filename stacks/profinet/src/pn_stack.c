@@ -22,6 +22,13 @@ void pn_ar_reset(pn_stack_t *s)
     s->last_rt_ns = 0;
     s->next_rt_ns = 0;
     s->last_cpm_ns = 0;
+    s->rt_tx_last_ns = 0;
+    s->rt_tx_sum = 0;
+    s->rt_tx_min = ~0ull;
+    s->rt_tx_max = 0;
+    s->rt_tx_late_max = 0;
+    s->rt_tx_n = 0;
+    s->rt_tx_logged = 0;
     pthread_mutex_unlock(&s->rt_lock);
     s->rpc_tx_pending = 0;
     s->rpc_tx_len = 0;
@@ -383,7 +390,10 @@ void pn_stack_poll(pn_stack_t *s)
     pn_rpc_poll(s);
     pn_snmp_poll(s);
     pn_rt_watchdog(s);
-    pn_rt_send_if_due(s);
+    /* Dedicated RTC1 thread owns cyclic TX. Poll only drives mock/unit tests. */
+    if (!s->rt_thread_started) {
+        pn_rt_send_if_due(s);
+    }
     pn_alarm_poll(s);
 
     uint64_t now = pn_now_ns();

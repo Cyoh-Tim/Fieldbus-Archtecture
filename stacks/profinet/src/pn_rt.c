@@ -118,12 +118,67 @@ static void pn_rt_advance_next(pn_stack_t *s, uint64_t now, uint64_t period)
     }
 }
 
-static void pn_rt_send_locked(pn_stack_t *s, uint64_t now)
+static void pn_rt_cpu_relax(void)
 {
-    uint64_t period = pn_ar_cycle_ns(&s->ar, s->cfg.cycle_us);
-    s->last_rt_ns = now;
-    pn_rt_advance_next(s, now, period);
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_ia32_pause();
+#elif defined(__aarch64__)
+    __asm__ __volatile__("yield" ::: "memory");
+#endif
+}
 
+static void pn_rt_sleep_until(uint64_t ns)
+{
+    struct timespec abs;
+    abs.tv_sec = (time_t)(ns / 1000000000ull);
+    abs.tv_nsec = (long)(ns % 1000000000ull);
+    int rc;
+    do {
+        rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &abs, NULL);
+    } while (rc == EINTR);
+}
+
+static void pn_rt_spin_until(pn_stack_t *s, uint64_t ns)
+{
+    while (s->running && pn_now_ns() < ns) {
+        pn_rt_cpu_relax();
+    }
+}
+
+static void pn_rt_note_interval(pn_stack_t *s, uint64_t t)
+{
+    if (s->rt_tx_last_ns != 0) {
+        uint64_t dt = t - s->rt_tx_last_ns;
+        uint64_t period = pn_ar_cycle_ns(&s->ar, s->cfg.cycle_us);
+        s->rt_tx_sum += dt;
+        s->rt_tx_n++;
+        if (dt < s->rt_tx_min) {
+            s->rt_tx_min = dt;
+        }
+        if (dt > s->rt_tx_max) {
+            s->rt_tx_max = dt;
+        }
+        if (dt > period && dt - period > s->rt_tx_late_max) {
+            s->rt_tx_late_max = dt - period;
+        }
+        if (!s->rt_tx_logged && s->rt_tx_n == 125) {
+            uint64_t mean = s->rt_tx_sum / s->rt_tx_n;
+            LOG_INFO(
+                "pn_rt",
+                "TX grid mean=%lluus min=%lluus max=%lluus late_max=%lluus n=%u",
+                (unsigned long long)(mean / 1000ull),
+                (unsigned long long)(s->rt_tx_min / 1000ull),
+                (unsigned long long)(s->rt_tx_max / 1000ull),
+                (unsigned long long)(s->rt_tx_late_max / 1000ull), s->rt_tx_n);
+            s->rt_tx_logged = 1;
+        }
+    }
+    s->rt_tx_last_ns = t;
+}
+
+static int pn_rt_build_frame(pn_stack_t *s, uint8_t *frame, size_t cap,
+                             size_t *out_len)
+{
     uint8_t pay[PN_FRAME_MAX];
     size_t n = 0;
     pn_wr_be16(pay, s->ar.in_frame_id);
@@ -137,21 +192,43 @@ static void pn_rt_send_locked(pn_stack_t *s, uint64_t now)
 
     uint8_t dst[6];
     memcpy(dst, s->ar.initiator_mac, 6);
-    uint8_t frame[PN_FRAME_MAX];
-    size_t flen;
     uint16_t vid = s->ar.iocr_in.vlan_id;
+    size_t flen;
     if (vid != 0) {
         uint8_t pcp = s->ar.iocr_in.pcp ? s->ar.iocr_in.pcp : 6;
         uint16_t tci = (uint16_t)(((uint16_t)pcp << 13) | vid);
-        flen = pn_eth_build_vlan(frame, sizeof(frame), dst, s->cfg.mac, tci,
-                                 PN_ETHTYPE_PN, pay, n);
+        flen = pn_eth_build_vlan(frame, cap, dst, s->cfg.mac, tci, PN_ETHTYPE_PN,
+                                 pay, n);
     } else {
-        flen = pn_eth_build(frame, sizeof(frame), dst, s->cfg.mac, PN_ETHTYPE_PN,
-                            pay, n);
+        flen = pn_eth_build(frame, cap, dst, s->cfg.mac, PN_ETHTYPE_PN, pay, n);
     }
+    if (!flen) {
+        return -ENOBUFS;
+    }
+    *out_len = flen;
+    return 0;
+}
+
+static void pn_rt_emit(pn_stack_t *s, const uint8_t *frame, size_t flen)
+{
+    uint64_t t = pn_now_ns();
+    uint64_t period = pn_ar_cycle_ns(&s->ar, s->cfg.cycle_us);
+    s->last_rt_ns = t;
+    pn_rt_note_interval(s, t);
+    pn_rt_advance_next(s, t, period);
     if (flen) {
         pn_eth_send(s, frame, flen);
     }
+}
+
+static void pn_rt_send_locked(pn_stack_t *s)
+{
+    uint8_t frame[PN_FRAME_MAX];
+    size_t flen = 0;
+    if (pn_rt_build_frame(s, frame, sizeof(frame), &flen) != 0) {
+        return;
+    }
+    pn_rt_emit(s, frame, flen);
 }
 
 void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen)
@@ -193,7 +270,7 @@ void pn_rt_send_if_due(pn_stack_t *s)
         pthread_mutex_unlock(&s->rt_lock);
         return;
     }
-    pn_rt_send_locked(s, now);
+    pn_rt_send_locked(s);
     pthread_mutex_unlock(&s->rt_lock);
 }
 
@@ -239,6 +316,10 @@ static void *pn_rt_thread_main(void *arg)
         }
     }
 
+    /* Sleep until 1 ms before due, build the frame, then spin onto the grid
+     * and sendto. ISA (x86 vs ARM) does not set the period; stretch did. */
+    const uint64_t spin_ns = 1000000ull;
+
     while (s->running) {
         uint64_t next = 0;
         int active = 0;
@@ -248,34 +329,46 @@ static void *pn_rt_thread_main(void *arg)
         pthread_mutex_unlock(&s->rt_lock);
 
         if (!active) {
-            struct timespec ts = {.tv_sec = 0, .tv_nsec = 250000};
+            struct timespec ts = {.tv_sec = 0, .tv_nsec = 50000};
             nanosleep(&ts, NULL);
             continue;
         }
 
         uint64_t now = pn_now_ns();
-        if (next != 0 && now < next) {
-            /* Sleep until 200 us before due, then spin onto the grid.
-             * timer wakeup alone is a few hundred us on non-PREEMPT_RT. */
-            const uint64_t spin_ns = 200000ull;
-            if (next > now + spin_ns) {
-                uint64_t wake = next - spin_ns;
-                struct timespec abs;
-                abs.tv_sec = (time_t)(wake / 1000000000ull);
-                abs.tv_nsec = (long)(wake % 1000000000ull);
-                int rc;
-                do {
-                    rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &abs,
-                                         NULL);
-                } while (rc == EINTR);
-            }
-            while (s->running && pn_now_ns() < next) {
-            }
+        if (next == 0 || now >= next) {
+            pn_rt_send_if_due(s);
+            continue;
+        }
+
+        if (next > now + spin_ns) {
+            pn_rt_sleep_until(next - spin_ns);
             if (!s->running) {
                 break;
             }
         }
-        pn_rt_send_if_due(s);
+
+        uint8_t frame[PN_FRAME_MAX];
+        size_t flen = 0;
+        int have = 0;
+        pthread_mutex_lock(&s->rt_lock);
+        if (s->ar.established && s->ar.cm_state == PN_CM_DATAEX) {
+            have = pn_rt_build_frame(s, frame, sizeof(frame), &flen) == 0;
+        }
+        pthread_mutex_unlock(&s->rt_lock);
+        if (!have) {
+            continue;
+        }
+
+        pn_rt_spin_until(s, next);
+        if (!s->running) {
+            break;
+        }
+
+        pthread_mutex_lock(&s->rt_lock);
+        if (s->ar.established && s->ar.cm_state == PN_CM_DATAEX) {
+            pn_rt_emit(s, frame, flen);
+        }
+        pthread_mutex_unlock(&s->rt_lock);
     }
     return NULL;
 }

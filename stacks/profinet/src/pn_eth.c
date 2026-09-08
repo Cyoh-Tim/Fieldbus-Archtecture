@@ -136,6 +136,16 @@ int pn_eth_open(pn_stack_t *s)
         return -errno;
     }
     set_nonblock(fd);
+#ifdef PACKET_QDISC_BYPASS
+    {
+        int one = 1;
+        (void)setsockopt(fd, SOL_PACKET, PACKET_QDISC_BYPASS, &one, sizeof(one));
+    }
+#endif
+    {
+        int prio = 6;
+        (void)setsockopt(fd, SOL_SOCKET, SO_PRIORITY, &prio, sizeof(prio));
+    }
     s->fd_eth = fd;
     return 0;
 }

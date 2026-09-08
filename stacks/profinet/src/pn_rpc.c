@@ -620,6 +620,13 @@ static void enter_dataex(pn_stack_t *s)
     s->last_cpm_ns = pn_now_ns();
     s->last_rt_ns = 0;
     s->next_rt_ns = 0;
+    s->rt_tx_last_ns = 0;
+    s->rt_tx_sum = 0;
+    s->rt_tx_min = ~0ull;
+    s->rt_tx_max = 0;
+    s->rt_tx_late_max = 0;
+    s->rt_tx_n = 0;
+    s->rt_tx_logged = 0;
     pthread_mutex_unlock(&s->rt_lock);
     LOG_INFO("pn_rpc", "DATAEX in_fid=0x%04x out_fid=0x%04x cycle=%uus wd=%u",
              s->ar.in_frame_id, s->ar.out_frame_id,

@@ -95,6 +95,13 @@ struct pn_stack {
     uint64_t last_rt_ns;  /* last cyclic TX timestamp (debug) */
     uint64_t next_rt_ns;  /* absolute CLOCK_MONOTONIC due; 0 = send now */
     uint64_t last_cpm_ns;
+    uint64_t rt_tx_last_ns;
+    uint64_t rt_tx_sum;
+    uint64_t rt_tx_min;
+    uint64_t rt_tx_max;
+    uint64_t rt_tx_late_max;
+    uint32_t rt_tx_n;
+    int rt_tx_logged;
     uint64_t last_lldp_ns;
     uint64_t last_hello_ns;
     uint64_t start_ns;
