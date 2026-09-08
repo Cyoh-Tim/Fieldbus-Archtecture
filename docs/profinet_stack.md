@@ -1,5 +1,8 @@
 # PROFINET Device stack (Fieldbus Architecture)
 
+비전문가용 해설(이 스택 소스를 예로 듦)은
+[`stacks/profinet/GUIDE.md`](../stacks/profinet/GUIDE.md).
+
 자체 구현 IO **Device** 스택. 컨트롤러/스캐너는 없다.
 랩 목표는 **CC-B 서브셋**. **CC-C(IRT)는 구현하지 않는다.**
 PI 인증 대상이 아니다.

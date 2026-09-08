@@ -7,6 +7,7 @@
 - Profinet, EtherNet/IP는 **상용 스택을 이미 구매**한 상태이므로, 자체 구현이 아니라 해당 SDK를 래핑하는 어댑터를 만든다. Modbus(libmodbus), SLMP(자체 디코더)는 오픈소스/자체 구현으로 처리한다. CC-Link, EtherCAT은 아직 미정 — 인터페이스만 비워두고 후속 어댑터로 추가할 수 있는 구조를 지금 만들어야 한다.
 - **PROFINET 성능 등급 제약**: 타깃이 A-core(Cortex-A급 애플리케이션 프로세서)이고 IRT 전용 ASIC(하드웨어 타임스탬핑/동기 스위칭을 지원하는 칩)이 없으므로, **IRT(Isochronous Real-Time, Conformance Class C)급은 애초에 목표 범위 밖**이다. PROFINET 어댑터는 **RT(Real-Time) 등급 / 랩 CC-B 서브셋**까지만 보장하는 것으로 설계·문서화하고, 구매한 스택의 스펙도 RT 등급 지원 여부 기준으로 확인해야 한다. 동기 정밀도가 필요한 응용에는 이 데몬을 쓸 수 없다는 점을 config/README에 명시할 것.
 - **핵심 요구사항**: 담당자가 Modbus/SLMP/CC-Link/EtherNet-IP/PROFINET에 대한 사전 지식이 전혀 없어도, 대상 PLC/상위 시스템의 "통신 가이드 문서"(레지스터 맵, 디바이스 코드 표 등)만 보고 JSON 설정 파일을 채우면 데몬이 그대로 동작해야 한다. 즉 **프로토콜 지식은 어댑터 코드 안에 캡슐화되고, 사용자는 데이터 매핑만 기술**한다.
+- **PROFINET 구현 현황 (설계 당시와 다름)**: EtherNet/IP 만 구매 스택 래핑이다. PROFINET 은 `stacks/profinet/` 자체 IO Device 스택이며, 비전문가 해설은 `stacks/profinet/GUIDE.md`.
 
 ## 1. 아키텍처 원칙
 1. **코어(Core) / 어댑터(Adapter) 분리**
@@ -33,7 +34,7 @@
         ┌───────────┬───────┼───────┬─────────────┬───────────┐
    ┌────▼───┐  ┌────▼───┐ ┌─▼────┐ ┌▼──────────┐ ┌▼─────────┐
    │ Modbus │  │  SLMP  │ │CClink│ │EtherNet/IP │ │ PROFINET │  ...(EtherCAT 등 추후)
-   │libmodbus│ │ 자체구현│ │(TBD) │ │(구매 스택) │ │(구매 스택)│
+   │libmodbus│ │ 자체구현│ │(TBD) │ │(구매 스택) │ │자체 스택 │
    └────────┘  └────────┘ └──────┘ └───────────┘ └──────────┘
 ```
 
