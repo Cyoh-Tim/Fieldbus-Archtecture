@@ -23,7 +23,7 @@ stacks/profinet/        PROFINET IO Device 스택 (DCP/LLDP/RPC/RTC1/SNMP/Sec1)
 third_party/            EtherNet/IP 구매 벤더 스택 배치 위치 (git 커밋 안 함)
 config/                 config.schema.json + 예제 설정 파일
 docs/design.md          설계 배경 전체 문서
-docs/slmp_stack.md      SLMP 범용 매핑/스택 문서
+docs/slmp_stack.md      SLMP 입문+스택/매핑 문서 (이 코드 기준)
 ```
 
 ## 빌드
@@ -47,7 +47,8 @@ cmake -DENABLE_ETHERNETIP=ON ..
 ./build/test_slmp_adapter
 ./build/multiproto_daemon config/example.profinet.json
 ```
-SLMP 상세: [`docs/slmp_stack.md`](docs/slmp_stack.md).
+SLMP(입문부터 이 코드 매핑까지): [`docs/slmp_stack.md`](docs/slmp_stack.md).
+PROFINET: [`docs/profinet_stack.md`](docs/profinet_stack.md).
 
 ## 새 프로토콜(예: EtherCAT) 추가하는 법
 1. `adapters/<name>/` 에 `include/protocol_adapter.h` 구현
