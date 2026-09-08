@@ -25,6 +25,10 @@
     "psk_hex": "1111111111111111111111111111111111111111111111111111111111111111",
     "secure_tcp_port": 2221,
     "protection_mode": 0,
+    "lldp_enable": true,
+    "lldp_tx_interval_sec": 30,
+    "acd_enable": true,
+    "iface": "eth0",
     "mock": true
   },
   "points": [

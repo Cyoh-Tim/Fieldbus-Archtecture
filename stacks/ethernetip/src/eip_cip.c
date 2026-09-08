@@ -71,7 +71,13 @@ static int identity_get_attr(eip_stack_t *s, uint16_t attr, uint8_t *out,
         if (cap < 2) {
             return -ENOSPC;
         }
-        eip_wr_le16(out, eip_stack_class1_up(s) ? 0x0004 : 0x0000);
+        {
+            uint16_t st = eip_stack_class1_up(s) ? 0x0004 : 0x0000;
+            if (s->acd_conflict) {
+                st |= 0x0100; /* minor recoverable fault (ACD) */
+            }
+            eip_wr_le16(out, st);
+        }
         *out_len = 2;
         return 0;
     case 6: /* Serial Number */
@@ -98,7 +104,11 @@ static int identity_get_attr(eip_stack_t *s, uint16_t attr, uint8_t *out,
         if (cap < 1) {
             return -ENOSPC;
         }
-        out[0] = s->device_state ? s->device_state : 3; /* operational */
+        if (s->acd_conflict) {
+            out[0] = 2; /* Minor Recoverable Fault — CT23 ACD guidance */
+        } else {
+            out[0] = s->device_state ? s->device_state : 3; /* operational */
+        }
         *out_len = 1;
         return 0;
     case 9: /* Configuration Consistency Value */
@@ -319,29 +329,42 @@ static int handle_object(eip_stack_t *s, uint8_t service, uint16_t class_id,
         }
     }
 
-    /* TCP/IP Interface Object — CT-facing attributes */
+    /* TCP/IP Interface Object — CT-facing attributes + ACD */
     if (class_id == CIP_CLASS_TCPIP && instance == 1 &&
         service == CIP_SVC_GET_ATTR_SINGLE) {
         size_t hdr = cip_ok_header(resp, resp_cap, service);
         if (attribute == 1 && resp_cap >= hdr + 4) {
-            eip_wr_le32(resp + hdr, 0x00000001); /* status: config valid */
+            uint32_t st = 0x00000001; /* config valid */
+            if (s->acd_conflict) {
+                st |= 0x00000040; /* ACD status bit — conflict detected */
+            }
+            eip_wr_le32(resp + hdr, st);
             *resp_len = hdr + 4;
             return 0;
         }
         if (attribute == 2 && resp_cap >= hdr + 4) {
-            eip_wr_le32(resp + hdr, 0x00000010); /* config capability */
+            eip_wr_le32(resp + hdr, 0x00000010 | (s->cfg.acd_enable ? 0x4 : 0));
             *resp_len = hdr + 4;
             return 0;
         }
         if (attribute == 3 && resp_cap >= hdr + 4) {
-            eip_wr_le32(resp + hdr, 0); /* config control */
+            eip_wr_le32(resp + hdr, 0);
             *resp_len = hdr + 4;
             return 0;
         }
         if (attribute == 4 && resp_cap >= hdr + 2) {
-            /* Physical Link Object path size = 0 */
             eip_wr_le16(resp + hdr, 0);
             *resp_len = hdr + 2;
+            return 0;
+        }
+        if (attribute == 10 && resp_cap >= hdr + 4) { /* ACD Status */
+            eip_wr_le32(resp + hdr, s->acd_conflict ? 1u : 0u);
+            *resp_len = hdr + 4;
+            return 0;
+        }
+        if (attribute == 11 && resp_cap >= hdr + 4) { /* ACD Activity */
+            eip_wr_le32(resp + hdr, s->acd_activity);
+            *resp_len = hdr + 4;
             return 0;
         }
         *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);
@@ -357,12 +380,12 @@ static int handle_object(eip_stack_t *s, uint8_t service, uint16_t class_id,
             return 0;
         }
         if (attribute == 2 && resp_cap >= hdr + 4) {
-            eip_wr_le32(resp + hdr, 0xF); /* link up + duplex + negotiated */
+            eip_wr_le32(resp + hdr, 0xF);
             *resp_len = hdr + 4;
             return 0;
         }
         if (attribute == 3 && resp_cap >= hdr + 6) {
-            memset(resp + hdr, 0x02, 6); /* MAC placeholder */
+            memset(resp + hdr, 0x02, 6);
             *resp_len = hdr + 6;
             return 0;
         }
@@ -370,17 +393,66 @@ static int handle_object(eip_stack_t *s, uint8_t service, uint16_t class_id,
         return 0;
     }
 
-    /* QoS Object — required for many EtherNet/IP CT runs */
-    if (class_id == CIP_CLASS_QOS && instance == 1 &&
-        service == CIP_SVC_GET_ATTR_SINGLE) {
-        size_t hdr = cip_ok_header(resp, resp_cap, service);
-        if (attribute >= 1 && attribute <= 8 && resp_cap >= hdr + 1) {
-            resp[hdr] = 0; /* DSCP defaults */
+    /* QoS Object — DSCP defaults used by CT manuals */
+    if (class_id == CIP_CLASS_QOS && instance == 1) {
+        if (service == CIP_SVC_GET_ATTR_SINGLE) {
+            size_t hdr = cip_ok_header(resp, resp_cap, service);
+            if (resp_cap < hdr + 1) {
+                *resp_len =
+                    cip_error(resp, resp_cap, service, CIP_STATUS_RESOURCE, 0);
+                return 0;
+            }
+            uint8_t v = 0;
+            switch (attribute) {
+            case 1: /* DSCP Urgent */
+                v = s->dscp_urgent;
+                break;
+            case 2: /* DSCP Scheduled */
+                v = s->dscp_scheduled;
+                break;
+            case 3: /* DSCP High */
+                v = s->dscp_high;
+                break;
+            case 4: /* DSCP Low */
+                v = s->dscp_low;
+                break;
+            case 5: /* DSCP Explicit */
+                v = s->dscp_explicit;
+                break;
+            default:
+                *resp_len =
+                    cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);
+                return 0;
+            }
+            resp[hdr] = v;
             *resp_len = hdr + 1;
             return 0;
         }
-        *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);
-        return 0;
+        if (service == CIP_SVC_SET_ATTR_SINGLE && data_len >= 1) {
+            switch (attribute) {
+            case 1:
+                s->dscp_urgent = data[0];
+                break;
+            case 2:
+                s->dscp_scheduled = data[0];
+                break;
+            case 3:
+                s->dscp_high = data[0];
+                break;
+            case 4:
+                s->dscp_low = data[0];
+                break;
+            case 5:
+                s->dscp_explicit = data[0];
+                break;
+            default:
+                *resp_len =
+                    cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);
+                return 0;
+            }
+            *resp_len = cip_ok_header(resp, resp_cap, service);
+            return 0;
+        }
     }
 
     /* Port Object */
@@ -388,12 +460,12 @@ static int handle_object(eip_stack_t *s, uint8_t service, uint16_t class_id,
         service == CIP_SVC_GET_ATTR_SINGLE) {
         size_t hdr = cip_ok_header(resp, resp_cap, service);
         if (attribute == 1 && resp_cap >= hdr + 2) {
-            eip_wr_le16(resp + hdr, 0); /* Port Type: CIP port stub */
+            eip_wr_le16(resp + hdr, 0);
             *resp_len = hdr + 2;
             return 0;
         }
         if (attribute == 2 && resp_cap >= hdr + 2) {
-            eip_wr_le16(resp + hdr, 1); /* Port Number */
+            eip_wr_le16(resp + hdr, 1);
             *resp_len = hdr + 2;
             return 0;
         }
@@ -406,7 +478,6 @@ static int handle_object(eip_stack_t *s, uint8_t service, uint16_t class_id,
         service == CIP_SVC_GET_ATTR_SINGLE) {
         size_t hdr = cip_ok_header(resp, resp_cap, service);
         if (attribute == 1 && resp_cap >= hdr + 2) {
-            /* State: 0 configured/open, 1 integrity, 2 confidential */
             eip_wr_le16(resp + hdr, (uint16_t)s->cfg.security_class);
             *resp_len = hdr + 2;
             return 0;
@@ -414,10 +485,10 @@ static int handle_object(eip_stack_t *s, uint8_t service, uint16_t class_id,
         if (attribute == 2 && resp_cap >= hdr + 4) {
             uint32_t caps = 0;
             if (s->cfg.security_class >= EIP_SECURITY_CLASS_1) {
-                caps |= 0x1; /* integrity */
+                caps |= 0x1;
             }
             if (s->cfg.security_class >= EIP_SECURITY_CLASS_2) {
-                caps |= 0x2; /* confidentiality / TLS */
+                caps |= 0x2;
             }
             eip_wr_le32(resp + hdr, caps);
             *resp_len = hdr + 4;
@@ -429,6 +500,74 @@ static int handle_object(eip_stack_t *s, uint8_t service, uint16_t class_id,
             return 0;
         }
         *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);
+        return 0;
+    }
+
+    /* LLDP Management Object (0x109) — TX required for first-time cert */
+    if (class_id == CIP_CLASS_LLDP_MGMT && instance == 1) {
+        if (service == CIP_SVC_GET_ATTR_SINGLE) {
+            size_t hdr = cip_ok_header(resp, resp_cap, service);
+            if (attribute == 1 && resp_cap >= hdr + 4) {
+                eip_wr_le32(resp + hdr, s->lldp_enable_flags);
+                *resp_len = hdr + 4;
+                return 0;
+            }
+            if (attribute == 2 && resp_cap >= hdr + 2) {
+                eip_wr_le16(resp + hdr, s->lldp_tx_interval_sec);
+                *resp_len = hdr + 2;
+                return 0;
+            }
+            if (attribute == 3 && resp_cap >= hdr + 2) {
+                eip_wr_le16(resp + hdr, s->lldp_tx_hold);
+                *resp_len = hdr + 2;
+                return 0;
+            }
+            if (attribute == 5 && resp_cap >= hdr + 4) {
+                /* Last Change = sysUpTime at last datastore/TX change.
+                 * TX-only: we do not expose Data Store (attr 4). */
+                eip_wr_le32(resp + hdr, s->lldp_last_change_sec);
+                *resp_len = hdr + 4;
+                return 0;
+            }
+            *resp_len =
+                cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);
+            return 0;
+        }
+        if (service == CIP_SVC_SET_ATTR_SINGLE) {
+            if (attribute == 1 && data_len >= 4) {
+                uint32_t v = eip_rd_le32(data);
+                /* Clearing global enable shall wipe TX cache (802.1AB align) */
+                if ((s->lldp_enable_flags & 1) && !(v & 1)) {
+                    s->lldp_last_frame_len = 0;
+                    s->lldp_last_change_sec = s->lldp_sys_uptime_sec;
+                }
+                s->lldp_enable_flags = v;
+                *resp_len = cip_ok_header(resp, resp_cap, service);
+                return 0;
+            }
+            if (attribute == 2 && data_len >= 2) {
+                uint16_t v = eip_rd_le16(data);
+                if (v < 1) {
+                    v = 1;
+                }
+                s->lldp_tx_interval_sec = v;
+                *resp_len = cip_ok_header(resp, resp_cap, service);
+                return 0;
+            }
+            if (attribute == 3 && data_len >= 2) {
+                s->lldp_tx_hold = eip_rd_le16(data);
+                *resp_len = cip_ok_header(resp, resp_cap, service);
+                return 0;
+            }
+            *resp_len =
+                cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);
+            return 0;
+        }
+    }
+
+    /* LLDP Data Table — not implemented (TX-only / no reception) */
+    if (class_id == CIP_CLASS_LLDP_DATA_TABLE) {
+        *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_PATH_DEST, 0);
         return 0;
     }
 

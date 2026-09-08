@@ -160,6 +160,9 @@ static int eip_init(protocol_adapter_t *self, const char *protocol_params_json,
     cfg.product_code = 1;
     cfg.major_rev = 1;
     cfg.minor_rev = 0;
+    cfg.lldp_enable = 1;
+    cfg.acd_enable = 1;
+    cfg.lldp_tx_interval_sec = 30;
     snprintf(cfg.product_name, sizeof(cfg.product_name), "FieldbusSensor");
 
     cJSON *params = cJSON_Parse(protocol_params_json);
@@ -261,6 +264,26 @@ static int eip_init(protocol_adapter_t *self, const char *protocol_params_json,
         cJSON *sp = cJSON_GetObjectItemCaseSensitive(params, "secure_tcp_port");
         if (cJSON_IsNumber(sp)) {
             cfg.secure_tcp_port = sp->valueint;
+        }
+        cJSON *iface = cJSON_GetObjectItemCaseSensitive(params, "iface");
+        if (cJSON_IsString(iface)) {
+            snprintf(cfg.iface, sizeof(cfg.iface), "%s", iface->valuestring);
+        }
+        cJSON *lldp = cJSON_GetObjectItemCaseSensitive(params, "lldp_enable");
+        if (cJSON_IsBool(lldp)) {
+            cfg.lldp_enable = cJSON_IsTrue(lldp);
+        } else if (cJSON_IsNumber(lldp)) {
+            cfg.lldp_enable = lldp->valueint != 0;
+        }
+        cJSON *li = cJSON_GetObjectItemCaseSensitive(params, "lldp_tx_interval_sec");
+        if (cJSON_IsNumber(li)) {
+            cfg.lldp_tx_interval_sec = (uint16_t)li->valueint;
+        }
+        cJSON *acd = cJSON_GetObjectItemCaseSensitive(params, "acd_enable");
+        if (cJSON_IsBool(acd)) {
+            cfg.acd_enable = cJSON_IsTrue(acd);
+        } else if (cJSON_IsNumber(acd)) {
+            cfg.acd_enable = acd->valueint != 0;
         }
         cJSON *psk = cJSON_GetObjectItemCaseSensitive(params, "psk_hex");
         if (cJSON_IsString(psk)) {

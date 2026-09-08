@@ -54,6 +54,12 @@ typedef struct {
     uint8_t psk[EIP_PSK_LEN];
     int psk_set;
     uint32_t protection_mode; /* Identity attr 17 */
+
+    /* Ship / CT extras */
+    char iface[32];          /* optional NIC name for LLDP TX */
+    int lldp_enable;         /* 1 = TX enabled (default) */
+    uint16_t lldp_tx_interval_sec; /* default 30 */
+    int acd_enable;          /* 1 = ACD armed (default) */
 } eip_cfg_t;
 
 /* Optional transport ops for tests (replaces TCP/UDP sockets). */
@@ -103,5 +109,15 @@ int eip_stack_handle_encap(eip_stack_t *s, const uint8_t *req, size_t req_len,
 
 /* Inject Class 1 UDP IO frame (mock / tests). */
 int eip_stack_handle_io(eip_stack_t *s, const uint8_t *frame, size_t len);
+
+/* ACD: inject address conflict (tests / OS hook). Returns 0. */
+int eip_stack_acd_conflict(eip_stack_t *s, int conflict);
+
+/* RT diagnostics: last/max poll duration in nanoseconds. */
+void eip_stack_rt_stats(const eip_stack_t *s, uint64_t *last_poll_ns,
+                        uint64_t *max_poll_ns, uint32_t *class1_timeouts);
+
+/* Build last LLDP TX frame into out (for tests). Returns length or <0. */
+int eip_stack_lldp_frame(eip_stack_t *s, uint8_t *out, size_t cap);
 
 #endif /* EIP_STACK_H */

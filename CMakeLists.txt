@@ -82,6 +82,7 @@ add_library(eip_stack STATIC
     stacks/ethernetip/src/eip_client.c
     stacks/ethernetip/src/eip_crypto.c
     stacks/ethernetip/src/eip_sec.c
+    stacks/ethernetip/src/eip_lldp.c
     stacks/ethernetip/src/eip_stack.c
 )
 target_include_directories(eip_stack PUBLIC stacks/ethernetip/include)

@@ -22,11 +22,12 @@
 | 0x02 | Message Router | 1 | Minimal |
 | 0x04 | Assembly | config/in/out | Attr 3 data, 4 size |
 | 0x06 | Connection Manager | 1 | Forward Open/Close, Large FO |
-| 0x48 | QoS | 1 | DSCP attrs stub |
+| 0x48 | QoS | 1 | DSCP Urgent/Scheduled/High/Low/Explicit (CT defaults) |
 | 0x5E | EtherNet/IP Security | 1 | Profile capability advertisement |
 | 0xF4 | Port | 1 | Minimal |
-| 0xF5 | TCP/IP Interface | 1 | Status/capability/control |
+| 0xF5 | TCP/IP Interface | 1 | Status/capability + ACD Status/Activity |
 | 0xF6 | Ethernet Link | 1 | Speed/flags/MAC |
+| 0x109 | LLDP Management | 1 | TX enable/interval/hold/last change (TX-only) |
 
 ## Security profiles (Fieldbus repository)
 

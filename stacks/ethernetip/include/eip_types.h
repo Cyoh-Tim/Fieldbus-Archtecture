@@ -88,8 +88,25 @@
 #define CIP_CLASS_PORT              0xF4
 #define CIP_CLASS_TCPIP             0xF5
 #define CIP_CLASS_ETHERNET_LINK     0xF6
+#define CIP_CLASS_LLDP_MGMT         0x109
+#define CIP_CLASS_LLDP_DATA_TABLE   0x10A
 
 #define CIP_STATUS_PRIVILEGE        0x0F
+
+/* QoS DSCP defaults (EtherNet/IP Vol2 typical values used in CT manuals) */
+#define EIP_DSCP_EXPLICIT           0x1B /* 27 — ListIdentity / UCMM */
+#define EIP_DSCP_SCHEDULED          0x2F /* 47 — Class1 scheduled */
+#define EIP_DSCP_HIGH               0x2B /* 43 */
+#define EIP_DSCP_LOW                0x1F /* 31 */
+#define EIP_DSCP_URGENT             0x37 /* 55 */
+
+/* Real-time poll budgets (keep poll_cycle within ~8ms daemon cycle) */
+#define EIP_POLL_TCP_BUDGET         8
+#define EIP_POLL_UDP_BUDGET         64
+#define EIP_POLL_TLS_BUDGET         4
+
+/* Class1 watchdog: close if no O->T for (timeout_mult+1)*4*RPI (CIP-ish) */
+#define EIP_CLASS1_TIMEOUT_MULT_DEFAULT 4
 
 /* Common assembly instance numbers (Rockwell-style defaults, configurable) */
 #define EIP_ASM_CONFIG_DEFAULT      100

@@ -64,6 +64,7 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     off += 2;
     uint32_t orig_serial = eip_rd_le32(data + off);
     off += 4;
+    uint8_t timeout_mult = data[off];
     off += 1; /* timeout multiplier */
     off += 3; /* reserved */
     uint32_t o2t_rpi = eip_rd_le32(data + off);
@@ -141,7 +142,19 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     c->conn_serial = conn_serial;
     c->vendor_id = orig_vendor;
     c->originator_serial = orig_serial;
-    c->last_rx_ns = eip_now_ns();
+    c->timeout_multiplier = timeout_mult;
+    {
+        uint32_t rpi = o2t_rpi ? o2t_rpi : s->cfg.rpi_us;
+        if (rpi == 0) {
+            rpi = 8000;
+        }
+        c->watchdog_us =
+            rpi * 4u *
+            (uint32_t)((timeout_mult ? timeout_mult
+                                     : EIP_CLASS1_TIMEOUT_MULT_DEFAULT) +
+                       1u);
+    }
+    c->last_rx_ns = 0; /* arm after first IO */
     c->last_tx_ns = 0;
     (void)path_bytes;
 

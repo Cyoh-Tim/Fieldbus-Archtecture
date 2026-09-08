@@ -4,6 +4,8 @@
 #include <errno.h>
 #include <string.h>
 
+#include "logger.h"
+
 int eip_io_handle_udp(eip_stack_t *s, const uint8_t *frame, size_t len,
                       uint32_t src_ip, uint16_t src_port)
 {
@@ -71,6 +73,40 @@ int eip_io_handle_udp(eip_stack_t *s, const uint8_t *frame, size_t len,
         memcpy(s->output_data, data, n);
     }
     return 0;
+}
+
+void eip_io_watchdog(eip_stack_t *s)
+{
+    uint64_t now = eip_now_ns();
+    for (int i = 0; i < EIP_CLASS1_CONN_MAX; i++) {
+        eip_class1_conn_t *c = &s->class1[i];
+        if (!c->in_use) {
+            continue;
+        }
+        uint32_t wd = c->watchdog_us;
+        if (wd == 0) {
+            uint32_t rpi = c->o2t_rpi_us ? c->o2t_rpi_us : s->cfg.rpi_us;
+            if (rpi == 0) {
+                rpi = 8000;
+            }
+            uint8_t mult = c->timeout_multiplier
+                               ? c->timeout_multiplier
+                               : EIP_CLASS1_TIMEOUT_MULT_DEFAULT;
+            wd = rpi * 4u * (uint32_t)(mult + 1u);
+            c->watchdog_us = wd;
+        }
+        /* Only arm after first O->T so FO without IO yet is not killed */
+        if (c->last_rx_ns == 0 || c->peer_udp_port == 0) {
+            continue;
+        }
+        if (now - c->last_rx_ns > (uint64_t)wd * 1000ull) {
+            LOG_WARN("ethernetip",
+                     "Class1 watchdog: conn_id O->T=%u timed out after %uus",
+                     c->o2t_conn_id, wd);
+            c->in_use = 0;
+            s->class1_timeouts++;
+        }
+    }
 }
 
 void eip_io_produce(eip_stack_t *s)

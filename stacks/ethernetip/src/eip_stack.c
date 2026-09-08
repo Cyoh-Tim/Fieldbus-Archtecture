@@ -120,6 +120,18 @@ eip_stack_t *eip_stack_create(const eip_cfg_t *cfg)
     s->tls_listen_fd = -1;
     s->device_state = 3;
     s->config_consistency = 1;
+    s->dscp_urgent = EIP_DSCP_URGENT;
+    s->dscp_scheduled = EIP_DSCP_SCHEDULED;
+    s->dscp_high = EIP_DSCP_HIGH;
+    s->dscp_low = EIP_DSCP_LOW;
+    s->dscp_explicit = EIP_DSCP_EXPLICIT;
+    if (s->cfg.lldp_tx_interval_sec == 0) {
+        s->cfg.lldp_tx_interval_sec = 30;
+    }
+    /* Caller defaults: adapter sets lldp_enable/acd_enable=1 unless overridden */
+    s->lldp_enable_flags = s->cfg.lldp_enable ? 0x1u : 0;
+    s->lldp_tx_interval_sec = s->cfg.lldp_tx_interval_sec;
+    s->lldp_tx_hold = 4;
     for (int i = 0; i < EIP_TCP_CLIENTS_MAX; i++) {
         s->clients[i].fd = -1;
     }
@@ -373,12 +385,12 @@ void eip_stack_stop(eip_stack_t *s)
     }
 }
 
-static void accept_clients(eip_stack_t *s)
+static void accept_clients(eip_stack_t *s, int budget)
 {
     if (s->listen_fd < 0) {
         return;
     }
-    for (;;) {
+    while (budget-- > 0) {
         struct sockaddr_in peer;
         socklen_t plen = sizeof(peer);
         int fd = accept(s->listen_fd, (struct sockaddr *)&peer, &plen);
@@ -456,12 +468,12 @@ static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
     }
 }
 
-static void service_udp(eip_stack_t *s)
+static void service_udp(eip_stack_t *s, int budget)
 {
     if (s->udp_fd < 0) {
         return;
     }
-    for (;;) {
+    while (budget-- > 0) {
         uint8_t buf[EIP_ASSEMBLY_SIZE_MAX + 64];
         struct sockaddr_in peer;
         socklen_t plen = sizeof(peer);
@@ -503,26 +515,99 @@ void eip_stack_poll(eip_stack_t *s)
     if (!s || !s->running) {
         return;
     }
+    uint64_t t0 = eip_now_ns();
     if (s->cfg.mock) {
         pthread_mutex_lock(&s->lock);
+        eip_io_watchdog(s);
         eip_io_produce(s);
+        eip_lldp_poll(s);
         pthread_mutex_unlock(&s->lock);
-        return;
-    }
-    if (s->cfg.role == EIP_ROLE_ADAPTER) {
-        accept_clients(s);
-        for (int i = 0; i < EIP_TCP_CLIENTS_MAX; i++) {
+    } else if (s->cfg.role == EIP_ROLE_ADAPTER) {
+        accept_clients(s, EIP_POLL_TCP_BUDGET);
+        int tcp_left = EIP_POLL_TCP_BUDGET;
+        for (int i = 0; i < EIP_TCP_CLIENTS_MAX && tcp_left > 0; i++) {
             if (s->clients[i].active) {
                 service_tcp_client(s, &s->clients[i]);
+                tcp_left--;
             }
         }
-        service_udp(s);
+        service_udp(s, EIP_POLL_UDP_BUDGET);
         pthread_mutex_lock(&s->lock);
+        eip_io_watchdog(s);
         eip_io_produce(s);
         flush_produces(s);
+        eip_lldp_poll(s);
         pthread_mutex_unlock(&s->lock);
         eip_sec_tls_poll(s);
     }
+    uint64_t dt = eip_now_ns() - t0;
+    s->last_poll_ns = dt;
+    if (dt > s->max_poll_ns) {
+        s->max_poll_ns = dt;
+    }
+    /* Soft RT guard: warn if poll itself approaches 8ms budget */
+    if (dt > 7000000ull) {
+        LOG_WARN("ethernetip", "poll_cycle slow: %llu ns (target <8ms)",
+                 (unsigned long long)dt);
+    }
+}
+
+int eip_stack_acd_conflict(eip_stack_t *s, int conflict)
+{
+    if (!s) {
+        return -EINVAL;
+    }
+    pthread_mutex_lock(&s->lock);
+    if (!s->cfg.acd_enable && conflict) {
+        pthread_mutex_unlock(&s->lock);
+        return 0;
+    }
+    s->acd_conflict = conflict ? 1 : 0;
+    if (conflict) {
+        s->acd_activity++;
+        s->device_state = 2; /* minor recoverable fault */
+        LOG_WARN("ethernetip", "ACD conflict detected — Identity state=MinorRF");
+    } else if (s->device_state == 2) {
+        s->device_state = 3;
+    }
+    pthread_mutex_unlock(&s->lock);
+    return 0;
+}
+
+void eip_stack_rt_stats(const eip_stack_t *s, uint64_t *last_poll_ns,
+                        uint64_t *max_poll_ns, uint32_t *class1_timeouts)
+{
+    if (!s) {
+        return;
+    }
+    if (last_poll_ns) {
+        *last_poll_ns = s->last_poll_ns;
+    }
+    if (max_poll_ns) {
+        *max_poll_ns = s->max_poll_ns;
+    }
+    if (class1_timeouts) {
+        *class1_timeouts = s->class1_timeouts;
+    }
+}
+
+int eip_stack_lldp_frame(eip_stack_t *s, uint8_t *out, size_t cap)
+{
+    if (!s || !out) {
+        return -EINVAL;
+    }
+    pthread_mutex_lock(&s->lock);
+    if (s->lldp_last_frame_len == 0) {
+        eip_lldp_build(s);
+    }
+    if (s->lldp_last_frame_len == 0 || s->lldp_last_frame_len > cap) {
+        pthread_mutex_unlock(&s->lock);
+        return -ENOSPC;
+    }
+    memcpy(out, s->lldp_last_frame, s->lldp_last_frame_len);
+    int n = (int)s->lldp_last_frame_len;
+    pthread_mutex_unlock(&s->lock);
+    return n;
 }
 
 int eip_stack_class1_up(const eip_stack_t *s)

@@ -33,6 +33,8 @@ typedef struct {
     uint16_t conn_serial;
     uint16_t vendor_id;
     uint32_t originator_serial;
+    uint8_t timeout_multiplier;
+    uint32_t watchdog_us; /* derived close timeout */
     uint8_t last_produce[16 + EIP_ASSEMBLY_SIZE_MAX];
     size_t last_produce_len;
     int produce_ready;
@@ -88,6 +90,33 @@ struct eip_stack {
     uint16_t config_consistency;
     uint8_t device_state; /* Identity state */
 
+    /* QoS DSCP */
+    uint8_t dscp_urgent;
+    uint8_t dscp_scheduled;
+    uint8_t dscp_high;
+    uint8_t dscp_low;
+    uint8_t dscp_explicit;
+
+    /* ACD */
+    int acd_conflict;
+    uint32_t acd_activity; /* bitmask / counter for TCP/IP attr */
+
+    /* LLDP (TX-only profile for first-time cert path) */
+    uint32_t lldp_enable_flags;
+    uint16_t lldp_tx_interval_sec;
+    uint16_t lldp_tx_hold;
+    uint32_t lldp_sys_uptime_sec;
+    uint32_t lldp_last_change_sec;
+    uint8_t lldp_last_frame[512];
+    size_t lldp_last_frame_len;
+    uint64_t lldp_last_tx_ns;
+    uint64_t lldp_uptime_anchor_ns;
+
+    /* Real-time accounting */
+    uint64_t last_poll_ns;
+    uint64_t max_poll_ns;
+    uint32_t class1_timeouts;
+
     pthread_mutex_t lock;
     char last_error[128];
 };
@@ -129,5 +158,12 @@ int eip_path_parse(const uint8_t *path, size_t path_bytes, uint16_t *class_id,
                    size_t tag_cap);
 
 uint64_t eip_now_ns(void);
+
+/* Class1 watchdog — close stale connections */
+void eip_io_watchdog(eip_stack_t *s);
+
+/* LLDP TX-only helpers */
+int eip_lldp_build(eip_stack_t *s);
+void eip_lldp_poll(eip_stack_t *s);
 
 #endif /* EIP_INTERNAL_H */

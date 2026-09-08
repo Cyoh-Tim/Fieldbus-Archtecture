@@ -1,75 +1,54 @@
 # EtherNet/IP stack (Fieldbus Architecture)
 
-자체 구현 **Adapter(Device/target)** 스택 + 선택적 **Originator(client)** explicit 메시징.
-`stacks/ethernetip/` in-tree. 구매 SDK 불필요.
+자체 구현 **Adapter(Device/target)** + 선택적 **Originator**.
+입문자용 설명·코드 예시는 [`ethernetip_guide.md`](ethernetip_guide.md).
+SOC 초안: [`ethernetip_soc.md`](ethernetip_soc.md).
 
-공식 **ODVA Declaration of Conformity는 멤버십 + 공인 CT 랩**에서 나온다.
-이 스택은 CT/CIP Security 경로에 맞춰 객체·EDS·보안 프로필을 갖춘 **인증 가능(certification-ready)** 구현이다.
-스택 바이너리만으로 인증서가 발급되지는 않는다. SOC 초안: [`ethernetip_soc.md`](ethernetip_soc.md).
-
-## 왜 자체 구현인가
-
-| 선택지 | 판단 |
-|--------|------|
-| 구매 스택 (`third_party/`) | 저장소 미배치 시 빌드/검증 불가 |
-| OpENer 등 오픈소스 | 상용 ODVA 라이선스/멤버십 이슈, 커스터마이즈 비용 |
-| **자체 스택** | PROFINET과 동일 패턴 + CT용 객체/EDS/보안을 직접 맞춤 |
-
-PROFINET(PI)보다 ODVA CT 접근이 덜 폐쇄적이라는 업계 인식이 있으나, Vendor ID·멤버십·랩 비용은 제품 측 책임이다.
+공식 **ODVA DoC는 멤버십 + 공인 CT 랩** 제품 프로세스다. 스택은 CT21/23 계열
+**ship 준비**(객체·EDS·보안·LLDP·ACD·QoS·Class1 워치독)까지 포함한다.
 
 ## 범위
 
 | 항목 | 상태 |
 |------|------|
 | Encapsulation TCP 44818 | RegisterSession, ListIdentity/Services, SendRRData |
-| CIP objects (CT-facing) | Identity(+Reset/Protection Mode), Assembly, CM, Msg Router, QoS, Port, TCP/IP, Ethernet Link, EIP Security |
-| Class 1 cyclic I/O | UDP 2222, Forward Open/Close, Large FO |
-| Security Class 1 | HMAC-SHA256 PSK integrity (mutating UCMM / FO) |
-| Security Class 2 | Class 1 + TLS PSK listen on TCP 2221 |
+| CIP objects | Identity(+Reset/Protection/ACD state), Assembly, CM, Msg Router, QoS(DSCP), Port, TCP/IP(+ACD), Ethernet Link, EIP Security, LLDP Management(0x109) |
+| Class 1 I/O | UDP 2222, FO/Large FO/Close, RPI produce, **watchdog timeout** |
+| LLDP | TX + Management Object (수신/Data Table 없음 — 단일 포트 어댑터 경로) |
+| ACD | TCP/IP status + Identity Minor Recoverable Fault (CT23 guidance) |
+| Security Class 1 | HMAC-SHA256 PSK integrity item `0x00C1` |
+| Security Class 2 | + TLS-PSK TCP 2221 |
+| Real-time | poll budget, RPI paced TX, poll>7ms warn (ms-class RT, not IRT) |
 | EDS | `stacks/ethernetip/eds/FieldbusSensor.eds` |
-| Originator explicit | Get/Set Attribute, ANSI tag path |
-| Full CIP Security CT suite / DTLS I/O | 제품 확장 (기반만 제공) |
-| ODVA DoC | 제품 프로세스 (멤버십+랩) |
+| ODVA DoC | 제품 프로세스 |
 
-## Security 프로필 (이 저장소)
-
-PI/ODVA 옵션 코드를 사칭하지 않는다. Fieldbus 프로필이다.
+## Security
 
 | `security_class` | 동작 |
 |------------------|------|
-| 0 | 랩/개발 open |
-| 1 | Integrity. PSK 필수. Forward Open / Set / Reset / Close 에 CPF integrity item `0x00C1`(32B HMAC) 없으면 거부 |
-| 2 | 1 + TCP `secure_tcp_port`(기본 2221) TLS-PSK 세션에서 encapsulation 처리 |
+| 0 | 랩 open |
+| 1 | Integrity. mutating UCMM/FO에 MAC 없으면 거부 |
+| 2 | 1 + TLS 2221 |
 
-- 키: `protocol_params.psk_hex` (64 hex chars = 32 bytes). 랩 키를 제품에 두지 말 것
-- ListIdentity / Get_Attribute(조회) 는 탐색용으로 MAC 불필요
-- Identity `protection_mode` (attr 17) config/`Set_Attribute` 지원
+`psk_hex`: 64 hex chars. 랩 키를 제품에 두지 말 것.
 
-## 용량
+## Real-time notes
 
-- Assembly 최대 2048B × 64, Class1 32, TCP 32, TLS 16
-- 포인트 테이블 heap 동적 확장
-- `input_size` / `output_size` 로 process image 확장
+- 데몬 `cycle_ms` 기본 8ms. PREEMPT_RT 없이도 편차 ~0.1ms 관측(설계 문서).
+- `eip_stack_poll` 은 TCP/UDP 처리량에 **예산**을 둬 사이클 초과를 완화한다.
+- Class 1 은 RPI 미도래 시 송신하지 않으며, O→T 공백이 워치독을 넘기면 연결 해제.
+- IRT / CIP Sync / 마이크로초 동기화는 범위 밖.
 
-## Config
+## Config keys (추가)
 
 ```json
-"protocol_params": {
-  "role": "server",
-  "bind_ip": "0.0.0.0",
-  "port": 44818,
-  "udp_io_port": 2222,
-  "secure_tcp_port": 2221,
-  "security_class": 1,
-  "psk_hex": "1111111111111111111111111111111111111111111111111111111111111111",
-  "input_assembly": 150,
-  "output_assembly": 101,
-  "input_size": 512,
-  "output_size": 128
-}
+"lldp_enable": true,
+"lldp_tx_interval_sec": 30,
+"acd_enable": true,
+"iface": "eth0",
+"security_class": 1,
+"psk_hex": "…"
 ```
-
-예제: `config/example.ethernetip.json`
 
 ## 실행
 
@@ -77,5 +56,3 @@ PI/ODVA 옵션 코드를 사칭하지 않는다. Fieldbus 프로필이다.
 ./build/test_eip_stack
 ./build/multiproto_daemon config/example.ethernetip.json
 ```
-
-실기: `mock` off, Vendor ID를 ODVA 할당 값으로 교체, EDS/SOC 확정 후 CT 랩 일정.

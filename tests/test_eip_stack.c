@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 static int g_fail;
 
@@ -449,16 +450,359 @@ static void test_security_integrity(void)
     eip_stack_destroy(s);
 }
 
+static int sendrr_get(eip_stack_t *s, uint16_t class_id, uint16_t inst,
+                      uint16_t attr, uint8_t *cip_data, size_t *cip_data_len)
+{
+    uint8_t path[8];
+    size_t pu = 0;
+    path[pu++] = 0x20;
+    path[pu++] = (uint8_t)class_id;
+    path[pu++] = 0x24;
+    path[pu++] = (uint8_t)inst;
+    path[pu++] = 0x30;
+    path[pu++] = (uint8_t)attr;
+    /* 16-bit class for LLDP 0x109 */
+    if (class_id > 0xff) {
+        pu = 0;
+        path[pu++] = 0x21;
+        path[pu++] = 0x00;
+        eip_wr_le16(path + pu, class_id);
+        pu += 2;
+        path[pu++] = 0x24;
+        path[pu++] = (uint8_t)inst;
+        path[pu++] = 0x30;
+        path[pu++] = (uint8_t)attr;
+    }
+    uint8_t cip[16];
+    cip[0] = CIP_SVC_GET_ATTR_SINGLE;
+    cip[1] = (uint8_t)((pu + 1) / 2);
+    memcpy(cip + 2, path, pu);
+    size_t cip_len = 2 + pu;
+
+    uint8_t body[64];
+    size_t boff = 0;
+    eip_wr_le32(body + boff, 0);
+    boff += 4;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, 2);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_NULL_ADDR);
+    boff += 2;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_UNCONNECTED_DATA);
+    boff += 2;
+    eip_wr_le16(body + boff, (uint16_t)cip_len);
+    boff += 2;
+    memcpy(body + boff, cip, cip_len);
+    boff += cip_len;
+
+    uint8_t req[EIP_ENCAP_HDR_SIZE + 64];
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req + 0, EIP_CMD_SENDRRDATA);
+    eip_wr_le16(req + 2, (uint16_t)boff);
+    memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
+    uint8_t resp[256];
+    size_t resp_len = 0;
+    if (eip_stack_handle_encap(s, req, EIP_ENCAP_HDR_SIZE + boff, resp,
+                               sizeof(resp), &resp_len) != 0) {
+        return -1;
+    }
+    /* find unconnected data item */
+    if (resp_len < EIP_ENCAP_HDR_SIZE + 8) {
+        return -1;
+    }
+    const uint8_t *b = resp + EIP_ENCAP_HDR_SIZE;
+    size_t bl = resp_len - EIP_ENCAP_HDR_SIZE;
+    size_t off = 6;
+    uint16_t items = eip_rd_le16(b + off);
+    off += 2;
+    for (uint16_t i = 0; i < items; i++) {
+        uint16_t type = eip_rd_le16(b + off);
+        uint16_t length = eip_rd_le16(b + off + 2);
+        off += 4;
+        if (type == EIP_ITEM_UNCONNECTED_DATA && length >= 4) {
+            if (b[off + 2] != 0) {
+                return -2;
+            }
+            size_t n = length - 4;
+            if (n > *cip_data_len) {
+                n = *cip_data_len;
+            }
+            memcpy(cip_data, b + off + 4, n);
+            *cip_data_len = n;
+            return 0;
+        }
+        off += length;
+        if (off > bl) {
+            break;
+        }
+    }
+    return -3;
+}
+
+static void test_qos_dscp_ct_defaults(void)
+{
+    eip_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mock = 1;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    eip_stack_t *s = eip_stack_create(&cfg);
+    expect(s != NULL, "qos stack");
+    uint8_t data[8];
+    size_t n = sizeof(data);
+    expect(sendrr_get(s, CIP_CLASS_QOS, 1, 5, data, &n) == 0, "qos explicit get");
+    expect(n >= 1 && data[0] == EIP_DSCP_EXPLICIT, "DSCP Explicit=0x1B");
+    n = sizeof(data);
+    expect(sendrr_get(s, CIP_CLASS_QOS, 1, 2, data, &n) == 0, "qos scheduled get");
+    expect(n >= 1 && data[0] == EIP_DSCP_SCHEDULED, "DSCP Scheduled=0x2F");
+    eip_stack_destroy(s);
+}
+
+static void test_acd_identity_state(void)
+{
+    eip_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mock = 1;
+    cfg.acd_enable = 1;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    eip_stack_t *s = eip_stack_create(&cfg);
+    expect(s != NULL, "acd stack");
+    expect(eip_stack_acd_conflict(s, 1) == 0, "inject conflict");
+    uint8_t data[8];
+    size_t n = sizeof(data);
+    expect(sendrr_get(s, CIP_CLASS_IDENTITY, 1, 8, data, &n) == 0, "id state");
+    expect(n >= 1 && data[0] == 2, "Identity state=MinorRF on ACD");
+    n = sizeof(data);
+    expect(sendrr_get(s, CIP_CLASS_TCPIP, 1, 10, data, &n) == 0, "acd status");
+    expect(n >= 4 && eip_rd_le32(data) == 1, "TCP/IP ACD Status=1");
+    expect(eip_stack_acd_conflict(s, 0) == 0, "clear conflict");
+    n = sizeof(data);
+    expect(sendrr_get(s, CIP_CLASS_IDENTITY, 1, 8, data, &n) == 0, "id state2");
+    expect(n >= 1 && data[0] == 3, "Identity state back to operational");
+    eip_stack_destroy(s);
+}
+
+static void test_lldp_mgmt_and_frame(void)
+{
+    eip_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mock = 1;
+    cfg.lldp_enable = 1;
+    cfg.lldp_tx_interval_sec = 1;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    snprintf(cfg.product_name, sizeof(cfg.product_name), "LLDPSensor");
+    snprintf(cfg.iface, sizeof(cfg.iface), "eth0");
+    eip_stack_t *s = eip_stack_create(&cfg);
+    expect(s != NULL, "lldp stack");
+    expect(eip_stack_start(s) == 0, "lldp start");
+    eip_stack_poll(s);
+    uint8_t data[8];
+    size_t n = sizeof(data);
+    expect(sendrr_get(s, CIP_CLASS_LLDP_MGMT, 1, 1, data, &n) == 0,
+           "lldp enable get");
+    expect(n >= 4 && (eip_rd_le32(data) & 1) == 1, "LLDP global enable");
+    n = sizeof(data);
+    expect(sendrr_get(s, CIP_CLASS_LLDP_MGMT, 1, 2, data, &n) == 0,
+           "lldp interval get");
+    expect(n >= 2 && eip_rd_le16(data) == 1, "LLDP tx interval");
+
+    uint8_t frame[512];
+    int flen = eip_stack_lldp_frame(s, frame, sizeof(frame));
+    expect(flen > 14, "LLDP frame length");
+    expect(frame[12] == 0x88 && frame[13] == 0xcc, "LLDP ethertype");
+    int found_name = 0;
+    for (int i = 0; i + 10 < flen; i++) {
+        if (memcmp(frame + i, "LLDPSensor", 10) == 0) {
+            found_name = 1;
+            break;
+        }
+    }
+    expect(found_name, "product name in LLDP");
+    eip_stack_destroy(s);
+}
+
+static void test_class1_watchdog_and_rt_stats(void)
+{
+    eip_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mock = 1;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    cfg.rpi_us = 1000;
+    eip_stack_t *s = eip_stack_create(&cfg);
+    expect(s != NULL, "wd stack");
+    expect(eip_stack_start(s) == 0, "wd start");
+
+    /* Forward Open with tiny RPI + timeout_mult=0 */
+    uint8_t fo[48];
+    size_t off = 0;
+    fo[off++] = 0x0A;
+    fo[off++] = 0x05;
+    memset(fo + off, 0, 8);
+    off += 8;
+    eip_wr_le16(fo + off, 0x77);
+    off += 2;
+    eip_wr_le16(fo + off, 1);
+    off += 2;
+    eip_wr_le32(fo + off, 7);
+    off += 4;
+    fo[off++] = 0; /* timeout multiplier */
+    fo[off++] = 0;
+    fo[off++] = 0;
+    fo[off++] = 0;
+    eip_wr_le32(fo + off, 100); /* O->T RPI 100us */
+    off += 4;
+    eip_wr_le16(fo + off, 8);
+    off += 2;
+    eip_wr_le32(fo + off, 100);
+    off += 4;
+    eip_wr_le16(fo + off, 8);
+    off += 2;
+    fo[off++] = 1;
+    fo[off++] = 0;
+
+    uint8_t cip[64];
+    cip[0] = CIP_SVC_FORWARD_OPEN;
+    cip[1] = 2;
+    cip[2] = 0x20;
+    cip[3] = CIP_CLASS_CONN_MANAGER;
+    cip[4] = 0x24;
+    cip[5] = 1;
+    memcpy(cip + 6, fo, off);
+    size_t cip_len = 6 + off;
+    uint8_t body[128];
+    size_t boff = 0;
+    eip_wr_le32(body + boff, 0);
+    boff += 4;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, 2);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_NULL_ADDR);
+    boff += 2;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_UNCONNECTED_DATA);
+    boff += 2;
+    eip_wr_le16(body + boff, (uint16_t)cip_len);
+    boff += 2;
+    memcpy(body + boff, cip, cip_len);
+    boff += cip_len;
+    uint8_t req[EIP_ENCAP_HDR_SIZE + 128];
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req, EIP_CMD_SENDRRDATA);
+    eip_wr_le16(req + 2, (uint16_t)boff);
+    memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
+    uint8_t resp[512];
+    size_t resp_len = 0;
+    expect(eip_stack_handle_encap(s, req, EIP_ENCAP_HDR_SIZE + boff, resp,
+                                  sizeof(resp), &resp_len) == 0,
+           "wd FO");
+    expect(eip_stack_class1_up(s) == 1, "class1 after FO");
+
+    uint32_t o2t = 0;
+    for (size_t i = 0; i + 12 < resp_len; i++) {
+        if (resp[i] == (CIP_SVC_FORWARD_OPEN | CIP_SVC_REPLY) &&
+            resp[i + 2] == 0) {
+            o2t = eip_rd_le32(resp + i + 4);
+            break;
+        }
+    }
+    expect(o2t != 0, "o2t id");
+
+    uint8_t io[64];
+    size_t ioff = 0;
+    eip_wr_le16(io + ioff, 2);
+    ioff += 2;
+    eip_wr_le16(io + ioff, EIP_ITEM_SEQ_ADDR);
+    ioff += 2;
+    eip_wr_le16(io + ioff, 8);
+    ioff += 2;
+    eip_wr_le32(io + ioff, o2t);
+    ioff += 4;
+    eip_wr_le32(io + ioff, 1);
+    ioff += 4;
+    eip_wr_le16(io + ioff, EIP_ITEM_CONNECTED_DATA);
+    ioff += 2;
+    eip_wr_le16(io + ioff, 10);
+    ioff += 2;
+    eip_wr_le16(io + ioff, 1);
+    ioff += 2;
+    memset(io + ioff, 0, 8);
+    ioff += 8;
+    expect(eip_stack_handle_io(s, io, ioff) == 0, "arm with first IO");
+
+    usleep(2000); /* > watchdog (~400us) */
+    eip_stack_poll(s);
+    expect(eip_stack_class1_up(s) == 0, "class1 closed by watchdog");
+
+    uint64_t last = 0, max = 0;
+    uint32_t tos = 0;
+    eip_stack_rt_stats(s, &last, &max, &tos);
+    expect(tos >= 1, "timeout counter");
+    expect(last > 0 || max > 0, "rt stats updated");
+    eip_stack_destroy(s);
+}
+
+static void test_list_identity_and_protection(void)
+{
+    eip_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mock = 1;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    cfg.vendor_id = 0x1234;
+    cfg.protection_mode = 0x1;
+    snprintf(cfg.product_name, sizeof(cfg.product_name), "ProtSensor");
+    eip_stack_t *s = eip_stack_create(&cfg);
+    expect(s != NULL, "listid stack");
+
+    uint8_t req[EIP_ENCAP_HDR_SIZE];
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req, EIP_CMD_LISTIDENTITY);
+    uint8_t resp[256];
+    size_t resp_len = 0;
+    expect(eip_stack_handle_encap(s, req, sizeof(req), resp, sizeof(resp),
+                                  &resp_len) == 0,
+           "list identity");
+    expect(resp_len > EIP_ENCAP_HDR_SIZE, "list identity body");
+    int found = 0;
+    for (size_t i = 0; i + 2 <= resp_len; i++) {
+        if (resp[i] == 0x34 && resp[i + 1] == 0x12) {
+            found = 1;
+            break;
+        }
+    }
+    expect(found, "vendor in ListIdentity");
+
+    uint8_t data[8];
+    size_t n = sizeof(data);
+    expect(sendrr_get(s, CIP_CLASS_IDENTITY, 1, 17, data, &n) == 0,
+           "protection mode");
+    expect(n >= 4 && eip_rd_le32(data) == 0x1, "protection mode value");
+    eip_stack_destroy(s);
+}
+
 int main(void)
 {
     test_register_session();
     test_identity_get();
     test_assembly_rw_and_forward_open();
     test_security_integrity();
+    test_qos_dscp_ct_defaults();
+    test_acd_identity_state();
+    test_lldp_mgmt_and_frame();
+    test_class1_watchdog_and_rt_stats();
+    test_list_identity_and_protection();
     if (g_fail) {
         fprintf(stderr, "eip stack tests FAILED\n");
         return 1;
     }
-    printf("eip stack tests OK\n");
+    printf("eip stack tests OK (CT21/23 ship profile)\n");
     return 0;
 }
