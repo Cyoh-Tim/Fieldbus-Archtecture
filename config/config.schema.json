@@ -35,11 +35,20 @@
           },
           "length": { "type": "integer" },
           "scale": { "type": "number", "default": 1.0 },
-          "offset": { "type": "number", "default": 0.0 },
+          "offset": {
+            "type": "number",
+            "default": 0.0,
+            "description": "엔지니어링 오프셋. eng = raw * scale + offset"
+          },
           "byte_order": { "type": "string", "enum": ["big", "little"] },
+          "word_order": {
+            "type": "string",
+            "enum": ["ab", "ba", "ABCD", "CDAB", "cdab"],
+            "description": "32비트 워드 순서. ab=고위워드 먼저(기본), ba/cdab=워드 스왑"
+          },
           "address": {
             "type": "object",
-            "description": "선택된 protocol 에 해당하는 서브키만 있으면 됨 (modbus/slmp/cclink/ethernetip/profinet)"
+            "description": "선택된 protocol 서브키만 있으면 됨. modbus 예: {register_type,start,offset,byte_offset,quantity,bit,zero_based}"
           }
         }
       }

@@ -67,7 +67,7 @@ target_link_libraries(mb_stack PUBLIC Threads::Threads)
 add_library(adapter_modbus STATIC adapters/modbus/modbus_adapter.c)
 target_include_directories(adapter_modbus PUBLIC adapters/modbus)
 target_include_directories(adapter_modbus PRIVATE include core stacks/modbus/include)
-target_link_libraries(adapter_modbus PUBLIC ${CJSON_TARGET} mb_stack)
+target_link_libraries(adapter_modbus PUBLIC ${CJSON_TARGET} mb_stack m)
 # ---- 어댑터: SLMP (항상 빌드, 벤더 의존성 없음) ----
 add_library(adapter_slmp STATIC adapters/slmp/slmp_adapter.c)
 target_include_directories(adapter_slmp PUBLIC adapters/slmp)
@@ -123,6 +123,11 @@ if(ENABLE_MB_TESTS)
     add_executable(test_mb_stack tests/test_mb_stack.c)
     target_include_directories(test_mb_stack PRIVATE stacks/modbus/include include core)
     target_link_libraries(test_mb_stack PRIVATE mb_stack)
+
+    add_executable(test_mb_adapter tests/test_mb_adapter.c)
+    target_include_directories(test_mb_adapter PRIVATE
+        stacks/modbus/include include core adapters/modbus)
+    target_link_libraries(test_mb_adapter PRIVATE adapter_modbus)
 endif()
 
 # ---- 데몬 실행파일 ----

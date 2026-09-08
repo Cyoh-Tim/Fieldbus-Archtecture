@@ -18,7 +18,45 @@
       "data_type": "string",
       "length": 32,
       "address": {
-        "modbus": { "register_type": "holding", "start": 40001 }
+        "modbus": {
+          "register_type": "holding",
+          "start": 40001,
+          "offset": 0,
+          "byte_offset": 0
+        }
+      }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 0.1,
+      "offset": 0.0,
+      "byte_order": "big",
+      "address": {
+        "modbus": {
+          "register_type": "holding",
+          "start": 40001,
+          "offset": 16,
+          "quantity": 1
+        }
+      }
+    },
+    {
+      "name": "pressure",
+      "access": "read",
+      "data_type": "float32",
+      "byte_order": "big",
+      "word_order": "ab",
+      "scale": 1.0,
+      "offset": 0.0,
+      "address": {
+        "modbus": {
+          "register_type": "input",
+          "start": 30001,
+          "offset": 0,
+          "quantity": 2
+        }
       }
     },
     {
@@ -27,7 +65,23 @@
       "data_type": "bool",
       "length": 1,
       "address": {
-        "modbus": { "register_type": "coil", "start": 1 }
+        "modbus": {
+          "register_type": "coil",
+          "start": 1,
+          "offset": 0
+        }
+      }
+    },
+    {
+      "name": "alarm_bit",
+      "access": "write",
+      "data_type": "bool",
+      "address": {
+        "modbus": {
+          "register_type": "holding",
+          "start": 40100,
+          "bit": 3
+        }
       }
     }
   ]

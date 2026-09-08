@@ -12,8 +12,6 @@ libmodbus 등 외부 라이브러리는 쓰지 않는다. (`stacks/modbus/`)
 | libmodbus | LGPL 의존, 서버/사이클 모델이 프레임워크와 어긋나기 쉽고, 환경에 패키지 필수 |
 | 자체 스택 | PROFINET과 동일한 `stacks/` + thin adapter 구조, 의존성 0, 서버 맵이 process image처럼 동작 |
 
-Modbus TCP PDU 범위(FC 01/02/03/04/05/06/15/16)는 자체 구현으로 충분히 커버된다.
-
 ## 범위
 
 | 항목 | 상태 |
@@ -21,6 +19,8 @@ Modbus TCP PDU 범위(FC 01/02/03/04/05/06/15/16)는 자체 구현으로 충분�
 | TCP server (slave) | listen + 다중 마스터(최대 4) |
 | TCP client (master) | 선택 — `protocol_params.role: "client"` |
 | Holding / Input / Coil / Discrete | 로컬 맵 + PDU |
+| 주소 offset / byte_offset / bit / quantity | config |
+| scale / offset / byte_order / word_order | config |
 | 인증/암호화 | 없음 (표준 Modbus TCP) |
 
 ## 프레임워크 규칙 (프로토콜을 몰라도 되는 부분)
@@ -32,14 +32,36 @@ PROFINET과 **같은 access 의미**를 쓴다.
 | `read` | PLC가 읽는 센서 값 | `write_point` 로 맵에 게시 | Holding/Input/Coil 읽기 |
 | `write` | PLC가 쓰는 명령 | `read_point` 로 맵에서 조회 | Coil/Holding 쓰기 |
 
-주소는 통신 가이드에 적힌 숫자를 그대로 넣는다. 스택이 정규화한다.
+### 주소 (`address.modbus`)
 
-| 가이드 표기 | `register_type` | `start` 예 | 내부 오프셋 |
+가이드에 적힌 숫자를 그대로 넣는다. 스택이 정규화한다.
+
+| 필드 | 의미 | 예 |
+|------|------|----|
+| `register_type` | holding / input / coil / discrete | `"holding"` |
+| `start` | 가이드 주소 또는 0-based | `40001` |
+| `offset` | start 에 더할 레지스터/비트 오프셋 | `16` → 실제 40017 |
+| `byte_offset` | 멀티바이트 창 안의 바이트 위치 | 문자열 일부 슬라이스 |
+| `quantity` | 레지스터/비트 개수 (생략 시 타입으로 추론) | `2` |
+| `bit` | holding/input 워드 안의 비트(0..15) | `3` |
+| `zero_based` | true 면 40001 정규화 생략 | `false` |
+
+| 가이드 표기 | `register_type` | `start` 예 | 내부 베이스 |
 |-------------|-----------------|-----------|-------------|
 | 4xxxx Holding | `holding` | `40001` | 0 |
 | 3xxxx Input | `input` | `30001` | 0 |
 | 1xxxx Discrete | `discrete` | `10001` | 0 |
-| 0xxxx / Coil 1 | `coil` | `1` | 0 |
+| Coil 1 | `coil` | `1` | 0 |
+
+### 값 변환 (포인트 공통)
+
+| 필드 | 의미 |
+|------|------|
+| `data_type` | uint16 / int16 / uint32 / int32 / float32 / bool / string |
+| `scale`, `offset` | `eng = raw * scale + offset` (설정 시 read는 float32 eng 반환) |
+| `byte_order` | `big` (기본) / `little` |
+| `word_order` | 32비트: `ab` (기본) / `ba` (워드 스왑, CDAB) |
+| `length` | 문자열 바이트 수 |
 
 문자열은 레지스터당 2바이트(빅엔디안)로 팩한다. `length: 32` → Holding 16워드.
 
@@ -58,17 +80,24 @@ PROFINET과 **같은 access 의미**를 쓴다.
   },
   "points": [
     {
-      "name": "barcode_value",
+      "name": "temperature",
       "access": "read",
-      "data_type": "string",
-      "length": 32,
-      "address": { "modbus": { "register_type": "holding", "start": 40001 } }
+      "data_type": "uint16",
+      "scale": 0.1,
+      "offset": 0.0,
+      "byte_order": "big",
+      "address": {
+        "modbus": {
+          "register_type": "holding",
+          "start": 40001,
+          "offset": 16
+        }
+      }
     },
     {
       "name": "trigger",
       "access": "write",
       "data_type": "bool",
-      "length": 1,
       "address": { "modbus": { "register_type": "coil", "start": 1 } }
     }
   ]
@@ -90,4 +119,4 @@ PROFINET과 **같은 access 의미**를 쓴다.
 ## 점대점 매핑
 
 - `poll_cycle`: 서버는 accept/요청 처리. 클라이언트는 등록 포인트를 일괄 읽어 캐시.
-- `read_point` / `write_point`: 로컬 맵(또는 클라이언트 캐시)만 다룬다.
+- `read_point` / `write_point`: 로컬 맵 + scale/byte_order 변환.
