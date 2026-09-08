@@ -19,8 +19,8 @@
 
 ## 우선순위 (docs/design.md 6장과 동일)
 1. 코어 완성/검증 (이미 스캐폴딩됨 — 버그 수정/테스트 위주)
-2. Modbus 어댑터 완성 (`adapters/modbus/` — 이미 대부분 구현됨, `poll_cycle`
-   에서 read 포인트 일괄 캐싱하도록 확장하는 것이 다음 단계)
+2. Modbus 어댑터 완성 (`adapters/modbus/` + `stacks/modbus/` 자체 TCP 스택.
+   기본 서버/슬레이브, libmodbus 없음. 상세 `docs/modbus_stack.md`)
 3. SLMP 어댑터 — 3E 프레임 인코딩/디코딩이 TODO로 남아있음. 실제 대상 PLC의
    SLMP 통신 가이드 문서(사용자가 제공)를 근거로 구현할 것. 문서 없이 임의로
    프레임 포맷을 추측하지 말 것.

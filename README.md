@@ -3,9 +3,13 @@
 Modbus / SLMP / CC-Link / EtherNet-IP / PROFINET 중 **한 번에 하나의 프로토콜**을
 config.json 설정만으로 선택해 동작시키는 필드버스 런타임.
 
-PROFINET 은 구매 스택 래핑이 아니라 `stacks/profinet/` 자체 Device 스택이다.
-범위는 **CC-B + RT Class 1 + Security Class 1(HMAC integrity)**. IRT 없음.
-자세한 내용은 [`docs/profinet_stack.md`](docs/profinet_stack.md).
+담당자가 각 프로토콜을 몰라도, 통신 가이드의 주소만 `points`에 채우면 되도록
+프로토콜 지식은 어댑터/스택 안에 캡슐화한다.
+
+- **PROFINET**: `stacks/profinet/` 자체 Device 스택 (CC-B + RT Class 1 + Sec Class 1). IRT 없음.
+  상세: [`docs/profinet_stack.md`](docs/profinet_stack.md)
+- **Modbus TCP**: `stacks/modbus/` 자체 스택 (기본 서버/슬레이브, libmodbus 없음).
+  상세: [`docs/modbus_stack.md`](docs/modbus_stack.md)
 
 전체 설계 배경은 [`docs/design.md`](docs/design.md).
 
@@ -13,11 +17,12 @@ PROFINET 은 구매 스택 래핑이 아니라 `stacks/profinet/` 자체 Device 
 ```
 include/               ProtocolAdapter 공통 인터페이스
 core/                   코어(설정 로더, 스케줄러, 어댑터 레지스트리, main)
-adapters/modbus/        Modbus TCP 어댑터 (libmodbus) - 벤더 의존성 없음
+adapters/modbus/        Modbus TCP 어댑터 — 자체 스택 연결
 adapters/slmp/          SLMP 어댑터 (자체 구현, 3E 프레임은 TODO)
 adapters/cclink/        CC-Link 어댑터 (미확정, 스텁)
 adapters/ethernetip/    EtherNet/IP 어댑터 (구매 스택 래핑, 연동부 TODO)
 adapters/profinet/      PROFINET 어댑터 — 자체 스택 연결 (RT Class 1, IRT 없음)
+stacks/modbus/          Modbus TCP 서버/클라이언트 스택
 stacks/profinet/        PROFINET IO Device 스택 (DCP/LLDP/RPC/RTC1/SNMP/Sec1)
 third_party/            EtherNet/IP 구매 벤더 스택 배치 위치 (git 커밋 안 함)
 config/                 config.schema.json + 예제 설정 파일
@@ -26,11 +31,11 @@ docs/design.md          설계 배경 전체 문서
 
 ## 빌드
 ```
-sudo apt install libmodbus-dev   # Modbus 어댑터용
 mkdir build && cd build
 cmake ..
 make
 ```
+외부 Modbus 라이브러리(libmodbus)는 **필요 없다**.
 EtherNet/IP 구매 스택을 `third_party/`에 배치한 뒤에는:
 ```
 cmake -DENABLE_ETHERNETIP=ON ..
@@ -39,6 +44,7 @@ cmake -DENABLE_ETHERNETIP=ON ..
 ## 실행
 ```
 ./build/multiproto_daemon config/example.modbus.json
+./build/test_mb_stack
 ./build/test_pn_stack
 ./build/multiproto_daemon config/example.profinet.json
 ```

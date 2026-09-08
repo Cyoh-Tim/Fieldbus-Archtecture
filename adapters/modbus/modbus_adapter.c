@@ -5,257 +5,401 @@
 #include <string.h>
 
 #include <cJSON.h>
-#include <modbus.h>
 
 #include "logger.h"
+#include "mb_stack.h"
 
 #define MAX_POINTS 128
 #define MAX_NAME 64
 
-typedef enum {
-    REG_HOLDING,
-    REG_INPUT,
-    REG_COIL,
-    REG_DISCRETE,
-} modbus_reg_type_t;
-
 typedef struct {
     char name[MAX_NAME];
-    modbus_reg_type_t reg_type;
-    int start;
-    char access[8]; /* "read" | "write" */
+    char access[8]; /* "read" | "write" — PLC 관점 (PROFINET과 동일) */
+    mb_reg_type_t reg_type;
+    uint16_t start;    /* 0-based protocol address */
+    uint16_t quantity; /* registers or bits */
+    size_t byte_len;   /* raw bytes exposed to core */
 } modbus_point_t;
 
 typedef struct {
-    modbus_t *mb;
-    char ip[64];
-    int port;
-    int unit_id;
-
+    mb_stack_t *stack;
+    mb_role_t role;
     modbus_point_t points[MAX_POINTS];
     int point_count;
-
-    int connected;
     char last_error[128];
 } modbus_ctx_t;
 
-static modbus_reg_type_t parse_reg_type(const char *s)
+static mb_reg_type_t parse_reg_type(const char *s)
 {
-    if (!s) return REG_HOLDING;
-    if (strcmp(s, "input") == 0) return REG_INPUT;
-    if (strcmp(s, "coil") == 0) return REG_COIL;
-    if (strcmp(s, "discrete") == 0) return REG_DISCRETE;
-    return REG_HOLDING;
+    if (!s) {
+        return MB_REG_HOLDING;
+    }
+    if (strcmp(s, "input") == 0) {
+        return MB_REG_INPUT;
+    }
+    if (strcmp(s, "coil") == 0) {
+        return MB_REG_COIL;
+    }
+    if (strcmp(s, "discrete") == 0) {
+        return MB_REG_DISCRETE;
+    }
+    return MB_REG_HOLDING;
+}
+
+/*
+ * 통신 가이드 주소 → 0-based protocol address.
+ * 비전문가가 문서의 40001 / 30001 / 10001 / 00001 를 그대로 넣어도 된다.
+ */
+static uint16_t normalize_start(mb_reg_type_t type, int start)
+{
+    if (start < 0) {
+        return 0;
+    }
+    switch (type) {
+    case MB_REG_HOLDING:
+        if (start >= 40001) {
+            return (uint16_t)(start - 40001);
+        }
+        if (start >= 4000 && start < 5000) {
+            return (uint16_t)(start - 4000);
+        }
+        break;
+    case MB_REG_INPUT:
+        if (start >= 30001) {
+            return (uint16_t)(start - 30001);
+        }
+        if (start >= 3000 && start < 4000) {
+            return (uint16_t)(start - 3000);
+        }
+        break;
+    case MB_REG_DISCRETE:
+        if (start >= 10001) {
+            return (uint16_t)(start - 10001);
+        }
+        if (start >= 1000 && start < 2000) {
+            return (uint16_t)(start - 1000);
+        }
+        break;
+    case MB_REG_COIL:
+        if (start >= 1 && start < 10000) {
+            /* 1-based coil numbering common in manuals */
+            return (uint16_t)(start - 1);
+        }
+        break;
+    }
+    return (uint16_t)start;
+}
+
+static uint16_t default_quantity(mb_reg_type_t type, const char *data_type,
+                                 int length, int quantity_field)
+{
+    if (quantity_field > 0) {
+        return (uint16_t)quantity_field;
+    }
+    if (type == MB_REG_COIL || type == MB_REG_DISCRETE) {
+        return 1;
+    }
+    if (data_type && strcmp(data_type, "string") == 0) {
+        int len = length > 0 ? length : 2;
+        return (uint16_t)((len + 1) / 2);
+    }
+    if (data_type && (strcmp(data_type, "uint32") == 0 ||
+                      strcmp(data_type, "int32") == 0 ||
+                      strcmp(data_type, "float32") == 0)) {
+        return 2;
+    }
+    if (data_type && strcmp(data_type, "bool") == 0) {
+        return 1;
+    }
+    if (length > 0) {
+        return (uint16_t)((length + 1) / 2);
+    }
+    return 1;
+}
+
+static size_t point_byte_len(mb_reg_type_t type, uint16_t quantity, int length,
+                             const char *data_type)
+{
+    if (type == MB_REG_COIL || type == MB_REG_DISCRETE) {
+        return quantity;
+    }
+    if (length > 0) {
+        return (size_t)length;
+    }
+    if (data_type && strcmp(data_type, "string") == 0) {
+        return (size_t)quantity * 2u;
+    }
+    return (size_t)quantity * 2u;
+}
+
+static int parse_points(modbus_ctx_t *ctx, const char *points_json)
+{
+    cJSON *arr = cJSON_Parse(points_json);
+    if (!cJSON_IsArray(arr)) {
+        cJSON_Delete(arr);
+        return 0;
+    }
+    cJSON *p;
+    cJSON_ArrayForEach(p, arr)
+    {
+        if (ctx->point_count >= MAX_POINTS) {
+            break;
+        }
+        cJSON *name = cJSON_GetObjectItemCaseSensitive(p, "name");
+        cJSON *access = cJSON_GetObjectItemCaseSensitive(p, "access");
+        cJSON *data_type = cJSON_GetObjectItemCaseSensitive(p, "data_type");
+        cJSON *length = cJSON_GetObjectItemCaseSensitive(p, "length");
+        cJSON *address = cJSON_GetObjectItemCaseSensitive(p, "address");
+        cJSON *mb =
+            address ? cJSON_GetObjectItemCaseSensitive(address, "modbus")
+                    : NULL;
+        if (!cJSON_IsString(name) || !cJSON_IsObject(mb)) {
+            LOG_WARN("modbus",
+                     "포인트 정의 누락(name/address.modbus) - 건너뜀");
+            continue;
+        }
+        modbus_point_t *pt = &ctx->points[ctx->point_count];
+        memset(pt, 0, sizeof(*pt));
+        snprintf(pt->name, sizeof(pt->name), "%s", name->valuestring);
+        snprintf(pt->access, sizeof(pt->access), "%s",
+                 cJSON_IsString(access) ? access->valuestring : "read");
+
+        cJSON *reg_type = cJSON_GetObjectItemCaseSensitive(mb, "register_type");
+        cJSON *start = cJSON_GetObjectItemCaseSensitive(mb, "start");
+        cJSON *qty = cJSON_GetObjectItemCaseSensitive(mb, "quantity");
+        pt->reg_type = parse_reg_type(
+            cJSON_IsString(reg_type) ? reg_type->valuestring : NULL);
+        int start_raw = cJSON_IsNumber(start) ? start->valueint : 0;
+        pt->start = normalize_start(pt->reg_type, start_raw);
+        pt->quantity = default_quantity(
+            pt->reg_type,
+            cJSON_IsString(data_type) ? data_type->valuestring : NULL,
+            cJSON_IsNumber(length) ? length->valueint : 0,
+            cJSON_IsNumber(qty) ? qty->valueint : 0);
+        pt->byte_len = point_byte_len(
+            pt->reg_type, pt->quantity,
+            cJSON_IsNumber(length) ? length->valueint : 0,
+            cJSON_IsString(data_type) ? data_type->valuestring : NULL);
+        ctx->point_count++;
+    }
+    cJSON_Delete(arr);
+    return 0;
 }
 
 static int mb_init(protocol_adapter_t *self, const char *protocol_params_json,
-                    const char *points_json)
+                   const char *points_json)
 {
-    modbus_ctx_t *ctx = calloc(1, sizeof(modbus_ctx_t));
-    if (!ctx) return -ENOMEM;
-    ctx->port = 502;
-    ctx->unit_id = 1;
+    modbus_ctx_t *ctx = calloc(1, sizeof(*ctx));
+    if (!ctx) {
+        return -ENOMEM;
+    }
+
+    mb_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.role = MB_ROLE_SERVER;
+    cfg.port = MB_TCP_DEFAULT_PORT;
+    cfg.unit_id = MB_UNIT_ID_DEFAULT;
+    snprintf(cfg.bind_ip, sizeof(cfg.bind_ip), "0.0.0.0");
 
     cJSON *params = cJSON_Parse(protocol_params_json);
     if (params) {
+        cJSON *role = cJSON_GetObjectItemCaseSensitive(params, "role");
+        if (cJSON_IsString(role) && strcmp(role->valuestring, "client") == 0) {
+            cfg.role = MB_ROLE_CLIENT;
+        }
         cJSON *ip = cJSON_GetObjectItemCaseSensitive(params, "ip");
         if (cJSON_IsString(ip)) {
-            snprintf(ctx->ip, sizeof(ctx->ip), "%s", ip->valuestring);
+            if (cfg.role == MB_ROLE_CLIENT) {
+                snprintf(cfg.remote_ip, sizeof(cfg.remote_ip), "%s",
+                         ip->valuestring);
+            } else {
+                snprintf(cfg.bind_ip, sizeof(cfg.bind_ip), "%s",
+                         ip->valuestring);
+            }
+        }
+        cJSON *bind_ip = cJSON_GetObjectItemCaseSensitive(params, "bind_ip");
+        if (cJSON_IsString(bind_ip) && cfg.role == MB_ROLE_SERVER) {
+            snprintf(cfg.bind_ip, sizeof(cfg.bind_ip), "%s",
+                     bind_ip->valuestring);
         }
         cJSON *port = cJSON_GetObjectItemCaseSensitive(params, "port");
-        if (cJSON_IsNumber(port)) ctx->port = port->valueint;
+        if (cJSON_IsNumber(port)) {
+            cfg.port = port->valueint;
+        }
         cJSON *unit_id = cJSON_GetObjectItemCaseSensitive(params, "unit_id");
-        if (cJSON_IsNumber(unit_id)) ctx->unit_id = unit_id->valueint;
+        if (cJSON_IsNumber(unit_id)) {
+            cfg.unit_id = unit_id->valueint;
+        }
         cJSON_Delete(params);
     }
 
-    if (!ctx->ip[0]) {
-        LOG_ERROR("modbus", "protocol_params.ip 누락");
+    if (cfg.role == MB_ROLE_CLIENT && !cfg.remote_ip[0]) {
+        LOG_ERROR("modbus",
+                  "client 역할이면 protocol_params.ip (원격 슬레이브) 필요");
         free(ctx);
         return -EINVAL;
     }
 
-    cJSON *points = cJSON_Parse(points_json);
-    if (cJSON_IsArray(points)) {
-        cJSON *p;
-        cJSON_ArrayForEach(p, points)
-        {
-            if (ctx->point_count >= MAX_POINTS) break;
-            cJSON *name = cJSON_GetObjectItemCaseSensitive(p, "name");
-            cJSON *access = cJSON_GetObjectItemCaseSensitive(p, "access");
-            cJSON *address = cJSON_GetObjectItemCaseSensitive(p, "address");
-            cJSON *mb_addr =
-                address ? cJSON_GetObjectItemCaseSensitive(address, "modbus")
-                        : NULL;
-            if (!cJSON_IsString(name) || !mb_addr) {
-                LOG_WARN("modbus",
-                         "포인트 정의 누락(name/address.modbus) - 건너뜀");
-                continue;
-            }
-            modbus_point_t *pt = &ctx->points[ctx->point_count++];
-            snprintf(pt->name, sizeof(pt->name), "%s", name->valuestring);
-            snprintf(pt->access, sizeof(pt->access), "%s",
-                     cJSON_IsString(access) ? access->valuestring : "read");
-            cJSON *reg_type =
-                cJSON_GetObjectItemCaseSensitive(mb_addr, "register_type");
-            cJSON *start = cJSON_GetObjectItemCaseSensitive(mb_addr, "start");
-            pt->reg_type = parse_reg_type(
-                cJSON_IsString(reg_type) ? reg_type->valuestring : NULL);
-            pt->start = cJSON_IsNumber(start) ? start->valueint : 0;
-        }
-        cJSON_Delete(points);
+    parse_points(ctx, points_json);
+    ctx->role = cfg.role;
+    ctx->stack = mb_stack_create(&cfg);
+    if (!ctx->stack) {
+        free(ctx);
+        return -ENOMEM;
     }
-
-    LOG_INFO("modbus", "init 완료: %s:%d unit_id=%d points=%d", ctx->ip,
-              ctx->port, ctx->unit_id, ctx->point_count);
-
     self->ctx = ctx;
+    LOG_INFO("modbus", "init %s port=%d unit_id=%d points=%d (자체 스택)",
+             cfg.role == MB_ROLE_SERVER ? "server" : "client", cfg.port,
+             cfg.unit_id, ctx->point_count);
     return 0;
 }
 
 static int mb_connect(protocol_adapter_t *self)
 {
     modbus_ctx_t *ctx = self->ctx;
-    ctx->mb = modbus_new_tcp(ctx->ip, ctx->port);
-    if (!ctx->mb) {
+    int rc = mb_stack_start(ctx->stack);
+    if (rc != 0) {
         snprintf(ctx->last_error, sizeof(ctx->last_error),
-                 "modbus_new_tcp 실패");
-        return -1;
-    }
-    modbus_set_slave(ctx->mb, ctx->unit_id);
-    if (modbus_connect(ctx->mb) == -1) {
-        snprintf(ctx->last_error, sizeof(ctx->last_error), "connect 실패: %s",
-                 modbus_strerror(errno));
+                 "stack start failed (%d)", rc);
         LOG_ERROR("modbus", "%s", ctx->last_error);
-        return -1;
+        return rc;
     }
-    ctx->connected = 1;
-    LOG_INFO("modbus", "연결 성공 %s:%d", ctx->ip, ctx->port);
     return 0;
 }
 
 static void mb_disconnect(protocol_adapter_t *self)
 {
     modbus_ctx_t *ctx = self->ctx;
-    if (ctx->mb) {
-        modbus_close(ctx->mb);
-        modbus_free(ctx->mb);
-        ctx->mb = NULL;
+    if (ctx && ctx->stack) {
+        mb_stack_stop(ctx->stack);
     }
-    ctx->connected = 0;
 }
 
 static void mb_poll_cycle(protocol_adapter_t *self)
 {
-    /* TODO: 여기서 등록된 read 포인트를 주기적으로 스캔해 캐시에 반영.
-     * 지금은 요청 시점에 read_point 에서 직접 읽는 방식으로 단순화되어 있음.
-     * 실제 배포 시 사이클마다 일괄 read 후 캐싱하도록 확장 권장. */
-    (void)self;
+    modbus_ctx_t *ctx = self->ctx;
+    if (!ctx || !ctx->stack) {
+        return;
+    }
+    mb_stack_poll(ctx->stack);
+
+    /* Client: batch-refresh all PLC-readable ("read") and PLC-writable
+     * ("write") points into the local cache each cycle. */
+    if (ctx->role != MB_ROLE_CLIENT) {
+        return;
+    }
+    for (int i = 0; i < ctx->point_count; i++) {
+        modbus_point_t *pt = &ctx->points[i];
+        int rc =
+            mb_stack_client_read(ctx->stack, pt->reg_type, pt->start,
+                                 pt->quantity);
+        if (rc != 0) {
+            snprintf(ctx->last_error, sizeof(ctx->last_error),
+                     "poll %s failed (%d)", pt->name, rc);
+            LOG_WARN("modbus", "%s", ctx->last_error);
+        }
+    }
 }
 
 static modbus_point_t *find_point(modbus_ctx_t *ctx, const char *name)
 {
     for (int i = 0; i < ctx->point_count; i++) {
-        if (strcmp(ctx->points[i].name, name) == 0) return &ctx->points[i];
+        if (strcmp(ctx->points[i].name, name) == 0) {
+            return &ctx->points[i];
+        }
     }
     return NULL;
 }
 
 static int mb_read_point(protocol_adapter_t *self, const char *point_name,
-                          point_value_t *out)
+                         point_value_t *out)
 {
     modbus_ctx_t *ctx = self->ctx;
     modbus_point_t *pt = find_point(ctx, point_name);
-    if (!pt || !ctx->mb) return -ENOENT;
+    if (!pt || !out) {
+        return -ENOENT;
+    }
 
-    int rc = -1;
-    switch (pt->reg_type) {
-    case REG_HOLDING: {
-        uint16_t reg;
-        rc = modbus_read_registers(ctx->mb, pt->start, 1, &reg);
-        if (rc == 1) {
-            out->data = malloc(2);
-            out->data[0] = reg >> 8;
-            out->data[1] = reg & 0xff;
-            out->len = 2;
-        }
-        break;
+    /* Framework rule (same as PROFINET):
+     * access=write → PLC writes into our map → app reads it here.
+     * access=read  → also readable (app may inspect what it published). */
+    size_t n = pt->byte_len;
+    uint8_t *buf = malloc(n > 0 ? n : 1);
+    if (!buf) {
+        return -ENOMEM;
     }
-    case REG_INPUT: {
-        uint16_t reg;
-        rc = modbus_read_input_registers(ctx->mb, pt->start, 1, &reg);
-        if (rc == 1) {
-            out->data = malloc(2);
-            out->data[0] = reg >> 8;
-            out->data[1] = reg & 0xff;
-            out->len = 2;
-        }
-        break;
+    int rc = mb_stack_read_bytes(ctx->stack, pt->reg_type, pt->start, buf, n);
+    if (rc != 0) {
+        free(buf);
+        return rc;
     }
-    case REG_COIL: {
-        uint8_t bit;
-        rc = modbus_read_bits(ctx->mb, pt->start, 1, &bit);
-        if (rc == 1) {
-            out->data = malloc(1);
-            out->data[0] = bit;
-            out->len = 1;
-        }
-        break;
-    }
-    case REG_DISCRETE: {
-        uint8_t bit;
-        rc = modbus_read_input_bits(ctx->mb, pt->start, 1, &bit);
-        if (rc == 1) {
-            out->data = malloc(1);
-            out->data[0] = bit;
-            out->len = 1;
-        }
-        break;
-    }
-    }
-    return rc < 0 ? -1 : 0;
+    out->data = buf;
+    out->len = n;
+    return 0;
 }
 
 static int mb_write_point(protocol_adapter_t *self, const char *point_name,
-                           const point_value_t *value)
+                          const point_value_t *value)
 {
     modbus_ctx_t *ctx = self->ctx;
     modbus_point_t *pt = find_point(ctx, point_name);
-    if (!pt || !ctx->mb) return -ENOENT;
+    if (!pt || !value || !value->data) {
+        return -ENOENT;
+    }
 
-    if (pt->reg_type == REG_HOLDING && value->len >= 2) {
-        uint16_t reg = (value->data[0] << 8) | value->data[1];
-        return modbus_write_register(ctx->mb, pt->start, reg) == 1 ? 0 : -1;
+    size_t n = value->len;
+    if (n > pt->byte_len) {
+        n = pt->byte_len;
     }
-    if (pt->reg_type == REG_COIL && value->len >= 1) {
-        return modbus_write_bit(ctx->mb, pt->start,
-                                 value->data[0] ? 1 : 0) == 1
-                   ? 0
-                   : -1;
+
+    if (ctx->role == MB_ROLE_CLIENT) {
+        if (pt->reg_type == MB_REG_HOLDING) {
+            uint16_t qty = (uint16_t)((n + 1) / 2);
+            uint16_t *regs = calloc(qty, sizeof(uint16_t));
+            if (!regs) {
+                return -ENOMEM;
+            }
+            for (uint16_t i = 0; i < qty; i++) {
+                size_t off = (size_t)i * 2u;
+                uint8_t hi = (off < n) ? value->data[off] : 0;
+                uint8_t lo = (off + 1 < n) ? value->data[off + 1] : 0;
+                regs[i] = (uint16_t)((hi << 8) | lo);
+            }
+            int rc = mb_stack_client_write_regs(ctx->stack, pt->start, regs, qty);
+            free(regs);
+            return rc;
+        }
+        if (pt->reg_type == MB_REG_COIL) {
+            return mb_stack_client_write_bits(ctx->stack, pt->start, value->data,
+                                              (uint16_t)n);
+        }
+        LOG_WARN("modbus", "client write 는 holding/coil 만 지원: %s",
+                 point_name);
+        return -EINVAL;
     }
-    LOG_WARN("modbus", "point %s 는 write 대상이 아니거나 값 크기 불일치",
-             point_name);
-    return -EINVAL;
+
+    /* Server: publish into local map for the PLC/master to read. */
+    return mb_stack_write_bytes(ctx->stack, pt->reg_type, pt->start, value->data,
+                                n);
 }
 
 static int mb_health(protocol_adapter_t *self, int *connected, char *err_buf,
-                      size_t err_buf_len)
+                     size_t err_buf_len)
 {
     modbus_ctx_t *ctx = self->ctx;
-    *connected = ctx->connected;
+    *connected = mb_stack_connected(ctx->stack);
     snprintf(err_buf, err_buf_len, "%s", ctx->last_error);
     return 0;
 }
 
 static void mb_destroy(protocol_adapter_t *self)
 {
-    if (!self) return;
+    if (!self) {
+        return;
+    }
     modbus_ctx_t *ctx = self->ctx;
     if (ctx) {
-        if (ctx->mb) {
-            modbus_close(ctx->mb);
-            modbus_free(ctx->mb);
-        }
+        mb_stack_destroy(ctx->stack);
         free(ctx);
     }
     free(self);
@@ -263,8 +407,10 @@ static void mb_destroy(protocol_adapter_t *self)
 
 protocol_adapter_t *modbus_adapter_create(void)
 {
-    protocol_adapter_t *a = calloc(1, sizeof(protocol_adapter_t));
-    if (!a) return NULL;
+    protocol_adapter_t *a = calloc(1, sizeof(*a));
+    if (!a) {
+        return NULL;
+    }
     a->name = "modbus_tcp";
     a->init = mb_init;
     a->connect = mb_connect;

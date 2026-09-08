@@ -7,6 +7,7 @@ add_definitions(-D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE)
 
 option(ENABLE_ETHERNETIP "EtherNet/IP 어댑터 빌드 (구매 스택 필요)" OFF)
 option(ENABLE_PN_TESTS "PROFINET 스택 단위 테스트" ON)
+option(ENABLE_MB_TESTS "Modbus 스택 단위 테스트" ON)
 
 find_package(Threads REQUIRED)
 
@@ -31,11 +32,13 @@ else()
     set(ENABLE_CJSON_TEST OFF CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(cjson_src)
-    set(CJSON_TARGET cjson)
+    FetchContent_GetProperties(cjson_src)
+    # Do not mutate the upstream cjson target (install export rejects SOURCE_DIR).
+    add_library(cjson_local INTERFACE)
+    target_link_libraries(cjson_local INTERFACE cjson)
+    target_include_directories(cjson_local INTERFACE ${cjson_src_SOURCE_DIR})
+    set(CJSON_TARGET cjson_local)
 endif()
-
-# libmodbus: pkg-config 로 탐색 (배포판 패키지: libmodbus-dev)
-pkg_check_modules(LIBMODBUS REQUIRED libmodbus)
 
 # ---- 코어 ----
 add_library(core STATIC
@@ -51,16 +54,20 @@ target_include_directories(core PUBLIC
     adapters/cclink
     adapters/ethernetip
     adapters/profinet
-    ${LIBMODBUS_INCLUDE_DIRS}
 )
 target_link_libraries(core PUBLIC ${CJSON_TARGET})
+
+# ---- Modbus TCP 스택 (자체 구현, libmodbus 없음) ----
+add_library(mb_stack STATIC stacks/modbus/src/mb_stack.c)
+target_include_directories(mb_stack PUBLIC stacks/modbus/include)
+target_include_directories(mb_stack PRIVATE include core)
+target_link_libraries(mb_stack PUBLIC Threads::Threads)
 
 # ---- 어댑터: Modbus (항상 빌드, 벤더 의존성 없음) ----
 add_library(adapter_modbus STATIC adapters/modbus/modbus_adapter.c)
 target_include_directories(adapter_modbus PUBLIC adapters/modbus)
-target_include_directories(adapter_modbus PRIVATE include core ${LIBMODBUS_INCLUDE_DIRS})
-target_link_libraries(adapter_modbus PUBLIC ${CJSON_TARGET} ${LIBMODBUS_LIBRARIES})
-
+target_include_directories(adapter_modbus PRIVATE include core stacks/modbus/include)
+target_link_libraries(adapter_modbus PUBLIC ${CJSON_TARGET} mb_stack)
 # ---- 어댑터: SLMP (항상 빌드, 벤더 의존성 없음) ----
 add_library(adapter_slmp STATIC adapters/slmp/slmp_adapter.c)
 target_include_directories(adapter_slmp PUBLIC adapters/slmp)
@@ -110,6 +117,12 @@ if(ENABLE_PN_TESTS)
     add_executable(test_pn_stack tests/test_pn_stack.c)
     target_include_directories(test_pn_stack PRIVATE stacks/profinet/include include core)
     target_link_libraries(test_pn_stack PRIVATE pn_stack)
+endif()
+
+if(ENABLE_MB_TESTS)
+    add_executable(test_mb_stack tests/test_mb_stack.c)
+    target_include_directories(test_mb_stack PRIVATE stacks/modbus/include include core)
+    target_link_libraries(test_mb_stack PRIVATE mb_stack)
 endif()
 
 # ---- 데몬 실행파일 ----
