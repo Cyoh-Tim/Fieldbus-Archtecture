@@ -725,8 +725,8 @@ static int parse_write_block(const uint8_t *p, size_t n, pn_iodrw_t *w,
     return 0;
 }
 
-static size_t build_write_res_all(const uint8_t *blocks, size_t n, uint8_t *out,
-                                  size_t cap)
+static size_t build_write_res_all(pn_stack_t *s, const uint8_t *blocks, size_t n,
+                                  uint8_t *out, size_t cap)
 {
     pn_iodrw_t w;
     size_t hdr_sz = 0;
@@ -739,6 +739,10 @@ static size_t build_write_res_all(const uint8_t *blocks, size_t n, uint8_t *out,
         return 4;
     }
     if (w.index != PN_INDEX_WRITE_MULTI) {
+        if (hdr_sz + w.rec_len <= n) {
+            pn_record_write(s, w.slot, w.subslot, w.index, blocks + hdr_sz,
+                            w.rec_len);
+        }
         return put_write_res(out, cap, &w, 0);
     }
     size_t pos = put_write_res(out, cap, &w, 0);
@@ -762,6 +766,8 @@ static size_t build_write_res_all(const uint8_t *blocks, size_t n, uint8_t *out,
         if (next > inner_end) {
             break;
         }
+        pn_record_write(s, iw.slot, iw.subslot, iw.index,
+                        blocks + inner_off + ih, iw.rec_len);
         size_t wn = put_write_res(out + pos, cap - pos, &iw, 0);
         if (wn == 0) {
             break;
@@ -907,7 +913,7 @@ int pn_rpc_handle_from(pn_stack_t *s, const uint8_t *pdu, size_t len,
         uint8_t z[4] = {0};
         memcpy(wblk, z, 4);
         if (blocks && blen >= 6) {
-            wn = build_write_res_all(blocks, blen, wblk, sizeof(wblk));
+            wn = build_write_res_all(s, blocks, blen, wblk, sizeof(wblk));
         }
         so = ndr_wrap(stub_out, wblk, wn, le);
     } else {

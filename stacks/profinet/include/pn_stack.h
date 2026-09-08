@@ -11,10 +11,11 @@
  *
  * Scope:
  *   - Device-side DCP, CM (Connect/Write/WriteMultiple/PrmEnd/ApplicationReady),
- *     RTC1 cyclic IO, record (I&M0, RealIdent, PD*), LLDP, SNMP (MIB-II +
- *     LLDP-MIB Get/GetNext), AlarmCR + one RTA Data/Ack
+ *     RTC1 cyclic IO, record (I&M0–4, RealIdent, PD* + statistics),
+ *     LLDP, SNMP (MIB-II ifTable/ifXTable, ip/udp/snmp, LLDP-MIB,
+ *     LLDP-EXT-PNO loc delays; Get/GetNext/Set), AlarmCR + RTA Data/Ack
  *   - Lab Conformance Class B subset: RT Class 1, DCP, CM, alarms,
- *     SNMP (MIB-II + LLDP-MIB Get/GetNext), LLDP topology, ChannelDiagnosis.
+ *     SNMP (MIB-II + LLDP-MIB + Set), LLDP topology, ChannelDiagnosis ASE.
  *     Not PI-certified.
  *   - CC-C / IRT (RT Class 3, PTCP, SPIRTA) is not implemented; Connect
  *     with RT_CLASS_3 is rejected.

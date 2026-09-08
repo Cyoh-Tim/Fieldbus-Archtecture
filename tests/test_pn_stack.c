@@ -885,6 +885,45 @@ static void test_cm_write_read(void)
     expect(count_block(resp, rlen, PN_BLOCK_PDIF_REAL) == 1,
            "PDInterfaceDataReal block type 0x0240");
 
+    uint8_t im1[60];
+    memset(im1, ' ', sizeof(im1));
+    pn_wr_be16(im1, PN_BLOCK_IM1);
+    pn_wr_be16(im1 + 2, 56);
+    im1[4] = 1;
+    im1[5] = 0;
+    memcpy(im1 + 6, "LINE-A", 6);
+    memcpy(im1 + 38, "CAB-1", 5);
+    bn = put_iod_write_hdr(blocks, 4, 0, 0, 1, PN_INDEX_IM1, sizeof(im1));
+    memcpy(blocks + bn, im1, sizeof(im1));
+    bn += sizeof(im1);
+    sn = ndr_wrap_le(stub, blocks, bn);
+    plen = rpc_req(pdu, 3, stub, sn);
+    rlen = 0;
+    rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
+    expect(rc == 0 && count_block(resp, rlen, PN_BLOCK_WRITE_RES) == 1,
+           "I&M1 Write.res");
+    plen = build_read_pdu(pdu, 0, 1, PN_INDEX_IM1);
+    rlen = 0;
+    rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
+    expect(rc == 0 && contains(resp, rlen, "LINE-A") &&
+               contains(resp, rlen, "CAB-1") &&
+               count_block(resp, rlen, PN_BLOCK_IM1) == 1,
+           "I&M1 TagFunction/Location after Write");
+
+    plen = build_read_pdu(pdu, 0, 1, PN_INDEX_IM2);
+    rlen = 0;
+    rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
+    expect(rc == 0 && contains(resp, rlen, "2020-01-01") &&
+               count_block(resp, rlen, PN_BLOCK_IM2) == 1,
+           "I&M2 default date");
+
+    plen = build_read_pdu(pdu, 0, 0x8001, PN_INDEX_PDPORT_STAT);
+    rlen = 0;
+    rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
+    expect(rc == 0 && rlen > 80 &&
+               count_block(resp, rlen, PN_BLOCK_PDPORT_STAT) == 1,
+           "PDPortStatistic 0x802F");
+
     plen = build_read_pdu(pdu, 0, 1, 0x1234);
     rlen = 0;
     rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
@@ -1084,6 +1123,61 @@ static size_t snmp_pdu(uint8_t *out, uint8_t rid, uint8_t pdu_tag,
     return m;
 }
 
+static size_t snmp_pdu_set(uint8_t *out, uint8_t rid, const uint8_t *oid,
+                           size_t olen, const char *str)
+{
+    size_t sl = strlen(str);
+    uint8_t vb[120];
+    size_t i = 0;
+    vb[i++] = 0x30;
+    size_t vb_len_at = i++;
+    vb[i++] = 0x06;
+    vb[i++] = (uint8_t)olen;
+    memcpy(vb + i, oid, olen);
+    i += olen;
+    vb[i++] = 0x04;
+    vb[i++] = (uint8_t)sl;
+    memcpy(vb + i, str, sl);
+    i += sl;
+    vb[vb_len_at] = (uint8_t)(i - vb_len_at - 1);
+    uint8_t vbl[136];
+    size_t v = 0;
+    vbl[v++] = 0x30;
+    vbl[v++] = (uint8_t)i;
+    memcpy(vbl + v, vb, i);
+    v += i;
+    uint8_t pdu[180];
+    size_t p = 0;
+    pdu[p++] = 0xA3;
+    size_t pdu_len_at = p++;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = rid;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = 0x00;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = 0x00;
+    memcpy(pdu + p, vbl, v);
+    p += v;
+    pdu[pdu_len_at] = (uint8_t)(p - pdu_len_at - 1);
+    size_t m = 0;
+    out[m++] = 0x30;
+    size_t msg_len_at = m++;
+    out[m++] = 0x02;
+    out[m++] = 0x01;
+    out[m++] = 0x00;
+    out[m++] = 0x04;
+    out[m++] = 0x06;
+    memcpy(out + m, "public", 6);
+    m += 6;
+    memcpy(out + m, pdu, p);
+    m += p;
+    out[msg_len_at] = (uint8_t)(m - msg_len_at - 1);
+    return m;
+}
+
 static int snmp_has(const uint8_t *resp, size_t n, const void *needle,
                     size_t nlen)
 {
@@ -1176,6 +1270,25 @@ static void test_snmp_mib(void)
     expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
                contains(resp, rlen, "ctl-lab1"),
            "SNMP Get lldpRemSysName after LLDP RX");
+    static const uint8_t oid_ifinoct[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x02,
+                                          0x02, 0x01, 0x0a, 0x01};
+    qn = snmp_pdu(req, 7, 0xa0, oid_ifinoct, sizeof(oid_ifinoct));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               snmp_has(resp, rlen, "\x41", 1),
+           "SNMP Get ifInOctets Counter32 after RX");
+    static const uint8_t oid_sysloc[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x01,
+                                         0x06, 0x00};
+    qn = snmp_pdu_set(req, 8, oid_sysloc, sizeof(oid_sysloc), "lab-rack");
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               contains(resp, rlen, "lab-rack"),
+           "SNMP Set sysLocation");
+    qn = snmp_pdu(req, 9, 0xa0, oid_sysloc, sizeof(oid_sysloc));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               contains(resp, rlen, "lab-rack"),
+           "SNMP Get sysLocation after Set");
     pn_stack_destroy(s);
 }
 
@@ -1245,6 +1358,13 @@ static void test_rta_alarm(void)
                    rlen > 80 &&
                    count_block(rresp, rlen, PN_BLOCK_DIAGNOSIS) >= 1,
                "ChannelDiagnosis 0x800A after RTA");
+        plen = build_read_pdu(rpdu, 0, 0x8001, PN_INDEX_QUAL_CHAN_DIAG);
+        rlen = 0;
+        expect(pn_stack_handle_rpc(s, rpdu, plen, rresp, sizeof(rresp), &rlen) ==
+                       0 &&
+                   rlen > 80 &&
+                   count_block(rresp, rlen, PN_BLOCK_DIAGNOSIS) >= 1,
+               "QualifiedChannelDiagnosis 0x8011");
     }
     pn_stack_destroy(s);
 }

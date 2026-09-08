@@ -31,6 +31,18 @@ typedef struct {
 typedef struct {
     uint16_t slot;
     uint16_t subslot;
+    uint16_t channel;
+    uint16_t properties;
+    uint16_t error_type;
+    uint16_t ext_error;
+    uint32_t ext_add;
+    uint32_t qualified;
+    int present;
+} pn_diag_ch_t;
+
+typedef struct {
+    uint16_t slot;
+    uint16_t subslot;
     uint16_t in_len;
     uint16_t out_len;
     uint16_t in_pi;
@@ -88,6 +100,7 @@ struct pn_stack {
 
     char lldp_rem_name[PN_STATION_NAME_MAX + 1];
     char lldp_rem_port[64];
+    char lldp_rem_desc[64];
     uint8_t lldp_rem_mac[6];
     uint8_t lldp_rem_chassis[32];
     uint8_t lldp_rem_chassis_len;
@@ -108,7 +121,41 @@ struct pn_stack {
     int alarm_retries;
     uint64_t last_alarm_ns;
     int diag_present;
+    int n_diag;
+    pn_diag_ch_t diag[PN_DIAG_MAX];
     int connect_reject;
+
+    char im1_function[32];
+    char im1_location[22];
+    char im2_date[16];
+    char im3_desc[54];
+    uint8_t im4_sig[54];
+    uint8_t pdport_adjust[PN_PDEV_STORE];
+    uint16_t pdport_adjust_len;
+    uint8_t pdport_check[PN_PDEV_STORE];
+    uint16_t pdport_check_len;
+    uint8_t pdif_adjust[PN_PDEV_STORE];
+    uint16_t pdif_adjust_len;
+
+    char snmp_syscontact[64];
+    char snmp_syslocation[64];
+    char snmp_sysname[PN_STATION_NAME_MAX + 1];
+    uint32_t if_in_octets;
+    uint32_t if_in_ucast;
+    uint32_t if_in_discards;
+    uint32_t if_in_errors;
+    uint32_t if_out_octets;
+    uint32_t if_out_ucast;
+    uint32_t if_out_discards;
+    uint32_t if_out_errors;
+    uint32_t snmp_in_pkts;
+    uint32_t snmp_out_pkts;
+    uint32_t snmp_in_get;
+    uint32_t snmp_in_next;
+    uint32_t snmp_in_set;
+    uint32_t udp_in;
+    uint32_t udp_out;
+    uint32_t lldp_rem_inserts;
 
     uint8_t rpc_tx[PN_FRAME_MAX];
     size_t rpc_tx_len;
@@ -176,6 +223,11 @@ int pn_udp_open_ip(uint32_t ip_host, uint16_t port);
 
 int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                    uint16_t index, uint8_t *out, size_t cap, size_t *out_len);
+int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
+                    uint16_t index, const uint8_t *data, uint32_t len);
+void pn_diag_arm_default(pn_stack_t *s);
+void pn_if_on_rx(pn_stack_t *s, size_t n);
+void pn_if_on_tx(pn_stack_t *s, size_t n);
 
 int pn_sec_hmac(const pn_stack_t *s, const uint8_t *data, size_t len,
                 uint8_t mac[PN_HMAC_LEN]);

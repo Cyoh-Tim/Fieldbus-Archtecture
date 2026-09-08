@@ -31,6 +31,8 @@ void pn_ar_reset(pn_stack_t *s)
     s->alarm_local_ref = 1;
     s->alarm_max_len = 200;
     s->diag_present = 0;
+    s->n_diag = 0;
+    memset(s->diag, 0, sizeof(s->diag));
     s->connect_reject = 0;
 }
 
@@ -60,6 +62,24 @@ const pn_submod_t *pn_find_sub(const pn_ar_t *ar, uint16_t slot,
         }
     }
     return NULL;
+}
+
+void pn_if_on_rx(pn_stack_t *s, size_t n)
+{
+    if (!s) {
+        return;
+    }
+    s->if_in_octets += (uint32_t)n;
+    s->if_in_ucast++;
+}
+
+void pn_if_on_tx(pn_stack_t *s, size_t n)
+{
+    if (!s) {
+        return;
+    }
+    s->if_out_octets += (uint32_t)n;
+    s->if_out_ucast++;
 }
 
 pn_stack_t *pn_stack_create(const pn_cfg_t *cfg)
@@ -115,6 +135,10 @@ pn_stack_t *pn_stack_create(const pn_cfg_t *cfg)
     pthread_mutex_init(&s->io_lock, NULL);
     memset(s->input_image, 0, sizeof(s->input_image));
     memset(s->output_image, 0, sizeof(s->output_image));
+    memset(s->im1_function, ' ', sizeof(s->im1_function));
+    memset(s->im1_location, ' ', sizeof(s->im1_location));
+    memcpy(s->im2_date, "2020-01-01 00:00", 16);
+    memset(s->im3_desc, ' ', sizeof(s->im3_desc));
     s->start_ns = pn_now_ns();
     s->lldp_last_change_ns = s->start_ns;
     s->alarm_local_ref = 1;
@@ -215,6 +239,7 @@ int pn_stack_handle_eth(pn_stack_t *s, const uint8_t *frame, size_t len)
     if (pn_eth_parse(frame, len, &payload, &plen, &et, &dst, &src) != 0) {
         return -EINVAL;
     }
+    pn_if_on_rx(s, len);
     int ours = memcmp(dst, s->cfg.mac, 6) == 0;
     int dcp_mc = memcmp(dst, k_dcp_mc, 6) == 0;
     if (et == PN_ETHTYPE_PN && plen >= 2) {

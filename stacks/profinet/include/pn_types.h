@@ -68,8 +68,14 @@
 #define PN_BLOCK_DIAGNOSIS    0x0010u
 #define PN_BLOCK_REALIDENT    0x0013u
 #define PN_BLOCK_IM0          0x0020u
+#define PN_BLOCK_IM1          0x0021u
+#define PN_BLOCK_IM2          0x0022u
+#define PN_BLOCK_IM3          0x0023u
+#define PN_BLOCK_IM4          0x0024u
 #define PN_BLOCK_PDPORT_REAL  0x020Fu
+#define PN_BLOCK_PDPORT_STAT  0x0251u
 #define PN_BLOCK_PDIF_REAL    0x0240u
+#define PN_BLOCK_PDIF_STAT    0x0250u
 #define PN_BLOCK_SEC_INT      0x0E01u /* stack-local integrity block */
 
 #define PN_IOCR_INPUT         0x0001u
@@ -93,11 +99,22 @@
 #define PN_DATASTATUS_PROBLEM 0x40u
 
 #define PN_INDEX_IM0            0xAFF0u
+#define PN_INDEX_IM1            0xAFF1u
+#define PN_INDEX_IM2            0xAFF2u
+#define PN_INDEX_IM3            0xAFF3u
+#define PN_INDEX_IM4            0xAFF4u
 #define PN_INDEX_CHAN_DIAG      0x800Au
+#define PN_INDEX_DIAG_DATA      0x800Cu
 #define PN_INDEX_EXT_CHAN_DIAG  0x8010u
+#define PN_INDEX_QUAL_CHAN_DIAG 0x8011u
 #define PN_INDEX_REALIDENT_SUB  0x8001u
 #define PN_INDEX_PDPORT_REAL    0x802Au
+#define PN_INDEX_PDPORT_CHECK   0x802Bu
+#define PN_INDEX_PDPORT_ADJUST  0x802Cu
+#define PN_INDEX_PDPORT_STAT    0x802Fu
+#define PN_INDEX_PDIF_STAT      0x8071u
 #define PN_INDEX_PDIF_REAL      0x8080u
+#define PN_INDEX_PDIF_ADJUST    0x8081u
 #define PN_INDEX_REALIDENT_SLOT 0xC001u
 #define PN_INDEX_EXPIDENT_AR    0xE000u
 #define PN_INDEX_REALIDENT_AR   0xE001u
@@ -115,6 +132,8 @@
 #define PN_IOCR_MAX           2
 #define PN_IOBJ_MAX           8
 #define PN_SUBMOD_MAX         16
+#define PN_DIAG_MAX           4
+#define PN_PDEV_STORE         128
 
 #define PN_CONFORMANCE_CLASS_B  2
 #define PN_RT_CLASS_1           1

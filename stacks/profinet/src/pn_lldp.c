@@ -141,6 +141,13 @@ void pn_lldp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
             s->lldp_rem_name[n] = '\0';
             s->lldp_rem_set = 1;
             changed = 1;
+        } else if (type == 6 && len > 0) {
+            size_t n = len < sizeof(s->lldp_rem_desc) - 1
+                           ? len
+                           : sizeof(s->lldp_rem_desc) - 1;
+            memcpy(s->lldp_rem_desc, val, n);
+            s->lldp_rem_desc[n] = '\0';
+            changed = 1;
         }
         off += len;
     }
@@ -148,9 +155,13 @@ void pn_lldp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
         memcpy(s->lldp_rem_mac, src, 6);
     }
     if (changed) {
+        int was = s->lldp_rem_set;
         s->lldp_last_change_ns = pn_now_ns();
         if (s->lldp_rem_name[0] || s->lldp_rem_chassis_len) {
             s->lldp_rem_set = 1;
+            if (!was) {
+                s->lldp_rem_inserts++;
+            }
         }
     }
 }

@@ -7,14 +7,17 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
-#define ASN_INT   0x02u
-#define ASN_OCT   0x04u
-#define ASN_NULL  0x05u
-#define ASN_OID   0x06u
-#define ASN_GAUGE 0x42u
-#define ASN_TICKS 0x43u
+#define ASN_INT        0x02u
+#define ASN_OCT        0x04u
+#define ASN_NULL       0x05u
+#define ASN_OID        0x06u
+#define ASN_COUNTER    0x41u
+#define ASN_GAUGE      0x42u
+#define ASN_TICKS      0x43u
+#define ASN_COUNTER64  0x46u
 
 #define SNMP_ERR_NOSUCHNAME 2
+#define SNMP_ERR_GENERR     5
 
 #define OID_MAX 16
 #define LEAF_VAL_MAX 64
@@ -180,18 +183,30 @@ static int oid_is_prefix(const uint32_t *pre, uint8_t pn, const uint32_t *oid,
 }
 
 enum {
+    L_LLDP_TX_INT,
+    L_LLDP_TX_HOLD,
+    L_LLDP_STATS_INS,
+    L_LLDP_STATS_DEL,
+    L_LLDP_STATS_DROP,
+    L_LLDP_STATS_AGE,
     L_LLDP_LASTCHG,
     L_LLDP_LOC_CHASSIS_ST,
     L_LLDP_LOC_CHASSIS,
     L_LLDP_LOC_SYSNAME,
     L_LLDP_LOC_SYSDESC,
+    L_LLDP_LOC_CAP_SUP,
+    L_LLDP_LOC_CAP_EN,
     L_LLDP_LOC_PORT_ST,
     L_LLDP_LOC_PORT,
+    L_LLDP_LOC_PORT_DESC,
     L_LLDP_REM_CHASSIS_ST,
     L_LLDP_REM_CHASSIS,
     L_LLDP_REM_PORT_ST,
     L_LLDP_REM_PORT,
     L_LLDP_REM_SYSNAME,
+    L_LLDP_REM_SYSDESC,
+    L_LLDP_XPNO_TXD,
+    L_LLDP_XPNO_RXD,
     L_SYSDESCR,
     L_SYSOID,
     L_SYSUPTIME,
@@ -208,22 +223,76 @@ enum {
     L_IFPHYS,
     L_IFADMIN,
     L_IFOPER,
+    L_IFLASTCHG,
+    L_IFINOCT,
+    L_IFINUCAST,
+    L_IFINNUCAST,
+    L_IFINDISC,
+    L_IFINERR,
+    L_IFINUNK,
+    L_IFOUTOCT,
+    L_IFOUTUCAST,
+    L_IFOUTNUCAST,
+    L_IFOUTDISC,
+    L_IFOUTERR,
+    L_IFOUTQLEN,
+    L_IFSPEC,
+    L_IPFWD,
+    L_IPTTL,
+    L_UDP_IN,
+    L_UDP_NOPORT,
+    L_UDP_INERR,
+    L_UDP_OUT,
+    L_UDP_LADDR,
+    L_UDP_LPORT,
+    L_SNMP_IN,
+    L_SNMP_OUT,
+    L_SNMP_INGET,
+    L_SNMP_INNEXT,
+    L_SNMP_INSET,
+    L_SNMP_OUTRESP,
+    L_SNMP_AUTHTRAP,
+    L_IFX_NAME,
+    L_IFX_INMCAST,
+    L_IFX_INBCAST,
+    L_IFX_OUTMCAST,
+    L_IFX_OUTBCAST,
+    L_IFX_HCIN,
+    L_IFX_HCOUT,
+    L_IFX_TRAP,
+    L_IFX_HSPEED,
+    L_IFX_PROM,
+    L_IFX_CONN,
+    L_IFX_ALIAS,
+    L_IFX_DISC,
     L_COUNT
 };
 
 static const uint32_t k_oids[][OID_MAX] = {
+    [L_LLDP_TX_INT] = {1, 0, 8802, 1, 1, 2, 1, 1, 1, 0},
+    [L_LLDP_TX_HOLD] = {1, 0, 8802, 1, 1, 2, 1, 1, 2, 0},
+    [L_LLDP_STATS_INS] = {1, 0, 8802, 1, 1, 2, 1, 2, 2, 0},
+    [L_LLDP_STATS_DEL] = {1, 0, 8802, 1, 1, 2, 1, 2, 3, 0},
+    [L_LLDP_STATS_DROP] = {1, 0, 8802, 1, 1, 2, 1, 2, 4, 0},
+    [L_LLDP_STATS_AGE] = {1, 0, 8802, 1, 1, 2, 1, 2, 5, 0},
     [L_LLDP_LASTCHG] = {1, 0, 8802, 1, 1, 2, 1, 2, 6, 0},
     [L_LLDP_LOC_CHASSIS_ST] = {1, 0, 8802, 1, 1, 2, 1, 3, 1, 0},
     [L_LLDP_LOC_CHASSIS] = {1, 0, 8802, 1, 1, 2, 1, 3, 2, 0},
     [L_LLDP_LOC_SYSNAME] = {1, 0, 8802, 1, 1, 2, 1, 3, 3, 0},
     [L_LLDP_LOC_SYSDESC] = {1, 0, 8802, 1, 1, 2, 1, 3, 4, 0},
+    [L_LLDP_LOC_CAP_SUP] = {1, 0, 8802, 1, 1, 2, 1, 3, 5, 0},
+    [L_LLDP_LOC_CAP_EN] = {1, 0, 8802, 1, 1, 2, 1, 3, 6, 0},
     [L_LLDP_LOC_PORT_ST] = {1, 0, 8802, 1, 1, 2, 1, 3, 7, 1, 2, 1},
     [L_LLDP_LOC_PORT] = {1, 0, 8802, 1, 1, 2, 1, 3, 7, 1, 3, 1},
+    [L_LLDP_LOC_PORT_DESC] = {1, 0, 8802, 1, 1, 2, 1, 3, 7, 1, 4, 1},
     [L_LLDP_REM_CHASSIS_ST] = {1, 0, 8802, 1, 1, 2, 1, 4, 1, 1, 4, 0, 1, 1},
     [L_LLDP_REM_CHASSIS] = {1, 0, 8802, 1, 1, 2, 1, 4, 1, 1, 5, 0, 1, 1},
     [L_LLDP_REM_PORT_ST] = {1, 0, 8802, 1, 1, 2, 1, 4, 1, 1, 6, 0, 1, 1},
     [L_LLDP_REM_PORT] = {1, 0, 8802, 1, 1, 2, 1, 4, 1, 1, 7, 0, 1, 1},
     [L_LLDP_REM_SYSNAME] = {1, 0, 8802, 1, 1, 2, 1, 4, 1, 1, 9, 0, 1, 1},
+    [L_LLDP_REM_SYSDESC] = {1, 0, 8802, 1, 1, 2, 1, 4, 1, 1, 10, 0, 1, 1},
+    [L_LLDP_XPNO_TXD] = {1, 0, 8802, 1, 1, 2, 1, 5, 3791, 1, 2, 3, 1, 1, 1},
+    [L_LLDP_XPNO_RXD] = {1, 0, 8802, 1, 1, 2, 1, 5, 3791, 1, 2, 4, 1, 1, 1},
     [L_SYSDESCR] = {1, 3, 6, 1, 2, 1, 1, 1, 0},
     [L_SYSOID] = {1, 3, 6, 1, 2, 1, 1, 2, 0},
     [L_SYSUPTIME] = {1, 3, 6, 1, 2, 1, 1, 3, 0},
@@ -240,44 +309,87 @@ static const uint32_t k_oids[][OID_MAX] = {
     [L_IFPHYS] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 6, 1},
     [L_IFADMIN] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 7, 1},
     [L_IFOPER] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 8, 1},
+    [L_IFLASTCHG] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 9, 1},
+    [L_IFINOCT] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 10, 1},
+    [L_IFINUCAST] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 11, 1},
+    [L_IFINNUCAST] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 12, 1},
+    [L_IFINDISC] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 13, 1},
+    [L_IFINERR] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 14, 1},
+    [L_IFINUNK] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 15, 1},
+    [L_IFOUTOCT] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 16, 1},
+    [L_IFOUTUCAST] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 17, 1},
+    [L_IFOUTNUCAST] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 18, 1},
+    [L_IFOUTDISC] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 19, 1},
+    [L_IFOUTERR] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 20, 1},
+    [L_IFOUTQLEN] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 21, 1},
+    [L_IFSPEC] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 22, 1},
+    [L_IPFWD] = {1, 3, 6, 1, 2, 1, 4, 1, 0},
+    [L_IPTTL] = {1, 3, 6, 1, 2, 1, 4, 2, 0},
+    [L_UDP_IN] = {1, 3, 6, 1, 2, 1, 7, 1, 0},
+    [L_UDP_NOPORT] = {1, 3, 6, 1, 2, 1, 7, 2, 0},
+    [L_UDP_INERR] = {1, 3, 6, 1, 2, 1, 7, 3, 0},
+    [L_UDP_OUT] = {1, 3, 6, 1, 2, 1, 7, 4, 0},
+    [L_UDP_LADDR] = {1, 3, 6, 1, 2, 1, 7, 5, 1, 1, 0, 0, 0, 0, 161},
+    [L_UDP_LPORT] = {1, 3, 6, 1, 2, 1, 7, 5, 1, 2, 0, 0, 0, 0, 161},
+    [L_SNMP_IN] = {1, 3, 6, 1, 2, 1, 11, 1, 0},
+    [L_SNMP_OUT] = {1, 3, 6, 1, 2, 1, 11, 2, 0},
+    [L_SNMP_INGET] = {1, 3, 6, 1, 2, 1, 11, 15, 0},
+    [L_SNMP_INNEXT] = {1, 3, 6, 1, 2, 1, 11, 16, 0},
+    [L_SNMP_INSET] = {1, 3, 6, 1, 2, 1, 11, 17, 0},
+    [L_SNMP_OUTRESP] = {1, 3, 6, 1, 2, 1, 11, 28, 0},
+    [L_SNMP_AUTHTRAP] = {1, 3, 6, 1, 2, 1, 11, 30, 0},
+    [L_IFX_NAME] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 1, 1},
+    [L_IFX_INMCAST] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 2, 1},
+    [L_IFX_INBCAST] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 3, 1},
+    [L_IFX_OUTMCAST] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 4, 1},
+    [L_IFX_OUTBCAST] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 5, 1},
+    [L_IFX_HCIN] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 6, 1},
+    [L_IFX_HCOUT] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 10, 1},
+    [L_IFX_TRAP] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 14, 1},
+    [L_IFX_HSPEED] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 15, 1},
+    [L_IFX_PROM] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 16, 1},
+    [L_IFX_CONN] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 17, 1},
+    [L_IFX_ALIAS] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 18, 1},
+    [L_IFX_DISC] = {1, 3, 6, 1, 2, 1, 31, 1, 1, 1, 19, 1},
 };
 
 static const uint8_t k_oidn[L_COUNT] = {
-    [L_LLDP_LASTCHG] = 10,
-    [L_LLDP_LOC_CHASSIS_ST] = 10,
-    [L_LLDP_LOC_CHASSIS] = 10,
-    [L_LLDP_LOC_SYSNAME] = 10,
-    [L_LLDP_LOC_SYSDESC] = 10,
-    [L_LLDP_LOC_PORT_ST] = 12,
-    [L_LLDP_LOC_PORT] = 12,
-    [L_LLDP_REM_CHASSIS_ST] = 14,
-    [L_LLDP_REM_CHASSIS] = 14,
-    [L_LLDP_REM_PORT_ST] = 14,
-    [L_LLDP_REM_PORT] = 14,
-    [L_LLDP_REM_SYSNAME] = 14,
-    [L_SYSDESCR] = 9,
-    [L_SYSOID] = 9,
-    [L_SYSUPTIME] = 9,
-    [L_SYSCONTACT] = 9,
-    [L_SYSNAME] = 9,
-    [L_SYSLOCATION] = 9,
-    [L_SYSSERVICES] = 9,
+    [L_LLDP_TX_INT] = 10, [L_LLDP_TX_HOLD] = 10,
+    [L_LLDP_STATS_INS] = 10, [L_LLDP_STATS_DEL] = 10,
+    [L_LLDP_STATS_DROP] = 10, [L_LLDP_STATS_AGE] = 10, [L_LLDP_LASTCHG] = 10,
+    [L_LLDP_LOC_CHASSIS_ST] = 10, [L_LLDP_LOC_CHASSIS] = 10,
+    [L_LLDP_LOC_SYSNAME] = 10, [L_LLDP_LOC_SYSDESC] = 10,
+    [L_LLDP_LOC_CAP_SUP] = 10, [L_LLDP_LOC_CAP_EN] = 10,
+    [L_LLDP_LOC_PORT_ST] = 12, [L_LLDP_LOC_PORT] = 12, [L_LLDP_LOC_PORT_DESC] = 12,
+    [L_LLDP_REM_CHASSIS_ST] = 14, [L_LLDP_REM_CHASSIS] = 14,
+    [L_LLDP_REM_PORT_ST] = 14, [L_LLDP_REM_PORT] = 14,
+    [L_LLDP_REM_SYSNAME] = 14, [L_LLDP_REM_SYSDESC] = 14,
+    [L_LLDP_XPNO_TXD] = 15, [L_LLDP_XPNO_RXD] = 15,
+    [L_SYSDESCR] = 9, [L_SYSOID] = 9, [L_SYSUPTIME] = 9, [L_SYSCONTACT] = 9,
+    [L_SYSNAME] = 9, [L_SYSLOCATION] = 9, [L_SYSSERVICES] = 9,
     [L_IFNUMBER] = 9,
-    [L_IFINDEX] = 11,
-    [L_IFDESCR] = 11,
-    [L_IFTYPE] = 11,
-    [L_IFMTU] = 11,
-    [L_IFSPEED] = 11,
-    [L_IFPHYS] = 11,
-    [L_IFADMIN] = 11,
-    [L_IFOPER] = 11,
+    [L_IFINDEX] = 11, [L_IFDESCR] = 11, [L_IFTYPE] = 11, [L_IFMTU] = 11,
+    [L_IFSPEED] = 11, [L_IFPHYS] = 11, [L_IFADMIN] = 11, [L_IFOPER] = 11,
+    [L_IFLASTCHG] = 11, [L_IFINOCT] = 11, [L_IFINUCAST] = 11, [L_IFINNUCAST] = 11,
+    [L_IFINDISC] = 11, [L_IFINERR] = 11, [L_IFINUNK] = 11, [L_IFOUTOCT] = 11,
+    [L_IFOUTUCAST] = 11, [L_IFOUTNUCAST] = 11, [L_IFOUTDISC] = 11, [L_IFOUTERR] = 11,
+    [L_IFOUTQLEN] = 11, [L_IFSPEC] = 11,
+    [L_IPFWD] = 9, [L_IPTTL] = 9,
+    [L_UDP_IN] = 9, [L_UDP_NOPORT] = 9, [L_UDP_INERR] = 9, [L_UDP_OUT] = 9,
+    [L_UDP_LADDR] = 15, [L_UDP_LPORT] = 15,
+    [L_SNMP_IN] = 9, [L_SNMP_OUT] = 9, [L_SNMP_INGET] = 9, [L_SNMP_INNEXT] = 9,
+    [L_SNMP_INSET] = 9, [L_SNMP_OUTRESP] = 9, [L_SNMP_AUTHTRAP] = 9,
+    [L_IFX_NAME] = 12, [L_IFX_INMCAST] = 12, [L_IFX_INBCAST] = 12,
+    [L_IFX_OUTMCAST] = 12, [L_IFX_OUTBCAST] = 12, [L_IFX_HCIN] = 12,
+    [L_IFX_HCOUT] = 12, [L_IFX_TRAP] = 12, [L_IFX_HSPEED] = 12, [L_IFX_PROM] = 12,
+    [L_IFX_CONN] = 12, [L_IFX_ALIAS] = 12, [L_IFX_DISC] = 12,
 };
 
 static int leaf_needs_rem(int id)
 {
     return id == L_LLDP_REM_CHASSIS_ST || id == L_LLDP_REM_CHASSIS ||
            id == L_LLDP_REM_PORT_ST || id == L_LLDP_REM_PORT ||
-           id == L_LLDP_REM_SYSNAME;
+           id == L_LLDP_REM_SYSNAME || id == L_LLDP_REM_SYSDESC;
 }
 
 static int leaf_present(const pn_stack_t *s, int id)
@@ -286,6 +398,11 @@ static int leaf_present(const pn_stack_t *s, int id)
         return 0;
     }
     return 1;
+}
+
+static int leaf_writable(int id)
+{
+    return id == L_SYSCONTACT || id == L_SYSNAME || id == L_SYSLOCATION;
 }
 
 static size_t put_str(uint8_t *val, const char *s)
@@ -298,16 +415,50 @@ static size_t put_str(uint8_t *val, const char *s)
     return n;
 }
 
+static size_t ber_u64(uint8_t *p, uint64_t v)
+{
+    uint8_t b[8];
+    for (int i = 0; i < 8; i++) {
+        b[i] = (uint8_t)(v >> (56 - 8 * i));
+    }
+    return ber_tlv(p, ASN_COUNTER64, b, 8);
+}
+
+static const char *sys_name(const pn_stack_t *s)
+{
+    return s->snmp_sysname[0] ? s->snmp_sysname : s->cfg.station_name;
+}
+
 static int leaf_value(pn_stack_t *s, int id, uint8_t *asn, uint8_t *val,
                       size_t *vlen)
 {
     static const uint32_t sysoid[] = {1, 3, 6, 1, 4, 1, 99999, 1};
+    static const uint32_t zero_dot[] = {0, 0};
     const char *descr =
         s->cfg.device_type[0] ? s->cfg.device_type : "Fieldbus PN Device";
     const char *port = "port-001";
     uint64_t now = pn_now_ns();
+    static const uint8_t cap[2] = {0x00, 0x80}; /* station-only */
 
     switch (id) {
+    case L_LLDP_TX_INT:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 5);
+        return 0;
+    case L_LLDP_TX_HOLD:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 4);
+        return 0;
+    case L_LLDP_STATS_INS:
+        *asn = ASN_GAUGE;
+        *vlen = ber_uint(val, ASN_GAUGE, s->lldp_rem_inserts);
+        return 0;
+    case L_LLDP_STATS_DEL:
+    case L_LLDP_STATS_DROP:
+    case L_LLDP_STATS_AGE:
+        *asn = ASN_GAUGE;
+        *vlen = ber_uint(val, ASN_GAUGE, 0);
+        return 0;
     case L_LLDP_LASTCHG:
         *asn = ASN_TICKS;
         *vlen = ber_uint(val, ASN_TICKS,
@@ -317,7 +468,7 @@ static int leaf_value(pn_stack_t *s, int id, uint8_t *asn, uint8_t *val,
         return 0;
     case L_LLDP_LOC_CHASSIS_ST:
         *asn = ASN_INT;
-        *vlen = ber_int(val, 4); /* macAddress */
+        *vlen = ber_int(val, 4);
         return 0;
     case L_LLDP_LOC_CHASSIS:
         *asn = ASN_OCT;
@@ -326,17 +477,27 @@ static int leaf_value(pn_stack_t *s, int id, uint8_t *asn, uint8_t *val,
         return 0;
     case L_LLDP_LOC_SYSNAME:
         *asn = ASN_OCT;
-        *vlen = put_str(val, s->cfg.station_name);
+        *vlen = put_str(val, sys_name(s));
         return 0;
     case L_LLDP_LOC_SYSDESC:
         *asn = ASN_OCT;
         *vlen = put_str(val, descr);
         return 0;
+    case L_LLDP_LOC_CAP_SUP:
+    case L_LLDP_LOC_CAP_EN:
+        *asn = ASN_OCT;
+        memcpy(val, cap, 2);
+        *vlen = 2;
+        return 0;
     case L_LLDP_LOC_PORT_ST:
         *asn = ASN_INT;
-        *vlen = ber_int(val, 7); /* local */
+        *vlen = ber_int(val, 7);
         return 0;
     case L_LLDP_LOC_PORT:
+    case L_LLDP_LOC_PORT_DESC:
+    case L_IFDESCR:
+    case L_IFX_NAME:
+    case L_IFX_ALIAS:
         *asn = ASN_OCT;
         *vlen = put_str(val, port);
         return 0;
@@ -379,6 +540,15 @@ static int leaf_value(pn_stack_t *s, int id, uint8_t *asn, uint8_t *val,
         *asn = ASN_OCT;
         *vlen = put_str(val, s->lldp_rem_name);
         return 0;
+    case L_LLDP_REM_SYSDESC:
+        *asn = ASN_OCT;
+        *vlen = put_str(val, s->lldp_rem_desc[0] ? s->lldp_rem_desc : "controller");
+        return 0;
+    case L_LLDP_XPNO_TXD:
+    case L_LLDP_XPNO_RXD:
+        *asn = ASN_GAUGE;
+        *vlen = ber_uint(val, ASN_GAUGE, 1000);
+        return 0;
     case L_SYSDESCR:
         *asn = ASN_OCT;
         *vlen = put_str(val, descr);
@@ -392,33 +562,29 @@ static int leaf_value(pn_stack_t *s, int id, uint8_t *asn, uint8_t *val,
         *vlen = ber_uint(val, ASN_TICKS, ticks_from(s, now));
         return 0;
     case L_SYSCONTACT:
+        *asn = ASN_OCT;
+        *vlen = put_str(val, s->snmp_syscontact);
+        return 0;
     case L_SYSLOCATION:
         *asn = ASN_OCT;
-        *vlen = 0;
+        *vlen = put_str(val, s->snmp_syslocation);
         return 0;
     case L_SYSNAME:
         *asn = ASN_OCT;
-        *vlen = put_str(val, s->cfg.station_name);
+        *vlen = put_str(val, sys_name(s));
         return 0;
     case L_SYSSERVICES:
         *asn = ASN_INT;
         *vlen = ber_int(val, 72);
         return 0;
     case L_IFNUMBER:
-        *asn = ASN_INT;
-        *vlen = ber_int(val, 1);
-        return 0;
     case L_IFINDEX:
         *asn = ASN_INT;
         *vlen = ber_int(val, 1);
         return 0;
-    case L_IFDESCR:
-        *asn = ASN_OCT;
-        *vlen = put_str(val, port);
-        return 0;
     case L_IFTYPE:
         *asn = ASN_INT;
-        *vlen = ber_int(val, 6); /* ethernetCsmacd */
+        *vlen = ber_int(val, 6);
         return 0;
     case L_IFMTU:
         *asn = ASN_INT;
@@ -436,7 +602,147 @@ static int leaf_value(pn_stack_t *s, int id, uint8_t *asn, uint8_t *val,
     case L_IFADMIN:
     case L_IFOPER:
         *asn = ASN_INT;
-        *vlen = ber_int(val, 1); /* up, matches PDPort Link UP */
+        *vlen = ber_int(val, 1);
+        return 0;
+    case L_IFLASTCHG:
+        *asn = ASN_TICKS;
+        *vlen = ber_uint(val, ASN_TICKS, 0);
+        return 0;
+    case L_IFINOCT:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->if_in_octets);
+        return 0;
+    case L_IFINUCAST:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->if_in_ucast);
+        return 0;
+    case L_IFOUTOCT:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->if_out_octets);
+        return 0;
+    case L_IFOUTUCAST:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->if_out_ucast);
+        return 0;
+    case L_IFINNUCAST:
+    case L_IFINUNK:
+    case L_IFOUTNUCAST:
+    case L_IFOUTQLEN:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, 0);
+        return 0;
+    case L_IFINDISC:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->if_in_discards);
+        return 0;
+    case L_IFINERR:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->if_in_errors);
+        return 0;
+    case L_IFOUTDISC:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->if_out_discards);
+        return 0;
+    case L_IFOUTERR:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->if_out_errors);
+        return 0;
+    case L_IFSPEC:
+        *asn = ASN_OID;
+        *vlen = oid_encode(zero_dot, 2, val);
+        return 0;
+    case L_IPFWD:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 2);
+        return 0;
+    case L_IPTTL:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 64);
+        return 0;
+    case L_UDP_IN:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->udp_in);
+        return 0;
+    case L_UDP_OUT:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->udp_out);
+        return 0;
+    case L_UDP_NOPORT:
+    case L_UDP_INERR:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, 0);
+        return 0;
+    case L_UDP_LADDR:
+        *asn = ASN_OCT;
+        memset(val, 0, 4);
+        *vlen = 4;
+        return 0;
+    case L_UDP_LPORT:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, PN_SNMP_PORT);
+        return 0;
+    case L_SNMP_IN:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->snmp_in_pkts);
+        return 0;
+    case L_SNMP_OUT:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->snmp_out_pkts);
+        return 0;
+    case L_SNMP_INGET:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->snmp_in_get);
+        return 0;
+    case L_SNMP_INNEXT:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->snmp_in_next);
+        return 0;
+    case L_SNMP_INSET:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->snmp_in_set);
+        return 0;
+    case L_SNMP_OUTRESP:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, s->snmp_out_pkts);
+        return 0;
+    case L_SNMP_AUTHTRAP:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 2);
+        return 0;
+    case L_IFX_INMCAST:
+    case L_IFX_INBCAST:
+    case L_IFX_OUTMCAST:
+    case L_IFX_OUTBCAST:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, 0);
+        return 0;
+    case L_IFX_HCIN:
+        *asn = ASN_COUNTER64;
+        *vlen = ber_u64(val, s->if_in_octets);
+        return 0;
+    case L_IFX_HCOUT:
+        *asn = ASN_COUNTER64;
+        *vlen = ber_u64(val, s->if_out_octets);
+        return 0;
+    case L_IFX_TRAP:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 1);
+        return 0;
+    case L_IFX_HSPEED:
+        *asn = ASN_GAUGE;
+        *vlen = ber_uint(val, ASN_GAUGE, 100);
+        return 0;
+    case L_IFX_PROM:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 2);
+        return 0;
+    case L_IFX_CONN:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 1);
+        return 0;
+    case L_IFX_DISC:
+        *asn = ASN_TICKS;
+        *vlen = ber_uint(val, ASN_TICKS, 0);
         return 0;
     default:
         return -1;
@@ -454,7 +760,6 @@ static int match_get(pn_stack_t *s, const uint32_t *req, uint8_t rn)
         if (oid_cmp(req, rn, k_oids[i], ln) == 0) {
             return i;
         }
-        /* Scalar .0 omitted, or table prefix that uniquely identifies a leaf. */
         if (oid_is_prefix(req, rn, k_oids[i], ln) && rn < ln) {
             if (prefix < 0) {
                 prefix = i;
@@ -480,7 +785,8 @@ static int match_next(pn_stack_t *s, const uint32_t *req, uint8_t rn)
 }
 
 static int snmp_parse(const uint8_t *buf, size_t n, int *rid, int *pdu_type,
-                      uint32_t *oid, uint8_t *oid_n)
+                      int *ver, uint32_t *oid, uint8_t *oid_n, uint8_t *vtag,
+                      uint8_t *vbuf, size_t *vlen)
 {
     if (n < 2 || buf[0] != 0x30) {
         return -1;
@@ -492,12 +798,12 @@ static int snmp_parse(const uint8_t *buf, size_t n, int *rid, int *pdu_type,
     if (off >= n) {
         return -1;
     }
-    int ver = 0;
+    int version = 0;
     size_t used = 0;
-    if (ber_parse_int(buf + off, n - off, &ver, &used) != 0) {
+    if (ber_parse_int(buf + off, n - off, &version, &used) != 0) {
         return -1;
     }
-    (void)ver;
+    *ver = version;
     off += used;
     if (off >= n || buf[off] != ASN_OCT) {
         return -1;
@@ -522,16 +828,31 @@ static int snmp_parse(const uint8_t *buf, size_t n, int *rid, int *pdu_type,
     }
     const uint8_t *found = NULL;
     size_t found_n = 0;
+    size_t found_at = 0;
     for (size_t i = off; i + 2 < n; i++) {
         if (buf[i] == ASN_OID && buf[i + 1] < 128 &&
             i + 2 + buf[i + 1] <= n) {
             found = buf + i + 2;
             found_n = buf[i + 1];
+            found_at = i + 2 + found_n;
             break;
         }
     }
     if (!found || oid_decode(found, found_n, oid, oid_n) != 0) {
         *oid_n = 0;
+    }
+    *vtag = ASN_NULL;
+    *vlen = 0;
+    if (found_at + 2 <= n) {
+        *vtag = buf[found_at];
+        size_t ln = buf[found_at + 1];
+        if (!(ln & 0x80) && found_at + 2 + ln <= n) {
+            if (ln > LEAF_VAL_MAX) {
+                ln = LEAF_VAL_MAX;
+            }
+            memcpy(vbuf, buf + found_at + 2, ln);
+            *vlen = ln;
+        }
     }
     return 0;
 }
@@ -545,17 +866,59 @@ static size_t wrap_seq(uint8_t *out, const uint8_t *inner, size_t n)
     return i + n;
 }
 
+static void store_oct(char *dst, size_t cap, const uint8_t *v, size_t n)
+{
+    if (n >= cap) {
+        n = cap - 1;
+    }
+    memcpy(dst, v, n);
+    dst[n] = '\0';
+}
+
+static int apply_set(pn_stack_t *s, int leaf, uint8_t vtag, const uint8_t *v,
+                     size_t n)
+{
+    if (vtag != ASN_OCT) {
+        return -1;
+    }
+    if (leaf == L_SYSCONTACT) {
+        store_oct(s->snmp_syscontact, sizeof(s->snmp_syscontact), v, n);
+        return 0;
+    }
+    if (leaf == L_SYSLOCATION) {
+        store_oct(s->snmp_syslocation, sizeof(s->snmp_syslocation), v, n);
+        return 0;
+    }
+    if (leaf == L_SYSNAME) {
+        store_oct(s->snmp_sysname, sizeof(s->snmp_sysname), v, n);
+        return 0;
+    }
+    return -1;
+}
+
 int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
                    size_t cap, size_t *out_len)
 {
-    int rid = 1, pdu_type = 0xA0;
+    int rid = 1, pdu_type = 0xA0, ver = 0;
     uint32_t req_oid[OID_MAX];
-    uint8_t req_n = 0;
-    if (snmp_parse(req, n, &rid, &pdu_type, req_oid, &req_n) != 0) {
+    uint8_t req_n = 0, vtag = ASN_NULL;
+    uint8_t setv[LEAF_VAL_MAX];
+    size_t setn = 0;
+    if (snmp_parse(req, n, &rid, &pdu_type, &ver, req_oid, &req_n, &vtag, setv,
+                   &setn) != 0) {
         return -EINVAL;
     }
+    s->snmp_in_pkts++;
+    int is_next = (pdu_type == 0xA1 || pdu_type == 0xA5);
+    int is_set = (pdu_type == 0xA3);
+    if (is_set) {
+        s->snmp_in_set++;
+    } else if (is_next) {
+        s->snmp_in_next++;
+    } else {
+        s->snmp_in_get++;
+    }
 
-    int is_next = (pdu_type == 0xA1);
     int leaf = is_next ? match_next(s, req_oid, req_n)
                        : match_get(s, req_oid, req_n);
 
@@ -567,10 +930,23 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
     memcpy(out_oid, req_oid, sizeof(uint32_t) * req_n);
 
     uint8_t asn = ASN_NULL;
-    uint8_t val[LEAF_VAL_MAX + 8];
+    uint8_t val[LEAF_VAL_MAX + 16];
     size_t vlen = 0;
 
-    if (leaf >= 0 && leaf_value(s, leaf, &asn, val, &vlen) == 0) {
+    if (is_set) {
+        if (leaf >= 0 && leaf_writable(leaf) &&
+            apply_set(s, leaf, vtag, setv, setn) == 0 &&
+            leaf_value(s, leaf, &asn, val, &vlen) == 0) {
+            memcpy(out_oid, k_oids[leaf], sizeof(uint32_t) * k_oidn[leaf]);
+            out_n = k_oidn[leaf];
+        } else if (leaf >= 0) {
+            err = SNMP_ERR_GENERR;
+            memcpy(out_oid, k_oids[leaf], sizeof(uint32_t) * k_oidn[leaf]);
+            out_n = k_oidn[leaf];
+        } else {
+            err = SNMP_ERR_NOSUCHNAME;
+        }
+    } else if (leaf >= 0 && leaf_value(s, leaf, &asn, val, &vlen) == 0) {
         memcpy(out_oid, k_oids[leaf], sizeof(uint32_t) * k_oidn[leaf]);
         out_n = k_oidn[leaf];
     } else {
@@ -578,7 +954,6 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
         asn = ASN_NULL;
         vlen = 0;
         if (is_next) {
-            /* SNMPv1 GetNext past end: noSuchName, echo request OID. */
             memcpy(out_oid, req_oid, sizeof(uint32_t) * req_n);
             out_n = req_n;
         }
@@ -594,7 +969,6 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
     } else if (asn == ASN_OID) {
         vi += ber_tlv(vb_inner + vi, ASN_OID, val, vlen);
     } else {
-        /* INTEGER / TimeTicks / Gauge already encoded as TLV in val. */
         memcpy(vb_inner + vi, val, vlen);
         vi += vlen;
     }
@@ -621,7 +995,7 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
 
     uint8_t msg_inner[320];
     size_t m = 0;
-    m += ber_int(msg_inner + m, 0);
+    m += ber_int(msg_inner + m, ver);
     m += ber_tlv(msg_inner + m, ASN_OCT, (const uint8_t *)"public", 6);
     memcpy(msg_inner + m, pdu, pn);
     m += pn;
@@ -631,6 +1005,7 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
         return -ENOSPC;
     }
     *out_len = total;
+    s->snmp_out_pkts++;
     return 0;
 }
 
@@ -647,11 +1022,13 @@ void pn_snmp_poll(pn_stack_t *s)
     if (n <= 0) {
         return;
     }
-    uint8_t msg[500];
+    s->udp_in++;
+    uint8_t msg[700];
     size_t mlen = 0;
     if (pn_snmp_handle(s, buf, (size_t)n, msg, sizeof(msg), &mlen) != 0) {
         return;
     }
     sendto(s->fd_snmp, msg, mlen, 0, (struct sockaddr *)&src, sl);
+    s->udp_out++;
     (void)errno;
 }

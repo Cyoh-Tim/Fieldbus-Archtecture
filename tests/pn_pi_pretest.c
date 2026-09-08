@@ -503,6 +503,80 @@ static int snmp_has_bytes(uint32_t dst_ip, uint8_t pdu_tag, const uint8_t *oid,
     return 0;
 }
 
+static int snmp_set_oct(uint32_t dst_ip, const uint8_t *oid, size_t olen,
+                        uint8_t rid, const char *str, uint8_t *srx, size_t cap)
+{
+    size_t sl = strlen(str);
+    uint8_t vb[120];
+    size_t i = 0;
+    vb[i++] = 0x30;
+    size_t vb_len_at = i++;
+    vb[i++] = 0x06;
+    vb[i++] = (uint8_t)olen;
+    memcpy(vb + i, oid, olen);
+    i += olen;
+    vb[i++] = 0x04;
+    vb[i++] = (uint8_t)sl;
+    memcpy(vb + i, str, sl);
+    i += sl;
+    vb[vb_len_at] = (uint8_t)(i - vb_len_at - 1);
+    uint8_t vbl[136];
+    size_t v = 0;
+    vbl[v++] = 0x30;
+    vbl[v++] = (uint8_t)i;
+    memcpy(vbl + v, vb, i);
+    v += i;
+    uint8_t spdu[180];
+    size_t p = 0;
+    spdu[p++] = 0xA3;
+    size_t pdu_len_at = p++;
+    spdu[p++] = 0x02;
+    spdu[p++] = 0x01;
+    spdu[p++] = rid;
+    spdu[p++] = 0x02;
+    spdu[p++] = 0x01;
+    spdu[p++] = 0x00;
+    spdu[p++] = 0x02;
+    spdu[p++] = 0x01;
+    spdu[p++] = 0x00;
+    memcpy(spdu + p, vbl, v);
+    p += v;
+    spdu[pdu_len_at] = (uint8_t)(p - pdu_len_at - 1);
+    uint8_t req[220];
+    size_t m = 0;
+    req[m++] = 0x30;
+    size_t msg_len_at = m++;
+    req[m++] = 0x02;
+    req[m++] = 0x01;
+    req[m++] = 0x00;
+    req[m++] = 0x04;
+    req[m++] = 0x06;
+    memcpy(req + m, "public", 6);
+    m += 6;
+    memcpy(req + m, spdu, p);
+    m += p;
+    req[msg_len_at] = (uint8_t)(m - msg_len_at - 1);
+
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0 || !dst_ip) {
+        if (fd >= 0) {
+            close(fd);
+        }
+        return -1;
+    }
+    struct sockaddr_in dst;
+    memset(&dst, 0, sizeof(dst));
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(PN_SNMP_PORT);
+    dst.sin_addr.s_addr = htonl(dst_ip);
+    sendto(fd, req, m, 0, (struct sockaddr *)&dst, sizeof(dst));
+    struct timeval tv = {.tv_sec = 1, .tv_usec = 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    int n = (int)recv(fd, srx, cap, 0);
+    close(fd);
+    return n;
+}
+
 static void send_lldp_neighbor(int raw, int ifindex, const uint8_t dst[6],
                                const uint8_t src[6], const char *sysname)
 {
@@ -1008,6 +1082,23 @@ int main(int argc, char **argv)
     check(snmp_has_bytes(dev_ip, 0xa0, oid_sysuptime, sizeof(oid_sysuptime),
                          0x32, (const uint8_t *)"\x43", 1),
           "LAB-SNMP-UPTIME", "sysUpTime TimeTicks");
+    static const uint8_t oid_ifinoct[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x02,
+                                          0x02, 0x01, 0x0a, 0x01};
+    check(snmp_has_bytes(dev_ip, 0xa0, oid_ifinoct, sizeof(oid_ifinoct), 0x34,
+                         (const uint8_t *)"\x41", 1),
+          "LAB-SNMP-IFINOCT", "ifInOctets Counter32");
+    static const uint8_t oid_sysloc[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x01,
+                                         0x06, 0x00};
+    {
+        uint8_t srx[512];
+        int sn = snmp_set_oct(dev_ip, oid_sysloc, sizeof(oid_sysloc), 0x35,
+                              "lab-rack", srx, sizeof(srx));
+        check(sn > 0 && contains(srx, (size_t)sn, "lab-rack"),
+              "LAB-SNMP-SET-SYSLOC", "SNMP Set sysLocation");
+        check(snmp_query(dev_ip, oid_sysloc, sizeof(oid_sysloc), 0x36,
+                         "lab-rack"),
+              "LAB-SNMP-GET-SYSLOC", "sysLocation after Set");
+    }
     check(snmp_query(dev_ip, oid_lldp_loc, sizeof(oid_lldp_loc), 0x2c,
                      expect_name),
           "LAB-SNMP-LLDP-LOC", "SNMP lldpLocSysName");
@@ -1136,6 +1227,37 @@ int main(int argc, char **argv)
     check(rn > 80 && contains(resp, (size_t)rn, "FB-ARCH-PN-DEV"),
           "LAB-CM-READ-IM0", "I&M0 OrderID");
 
+    {
+        uint8_t im1[60];
+        memset(im1, ' ', sizeof(im1));
+        pn_wr_be16(im1, PN_BLOCK_IM1);
+        pn_wr_be16(im1 + 2, 56);
+        im1[4] = 1;
+        im1[5] = 0;
+        memcpy(im1 + 6, "LINE-A", 6);
+        memcpy(im1 + 38, "CAB-1", 5);
+        uint8_t blocks[128];
+        size_t bn = put_iod_write_hdr(blocks, 5, 0, 0, 1, PN_INDEX_IM1,
+                                      sizeof(im1));
+        memcpy(blocks + bn, im1, sizeof(im1));
+        bn += sizeof(im1);
+        uint8_t stub[220];
+        size_t sn = ndr_wrap_le(stub, blocks, bn);
+        plen = rpc_req(pdu, 3, stub, sn);
+    }
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_WRITE_RES) == 1,
+          "LAB-CM-WRITE-IM1", "I&M1 Write.res");
+    plen = build_read(pdu, 0, 1, PN_INDEX_IM1);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80 && contains(resp, (size_t)rn, "LINE-A") &&
+              contains(resp, (size_t)rn, "CAB-1"),
+          "LAB-CM-READ-IM1", "I&M1 TagFunction/Location");
+    plen = build_read(pdu, 0, 1, PN_INDEX_IM2);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80 && contains(resp, (size_t)rn, "2020-01-01"),
+          "LAB-CM-READ-IM2", "I&M2 date");
+
     plen = build_read(pdu, 0, 1, PN_INDEX_REALIDENT_API);
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_REALIDENT) == 1,
@@ -1256,6 +1378,14 @@ int main(int argc, char **argv)
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_DIAGNOSIS) >= 1,
           "LAB-CM-DIAG-EXT", "ExtChannelDiagnosis 0x8010");
+    plen = build_read(pdu, 0, 0x8001, PN_INDEX_QUAL_CHAN_DIAG);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_DIAGNOSIS) >= 1,
+          "LAB-CM-DIAG-QUAL", "QualifiedChannelDiagnosis 0x8011");
+    plen = build_read(pdu, 0, 0x8001, PN_INDEX_PDPORT_STAT);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_PDPORT_STAT) >= 1,
+          "LAB-CM-PDPORT-STAT", "PDPortStatistic counters");
 
     for (int i = 0; i < 400; i++) {
         uint8_t junk[64];

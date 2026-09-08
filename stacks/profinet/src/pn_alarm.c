@@ -114,6 +114,7 @@ static void send_rta_data(pn_stack_t *s)
         pn_eth_send(s, frame, flen);
         s->alarm_rta_sent = 1;
         s->diag_present = 1;
+        pn_diag_arm_default(s);
         s->last_alarm_ns = pn_now_ns();
         LOG_INFO("pn_alarm", "RTA Data seq=%u dst_ref=%u src_ref=%u",
                  s->alarm_send_seq, dst_ref, src_ref);

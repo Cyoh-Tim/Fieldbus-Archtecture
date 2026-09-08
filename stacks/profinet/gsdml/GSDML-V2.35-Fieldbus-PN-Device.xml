@@ -36,6 +36,7 @@
                                PNIO_Version="V2.35"
                                ImplementationType="software"
                                DeviceAccessSupported="true"
+                               MultipleWriteSupported="true"
                                RequiredSchemaVersion="2.35">
           <ModuleInfo>
             <Name TextId="T_DAP"/>
@@ -51,7 +52,8 @@
           </UseableModules>
           <VirtualSubmoduleList>
             <VirtualSubmoduleItem ID="DAP_IF" SubmoduleIdentNumber="0x00000001"
-                                  SubslotNumber="1" FixedInSubslots="1">
+                                  SubslotNumber="1" FixedInSubslots="1"
+                                  IM_Supported="1 2 3 4">
               <IOData/>
               <ModuleInfo>
                 <Name TextId="T_DAP_SUB"/>

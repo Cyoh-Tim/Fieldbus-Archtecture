@@ -26,9 +26,9 @@ MRP를 CC-C로 부르지 않는다. 진단/알람은 A/B/C 공통이다.
 | CM 기동 | Connect → Write(ACK) → PrmEnd → ApplicationReady → cyclic | A/B |
 | RT Class 1 | 비동기 cyclic. C_SDU 에 데이터+IOPS/IOCS. `SendClock×ReductionRatio` | A |
 | DCP | Identify(필터), Get(요청 속성), Set(Name/IP). 기동 시 Hello. Set 시 `apply_os_ip` 이면 OS 주소 적용 | A |
-| Record | I&M0, RealIdent, PDPort/PDIF, ChannelDiagnosis `0x800A` / ExtChannel `0x8010` / AR Diag `0xE00C`, WriteMultiple | A/B/C (진단) |
+| Record | I&M0–4 (1–4 writable), RealIdent, PDPort/PDIF Real/Adjust/Check, PD*Statistic, Channel/Ext/Qualified Diagnosis | A/B |
 | LLDP | Chassis/Port/TTL/SysName/MgmtAddr + PN Chassis MAC / Port Status | A (이웃), B (LLDP-MIB) |
-| SNMP | MIB-II system + ifTable(1 port) Get/GetNext. LLDP-MIB loc/rem + LastChange | **B** |
+| SNMP | MIB-II system + ifTable/ifXTable 카운터, ip/udp/snmp, LLDP-MIB loc/rem/stats, LLDP-EXT-PNO loc delay. Get/GetNext/Set | **B** |
 | Watchdog | output CR 가 끊기면 AR down, output image 클리어 | A |
 | Alarm CR | AlarmCR_REQ 파싱, RTA Data(USI ChannelDiagnosis) + ACK | A/B/C |
 | RT Class 3 / IRT / PTCP | Connect 에서 거부. 구현하지 않음 | **C — 미구현** |
@@ -78,8 +78,8 @@ bash tests/run_pn_fulltest.sh
 
 | 항목 | 클래스 | 랩에서 하는 일 | 그게 아닌 것 |
 |------|--------|----------------|--------------|
-| diagnosis ASE | A/B/C | ChannelDiagnosis USI + record `0x800A`/`0x8010`/`0xE00C` | 전체 diagnosis 상태기계, Maintenance ASE, 공식 TCS |
-| SNMP / LLDP-MIB | **B** | Get+GetNext, loc/rem, LastChange | 전체 MIB-II, SNMPv3, 공식 ART TCS |
+| diagnosis ASE | A/B/C | Channel + Ext + Qualified + Maintenance demanded 레코드, appear | 전체 상태기계, 공식 TCS |
+| SNMP / LLDP-MIB | **B** | Get+GetNext+Set, ifTable/ifXTable, ip/udp/snmp, loc/rem/stats, PNO delays | 전체 MIB-II, SNMPv3, 공식 ART TCS |
 | MRP | **B 옵션** | `0x88E3` 무시 + GSDML 미선언 + flood 중 RTC1 유지 | MRP Client/Manager 링. CC-B(PA) TCS도 아님 |
 | DCP Hello | A | 기동·IP Set 후 Hello.req | Hello 타이밍 공식 프로파일 |
 | Netload | A/B 부하 | unicast junk + MRP ethertype flood 중 cyclic | 공식 Netload 프로파일 / ETS 계측 |

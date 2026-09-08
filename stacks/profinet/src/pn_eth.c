@@ -150,6 +150,7 @@ void pn_eth_close(pn_stack_t *s)
 
 int pn_eth_send(pn_stack_t *s, const uint8_t *frame, size_t len)
 {
+    pn_if_on_tx(s, len);
     if (s->use_eth_ops) {
         if (!s->eth_ops.send) {
             return 0;

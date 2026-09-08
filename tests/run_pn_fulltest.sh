@@ -62,6 +62,10 @@ chk("SupportedProtocols=\"SNMP;LLDP\"" in text, "LAB-GSD-PROTO",
     "SupportedProtocols SNMP;LLDP")
 chk("SupportedMibs=\"MIB2;LLDP\"" in text, "LAB-GSD-MIB2",
     "SupportedMibs=MIB2;LLDP (CC-B)")
+chk('IM_Supported="1 2 3 4"' in text, "LAB-GSD-IM",
+    "DAP IM_Supported I&M1-4")
+chk("MultipleWriteSupported=\"true\"" in text, "LAB-GSD-MULTIWRITE",
+    "MultipleWriteSupported")
 chk("NumberOfAR=\"1\"" in text, "LAB-GSD-AR", "NumberOfAR=1")
 chk("DNS_CompatibleName=" in text, "LAB-GSD-DNS", "DNS_CompatibleName present")
 chk('Length="32"' in text and 'Length="8"' in text, "LAB-GSD-IO",
