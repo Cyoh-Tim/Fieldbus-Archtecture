@@ -43,7 +43,10 @@ cmake -DENABLE_ETHERNETIP=ON ..
 ./build/test_pn_stack
 ./build/multiproto_daemon config/example.profinet.json
 bash tests/run_pn_fulltest.sh   # PROFINET 랩 프리테스트 (PI ART/PITL 아님)
+bash tests/run_pn_codesys_beta.sh   # CODESYS 2시간 데모 CM 프로파일 (CODESYS 바이너리 아님)
 ```
+
+CODESYS Control SL 2시간 데모로 Controller를 붙이려면 [`docs/codesys_beta.md`](docs/codesys_beta.md).
 
 ## 새 프로토콜(예: EtherCAT) 추가하는 법
 1. `adapters/<name>/` 에 `include/protocol_adapter.h` 구현

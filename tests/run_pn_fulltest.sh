@@ -74,6 +74,11 @@ chk('Length="32"' in text and 'Length="8"' in text, "LAB-GSD-IO",
     "IO module 32-byte input / 8-byte output")
 chk("MAUTypes=\"16\"" in text, "LAB-GSD-MAU", "Port MAUTypes=16 (100BaseTXFD)")
 chk("OrderNumber" in text, "LAB-GSD-ORDER", "ModuleInfo OrderNumber")
+chk('SubslotNumber="1"' in text, "LAB-GSD-SUBSLOT", "IO submodule SubslotNumber")
+chk("ChannelDiagList" in text and 'ErrorType="16"' in text, "LAB-GSD-CHDIAG",
+    "ChannelDiagList ErrorType 16 (CODESYS catalog)")
+chk("ParameterRecordDataItem" not in text, "LAB-GSD-NO-EMPTY-PRM",
+    "no empty ParameterRecordDataItem (CODESYS writes every record)")
 sys.exit(0 if ok else 1)
 PY
 

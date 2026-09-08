@@ -3,8 +3,10 @@
   GSDML for the Fieldbus Architecture PROFINET Device.
   RT_CLASS_1 only. Not IRT. Not PI-certified. VendorID 0xABCD is not PI-assigned.
   Slot 0 = DAP + Interface(0x8000) + Port(0x8001). Slot 1 = 32-byte input / 8-byte output.
+  CODESYS Device Repository: Tools → Device Repository → Install this XML.
 -->
-<ISO15745Profile xmlns="http://www.profibus.com/GSDML/2003/11/DeviceProfile">
+<ISO15745Profile xmlns="http://www.profibus.com/GSDML/2003/11/DeviceProfile"
+                 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ProfileHeader>
     <ProfileIdentification>PROFINET Device Profile</ProfileIdentification>
     <ProfileRevision>1.00</ProfileRevision>
@@ -53,6 +55,7 @@
           <VirtualSubmoduleList>
             <VirtualSubmoduleItem ID="DAP_IF" SubmoduleIdentNumber="0x00000001"
                                   SubslotNumber="1" FixedInSubslots="1"
+                                  API="0"
                                   IM_Supported="1 2 3 4">
               <IOData/>
               <ModuleInfo>
@@ -91,7 +94,8 @@
           </ModuleInfo>
           <VirtualSubmoduleList>
             <VirtualSubmoduleItem ID="SUB_IO" SubmoduleIdentNumber="0x00000011"
-                                  FixedInSubslots="1">
+                                  SubslotNumber="1" FixedInSubslots="1"
+                                  API="0">
               <IOData>
                 <Input>
                   <DataItem DataType="OctetString" Length="32" TextId="T_IN"/>
@@ -100,9 +104,6 @@
                   <DataItem DataType="OctetString" Length="8" TextId="T_OUT"/>
                 </Output>
               </IOData>
-              <RecordDataList>
-                <ParameterRecordDataItem Index="1" Length="0"/>
-              </RecordDataList>
               <ModuleInfo>
                 <Name TextId="T_IO"/>
                 <InfoText TextId="T_IO_INFO"/>
@@ -111,6 +112,14 @@
           </VirtualSubmoduleList>
         </ModuleItem>
       </ModuleList>
+      <ChannelDiagList>
+        <ChannelDiagItem ErrorType="7">
+          <Name TextId="T_DIAG7"/>
+        </ChannelDiagItem>
+        <ChannelDiagItem ErrorType="16">
+          <Name TextId="T_DIAG16"/>
+        </ChannelDiagItem>
+      </ChannelDiagList>
       <ExternalTextList>
         <PrimaryLanguage>
           <Text TextId="T_ID" Value="FB-ARCH PN Device"/>
@@ -123,6 +132,8 @@
           <Text TextId="T_IO_INFO" Value="32 byte input, 8 byte output"/>
           <Text TextId="T_IN" Value="Input image"/>
           <Text TextId="T_OUT" Value="Output image"/>
+          <Text TextId="T_DIAG7" Value="Maintenance demanded"/>
+          <Text TextId="T_DIAG16" Value="Parameter missing"/>
         </PrimaryLanguage>
       </ExternalTextList>
     </ApplicationProcess>

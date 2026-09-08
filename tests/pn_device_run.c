@@ -53,9 +53,17 @@ int main(int argc, char **argv)
     fprintf(stderr, "device up on %s name=%s ip=%s\n", argv[1],
             pn_stack_cfg(s)->station_name, argc > 2 ? argv[2] : "192.168.0.10");
     int inject = getenv("PN_INJECT_DIAG") != NULL;
+    int beta_io = getenv("PN_BETA_IO") != NULL;
     int injected = 0;
+    static const uint8_t k_beta_in[32] = {
+        'B', 'E', 'T', 'A', '-', 'P', 'N', '-', 'I', 'N', '-',
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        'A', 'B', 'C', 'D', 'E', 'F', '!', '!', '!', '!', '!'};
     int loops = seconds * 50;
     for (int i = 0; i < loops && g_run; i++) {
+        if (beta_io) {
+            pn_stack_write_input(s, 0, k_beta_in, sizeof(k_beta_in));
+        }
         pn_stack_poll(s);
         if (inject && !injected && pn_stack_ar_up(s)) {
             pn_stack_diag_appear(s);

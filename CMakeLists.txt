@@ -127,6 +127,10 @@ if(ENABLE_PN_TESTS)
     add_executable(pn_pi_pretest tests/pn_pi_pretest.c)
     target_include_directories(pn_pi_pretest PRIVATE stacks/profinet/include include core)
     target_link_libraries(pn_pi_pretest PRIVATE pn_stack)
+
+    add_executable(pn_codesys_beta tests/pn_codesys_beta.c)
+    target_include_directories(pn_codesys_beta PRIVATE stacks/profinet/include include core)
+    target_link_libraries(pn_codesys_beta PRIVATE pn_stack)
 endif()
 
 # ---- 데몬 실행파일 ----
