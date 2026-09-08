@@ -1370,6 +1370,21 @@ int main(int argc, char **argv)
     check(saw_rta == 2, "LAB-CM-RTA-USI", "RTA ChannelDiagnosis USI 0x8000");
     check(sent_rta_ack, "LAB-CM-RTA-ACK", "RTA ACK sent for device Data");
 
+    {
+        uint8_t opay[48];
+        memset(opay, 0, sizeof(opay));
+        pn_wr_be16(opay, out_fid);
+        opay[10] = PN_IOPS_GOOD;
+        opay[44] = PN_DATASTATUS_PRIMARY | PN_DATASTATUS_VALID |
+                   PN_DATASTATUS_RUN;
+        uint8_t fr[64];
+        memcpy(fr, devmac, 6);
+        memcpy(fr + 6, mymac, 6);
+        pn_wr_be16(fr + 12, PN_ETHTYPE_PN);
+        memcpy(fr + 14, opay, 46);
+        send_raw(raw, ifindex, fr, 60);
+    }
+
     plen = build_read(pdu, 0, 0x8001, PN_INDEX_CHAN_DIAG);
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_DIAGNOSIS) >= 1,
@@ -1378,6 +1393,20 @@ int main(int argc, char **argv)
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_DIAGNOSIS) >= 1,
           "LAB-CM-DIAG-EXT", "ExtChannelDiagnosis 0x8010");
+    {
+        uint8_t opay[48];
+        memset(opay, 0, sizeof(opay));
+        pn_wr_be16(opay, out_fid);
+        opay[10] = PN_IOPS_GOOD;
+        opay[44] = PN_DATASTATUS_PRIMARY | PN_DATASTATUS_VALID |
+                   PN_DATASTATUS_RUN;
+        uint8_t fr[64];
+        memcpy(fr, devmac, 6);
+        memcpy(fr + 6, mymac, 6);
+        pn_wr_be16(fr + 12, PN_ETHTYPE_PN);
+        memcpy(fr + 14, opay, 46);
+        send_raw(raw, ifindex, fr, 60);
+    }
     plen = build_read(pdu, 0, 0x8001, PN_INDEX_QUAL_CHAN_DIAG);
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_DIAGNOSIS) >= 1,
