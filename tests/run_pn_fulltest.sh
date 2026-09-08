@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Full lab pretest for the PROFINET Device stack.
-# Official PI Test Bundle (ART/SPIRTA/ETS) is member-only and Windows/ETS based.
-# Member zip stays locked until PI maps the company account; this script is the
-# in-tree substitute:
+# Full lab pretest for the PROFINET Device stack (CC-A/B lab subset).
+# Official ART (mainly CC-A/B) / SPIRTA (CC-C IRT) / ETS is member-only and
+# Windows/ETS based. This script is not a SPIRTA substitute; IRT is rejected.
+# Member zip stays locked until PI maps the company account. In-tree steps:
 #   1) unit tests (mock Ethernet)
 #   2) GSDML well-formed + required DAP/PDev fields
 #   3) on-wire RT Device groups over veth (DCP/LLDP/SNMP/CM/RTC1)
@@ -53,8 +53,9 @@ chk("SubslotNumber=\"32768\"" in text and "SubslotNumber=\"32769\"" in text,
     "LAB-GSD-PDEV", "Interface 0x8000 / Port 0x8001")
 chk("RT_CLASS_1" in text, "LAB-GSD-RT1", "SupportedRT_Classes includes RT_CLASS_1")
 chk("IsochroneModeSupported=\"false\"" in text, "LAB-GSD-NO-IRT",
-    "IsochroneModeSupported=false")
-chk("RT_CLASS_3" not in text, "LAB-GSD-NO-RT3", "GSDML does not claim RT_CLASS_3")
+    "IsochroneModeSupported=false (does not claim CC-C IRT)")
+chk("RT_CLASS_3" not in text, "LAB-GSD-NO-RT3",
+    "GSDML does not claim CC-C RT_CLASS_3")
 chk("MediaRedundancy" not in text, "LAB-GSD-NO-MRP",
     "GSDML does not declare MediaRedundancy")
 chk("SupportedProtocols=\"SNMP;LLDP\"" in text, "LAB-GSD-PROTO",

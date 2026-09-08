@@ -3,7 +3,8 @@
 /*
  * Lab pretest modeled on PI Test Bundle RT Device groups (public Readme:
  * https://www.profibus.com/download/profinet-test-bundle ).
- * This is not ART/SPIRTA/PITL certification. Official ETS is PI-member-only.
+ * This is not ART (CC-A/B) / SPIRTA (CC-C IRT) / PITL certification.
+ * Official ETS is PI-member-only. IRT reject is a CC-C not-supported check.
  */
 
 #include "pn_endian.h"
@@ -1081,7 +1082,7 @@ int main(int argc, char **argv)
     plen = build_connect(pdu, mymac, PN_RT_CLASS_3);
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     check(rn > 0 && count_block(resp, (size_t)rn, PN_BLOCK_ARSERVER_RES) == 0,
-          "LAB-CM-NO-IRT", "Connect RT_CLASS_3 rejected (no IRT)");
+          "LAB-CM-NO-IRT", "CC-C: Connect RT_CLASS_3 rejected");
 
     plen = build_connect(pdu, mymac, PN_RT_CLASS_1);
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);

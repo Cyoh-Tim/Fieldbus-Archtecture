@@ -237,8 +237,8 @@ int pn_stack_handle_eth(pn_stack_t *s, const uint8_t *frame, size_t len)
         pn_lldp_on_frame(s, src, payload, plen);
         return 0;
     }
-    /* MRP (CC-B PA / ring) is not implemented. Ignore so a lab flood of
-     * 0x88E3 does not take down RTC1. Official MRP TCS is out of scope. */
+    /* MRP is optional CC-B media redundancy, not CC-C IRT. Not implemented.
+     * Ignore 0x88E3 so a lab flood does not take down RTC1. */
     if (et == PN_ETHTYPE_MRP) {
         return 0;
     }

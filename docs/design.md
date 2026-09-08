@@ -5,7 +5,7 @@
 - 런타임에는 **한 번에 하나의 프로토콜만** 활성화되어 통신을 수행한다. 프로토콜 선택은 배포 시점의 설정(config)으로 결정된다.
 - 이 다섯(추후 확장 포함) 프로토콜을 위한 **개별 프로그램을 따로 만들지 않고, 하나의 프로젝트/하나의 바이너리(데몬)**로 통합한다.
 - Profinet, EtherNet/IP는 **상용 스택을 이미 구매**한 상태이므로, 자체 구현이 아니라 해당 SDK를 래핑하는 어댑터를 만든다. Modbus(libmodbus), SLMP(자체 디코더)는 오픈소스/자체 구현으로 처리한다. CC-Link, EtherCAT은 아직 미정 — 인터페이스만 비워두고 후속 어댑터로 추가할 수 있는 구조를 지금 만들어야 한다.
-- **PROFINET 성능 등급 제약**: 타깃이 A-core(Cortex-A급 애플리케이션 프로세서)이고 IRT 전용 ASIC(하드웨어 타임스탬핑/동기 스위칭을 지원하는 칩)이 없으므로, **IRT(Isochronous Real-Time)급은 애초에 목표 범위 밖**이다. PROFINET 어댑터는 **RT(Real-Time) 등급**까지만 보장하는 것으로 설계·문서화하고, 구매한 스택의 스펙도 RT 등급 지원 여부 기준으로 확인해야 한다. 동기 정밀도가 필요한 응용에는 이 데몬을 쓸 수 없다는 점을 config/README에 명시할 것.
+- **PROFINET 성능 등급 제약**: 타깃이 A-core(Cortex-A급 애플리케이션 프로세서)이고 IRT 전용 ASIC(하드웨어 타임스탬핑/동기 스위칭을 지원하는 칩)이 없으므로, **IRT(Isochronous Real-Time, Conformance Class C)급은 애초에 목표 범위 밖**이다. PROFINET 어댑터는 **RT(Real-Time) 등급 / 랩 CC-B 서브셋**까지만 보장하는 것으로 설계·문서화하고, 구매한 스택의 스펙도 RT 등급 지원 여부 기준으로 확인해야 한다. 동기 정밀도가 필요한 응용에는 이 데몬을 쓸 수 없다는 점을 config/README에 명시할 것.
 - **핵심 요구사항**: 담당자가 Modbus/SLMP/CC-Link/EtherNet-IP/PROFINET에 대한 사전 지식이 전혀 없어도, 대상 PLC/상위 시스템의 "통신 가이드 문서"(레지스터 맵, 디바이스 코드 표 등)만 보고 JSON 설정 파일을 채우면 데몬이 그대로 동작해야 한다. 즉 **프로토콜 지식은 어댑터 코드 안에 캡슐화되고, 사용자는 데이터 매핑만 기술**한다.
 
 ## 1. 아키텍처 원칙
@@ -119,7 +119,7 @@ interface ProtocolAdapter {
 | SLMP | 자체 디코더/인코더 | 클라이언트 | 3E 프레임 기준, 디바이스 코드(D/M/X/Y 등) 파싱 |
 | CC-Link | 스텁 → 추후 구현 | TBD | 인터페이스 자리만 확보, `NotImplementedAdapter` |
 | EtherNet/IP | 구매 스택(Pyramid 등) 래핑 | 서버/클라이언트 (스택 지원 범위에 따름) | 어댑터가 스택의 콜백 모델을 poll_cycle로 흡수 |
-| PROFINET | 자체 Device 스택 `stacks/profinet/` | 디바이스(슬레이브) | RT Class 1 Device (DCP/CM/RTC1). IRT 없음. PI 인증 아님. `docs/profinet_stack.md` |
+| PROFINET | 자체 Device 스택 `stacks/profinet/` | 디바이스(슬레이브) | RT Class 1 Device (DCP/CM/RTC1). 랩 CC-B 서브셋. CC-C IRT 없음. PI 인증 아님. `docs/profinet_stack.md` |
 | EtherCAT(추후) | 미정 | TBD | 인터페이스만 남겨둠 |
 
 ## 5. 비기능 요구사항

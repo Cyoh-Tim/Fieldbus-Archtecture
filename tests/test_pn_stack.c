@@ -1280,9 +1280,9 @@ static void test_irt_reject(void)
                                       sizeof(resp), &rlen);
     expect(rc == 0 && rlen > 0, "IRT Connect returns RPC");
     expect(pn_stack_cm_state(s) == PN_CM_OFFLINE,
-           "RT_CLASS_3 Connect is rejected");
+           "CC-C RT_CLASS_3 Connect is rejected");
     expect(count_block(resp, rlen, PN_BLOCK_ARSERVER_RES) == 0,
-           "no ARServerBlock on IRT Connect");
+           "no ARServerBlock on CC-C/IRT Connect");
     pn_stack_destroy(s);
 }
 

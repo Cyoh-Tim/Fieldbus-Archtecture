@@ -213,8 +213,8 @@ static int parse_connect_block(uint16_t type, const uint8_t *body, uint16_t blen
         if (blen >= 10) {
             uint32_t props = pn_rd_be32(body + 6);
             uint32_t rt = props & 0xFu;
-            /* RT_CLASS_3 / IRT (and IRT FrameID range) is out of product
-             * scope. Reject so lab SPIRTA-shaped tests can assert the NACK. */
+            /* CC-C IRT: RT_CLASS_3 / IRT FrameID range. Not a CC-B feature.
+             * Lab CC-B is RT Class 1 + SNMP; reject rather than enter DATAEX. */
             if (rt >= PN_RT_CLASS_3) {
                 s->connect_reject = 1;
             }
@@ -829,7 +829,7 @@ int pn_rpc_handle_from(pn_stack_t *s, const uint8_t *pdu, size_t len,
         s->ar.initiator_udp = src_port;
         walk_blocks(blocks, blen, parse_connect_block, s);
         if (s->connect_reject) {
-            LOG_WARN("pn_rpc", "Connect 거부 — RT Class 3 / IRT 미지원");
+            LOG_WARN("pn_rpc", "Connect 거부 — CC-C IRT / RT Class 3 미지원");
             pn_ar_reset(s);
             uint8_t err[4] = {0x81, 0x54, 0x00, 0x00};
             so = ndr_wrap(stub_out, err, 4, le);
