@@ -2,6 +2,7 @@
 #include "pn_endian.h"
 #include "pn_stack.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -254,6 +255,21 @@ static void test_dcp_set_unsigned(void)
     pn_stack_handle_eth(s, frame, flen);
     expect(strcmp(pn_stack_cfg(s)->station_name, "new-name") == 0,
            "unsigned DCP Set accepted when security_class is 0");
+
+    uint8_t ipb[14];
+    pn_wr_be16(ipb, 1);
+    pn_wr_be32(ipb + 2, 0xC0A80A32u);
+    pn_wr_be32(ipb + 6, 0xFFFFFF00u);
+    pn_wr_be32(ipb + 10, 0xC0A80A01u);
+    bn = append_dcp_block(blocks, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ipb, 14);
+    pn_wr_be32(pay + 4, 0xAABB0002);
+    pn_wr_be16(pay + 10, (uint16_t)bn);
+    memcpy(pay + 12, blocks, bn);
+    flen = pn_eth_build(frame, sizeof(frame), dst, src, PN_ETHTYPE_PN, pay,
+                        12 + bn);
+    pn_stack_handle_eth(s, frame, flen);
+    expect(pn_stack_cfg(s)->ip == 0xC0A80A32u,
+           "DCP Set IPParameter updates cfg.ip");
     pn_stack_destroy(s);
 }
 
@@ -701,6 +717,28 @@ static void test_dcp_identify_filter(void)
         }
     }
     expect(found, "Identify with matching DeviceID is answered");
+
+    /* IP-only filter is not AllSelector and not Name/DeviceID. */
+    memset(pay, 0, sizeof(pay));
+    pn_wr_be16(pay, PN_FRAMEID_DCP_ID_REQ);
+    pay[2] = PN_DCP_IDENTIFY;
+    pay[3] = PN_DCP_REQ;
+    pn_wr_be32(pay + 4, 0x4);
+    pn_wr_be16(pay + 8, 0);
+    pay[12] = PN_DCP_OPT_IP;
+    pay[13] = PN_DCP_SUB_IP_PARAM;
+    pn_wr_be16(pay + 14, 0);
+    pn_wr_be16(pay + 10, 4);
+    flen = pn_eth_build(frame, PN_FRAME_MAX, mc, src, PN_ETHTYPE_PN, pay, 16);
+    cap.n = 0;
+    pn_stack_handle_eth(s, frame, flen);
+    found = 0;
+    for (int i = 0; i < cap.n; i++) {
+        if (contains(cap.frames[i], cap.lens[i], "sensor-line1")) {
+            found = 1;
+        }
+    }
+    expect(!found, "Identify with IP-only filter is ignored");
     pn_stack_destroy(s);
 }
 
@@ -1241,6 +1279,60 @@ static size_t snmp_pdu(uint8_t *out, uint8_t rid, uint8_t pdu_tag,
     return m;
 }
 
+/* Same Get as snmp_pdu but PDU length is BER long-form 0x81. */
+static size_t snmp_pdu_long_len(uint8_t *out, uint8_t rid, const uint8_t *oid,
+                                size_t olen)
+{
+    uint8_t vb[80];
+    size_t i = 0;
+    vb[i++] = 0x30;
+    size_t vb_len_at = i++;
+    vb[i++] = 0x06;
+    vb[i++] = (uint8_t)olen;
+    memcpy(vb + i, oid, olen);
+    i += olen;
+    vb[i++] = 0x05;
+    vb[i++] = 0x00;
+    vb[vb_len_at] = (uint8_t)(i - vb_len_at - 1);
+    uint8_t vbl[96];
+    size_t v = 0;
+    vbl[v++] = 0x30;
+    vbl[v++] = (uint8_t)i;
+    memcpy(vbl + v, vb, i);
+    v += i;
+    uint8_t pdu[160];
+    size_t p = 0;
+    pdu[p++] = 0xa0;
+    pdu[p++] = 0x81;
+    size_t pdu_len_at = p++;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = rid;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = 0x00;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = 0x00;
+    memcpy(pdu + p, vbl, v);
+    p += v;
+    pdu[pdu_len_at] = (uint8_t)(p - pdu_len_at - 1);
+    size_t m = 0;
+    out[m++] = 0x30;
+    size_t msg_len_at = m++;
+    out[m++] = 0x02;
+    out[m++] = 0x01;
+    out[m++] = 0x00;
+    out[m++] = 0x04;
+    out[m++] = 0x06;
+    memcpy(out + m, "public", 6);
+    m += 6;
+    memcpy(out + m, pdu, p);
+    m += p;
+    out[msg_len_at] = (uint8_t)(m - msg_len_at - 1);
+    return m;
+}
+
 static size_t snmp_pdu_set(uint8_t *out, uint8_t rid, const uint8_t *oid,
                            size_t olen, const char *str)
 {
@@ -1384,6 +1476,11 @@ static void test_snmp_mib(void)
     expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
                contains(resp, rlen, "sensor-line1"),
            "SNMP Get sysName");
+    qn = snmp_pdu_long_len(req, 20, oid_sysname, sizeof(oid_sysname));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               contains(resp, rlen, "sensor-line1"),
+           "SNMP Get sysName with long-form BER PDU length");
     qn = snmp_pdu(req, 2, 0xa1, oid_sys, sizeof(oid_sys));
     rlen = 0;
     expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
@@ -1579,6 +1676,13 @@ static void test_rta_alarm(void)
                 uint16_t altype = pn_rd_be16(cap.frames[pidx] + 14 + 14 + 6);
                 expect(altype == PN_ALARM_TYPE_PROCESS,
                        "process AlarmType 0x0002");
+                ack_rta_frame(s, cap.frames[pidx]);
+                plen = build_read_pdu(rpdu, 0, 0x8001, PN_INDEX_CHAN_DIAG);
+                rlen = 0;
+                expect(pn_stack_handle_rpc(s, rpdu, plen, rresp, sizeof(rresp),
+                                           &rlen) == 0 &&
+                           count_block(rresp, rlen, PN_BLOCK_DIAGNOSIS) == 0,
+                       "ChannelDiagnosis cleared after process ACK");
             }
         }
     }
@@ -1641,6 +1745,47 @@ static void test_dcp_hello(void)
     pn_stack_destroy(s);
 }
 
+static void test_dcp_set_ip_resets_ar(void)
+{
+    tx_cap_t cap;
+    pn_stack_t *s = mock_stack(&cap);
+    do_connect(s);
+    expect(pn_stack_cm_state(s) == PN_CM_CONNECTED,
+           "AR connected before DCP Set IP");
+    uint8_t b;
+    expect(pn_stack_read_input(s, 32, &b, 1) == -EINVAL,
+           "input read past end rejected");
+    expect(pn_stack_read_output(s, 8, &b, 1) == -EINVAL,
+           "output read past end rejected");
+
+    static const uint8_t dst[6] = {0x02, 0xFB, 0x00, 0x00, 0x00, 0x01};
+    static const uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t ipb[14];
+    pn_wr_be16(ipb, 1);
+    pn_wr_be32(ipb + 2, 0xC0A80A32u);
+    pn_wr_be32(ipb + 6, 0xFFFFFF00u);
+    pn_wr_be32(ipb + 10, 0xC0A80A01u);
+    uint8_t blocks[32];
+    size_t bn =
+        append_dcp_block(blocks, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ipb, 14);
+    uint8_t pay[64];
+    pn_wr_be16(pay, PN_FRAMEID_DCP_GETSET);
+    pay[2] = PN_DCP_SET;
+    pay[3] = PN_DCP_REQ;
+    pn_wr_be32(pay + 4, 0xAABB0003);
+    pn_wr_be16(pay + 8, 0);
+    pn_wr_be16(pay + 10, (uint16_t)bn);
+    memcpy(pay + 12, blocks, bn);
+    uint8_t frame[PN_FRAME_MAX];
+    size_t flen = pn_eth_build(frame, sizeof(frame), dst, src, PN_ETHTYPE_PN,
+                               pay, 12 + bn);
+    pn_stack_handle_eth(s, frame, flen);
+    expect(pn_stack_cfg(s)->ip == 0xC0A80A32u, "DCP Set IP after Connect");
+    expect(pn_stack_cm_state(s) == PN_CM_OFFLINE,
+           "DCP Set IP resets a live AR");
+    pn_stack_destroy(s);
+}
+
 static void test_watchdog(void)
 {
     tx_cap_t cap;
@@ -1672,6 +1817,7 @@ int main(void)
     test_rta_alarm();
     test_irt_reject();
     test_dcp_hello();
+    test_dcp_set_ip_resets_ar();
     test_watchdog();
     if (g_fail) {
         fprintf(stderr, "pn stack tests FAILED\n");

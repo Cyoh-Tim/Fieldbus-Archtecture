@@ -15,6 +15,7 @@ void pn_ar_reset(pn_stack_t *s)
 {
     memset(&s->ar, 0, sizeof(s->ar));
     pthread_mutex_lock(&s->io_lock);
+    memset(s->input_image, 0, sizeof(s->input_image));
     memset(s->output_image, 0, sizeof(s->output_image));
     pthread_mutex_unlock(&s->io_lock);
     s->last_rt_ns = 0;
@@ -181,6 +182,27 @@ int pn_stack_lldp_remote_name(const pn_stack_t *s, char *out, size_t cap)
     return 0;
 }
 
+static void close_udp(pn_stack_t *s)
+{
+    if (s->fd_rpc >= 0) {
+        close(s->fd_rpc);
+        s->fd_rpc = -1;
+    }
+    if (s->fd_snmp >= 0) {
+        close(s->fd_snmp);
+        s->fd_snmp = -1;
+    }
+}
+
+static int open_one_udp(uint32_t ip, uint16_t port)
+{
+    int fd = pn_udp_open_ip(ip, port);
+    if (fd < 0 && ip != 0) {
+        fd = pn_udp_open_ip(0, port);
+    }
+    return fd;
+}
+
 int pn_stack_start(pn_stack_t *s)
 {
     int rc = pn_eth_open(s);
@@ -188,20 +210,23 @@ int pn_stack_start(pn_stack_t *s)
         return rc;
     }
     if (!s->use_eth_ops) {
-        s->fd_rpc = pn_udp_open_ip(s->cfg.ip, PN_RPC_PORT);
+        /* Bind after the OS address exists; otherwise the unicast IP bind
+         * fails and RPC stays dead until a later DCP Set. Fall back to
+         * INADDR_ANY if the address is not yet local. */
+        if (s->cfg.apply_os_ip && s->cfg.ip) {
+            pn_if_apply_ipv4(s->cfg.iface, s->cfg.ip, s->cfg.netmask,
+                             s->cfg.gateway);
+        }
+        s->fd_rpc = open_one_udp(s->cfg.ip, PN_RPC_PORT);
         if (s->fd_rpc < 0) {
             LOG_WARN("pn_stack", "RPC UDP %d bind 실패 (%d)", PN_RPC_PORT,
                      s->fd_rpc);
             s->fd_rpc = -1;
         }
-        s->fd_snmp = pn_udp_open_ip(s->cfg.ip, PN_SNMP_PORT);
+        s->fd_snmp = open_one_udp(s->cfg.ip, PN_SNMP_PORT);
         if (s->fd_snmp < 0) {
             LOG_WARN("pn_stack", "SNMP UDP bind 실패 — neighbor 진단은 제한됨");
             s->fd_snmp = -1;
-        }
-        if (s->cfg.apply_os_ip && s->cfg.ip) {
-            pn_if_apply_ipv4(s->cfg.iface, s->cfg.ip, s->cfg.netmask,
-                             s->cfg.gateway);
         }
     }
     s->running = 1;
@@ -217,19 +242,30 @@ int pn_stack_start(pn_stack_t *s)
     return 0;
 }
 
+void pn_stack_rebind_udp(pn_stack_t *s)
+{
+    if (!s || s->use_eth_ops) {
+        return;
+    }
+    close_udp(s);
+    s->fd_rpc = open_one_udp(s->cfg.ip, PN_RPC_PORT);
+    if (s->fd_rpc < 0) {
+        LOG_WARN("pn_stack", "RPC UDP rebind 실패 (%d)", s->fd_rpc);
+        s->fd_rpc = -1;
+    }
+    s->fd_snmp = open_one_udp(s->cfg.ip, PN_SNMP_PORT);
+    if (s->fd_snmp < 0) {
+        LOG_WARN("pn_stack", "SNMP UDP rebind 실패");
+        s->fd_snmp = -1;
+    }
+}
+
 void pn_stack_stop(pn_stack_t *s)
 {
     s->running = 0;
     pn_ar_reset(s);
     pn_eth_close(s);
-    if (s->fd_rpc >= 0) {
-        close(s->fd_rpc);
-        s->fd_rpc = -1;
-    }
-    if (s->fd_snmp >= 0) {
-        close(s->fd_snmp);
-        s->fd_snmp = -1;
-    }
+    close_udp(s);
 }
 
 int pn_stack_handle_eth(pn_stack_t *s, const uint8_t *frame, size_t len)
@@ -360,7 +396,7 @@ int pn_stack_cm_state(const pn_stack_t *s)
 
 int pn_stack_read_output(pn_stack_t *s, size_t off, uint8_t *dst, size_t len)
 {
-    if (off + len > s->cfg.output_len) {
+    if (!s || !dst || len > s->cfg.output_len || off > s->cfg.output_len - len) {
         return -EINVAL;
     }
     pthread_mutex_lock(&s->io_lock);
@@ -371,7 +407,7 @@ int pn_stack_read_output(pn_stack_t *s, size_t off, uint8_t *dst, size_t len)
 
 int pn_stack_read_input(pn_stack_t *s, size_t off, uint8_t *dst, size_t len)
 {
-    if (off + len > s->cfg.input_len) {
+    if (!s || !dst || len > s->cfg.input_len || off > s->cfg.input_len - len) {
         return -EINVAL;
     }
     pthread_mutex_lock(&s->io_lock);
@@ -383,7 +419,7 @@ int pn_stack_read_input(pn_stack_t *s, size_t off, uint8_t *dst, size_t len)
 int pn_stack_write_input(pn_stack_t *s, size_t off, const uint8_t *src,
                          size_t len)
 {
-    if (off + len > s->cfg.input_len) {
+    if (!s || !src || len > s->cfg.input_len || off > s->cfg.input_len - len) {
         return -EINVAL;
     }
     pthread_mutex_lock(&s->io_lock);

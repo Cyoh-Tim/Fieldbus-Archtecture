@@ -25,12 +25,12 @@ MRP를 CC-C로 부르지 않는다. 진단/알람은 A/B/C 공통이다.
 |------|------|--------|
 | CM 기동 | Connect → Write(ACK) → PrmEnd → ApplicationReady → cyclic | A/B |
 | RT Class 1 | 비동기 cyclic. C_SDU 에 데이터+IOPS/IOCS. `SendClock×ReductionRatio` | A |
-| DCP | Identify(필터), Get(요청 속성), Set(Name/IP). 기동 시 Hello. Set 시 `apply_os_ip` 이면 OS 주소 적용 | A |
-| Record | I&M0–4 (1–4 writable), RealIdent, PDPort/PDIF Real/Adjust/Check/FSU, PD*Statistic, Channel/Ext/Qualified Diagnosis, disappear/process alarm | A/B |
+| DCP | Identify(필터: All / Name / DeviceID), Get(요청 속성), Set(Name/IP). 기동 시 Hello. `apply_os_ip` 이면 기동·Set 시 OS 주소 적용 후 UDP 바인드. Set IP 후 RPC/SNMP 재바인드, 열린 AR 은 리셋 | A |
+| Record | I&M0–4 (1–4 writable), RealIdent, PDPort/PDIF Real/Adjust/Check/FSU 저장, PD*Statistic, Channel/Ext/Qualified Diagnosis. FSU **CM**(ParameterizationSpeedup) 은 클레임하지 않음 | A/B |
 | LLDP | Chassis/Port/TTL/SysName/MgmtAddr + PN Chassis MAC / Port Status | A (이웃), B (LLDP-MIB) |
 | SNMP | MIB-II system + ifTable/ifXTable + ipAddrTable + icmp + udp/snmp, LLDP-MIB loc/rem/stats/cap, LLDP-EXT-PNO loc/rem delay. Get/GetNext/Set/GetBulk | **B** |
 | Watchdog | output CR 가 끊기면 AR down, output image 클리어 | A |
-| Alarm CR | AlarmCR_REQ 파싱, RTA appear → disappear → process Data + ACK | A/B/C |
+| Alarm CR | AlarmCR_REQ 파싱, RTA appear → disappear → process Data + ACK. 랩 ASE 데모이며 process ACK 후 진단은 비움 | A/B/C |
 | RT Class 3 / IRT / PTCP | Connect 에서 거부. 구현하지 않음 | **C — 미구현** |
 | MRP | 이더타입 `0x88E3` 무시. 링 클라이언트 미구현 | **B 옵션 — 미구현** |
 | PI Security Class 1 | 아님. `security_class: 1` 은 스택 로컬 HMAC-SHA256 PSK | 클래스 아님 |

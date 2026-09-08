@@ -66,6 +66,9 @@ static uint32_t parse_ipv4(const char *s)
     if (sscanf(s, "%u.%u.%u.%u", &a, &b, &c, &d) != 4) {
         return 0;
     }
+    if (a > 255 || b > 255 || c > 255 || d > 255) {
+        return 0;
+    }
     return (a << 24) | (b << 16) | (c << 8) | d;
 }
 
@@ -105,6 +108,10 @@ static int parse_points(pn_ctx_t *ctx, const char *points_json)
         pt->subslot = cJSON_IsNumber(sub) ? sub->valueint : 1;
         pt->index = cJSON_IsNumber(idx) ? idx->valueint : 1;
         pt->byte_offset = cJSON_IsNumber(off) ? off->valueint : 0;
+        if (pt->byte_offset < 0 || pt->length <= 0) {
+            LOG_WARN("profinet", "point %s skipped (offset/length)", pt->name);
+            continue;
+        }
         ctx->point_count++;
     }
     cJSON_Delete(arr);

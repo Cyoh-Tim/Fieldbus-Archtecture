@@ -47,6 +47,40 @@ static size_t ber_len(uint8_t *p, size_t n)
     return 3;
 }
 
+static size_t ber_len_size(size_t n)
+{
+    if (n < 128) {
+        return 1;
+    }
+    if (n < 256) {
+        return 2;
+    }
+    return 3;
+}
+
+static int ber_read_len(const uint8_t *p, size_t n, size_t *len, size_t *used)
+{
+    if (n < 1) {
+        return -1;
+    }
+    if (!(p[0] & 0x80)) {
+        *len = p[0];
+        *used = 1;
+        return 0;
+    }
+    size_t nbytes = (size_t)(p[0] & 0x7f);
+    if (nbytes == 0 || nbytes > 2 || 1 + nbytes > n) {
+        return -1;
+    }
+    size_t v = 0;
+    for (size_t i = 0; i < nbytes; i++) {
+        v = (v << 8) | p[1 + i];
+    }
+    *len = v;
+    *used = 1 + nbytes;
+    return 0;
+}
+
 static size_t ber_tlv(uint8_t *p, uint8_t tag, const uint8_t *v, size_t n)
 {
     size_t i = 0;
@@ -897,10 +931,15 @@ static int snmp_parse(const uint8_t *buf, size_t n, int *rid, int *pdu_type,
     if (n < 2 || buf[0] != 0x30) {
         return -1;
     }
-    size_t off = 2;
-    if (buf[1] & 0x80) {
-        off += (size_t)(buf[1] & 0x7f);
+    size_t slen = 0, sused = 0;
+    if (ber_read_len(buf + 1, n - 1, &slen, &sused) != 0) {
+        return -1;
     }
+    if (1 + sused + slen > n) {
+        return -1;
+    }
+    n = 1 + sused + slen;
+    size_t off = 1 + sused;
     if (off >= n) {
         return -1;
     }
@@ -914,8 +953,15 @@ static int snmp_parse(const uint8_t *buf, size_t n, int *rid, int *pdu_type,
     if (off >= n || buf[off] != ASN_OCT) {
         return -1;
     }
-    size_t clen = buf[off + 1];
-    off += 2 + clen;
+    size_t clen = 0, cused = 0;
+    if (off + 1 >= n ||
+        ber_read_len(buf + off + 1, n - off - 1, &clen, &cused) != 0) {
+        return -1;
+    }
+    if (1 + cused + clen > n - off) {
+        return -1;
+    }
+    off += 1 + cused + clen;
     if (off >= n) {
         return -1;
     }
@@ -924,10 +970,16 @@ static int snmp_parse(const uint8_t *buf, size_t n, int *rid, int *pdu_type,
         return -1;
     }
     *pdu_type = pt;
-    off += 2;
-    if (buf[off - 1] & 0x80) {
-        off += (size_t)(buf[off - 1] & 0x7f) - 1;
+    size_t pdulen = 0, pused = 0;
+    if (off + 1 >= n ||
+        ber_read_len(buf + off + 1, n - off - 1, &pdulen, &pused) != 0) {
+        return -1;
     }
+    if (1 + pused + pdulen > n - off) {
+        return -1;
+    }
+    n = off + 1 + pused + pdulen;
+    off += 1 + pused;
     *rid = 1;
     *nonrep = 0;
     *maxrep = 0;
@@ -1166,10 +1218,11 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
     memcpy(msg_inner + m, pdu, pn);
     m += pn;
 
-    size_t total = wrap_seq(resp, msg_inner, m);
-    if (total > cap) {
+    size_t need = 1 + ber_len_size(m) + m;
+    if (need > cap) {
         return -ENOSPC;
     }
+    size_t total = wrap_seq(resp, msg_inner, m);
     *out_len = total;
     s->snmp_out_pkts++;
     return 0;

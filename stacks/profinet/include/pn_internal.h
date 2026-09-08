@@ -224,6 +224,7 @@ void pn_alarm_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen);
 void pn_alarm_on_connect(pn_stack_t *s, const uint8_t *body, uint16_t blen);
 int pn_udp_open(uint16_t port);
 int pn_udp_open_ip(uint32_t ip_host, uint16_t port);
+void pn_stack_rebind_udp(pn_stack_t *s);
 
 int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                    uint16_t index, uint8_t *out, size_t cap, size_t *out_len);

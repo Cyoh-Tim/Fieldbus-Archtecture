@@ -192,6 +192,14 @@ void pn_alarm_poll(pn_stack_t *s)
         return;
     }
     if (s->alarm_retries >= RTA_MAX_RETRY) {
+        LOG_WARN("pn_alarm", "RTA retries exhausted seq=%u kind=%d",
+                 s->alarm_send_seq, s->alarm_kind);
+        if (s->alarm_kind == 2) {
+            pn_diag_disappear(s, 1);
+        }
+        /* Mark acked so poll does not WARN on every subsequent cycle. */
+        s->alarm_rta_acked = 1;
+        s->last_alarm_ns = now;
         return;
     }
     s->alarm_retries++;
@@ -218,6 +226,9 @@ void pn_alarm_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen)
         s->last_alarm_ns = pn_now_ns();
         if (s->alarm_kind == 1) {
             pn_diag_disappear(s, 0);
+        } else if (s->alarm_kind == 2) {
+            /* Lab ASE demo must not leave a sticky diagnosis for the AR. */
+            pn_diag_disappear(s, 1);
         }
         LOG_INFO("pn_alarm", "RTA ACK seq=%u kind=%d", ack_seq, s->alarm_kind);
     }

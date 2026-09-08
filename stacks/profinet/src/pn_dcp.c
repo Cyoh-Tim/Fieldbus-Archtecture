@@ -213,7 +213,9 @@ static int identify_match(const pn_stack_t *s, const uint8_t *blocks,
     if (!ok) {
         return 0;
     }
-    return saw_all || saw_specific || dlen > 0;
+    /* AllSelector, matching Name/DeviceID, or empty filter (= all).
+     * Unrecognized-only filters must not elicit a response. */
+    return saw_all || saw_specific;
 }
 
 static int apply_blocks(pn_stack_t *s, const uint8_t *blocks, uint16_t dlen)
@@ -451,6 +453,14 @@ void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
         if (ip_changed && s->cfg.apply_os_ip) {
             pn_if_apply_ipv4(s->cfg.iface, s->cfg.ip, s->cfg.netmask,
                              s->cfg.gateway);
+        }
+        if (ip_changed) {
+            /* A live AR still talks L2 cyclic to the old controller while
+             * RPC/SNMP move to the new unicast address. Drop it. */
+            if (s->ar.cm_state != PN_CM_OFFLINE) {
+                pn_ar_reset(s);
+            }
+            pn_stack_rebind_udp(s);
         }
         uint8_t ok[64];
         size_t n = build_set_ack(blocks, dlen, ok, sizeof(ok));
