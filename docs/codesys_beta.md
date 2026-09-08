@@ -2,11 +2,14 @@
 
 This Device can be brought up under **CODESYS Control for Linux SL / Win SL**
 in the official **two-hour demo** (no paid license; runtime stops until
-restart). This repository does **not** ship the CODESYS binary. The Store
-package is account-gated and the Development System is Windows, so this Linux
-agent cannot install or log into a real CODESYS PLC.
+restart). This repository does **not** ship the CODESYS binary.
 
-In this environment the stand-in is:
+An empty Control SL process is **not** a PROFINET Controller. The IEC app
+(Ethernet → PN-Controller → this GSDML) is compiled in **CODESYS Development
+System** on Windows and downloaded to the runtime. Without that download there
+is no AR, even if `codesyscontrol` is running.
+
+In this repo the on-wire stand-in (same CM order, not the CODESYS binary) is:
 
 ```
 cmake --build build --target pn_codesys_beta pn_device_run
@@ -57,6 +60,44 @@ sudo setcap cap_net_raw,cap_net_bind_service=+ep ./build/multiproto_daemon
 
 8. Demo limit: after two hours the SoftPLC stops. Restart `codesyscontrol`
    (Linux) or the Control Win tray app and login again.
+
+## Linux SL runtime (verified 4.22.0.0)
+
+Store SKUs: Control Linux SL `2302000005-SW`, Edge Gateway for Linux `000120`.
+WIBU **CodeMeter-lite** is a package dependency (`codemeter | codemeter-lite`).
+Official User Runtime DEB (driver-only / lite, amd64, 9.10):
+
+```
+https://www.wibu.com/support/user/user-software/file/download/17974.html?tx_wibudownloads_downloadlist[directDownload]=directDownload&tx_wibudownloads_downloadlist[useAwsS3]=0
+```
+
+Then `dpkg -i` CodeMeter-lite, `codesyscontrol_linux_*_amd64.deb` from the
+Control SL `.package`, and `codesysedge_edgeamd64_*_amd64.deb` from the Edge
+Gateway `.package`.
+
+If PID 1 is not systemd, start the binaries directly (root, for raw Ethernet):
+
+```
+sudo /etc/init.d/codemeter start
+sudo env LD_LIBRARY_PATH=/opt/codesys/lib /opt/codesys/bin/codesyscontrol.bin /etc/codesyscontrol/CODESYSControl.cfg
+sudo env LD_LIBRARY_PATH=/opt/codesysedge/lib /opt/codesysedge/bin/codesysedge.bin /etc/codesysedge/Gateway.cfg
+```
+
+Add to `CODESYSControl_User.cfg` (CODESYS help):
+
+```
+[SysEthernet]
+Linux.PACKET_QDISC_BYPASS=1
+Linux.ProtocolFilter=3
+```
+
+Demo listen ports seen on Ubuntu 24.04 amd64: Gateway **1217/tcp**, runtime
+**11740/tcp**, network scan **1740/udp** (PLC) and **1743/udp** (Gateway),
+OPC UA **4840/tcp**, CodeMeter **22350/tcp**.
+
+CODESYS does **not** release Control SL for containers/VMs. A cloud VM can
+still start the 2-hour demo, but IRT/XDP and support are out of scope, and a
+Windows IDE on another network cannot reach a private `172.30.0.0/24` runtime.
 
 ## Do not expect
 

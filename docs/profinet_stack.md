@@ -99,7 +99,7 @@ bash tests/run_pn_fulltest.sh
 
 GSDML 은 `stacks/profinet/gsdml/` 에 있다. TIA / **CODESYS Device Repository** 에서 여는 출발점이며 VendorID `0xABCD` 는 PI 할당이 아니다. 최소 사이클은 8ms (`MinDeviceInterval=256`). Interface `SupportedMibs="MIB2;LLDP"` 는 랩 **CC-B** 선언이다. `IsochroneModeSupported=false` / `RT_CLASS_3` 미기재는 **CC-C를 클레임하지 않는다**는 뜻이지, IRT 테스트를 대체한다는 뜻이 아니다. PITL / ART / SPIRTA 인증을 대체하지 않는다.
 
-CODESYS Control SL **2시간 데모**로 Controller 를 붙이는 절차는 [`docs/codesys_beta.md`](codesys_beta.md). 이 에이전트 환경에는 Store 패키지와 Windows IDE 가 없어서 실제 `codesyscontrol` 은 설치하지 않는다. `tests/run_pn_codesys_beta.sh` 가 같은 CM 순서를 랩에서 재현한다.
+CODESYS Control SL **2시간 데모**로 Controller 를 붙이는 절차는 [`docs/codesys_beta.md`](codesys_beta.md). Linux SL 런타임은 Store 패키지 + WIBU CodeMeter-lite 로 설치할 수 있다. 빈 런타임은 PN Controller 가 아니고, GSDML·IEC 앱은 Windows Development System 에서 다운로드한다. `tests/run_pn_codesys_beta.sh` 가 같은 CM 순서를 랩에서 재현한다.
 
 ## 점대점 매핑
 
