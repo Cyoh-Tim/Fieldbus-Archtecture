@@ -1,0 +1,83 @@
+[File]
+DescText = "Fieldbus Architecture EtherNet/IP Sensor Adapter";
+CreateDate = 09-08-2026;
+CreateTime = 11:15:00;
+ModDate = 09-08-2026;
+ModTime = 11:15:00;
+Revision = 1.1;
+HomeURL = "https://github.com/Cyoh-Tim/Fieldbus-Archtecture";
+
+[Device]
+VendCode = 43981;
+VendName = "FieldbusArch";
+ProdType = 12;
+ProdTypeStr = "Communications Adapter";
+ProdCode = 1;
+MajRev = 1;
+MinRev = 1;
+ProdName = "FieldbusSensor";
+Catalog = "FB-EIP-SENSOR";
+
+[Device Classification]
+Class1 = EtherNet/IP;
+
+[Params]
+Param1 =
+    0,                  $ first field shall equal 0
+    6,0,                $ assembly link path size/path (placeholder)
+    0x0000,             $ descriptor
+    0xC1,               $ data type = BYTE
+    2,                  $ data size in bytes
+    "Input Size",       $ name
+    "",                 $ units
+    "",                 $ help
+    1,2048,32,          $ min,max,default
+    1,1,1,0,            $ mult,div,base,offset scaling
+    0,0,0,0,            $ mult,div,base,offset links
+    0;                  $ decimal places
+
+[Assembly]
+Assem100 =
+    "Config", ,
+    1,
+    1,1,1;
+
+Assem101 =
+    "Output (O->T)", ,
+    128,
+    ;
+
+Assem150 =
+    "Input (T->O)", ,
+    512,
+    ;
+
+[Connection Manager]
+Connection1 =
+    0x04010002,         $ Exclusive Owner
+    0x44640405,         $ trigger & transport
+    1000000,8000,       $ O->T RPI range (us) — example
+    128,                $ O->T size
+    1000000,8000,       $ T->O RPI
+    512,                $ T->O size
+    ,,                  $ proxy config
+    ,Assem100,,Assem101,Assem150,,
+    "Exclusive Owner",
+    "";
+
+[Port]
+Port1 =
+    TCP,
+    "EtherNet/IP",
+    "Twisted-pair",
+    0xF5,
+    0xF6,
+    0x48;
+
+[Capacity]
+MaxCIPConnections = 64;
+MaxIOConnections = 32;
+MaxMsgConnections = 32;
+TSpec1 = TCP, 44818;
+TSpec2 = UDP, 2222;
+TSpec3 = TCP, 2221;

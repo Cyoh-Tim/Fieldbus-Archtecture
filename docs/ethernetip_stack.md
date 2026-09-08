@@ -1,46 +1,57 @@
 # EtherNet/IP stack (Fieldbus Architecture)
 
 자체 구현 **Adapter(Device/target)** 스택 + 선택적 **Originator(client)** explicit 메시징.
-구매 벤더 SDK / OpENer 없이 `stacks/ethernetip/` 에 둔다.
-ODVA 인증 제품이 아니다.
+`stacks/ethernetip/` in-tree. 구매 SDK 불필요.
+
+공식 **ODVA Declaration of Conformity는 멤버십 + 공인 CT 랩**에서 나온다.
+이 스택은 CT/CIP Security 경로에 맞춰 객체·EDS·보안 프로필을 갖춘 **인증 가능(certification-ready)** 구현이다.
+스택 바이너리만으로 인증서가 발급되지는 않는다. SOC 초안: [`ethernetip_soc.md`](ethernetip_soc.md).
 
 ## 왜 자체 구현인가
 
 | 선택지 | 판단 |
 |--------|------|
-| 구매 스택 (`third_party/`) | 저장소에 미배치. 라이선스 코드 없이는 빌드/검증 불가 |
-| OpENer 등 오픈소스 | 상용 시 ODVA 멤버십/라이선스 이슈, 의존성·용량 커스터마이즈가 무거움 |
-| **자체 스택** | PROFINET과 동일 패턴. 센서 process image / 포인트 매핑 확장성을 직접 제어 |
+| 구매 스택 (`third_party/`) | 저장소 미배치 시 빌드/검증 불가 |
+| OpENer 등 오픈소스 | 상용 ODVA 라이선스/멤버십 이슈, 커스터마이즈 비용 |
+| **자체 스택** | PROFINET과 동일 패턴 + CT용 객체/EDS/보안을 직접 맞춤 |
 
-`third_party/ethernetip_stack/` 자리는 향후 벤더 스택으로 교체할 때를 위해 남겨 둔다.
-어댑터 공개 API(`ethernetip_adapter_create`)와 config 스키마는 스택 교체와 무관하게 유지한다.
+PROFINET(PI)보다 ODVA CT 접근이 덜 폐쇄적이라는 업계 인식이 있으나, Vendor ID·멤버십·랩 비용은 제품 측 책임이다.
 
 ## 범위
 
 | 항목 | 상태 |
 |------|------|
 | Encapsulation TCP 44818 | RegisterSession, ListIdentity/Services, SendRRData |
-| CIP objects | Identity, Assembly, Connection Manager, TCP/IP(최소), Ethernet Link(최소) |
-| Class 1 cyclic I/O | UDP 2222, Forward Open/Close, Sequenced Address + Connected Data |
-| Large Forward Open | 지원 |
-| Originator explicit | Get/Set Attribute Single, ANSI symbolic tag path |
-| Logix 전체 태그 모델 / CIP Security | 미구현 |
-| ODVA 인증 | 아님 |
+| CIP objects (CT-facing) | Identity(+Reset/Protection Mode), Assembly, CM, Msg Router, QoS, Port, TCP/IP, Ethernet Link, EIP Security |
+| Class 1 cyclic I/O | UDP 2222, Forward Open/Close, Large FO |
+| Security Class 1 | HMAC-SHA256 PSK integrity (mutating UCMM / FO) |
+| Security Class 2 | Class 1 + TLS PSK listen on TCP 2221 |
+| EDS | `stacks/ethernetip/eds/FieldbusSensor.eds` |
+| Originator explicit | Get/Set Attribute, ANSI tag path |
+| Full CIP Security CT suite / DTLS I/O | 제품 확장 (기반만 제공) |
+| ODVA DoC | 제품 프로세스 (멤버십+랩) |
 
-## 용량 (센서 확장용)
+## Security 프로필 (이 저장소)
 
-헤더 `eip_types.h` 기본값:
+PI/ODVA 옵션 코드를 사칭하지 않는다. Fieldbus 프로필이다.
 
-- Assembly 인스턴스 최대 64, 인스턴스당 최대 2048 bytes
-- Class 1 연결 32, TCP 세션 32
-- 어댑터 포인트 테이블은 heap 동적 확장 (초기 256, 필요 시 배가)
+| `security_class` | 동작 |
+|------------------|------|
+| 0 | 랩/개발 open |
+| 1 | Integrity. PSK 필수. Forward Open / Set / Reset / Close 에 CPF integrity item `0x00C1`(32B HMAC) 없으면 거부 |
+| 2 | 1 + TCP `secure_tcp_port`(기본 2221) TLS-PSK 세션에서 encapsulation 처리 |
 
-`protocol_params.input_size` / `output_size` 로 process image 를 키운다.
-포인트 `byte_offset+length` 가 더 크면 init 시 자동 확장한다(상한 `EIP_ASSEMBLY_SIZE_MAX`).
+- 키: `protocol_params.psk_hex` (64 hex chars = 32 bytes). 랩 키를 제품에 두지 말 것
+- ListIdentity / Get_Attribute(조회) 는 탐색용으로 MAC 불필요
+- Identity `protection_mode` (attr 17) config/`Set_Attribute` 지원
+
+## 용량
+
+- Assembly 최대 2048B × 64, Class1 32, TCP 32, TLS 16
+- 포인트 테이블 heap 동적 확장
+- `input_size` / `output_size` 로 process image 확장
 
 ## Config
-
-예제: `config/example.ethernetip.json`
 
 ```json
 "protocol_params": {
@@ -48,22 +59,17 @@ ODVA 인증 제품이 아니다.
   "bind_ip": "0.0.0.0",
   "port": 44818,
   "udp_io_port": 2222,
+  "secure_tcp_port": 2221,
+  "security_class": 1,
+  "psk_hex": "1111111111111111111111111111111111111111111111111111111111111111",
   "input_assembly": 150,
   "output_assembly": 101,
   "input_size": 512,
-  "output_size": 128,
-  "rpi_us": 8000
+  "output_size": 128
 }
 ```
 
-포인트 주소 (`address.ethernetip`):
-
-- Assembly 오프셋 (권장, cyclic): `{ "assembly": 150, "byte_offset": 0, "length": 32 }`
-- 태그 심볼: `{ "tag": "Sensor1.Barcode" }` (어댑터에서는 input assembly 매핑)
-- CIP 경로 (originator): `{ "class_id": 4, "instance": 150, "attribute": 3 }`
-
-`access: read` → 센서가 채우는 input (T→O)  
-`access: write` → 스캐너가 쓰는 output (O→T)
+예제: `config/example.ethernetip.json`
 
 ## 실행
 
@@ -72,5 +78,4 @@ ODVA 인증 제품이 아니다.
 ./build/multiproto_daemon config/example.ethernetip.json
 ```
 
-실기 연동 시 `protocol_params.mock` 을 끄고 `bind_ip`/어셈블리 번호를 PLC 가이드에 맞춘다.
-TCP 44818 / UDP 2222 방화벽을 연다.
+실기: `mock` off, Vendor ID를 ODVA 할당 값으로 교체, EDS/SOC 확정 후 CT 랩 일정.

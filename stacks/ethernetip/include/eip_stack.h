@@ -15,8 +15,9 @@
  *   - Originator (client): RegisterSession + explicit Get/Set Attribute
  *     Single and symbolic tag read/write (UCMM)
  *
- * Not ODVA-certified. Suitable for sensor process-image exchange and
- * config-driven point mapping. Capacity limits are intentionally high.
+ * Designed for an ODVA conformance path (EDS + SOC + CT objects/security).
+ * Official Declaration of Conformity still requires ODVA membership and an
+ * authorized CT lab — the stack alone is not a certificate.
  */
 
 typedef struct eip_stack eip_stack_t;
@@ -26,6 +27,7 @@ typedef struct {
     char bind_ip[64];    /* adapter listen address; empty = 0.0.0.0 */
     int tcp_port;        /* default 44818 */
     int udp_io_port;     /* default 2222 */
+    int secure_tcp_port; /* default 2221 (TLS when security_class>=2) */
     char remote_ip[64];  /* originator peer */
     int remote_port;
 
@@ -46,6 +48,12 @@ typedef struct {
 
     uint32_t rpi_us; /* Class 1 RPI hint (default 8000) */
     int mock;        /* 1 = no real sockets (unit tests) */
+
+    /* Security — see docs/ethernetip_stack.md */
+    int security_class; /* 0/1/2 */
+    uint8_t psk[EIP_PSK_LEN];
+    int psk_set;
+    uint32_t protection_mode; /* Identity attr 17 */
 } eip_cfg_t;
 
 /* Optional transport ops for tests (replaces TCP/UDP sockets). */

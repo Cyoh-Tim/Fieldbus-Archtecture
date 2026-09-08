@@ -27,7 +27,7 @@ static const registry_entry_t k_registry[] = {
     {"slmp", slmp_adapter_create},
     {"cclink", cclink_adapter_create},         /* 현재 스텁(NotImplemented) */
     {"ethernetip", ethernetip_adapter_create}, /* 자체 스택 stacks/ethernetip */
-    {"profinet", profinet_adapter_create},     /* 구매 스택 래핑, RT 등급까지만 지원 */
+    {"profinet", profinet_adapter_create},     /* 자체 스택, RT 등급까지만 지원 */
 };
 
 adapter_ctor_fn adapter_registry_lookup(const char *protocol_name)

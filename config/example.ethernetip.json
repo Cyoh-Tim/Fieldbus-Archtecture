@@ -21,6 +21,10 @@
     "input_size": 512,
     "output_size": 128,
     "rpi_us": 8000,
+    "security_class": 1,
+    "psk_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "secure_tcp_port": 2221,
+    "protection_mode": 0,
     "mock": true
   },
   "points": [

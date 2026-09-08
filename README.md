@@ -7,8 +7,8 @@ config.json 설정만으로 선택해 동작시키는 필드버스 런타임.
   범위는 **CC-B + RT Class 1 + Security Class 1(HMAC integrity)**. IRT 없음.
   자세한 내용은 [`docs/profinet_stack.md`](docs/profinet_stack.md).
 - **EtherNet/IP**: `stacks/ethernetip/` 자체 Adapter(+Originator) 스택.
-  Class 1 I/O + explicit messaging. ODVA 인증 아님.
-  자세한 내용은 [`docs/ethernetip_stack.md`](docs/ethernetip_stack.md).
+  Class 1 I/O + explicit + Security Class 1/2 (HMAC / TLS-PSK).
+  ODVA DoC는 멤버십+CT 랩 제품 프로세스. [`docs/ethernetip_stack.md`](docs/ethernetip_stack.md).
 
 전체 설계 배경은 [`docs/design.md`](docs/design.md).
 

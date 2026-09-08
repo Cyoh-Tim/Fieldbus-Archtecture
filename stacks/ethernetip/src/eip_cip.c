@@ -94,6 +94,34 @@ static int identity_get_attr(eip_stack_t *s, uint16_t attr, uint8_t *out,
         *out_len = 1 + n;
         return 0;
     }
+    case 8: /* State */
+        if (cap < 1) {
+            return -ENOSPC;
+        }
+        out[0] = s->device_state ? s->device_state : 3; /* operational */
+        *out_len = 1;
+        return 0;
+    case 9: /* Configuration Consistency Value */
+        if (cap < 2) {
+            return -ENOSPC;
+        }
+        eip_wr_le16(out, s->config_consistency);
+        *out_len = 2;
+        return 0;
+    case 10: /* Heartbeat Interval */
+        if (cap < 1) {
+            return -ENOSPC;
+        }
+        out[0] = 0;
+        *out_len = 1;
+        return 0;
+    case 17: /* Protection Mode */
+        if (cap < 4) {
+            return -ENOSPC;
+        }
+        eip_wr_le32(out, c->protection_mode);
+        *out_len = 4;
+        return 0;
     default:
         return -ENOTSUP;
     }
@@ -105,7 +133,7 @@ static int identity_get_attr_all(eip_stack_t *s, uint8_t *out, size_t cap,
     size_t used = 0;
     size_t piece = 0;
     uint8_t tmp[64];
-    for (uint16_t attr = 1; attr <= 7; attr++) {
+    for (uint16_t attr = 1; attr <= 10; attr++) {
         piece = 0;
         if (identity_get_attr(s, attr, tmp, sizeof(tmp), &piece) != 0) {
             continue;
@@ -115,6 +143,14 @@ static int identity_get_attr_all(eip_stack_t *s, uint8_t *out, size_t cap,
         }
         memcpy(out + used, tmp, piece);
         used += piece;
+    }
+    /* Attr 17 Protection Mode */
+    piece = 0;
+    if (identity_get_attr(s, 17, tmp, sizeof(tmp), &piece) == 0) {
+        if (used + piece <= cap) {
+            memcpy(out + used, tmp, piece);
+            used += piece;
+        }
     }
     *out_len = used;
     return 0;
@@ -207,6 +243,39 @@ static int handle_object(eip_stack_t *s, uint8_t service, uint16_t class_id,
             *resp_len = hdr + n;
             return 0;
         }
+        if (service == CIP_SVC_RESET) {
+            /* Type 0 = power-cycle equivalent soft reset of IO image */
+            memset(s->input_data, 0, s->input_size);
+            memset(s->output_data, 0, s->output_size);
+            for (int i = 0; i < EIP_CLASS1_CONN_MAX; i++) {
+                s->class1[i].in_use = 0;
+            }
+            s->config_consistency++;
+            *resp_len = cip_ok_header(resp, resp_cap, service);
+            return 0;
+        }
+        if (service == CIP_SVC_SET_ATTR_SINGLE && attribute == 17) {
+            if (data_len < 4) {
+                *resp_len = cip_error(resp, resp_cap, service,
+                                      CIP_STATUS_INVALID_PARAM, 0);
+                return 0;
+            }
+            s->cfg.protection_mode = eip_rd_le32(data);
+            *resp_len = cip_ok_header(resp, resp_cap, service);
+            return 0;
+        }
+    }
+
+    if (class_id == CIP_CLASS_MSG_ROUTER && instance == 1 &&
+        service == CIP_SVC_GET_ATTR_SINGLE) {
+        size_t hdr = cip_ok_header(resp, resp_cap, service);
+        if (attribute == 1 && resp_cap >= hdr + 2) { /* object list count stub */
+            eip_wr_le16(resp + hdr, 8);
+            *resp_len = hdr + 2;
+            return 0;
+        }
+        *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);
+        return 0;
     }
 
     if (class_id == CIP_CLASS_ASSEMBLY) {
@@ -250,18 +319,29 @@ static int handle_object(eip_stack_t *s, uint8_t service, uint16_t class_id,
         }
     }
 
-    /* TCP/IP Interface Object — minimal Attr 1 (status) / 3 (config) */
+    /* TCP/IP Interface Object — CT-facing attributes */
     if (class_id == CIP_CLASS_TCPIP && instance == 1 &&
         service == CIP_SVC_GET_ATTR_SINGLE) {
         size_t hdr = cip_ok_header(resp, resp_cap, service);
-        if (attribute == 1) {
-            if (resp_cap < hdr + 4) {
-                *resp_len =
-                    cip_error(resp, resp_cap, service, CIP_STATUS_RESOURCE, 0);
-                return 0;
-            }
-            eip_wr_le32(resp + hdr, 1); /* interface config valid-ish */
+        if (attribute == 1 && resp_cap >= hdr + 4) {
+            eip_wr_le32(resp + hdr, 0x00000001); /* status: config valid */
             *resp_len = hdr + 4;
+            return 0;
+        }
+        if (attribute == 2 && resp_cap >= hdr + 4) {
+            eip_wr_le32(resp + hdr, 0x00000010); /* config capability */
+            *resp_len = hdr + 4;
+            return 0;
+        }
+        if (attribute == 3 && resp_cap >= hdr + 4) {
+            eip_wr_le32(resp + hdr, 0); /* config control */
+            *resp_len = hdr + 4;
+            return 0;
+        }
+        if (attribute == 4 && resp_cap >= hdr + 2) {
+            /* Physical Link Object path size = 0 */
+            eip_wr_le16(resp + hdr, 0);
+            *resp_len = hdr + 2;
             return 0;
         }
         *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);
@@ -271,14 +351,81 @@ static int handle_object(eip_stack_t *s, uint8_t service, uint16_t class_id,
     if (class_id == CIP_CLASS_ETHERNET_LINK && instance == 1 &&
         service == CIP_SVC_GET_ATTR_SINGLE) {
         size_t hdr = cip_ok_header(resp, resp_cap, service);
-        if (attribute == 1 && resp_cap >= hdr + 4) { /* Interface Speed */
+        if (attribute == 1 && resp_cap >= hdr + 4) {
             eip_wr_le32(resp + hdr, 100);
             *resp_len = hdr + 4;
             return 0;
         }
-        if (attribute == 2 && resp_cap >= hdr + 4) { /* Interface Flags */
-            eip_wr_le32(resp + hdr, 0x1); /* link up */
+        if (attribute == 2 && resp_cap >= hdr + 4) {
+            eip_wr_le32(resp + hdr, 0xF); /* link up + duplex + negotiated */
             *resp_len = hdr + 4;
+            return 0;
+        }
+        if (attribute == 3 && resp_cap >= hdr + 6) {
+            memset(resp + hdr, 0x02, 6); /* MAC placeholder */
+            *resp_len = hdr + 6;
+            return 0;
+        }
+        *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);
+        return 0;
+    }
+
+    /* QoS Object — required for many EtherNet/IP CT runs */
+    if (class_id == CIP_CLASS_QOS && instance == 1 &&
+        service == CIP_SVC_GET_ATTR_SINGLE) {
+        size_t hdr = cip_ok_header(resp, resp_cap, service);
+        if (attribute >= 1 && attribute <= 8 && resp_cap >= hdr + 1) {
+            resp[hdr] = 0; /* DSCP defaults */
+            *resp_len = hdr + 1;
+            return 0;
+        }
+        *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);
+        return 0;
+    }
+
+    /* Port Object */
+    if (class_id == CIP_CLASS_PORT && instance == 1 &&
+        service == CIP_SVC_GET_ATTR_SINGLE) {
+        size_t hdr = cip_ok_header(resp, resp_cap, service);
+        if (attribute == 1 && resp_cap >= hdr + 2) {
+            eip_wr_le16(resp + hdr, 0); /* Port Type: CIP port stub */
+            *resp_len = hdr + 2;
+            return 0;
+        }
+        if (attribute == 2 && resp_cap >= hdr + 2) {
+            eip_wr_le16(resp + hdr, 1); /* Port Number */
+            *resp_len = hdr + 2;
+            return 0;
+        }
+        *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);
+        return 0;
+    }
+
+    /* EtherNet/IP Security Object — advertise profile capabilities */
+    if (class_id == CIP_CLASS_EIP_SECURITY && instance == 1 &&
+        service == CIP_SVC_GET_ATTR_SINGLE) {
+        size_t hdr = cip_ok_header(resp, resp_cap, service);
+        if (attribute == 1 && resp_cap >= hdr + 2) {
+            /* State: 0 configured/open, 1 integrity, 2 confidential */
+            eip_wr_le16(resp + hdr, (uint16_t)s->cfg.security_class);
+            *resp_len = hdr + 2;
+            return 0;
+        }
+        if (attribute == 2 && resp_cap >= hdr + 4) {
+            uint32_t caps = 0;
+            if (s->cfg.security_class >= EIP_SECURITY_CLASS_1) {
+                caps |= 0x1; /* integrity */
+            }
+            if (s->cfg.security_class >= EIP_SECURITY_CLASS_2) {
+                caps |= 0x2; /* confidentiality / TLS */
+            }
+            eip_wr_le32(resp + hdr, caps);
+            *resp_len = hdr + 4;
+            return 0;
+        }
+        if (attribute == 3 && resp_cap >= hdr + 2) {
+            eip_wr_le16(resp + hdr, (uint16_t)s->cfg.secure_tcp_port);
+            *resp_len = hdr + 2;
             return 0;
         }
         *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_ATTR_NSUP, 0);

@@ -1,5 +1,6 @@
 #include "eip_endian.h"
 #include "eip_internal.h"
+#include "eip_sec.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -76,6 +77,17 @@ eip_stack_t *eip_stack_create(const eip_cfg_t *cfg)
     if (s->cfg.rpi_us == 0) {
         s->cfg.rpi_us = 8000;
     }
+    if (s->cfg.secure_tcp_port <= 0) {
+        s->cfg.secure_tcp_port = EIP_SECURE_PORT_DEFAULT;
+    }
+    if (s->cfg.security_class < 0 || s->cfg.security_class > 2) {
+        free(s);
+        return NULL;
+    }
+    if (s->cfg.security_class >= EIP_SECURITY_CLASS_1 && !s->cfg.psk_set) {
+        free(s);
+        return NULL;
+    }
     if (s->cfg.vendor_id == 0) {
         s->cfg.vendor_id = 0xABCD;
     }
@@ -105,8 +117,14 @@ eip_stack_t *eip_stack_create(const eip_cfg_t *cfg)
     s->listen_fd = -1;
     s->udp_fd = -1;
     s->originator_fd = -1;
+    s->tls_listen_fd = -1;
+    s->device_state = 3;
+    s->config_consistency = 1;
     for (int i = 0; i < EIP_TCP_CLIENTS_MAX; i++) {
         s->clients[i].fd = -1;
+    }
+    for (int i = 0; i < EIP_TLS_CLIENTS_MAX; i++) {
+        s->tls_clients[i].fd = -1;
     }
     s->next_session = 1;
     s->next_conn_id = 0x20000001;
@@ -291,9 +309,21 @@ int eip_stack_start(eip_stack_t *s)
             return rc;
         }
         LOG_INFO("ethernetip",
-                 "adapter listening TCP:%d UDP-IO:%d in_asm=%u(%u) out_asm=%u(%u)",
+                 "adapter listening TCP:%d UDP-IO:%d in_asm=%u(%u) out_asm=%u(%u) sec=%d",
                  s->cfg.tcp_port, s->cfg.udp_io_port, s->cfg.input_assembly,
-                 s->cfg.input_size, s->cfg.output_assembly, s->cfg.output_size);
+                 s->cfg.input_size, s->cfg.output_assembly, s->cfg.output_size,
+                 s->cfg.security_class);
+        rc = eip_sec_tls_start(s);
+        if (rc != 0) {
+            snprintf(s->last_error, sizeof(s->last_error),
+                     "TLS secure port start failed (%d)", rc);
+            LOG_ERROR("ethernetip", "%s", s->last_error);
+            close(s->listen_fd);
+            s->listen_fd = -1;
+            close(s->udp_fd);
+            s->udp_fd = -1;
+            return rc;
+        }
     } else {
         rc = connect_originator(s);
         if (rc != 0) {
@@ -315,6 +345,7 @@ void eip_stack_stop(eip_stack_t *s)
         return;
     }
     s->running = 0;
+    eip_sec_tls_stop(s);
     if (s->listen_fd >= 0) {
         close(s->listen_fd);
         s->listen_fd = -1;
@@ -490,6 +521,7 @@ void eip_stack_poll(eip_stack_t *s)
         eip_io_produce(s);
         flush_produces(s);
         pthread_mutex_unlock(&s->lock);
+        eip_sec_tls_poll(s);
     }
 }
 

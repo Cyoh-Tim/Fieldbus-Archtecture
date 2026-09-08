@@ -80,11 +80,14 @@ add_library(eip_stack STATIC
     stacks/ethernetip/src/eip_encap.c
     stacks/ethernetip/src/eip_io.c
     stacks/ethernetip/src/eip_client.c
+    stacks/ethernetip/src/eip_crypto.c
+    stacks/ethernetip/src/eip_sec.c
     stacks/ethernetip/src/eip_stack.c
 )
 target_include_directories(eip_stack PUBLIC stacks/ethernetip/include)
 target_include_directories(eip_stack PRIVATE include core)
-target_link_libraries(eip_stack PUBLIC Threads::Threads)
+find_package(OpenSSL REQUIRED)
+target_link_libraries(eip_stack PUBLIC Threads::Threads OpenSSL::SSL OpenSSL::Crypto)
 
 add_library(adapter_ethernetip STATIC adapters/ethernetip/ethernetip_adapter.c)
 target_include_directories(adapter_ethernetip PUBLIC adapters/ethernetip)

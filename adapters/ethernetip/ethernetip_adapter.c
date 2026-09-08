@@ -250,11 +250,53 @@ static int eip_init(protocol_adapter_t *self, const char *protocol_params_json,
         if (cJSON_IsNumber(rpi)) {
             cfg.rpi_us = (uint32_t)rpi->valueint;
         }
+        cJSON *sc = cJSON_GetObjectItemCaseSensitive(params, "security_class");
+        if (cJSON_IsNumber(sc)) {
+            cfg.security_class = sc->valueint;
+        }
+        cJSON *pm = cJSON_GetObjectItemCaseSensitive(params, "protection_mode");
+        if (cJSON_IsNumber(pm)) {
+            cfg.protection_mode = (uint32_t)pm->valuedouble;
+        }
+        cJSON *sp = cJSON_GetObjectItemCaseSensitive(params, "secure_tcp_port");
+        if (cJSON_IsNumber(sp)) {
+            cfg.secure_tcp_port = sp->valueint;
+        }
+        cJSON *psk = cJSON_GetObjectItemCaseSensitive(params, "psk_hex");
+        if (cJSON_IsString(psk)) {
+            const char *hex = psk->valuestring;
+            size_t n = strlen(hex);
+            if (n != EIP_PSK_LEN * 2) {
+                LOG_ERROR("ethernetip",
+                          "psk_hex 는 64 hex chars (32 bytes) 여야 함");
+                cJSON_Delete(params);
+                free(ctx);
+                return -EINVAL;
+            }
+            for (int i = 0; i < EIP_PSK_LEN; i++) {
+                unsigned int b;
+                if (sscanf(hex + i * 2, "%2x", &b) != 1) {
+                    LOG_ERROR("ethernetip", "psk_hex 파싱 실패");
+                    cJSON_Delete(params);
+                    free(ctx);
+                    return -EINVAL;
+                }
+                cfg.psk[i] = (uint8_t)b;
+            }
+            cfg.psk_set = 1;
+        }
         cJSON *mock = cJSON_GetObjectItemCaseSensitive(params, "mock");
         if (cJSON_IsBool(mock)) {
             cfg.mock = cJSON_IsTrue(mock);
         }
         cJSON_Delete(params);
+    }
+
+    if (cfg.security_class >= EIP_SECURITY_CLASS_1 && !cfg.psk_set) {
+        LOG_ERROR("ethernetip",
+                  "security_class>=1 이면 protocol_params.psk_hex 가 필요함");
+        free(ctx);
+        return -EINVAL;
     }
 
     if (cfg.role == EIP_ROLE_ORIGINATOR && !cfg.remote_ip[0]) {
@@ -295,10 +337,10 @@ static int eip_init(protocol_adapter_t *self, const char *protocol_params_json,
     }
     self->ctx = ctx;
     LOG_INFO("ethernetip",
-             "init role=%s points=%d in_asm=%u/%u out_asm=%u/%u (자체 스택)",
+             "init role=%s points=%d in_asm=%u/%u out_asm=%u/%u sec=%d (자체 스택)",
              cfg.role == EIP_ROLE_ORIGINATOR ? "originator" : "adapter",
              ctx->point_count, cfg.input_assembly, cfg.input_size,
-             cfg.output_assembly, cfg.output_size);
+             cfg.output_assembly, cfg.output_size, cfg.security_class);
     return 0;
 }
 

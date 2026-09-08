@@ -1,5 +1,6 @@
 #include "eip_endian.h"
 #include "eip_internal.h"
+#include "eip_sec.h"
 
 #include <errno.h>
 #include <string.h>
@@ -65,8 +66,9 @@ static int build_list_identity(eip_stack_t *s, uint8_t *payload, size_t cap,
     return 0;
 }
 
-static int handle_sendrr(eip_stack_t *s, const uint8_t *body, size_t body_len,
-                         uint8_t *resp_body, size_t resp_cap, size_t *resp_len)
+static int handle_sendrr(eip_stack_t *s, uint32_t session, const uint8_t *body,
+                         size_t body_len, uint8_t *resp_body, size_t resp_cap,
+                         size_t *resp_len)
 {
     /* interface handle(4) + timeout(2) + CPF */
     if (body_len < 6) {
@@ -80,6 +82,8 @@ static int handle_sendrr(eip_stack_t *s, const uint8_t *body, size_t body_len,
     off += 2;
     const uint8_t *cip = NULL;
     size_t cip_len = 0;
+    const uint8_t *mac = NULL;
+    size_t mac_len = 0;
     for (uint16_t i = 0; i < items; i++) {
         if (off + 4 > body_len) {
             return -EINVAL;
@@ -93,6 +97,9 @@ static int handle_sendrr(eip_stack_t *s, const uint8_t *body, size_t body_len,
         if (type == EIP_ITEM_UNCONNECTED_DATA) {
             cip = body + off;
             cip_len = length;
+        } else if (type == EIP_SEC_ITEM_INTEGRITY) {
+            mac = body + off;
+            mac_len = length;
         }
         off += length;
     }
@@ -100,12 +107,48 @@ static int handle_sendrr(eip_stack_t *s, const uint8_t *body, size_t body_len,
         return -EINVAL;
     }
 
+    if (eip_sec_check_ucmm(s, session, cip, cip_len, mac, mac_len) != 0) {
+        /* Privilege / security failure as CIP-shaped bare reply via empty */
+        uint8_t err[6];
+        err[0] = (uint8_t)(cip[0] | CIP_SVC_REPLY);
+        err[1] = 0;
+        err[2] = CIP_STATUS_PRIVILEGE;
+        err[3] = 0;
+        size_t r = 0;
+        eip_wr_le32(resp_body + r, 0);
+        r += 4;
+        eip_wr_le16(resp_body + r, 0);
+        r += 2;
+        eip_wr_le16(resp_body + r, 2);
+        r += 2;
+        eip_wr_le16(resp_body + r, EIP_ITEM_NULL_ADDR);
+        r += 2;
+        eip_wr_le16(resp_body + r, 0);
+        r += 2;
+        eip_wr_le16(resp_body + r, EIP_ITEM_UNCONNECTED_DATA);
+        r += 2;
+        eip_wr_le16(resp_body + r, 4);
+        r += 2;
+        memcpy(resp_body + r, err, 4);
+        r += 4;
+        *resp_len = r;
+        return 0;
+    }
+
     uint8_t cip_resp[EIP_EXPLICIT_DATA_MAX + 64];
     size_t cip_resp_len = 0;
     eip_cip_route(s, cip, cip_len, cip_resp, sizeof(cip_resp), &cip_resp_len);
 
-    /* Build CPF response: null addr + unconnected data */
-    if (resp_cap < 6 + 2 + 4 + 4 + cip_resp_len) {
+    size_t mac_item_len = 0;
+    uint8_t mac_item[4 + EIP_HMAC_LEN];
+    if (eip_sec_required(s) && eip_sec_service_needs_mac(cip[0])) {
+        mac_item_len = eip_sec_append_mac_item(s, session, cip_resp,
+                                               cip_resp_len, mac_item,
+                                               sizeof(mac_item));
+    }
+
+    uint16_t item_count = mac_item_len ? 3 : 2;
+    if (resp_cap < 6 + 2 + 8 + cip_resp_len + mac_item_len) {
         return -ENOSPC;
     }
     size_t r = 0;
@@ -113,7 +156,7 @@ static int handle_sendrr(eip_stack_t *s, const uint8_t *body, size_t body_len,
     r += 4;
     eip_wr_le16(resp_body + r, 0);
     r += 2;
-    eip_wr_le16(resp_body + r, 2);
+    eip_wr_le16(resp_body + r, item_count);
     r += 2;
     eip_wr_le16(resp_body + r, EIP_ITEM_NULL_ADDR);
     r += 2;
@@ -125,6 +168,10 @@ static int handle_sendrr(eip_stack_t *s, const uint8_t *body, size_t body_len,
     r += 2;
     memcpy(resp_body + r, cip_resp, cip_resp_len);
     r += cip_resp_len;
+    if (mac_item_len) {
+        memcpy(resp_body + r, mac_item, mac_item_len);
+        r += mac_item_len;
+    }
     *resp_len = r;
     return 0;
 }
@@ -201,7 +248,7 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
         break;
 
     case EIP_CMD_SENDRRDATA:
-        if (handle_sendrr(s, body, length, body_resp, sizeof(body_resp),
+        if (handle_sendrr(s, session, body, length, body_resp, sizeof(body_resp),
                           &body_len) != 0) {
             status = 1;
             body_len = 0;

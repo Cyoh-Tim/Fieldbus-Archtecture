@@ -12,6 +12,7 @@
 
 #define EIP_TCP_PORT_DEFAULT     44818
 #define EIP_UDP_IO_PORT_DEFAULT  2222
+#define EIP_SECURE_PORT_DEFAULT  2221 /* CIP Security–oriented TLS port */
 
 #define EIP_ENCAP_HDR_SIZE       24
 #define EIP_CPF_ITEM_HDR         4
@@ -24,10 +25,18 @@
 #define EIP_CLASS1_CONN_MAX         32
 #define EIP_CLASS3_SESSIONS_MAX     64
 #define EIP_TCP_CLIENTS_MAX         32
+#define EIP_TLS_CLIENTS_MAX         16
 #define EIP_TAG_NAME_MAX            128
 #define EIP_PRODUCT_NAME_MAX        32
 #define EIP_PATH_MAX                64
 #define EIP_EXPLICIT_DATA_MAX       504
+#define EIP_PSK_LEN                 32
+#define EIP_HMAC_LEN                32
+
+/* Security class (Fieldbus profile — see docs/ethernetip_stack.md) */
+#define EIP_SECURITY_CLASS_0  0 /* lab / open */
+#define EIP_SECURITY_CLASS_1  1 /* Integrity PSK (HMAC) */
+#define EIP_SECURITY_CLASS_2  2 /* Integrity + TLS confidentiality port */
 
 /* Encapsulation commands (LE on wire) */
 #define EIP_CMD_NOP                 0x0000
@@ -74,8 +83,13 @@
 #define CIP_CLASS_MSG_ROUTER        0x02
 #define CIP_CLASS_ASSEMBLY          0x04
 #define CIP_CLASS_CONN_MANAGER      0x06
+#define CIP_CLASS_QOS               0x48
+#define CIP_CLASS_EIP_SECURITY      0x5E
+#define CIP_CLASS_PORT              0xF4
 #define CIP_CLASS_TCPIP             0xF5
 #define CIP_CLASS_ETHERNET_LINK     0xF6
+
+#define CIP_STATUS_PRIVILEGE        0x0F
 
 /* Common assembly instance numbers (Rockwell-style defaults, configurable) */
 #define EIP_ASM_CONFIG_DEFAULT      100

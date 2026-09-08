@@ -6,6 +6,9 @@
 
 #include "eip_stack.h"
 
+typedef struct ssl_ctx_st SSL_CTX;
+typedef struct ssl_st SSL;
+
 typedef struct {
     uint16_t instance;
     uint16_t size;
@@ -43,6 +46,14 @@ typedef struct {
     size_t rx_len;
 } eip_tcp_client_t;
 
+typedef struct {
+    int fd;
+    int active;
+    SSL *ssl;
+    uint8_t rx[EIP_TCP_BUF_MAX];
+    size_t rx_len;
+} eip_tls_client_t;
+
 struct eip_stack {
     eip_cfg_t cfg;
     eip_transport_ops_t tops;
@@ -62,7 +73,6 @@ struct eip_stack {
     eip_assembly_t assemblies[EIP_ASSEMBLY_INSTANCES_MAX];
     int assembly_count;
 
-    /* Direct pointers into assemblies[] data for hot path */
     uint8_t *input_data;
     uint16_t input_size;
     uint8_t *output_data;
@@ -70,31 +80,34 @@ struct eip_stack {
     uint8_t *config_data;
     uint16_t config_size;
 
+    /* CIP Security confidentiality (class >= 2) */
+    SSL_CTX *tls_ctx;
+    int tls_listen_fd;
+    eip_tls_client_t tls_clients[EIP_TLS_CLIENTS_MAX];
+
+    uint16_t config_consistency;
+    uint8_t device_state; /* Identity state */
+
     pthread_mutex_t lock;
     char last_error[128];
 };
 
-/* encap */
 int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
                       uint8_t *resp, size_t resp_cap, size_t *resp_len);
 
-/* CIP message router (UCMM payload in/out, without CPF) */
 int eip_cip_route(eip_stack_t *s, const uint8_t *req, size_t req_len,
                   uint8_t *resp, size_t resp_cap, size_t *resp_len);
 
-/* Connection Manager services */
 int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
                         int large, uint8_t *resp, size_t resp_cap,
                         size_t *resp_len);
 int eip_cm_forward_close(eip_stack_t *s, const uint8_t *data, size_t len,
                          uint8_t *resp, size_t resp_cap, size_t *resp_len);
 
-/* Class 1 IO */
 int eip_io_handle_udp(eip_stack_t *s, const uint8_t *frame, size_t len,
                       uint32_t src_ip, uint16_t src_port);
 void eip_io_produce(eip_stack_t *s);
 
-/* Assemblies */
 int eip_assembly_init(eip_stack_t *s);
 void eip_assembly_fini(eip_stack_t *s);
 eip_assembly_t *eip_assembly_find(eip_stack_t *s, uint16_t instance);
@@ -103,7 +116,6 @@ int eip_assembly_read(eip_stack_t *s, uint16_t instance, uint8_t *dst,
 int eip_assembly_write(eip_stack_t *s, uint16_t instance, const uint8_t *src,
                        size_t len);
 
-/* Path helpers */
 int eip_path_append_class(uint8_t *path, size_t cap, size_t *used,
                           uint16_t class_id);
 int eip_path_append_instance(uint8_t *path, size_t cap, size_t *used,
