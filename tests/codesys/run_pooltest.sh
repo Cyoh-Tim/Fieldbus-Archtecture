@@ -126,7 +126,7 @@ else
   sudo ip addr add 192.168.10.1/24 dev pn-ctl
   sudo ip link set pn-dev up
   sudo ip link set pn-ctl up
-  rm -f /tmp/fieldbus-sensor-pn.json
+  sudo rm -f /tmp/fieldbus-sensor-pn.json
   SENSOR_STATE=/tmp/fieldbus-sensor-pn.json \
     sudo env SENSOR_STATE=/tmp/fieldbus-sensor-pn.json \
     "${BIN}/sensor_demo" "${ROOT}/config/demo.sensor.profinet.json" \
@@ -154,15 +154,16 @@ sk "ethercat" "SubDevice needs ESC ASIC"
 
 # ---------- Real CODESYS Control SL binary (optional) ----------
 echo "=== CODESYS Control SL binary ==="
-if command -v codesyscontrol >/dev/null 2>&1 || [[ -x /opt/codesys/bin/codesyscontrol.bin ]]; then
-  CDS_BIN="$(command -v codesyscontrol 2>/dev/null || true)"
-  [[ -z "${CDS_BIN}" ]] && CDS_BIN=/opt/codesys/bin/codesyscontrol.bin
-  echo "found ${CDS_BIN}"
+# /opt/codesys is 770 root:root after dpkg — probe with sudo.
+if sudo -n test -x /opt/codesys/bin/codesyscontrol.bin 2>/dev/null; then
+  echo "found /opt/codesys/bin/codesyscontrol.bin"
   if ss -ltn 2>/dev/null | grep -q ':11740'; then
     ok "codesyscontrol listening 11740 (empty runtime is not a fieldbus master)"
   else
     sk "codesyscontrol live" "binary present but not listening; start with 2-hour demo"
   fi
+elif ss -ltn 2>/dev/null | grep -q ':11740'; then
+  ok "codesyscontrol listening 11740 (empty runtime is not a fieldbus master)"
 else
   sk "codesyscontrol binary" "not installed (see tests/codesys/try_install_codesys.sh)"
 fi

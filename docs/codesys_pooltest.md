@@ -77,15 +77,16 @@ SLMP 는 CODESYS 필드버스 목록에 없다. 미쓰비시 PLC 또는
 
 ## 이 PR 에서 돌린 결과
 
-`bash tests/codesys/run_pooltest.sh` (이 클라우드 VM, 2026-09-08):
+`bash tests/codesys/run_pooltest.sh` (이 클라우드 VM, 2026-09-08, Control SL 기동 후):
+**PASS=5 FAIL=0 SKIP=2**
 
 | 항목 | 결과 |
 |---|---|
-| Modbus TCP Master ← sensor | **PASS** 20 samples, barcode `BETA-PN-IN/…` seq 52→546, state_match |
-| EtherNet/IP UCMM ← sensor | **PASS** 17 samples, assembly 150 seq 65→481, state_match |
-| SLMP 3E client → PLC stand-in | **PASS** 20 samples, D100.. seq 15→139, state_match |
-| PROFINET CODESYS-profile Controller | **PASS** 16/16 (DCP Nominate, Connect+AlarmCR, Write, PrmEnd, RTC1 8 ms mean 7999 µs, input `BETA-PN-IN`) |
+| Modbus TCP Master ← sensor | **PASS** 16 samples, barcode `BETA-PN-IN/…` last seq 442, state_match |
+| EtherNet/IP UCMM ← sensor | **PASS** 17 samples, assembly 150 last seq 481, state_match |
+| SLMP 3E client → PLC stand-in | **PASS** 15 samples, D100 last seq 106, state_match |
+| PROFINET CODESYS-profile Controller | **PASS** 16/16 (DCP Nominate, Connect+AlarmCR, Write, PrmEnd, RTC1 8 ms mean 7999 µs n=145, input `BETA-PN-IN`) |
 | CC-Link / EtherCAT | SKIP (스텁 / ESC ASIC) |
-| `codesyscontrol` 4.22.0.0 | **설치·기동됨** (이 VM). CodeMeter 9.10.8166.500 + Control SL + Edge Gateway. 로그: `CODESYS Control ready`, `no runtime license - running in demo mode(~2 hours)`. listen **11740**/tcp, Gateway **1217**/tcp, OPC UA **4840**/tcp, CodeMeter **22350**/tcp. 빈 런타임 — IEC 앱 없음, 필드버스 마스터 아님. XDP/`libxdp.so` 없음은 VM 에서 정상. |
+| `codesyscontrol` 4.22.0.0 | **PASS** listening 11740. CodeMeter 9.10.8166.500 + Control SL + Edge Gateway. 로그: `CODESYS Control ready`, `no runtime license - running in demo mode(~2 hours)`. Gateway **1217**/tcp, OPC UA **4840**/tcp, CodeMeter **22350**/tcp. 빈 런타임 — IEC 앱 없음, 필드버스 마스터 아님. `/opt/codesys` 는 dpkg 후 770 root:root. XDP/`libxdp.so` 없음은 VM 에서 정상. |
 
 와이어에서 읽은 온도는 200–350 (0.1 °C) 범위에서 매 샘플 바뀌었고, `sensor_demo` 가 쓴 JSON 스냅샷과 일치했다.
