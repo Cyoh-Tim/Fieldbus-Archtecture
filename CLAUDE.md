@@ -21,9 +21,10 @@
 1. 코어 완성/검증 (이미 스캐폴딩됨 — 버그 수정/테스트 위주)
 2. Modbus 어댑터 완성 (`adapters/modbus/` — 이미 대부분 구현됨, `poll_cycle`
    에서 read 포인트 일괄 캐싱하도록 확장하는 것이 다음 단계)
-3. SLMP 어댑터 — 3E 프레임 인코딩/디코딩이 TODO로 남아있음. 실제 대상 PLC의
-   SLMP 통신 가이드 문서(사용자가 제공)를 근거로 구현할 것. 문서 없이 임의로
-   프레임 포맷을 추측하지 말 것.
+3. SLMP 어댑터 — `adapters/slmp/` + `stacks/slmp/` 자체 Binary 3E 스택.
+   프레임/커맨드/디바이스 코드는 Mitsubishi SLMP Reference Manual(Binary 3E) 기준.
+   특정 PLC 가이드의 주소·디바이스 표는 config로 수용(코드 수정 없이).
+   상세 `docs/slmp_stack.md`. ASCII/4E는 frame enum 예약만.
 4. EtherNet/IP 어댑터 — `third_party/ethernetip_stack/`에 벤더 스택이
    배치된 후 진행. 스택 매뉴얼의 초기화/폴링/read-write API를
    `ethernetip_adapter.c`의 TODO 지점에 연결.

@@ -28,10 +28,13 @@
         "required": ["name", "access", "address"],
         "properties": {
           "name": { "type": "string" },
-          "access": { "type": "string", "enum": ["read", "write"] },
+          "access": {
+            "type": "string",
+            "description": "read|write|readwrite (PLC 관점)"
+          },
           "data_type": {
             "type": "string",
-            "enum": ["uint16", "int16", "uint32", "int32", "float32", "bool", "string"]
+            "description": "프로토콜 공통. 별칭(u16/REAL/ascii/…)은 어댑터가 수용. SLMP 확장 타입은 docs/slmp_stack.md 참고."
           },
           "length": { "type": "integer" },
           "scale": { "type": "number", "default": 1.0 },

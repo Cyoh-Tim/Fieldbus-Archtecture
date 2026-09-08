@@ -116,7 +116,7 @@ interface ProtocolAdapter {
 | 프로토콜 | 구현 방식 | 역할 | 비고 |
 |---|---|---|---|
 | Modbus | libmodbus 래핑 | 서버(슬레이브) | holding/input register, coil, discrete input 매핑 지원 |
-| SLMP | 자체 디코더/인코더 | 클라이언트 | 3E 프레임 기준, 디바이스 코드(D/M/X/Y 등) 파싱 |
+| SLMP | 자체 스택 `stacks/slmp/` | 클라이언트(기본)/서버(시뮬) | Binary 3E, 디바이스·엔디안·스케일 범용 매핑. 상세 `docs/slmp_stack.md` |
 | CC-Link | 스텁 → 추후 구현 | TBD | 인터페이스 자리만 확보, `NotImplementedAdapter` |
 | EtherNet/IP | 구매 스택(Pyramid 등) 래핑 | 서버/클라이언트 (스택 지원 범위에 따름) | 어댑터가 스택의 콜백 모델을 poll_cycle로 흡수 |
 | PROFINET | 자체 Device 스택 `stacks/profinet/` | 디바이스(슬레이브) | CC-B + RT Class 1 + Security Class 1(HMAC). IRT 없음. PI 인증 아님. 상세는 `docs/profinet_stack.md` |

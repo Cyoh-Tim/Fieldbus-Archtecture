@@ -7,6 +7,7 @@ add_definitions(-D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE)
 
 option(ENABLE_ETHERNETIP "EtherNet/IP 어댑터 빌드 (구매 스택 필요)" OFF)
 option(ENABLE_PN_TESTS "PROFINET 스택 단위 테스트" ON)
+option(ENABLE_SLMP_TESTS "SLMP 스택/어댑터 단위 테스트" ON)
 
 find_package(Threads REQUIRED)
 
@@ -61,11 +62,20 @@ target_include_directories(adapter_modbus PUBLIC adapters/modbus)
 target_include_directories(adapter_modbus PRIVATE include core ${LIBMODBUS_INCLUDE_DIRS})
 target_link_libraries(adapter_modbus PUBLIC ${CJSON_TARGET} ${LIBMODBUS_LIBRARIES})
 
+# ---- SLMP 스택 (자체 구현, Binary 3E) ----
+add_library(slmp_stack STATIC stacks/slmp/src/slmp_stack.c)
+target_include_directories(slmp_stack PUBLIC stacks/slmp/include)
+target_include_directories(slmp_stack PRIVATE include core)
+target_link_libraries(slmp_stack PUBLIC Threads::Threads)
+
 # ---- 어댑터: SLMP (항상 빌드, 벤더 의존성 없음) ----
-add_library(adapter_slmp STATIC adapters/slmp/slmp_adapter.c)
+add_library(adapter_slmp STATIC
+    adapters/slmp/slmp_adapter.c
+    adapters/slmp/slmp_codec.c
+)
 target_include_directories(adapter_slmp PUBLIC adapters/slmp)
-target_include_directories(adapter_slmp PRIVATE include core)
-target_link_libraries(adapter_slmp PUBLIC ${CJSON_TARGET})
+target_include_directories(adapter_slmp PRIVATE include core stacks/slmp/include)
+target_link_libraries(adapter_slmp PUBLIC ${CJSON_TARGET} slmp_stack m)
 
 # ---- 어댑터: CC-Link (스텁, 항상 빌드) ----
 add_library(adapter_cclink STATIC adapters/cclink/cclink_adapter.c)
@@ -110,6 +120,17 @@ if(ENABLE_PN_TESTS)
     add_executable(test_pn_stack tests/test_pn_stack.c)
     target_include_directories(test_pn_stack PRIVATE stacks/profinet/include include core)
     target_link_libraries(test_pn_stack PRIVATE pn_stack)
+endif()
+
+if(ENABLE_SLMP_TESTS)
+    add_executable(test_slmp_stack tests/test_slmp_stack.c)
+    target_include_directories(test_slmp_stack PRIVATE stacks/slmp/include include core)
+    target_link_libraries(test_slmp_stack PRIVATE slmp_stack Threads::Threads)
+
+    add_executable(test_slmp_adapter tests/test_slmp_adapter.c)
+    target_include_directories(test_slmp_adapter PRIVATE
+        stacks/slmp/include include core adapters/slmp)
+    target_link_libraries(test_slmp_adapter PRIVATE adapter_slmp m)
 endif()
 
 # ---- 데몬 실행파일 ----

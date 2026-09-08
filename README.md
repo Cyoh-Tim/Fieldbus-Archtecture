@@ -14,7 +14,8 @@ PROFINET 은 구매 스택 래핑이 아니라 `stacks/profinet/` 자체 Device 
 include/               ProtocolAdapter 공통 인터페이스
 core/                   코어(설정 로더, 스케줄러, 어댑터 레지스트리, main)
 adapters/modbus/        Modbus TCP 어댑터 (libmodbus) - 벤더 의존성 없음
-adapters/slmp/          SLMP 어댑터 (자체 구현, 3E 프레임은 TODO)
+adapters/slmp/          SLMP 어댑터 (범용 매핑 + codec)
+stacks/slmp/            SLMP Binary 3E 스택 (client/server simulator)
 adapters/cclink/        CC-Link 어댑터 (미확정, 스텁)
 adapters/ethernetip/    EtherNet/IP 어댑터 (구매 스택 래핑, 연동부 TODO)
 adapters/profinet/      PROFINET 어댑터 — 자체 스택 연결 (RT Class 1, IRT 없음)
@@ -22,6 +23,7 @@ stacks/profinet/        PROFINET IO Device 스택 (DCP/LLDP/RPC/RTC1/SNMP/Sec1)
 third_party/            EtherNet/IP 구매 벤더 스택 배치 위치 (git 커밋 안 함)
 config/                 config.schema.json + 예제 설정 파일
 docs/design.md          설계 배경 전체 문서
+docs/slmp_stack.md      SLMP 범용 매핑/스택 문서
 ```
 
 ## 빌드
@@ -39,9 +41,13 @@ cmake -DENABLE_ETHERNETIP=ON ..
 ## 실행
 ```
 ./build/multiproto_daemon config/example.modbus.json
+./build/multiproto_daemon config/example.slmp.json
 ./build/test_pn_stack
+./build/test_slmp_stack
+./build/test_slmp_adapter
 ./build/multiproto_daemon config/example.profinet.json
 ```
+SLMP 상세: [`docs/slmp_stack.md`](docs/slmp_stack.md).
 
 ## 새 프로토콜(예: EtherCAT) 추가하는 법
 1. `adapters/<name>/` 에 `include/protocol_adapter.h` 구현
