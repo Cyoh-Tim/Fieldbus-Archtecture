@@ -83,6 +83,7 @@ struct pn_stack {
     uint64_t last_rt_ns;
     uint64_t last_cpm_ns;
     uint64_t last_lldp_ns;
+    uint64_t last_hello_ns;
     uint64_t start_ns;
 
     char lldp_rem_name[PN_STATION_NAME_MAX + 1];
@@ -106,6 +107,8 @@ struct pn_stack {
     int alarm_rta_acked;
     int alarm_retries;
     uint64_t last_alarm_ns;
+    int diag_present;
+    int connect_reject;
 
     uint8_t rpc_tx[PN_FRAME_MAX];
     size_t rpc_tx_len;
@@ -143,6 +146,7 @@ int pn_eth_parse(const uint8_t *frame, size_t len, const uint8_t **payload,
 void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
                      size_t plen);
 int pn_dcp_verify_set(const pn_stack_t *s, const uint8_t *payload, size_t plen);
+void pn_dcp_send_hello(pn_stack_t *s);
 
 void pn_lldp_send(pn_stack_t *s);
 void pn_lldp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,

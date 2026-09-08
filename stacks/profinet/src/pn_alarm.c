@@ -54,21 +54,30 @@ void pn_alarm_on_connect(pn_stack_t *s, const uint8_t *body, uint16_t blen)
     alarm_reset_tx(s);
 }
 
+static void put_channel_diag(uint8_t *p)
+{
+    pn_wr_be16(p, 0x8000); /* whole submodule */
+    pn_wr_be16(p + 2, 0x0800); /* specifier = appears */
+    pn_wr_be16(p + 4, 0x0010); /* ChannelErrorType: parameter missing */
+}
+
 static size_t put_notify_high(uint8_t *p)
 {
-    /* AlarmNotification-High: Diagnosis on DAP Port (0x8001). */
+    /* AlarmNotification-High + USI ChannelDiagnosis (diagnosis ASE). */
     pn_wr_be16(p, 0x0001);
-    pn_wr_be16(p + 2, 22);
+    pn_wr_be16(p + 2, 30);
     p[4] = 1;
     p[5] = 0;
     pn_wr_be16(p + 6, 0x0001);  /* AlarmType Diagnosis */
-    pn_wr_be32(p + 8, 0);       /* API */
-    pn_wr_be16(p + 12, 0);      /* Slot */
-    pn_wr_be16(p + 14, 0x8001); /* Port subslot */
-    pn_wr_be32(p + 16, 1);      /* ModuleIdent DAP */
-    pn_wr_be32(p + 20, 3);      /* SubmoduleIdent Port */
-    pn_wr_be16(p + 24, 0x0800); /* ChannelDiagnosis */
-    return 26;
+    pn_wr_be32(p + 8, 0);
+    pn_wr_be16(p + 12, 0);
+    pn_wr_be16(p + 14, 0x8001);
+    pn_wr_be32(p + 16, 1);
+    pn_wr_be32(p + 20, 3);
+    pn_wr_be16(p + 24, 0x0800);
+    pn_wr_be16(p + 26, PN_USI_CHANNEL_DIAG);
+    put_channel_diag(p + 28);
+    return 34;
 }
 
 static void send_rta_data(pn_stack_t *s)
@@ -104,6 +113,7 @@ static void send_rta_data(pn_stack_t *s)
     if (flen) {
         pn_eth_send(s, frame, flen);
         s->alarm_rta_sent = 1;
+        s->diag_present = 1;
         s->last_alarm_ns = pn_now_ns();
         LOG_INFO("pn_alarm", "RTA Data seq=%u dst_ref=%u src_ref=%u",
                  s->alarm_send_seq, dst_ref, src_ref);

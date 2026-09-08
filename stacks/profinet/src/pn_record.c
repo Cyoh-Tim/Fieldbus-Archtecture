@@ -219,6 +219,34 @@ static size_t put_pdif_real(const pn_stack_t *s, uint8_t *out, size_t cap)
     return rec_block(out, cap, PN_BLOCK_PDIF_REAL, body, (uint16_t)off);
 }
 
+static void put_channel_diag(uint8_t *p)
+{
+    pn_wr_be16(p, 0x8000);
+    pn_wr_be16(p + 2, 0x0800);
+    pn_wr_be16(p + 4, 0x0010);
+}
+
+static size_t put_diagnosis(uint8_t *out, size_t cap, int ext)
+{
+    uint8_t body[24];
+    memset(body, 0, sizeof(body));
+    size_t off = 0;
+    off += 2; /* align */
+    pn_wr_be16(body + off, 0); /* slot */
+    off += 2;
+    pn_wr_be16(body + off, 0x8001);
+    off += 2;
+    put_channel_diag(body + off);
+    off += 6;
+    if (ext) {
+        pn_wr_be16(body + off, 0); /* ExtChannelErrorType */
+        off += 2;
+        pn_wr_be32(body + off, 0); /* ExtChannelAddValue */
+        off += 4;
+    }
+    return rec_block(out, cap, PN_BLOCK_DIAGNOSIS, body, (uint16_t)off);
+}
+
 int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                    uint16_t index, uint8_t *out, size_t cap, size_t *out_len)
 {
@@ -235,6 +263,13 @@ int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                             cap);
     } else if (index == PN_INDEX_PDIF_REAL) {
         n = put_pdif_real(s, out, cap);
+    } else if (index == PN_INDEX_CHAN_DIAG || index == PN_INDEX_EXT_CHAN_DIAG ||
+               index == PN_INDEX_DIAG_AR) {
+        if (!s->diag_present) {
+            *out_len = 0;
+            return 0;
+        }
+        n = put_diagnosis(out, cap, index == PN_INDEX_EXT_CHAN_DIAG);
     } else {
         /* Unknown index: empty success. Controllers treat a PNIO error as
          * fatal; TIA and others skip optional records if the length is 0. */

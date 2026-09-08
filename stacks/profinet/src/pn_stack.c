@@ -30,6 +30,8 @@ void pn_ar_reset(pn_stack_t *s)
     s->last_alarm_ns = 0;
     s->alarm_local_ref = 1;
     s->alarm_max_len = 200;
+    s->diag_present = 0;
+    s->connect_reject = 0;
 }
 
 uint64_t pn_ar_cycle_ns(const pn_ar_t *ar, uint32_t fallback_us)
@@ -184,7 +186,9 @@ int pn_stack_start(pn_stack_t *s)
              s->cfg.iface[0] ? s->cfg.iface : "mock", s->cfg.input_len,
              s->cfg.output_len, s->cfg.cycle_us);
     pn_lldp_send(s);
+    pn_dcp_send_hello(s);
     s->last_lldp_ns = pn_now_ns();
+    s->last_hello_ns = s->last_lldp_ns;
     return 0;
 }
 
@@ -231,6 +235,11 @@ int pn_stack_handle_eth(pn_stack_t *s, const uint8_t *frame, size_t len)
     }
     if (et == PN_ETHTYPE_LLDP) {
         pn_lldp_on_frame(s, src, payload, plen);
+        return 0;
+    }
+    /* MRP (CC-B PA / ring) is not implemented. Ignore so a lab flood of
+     * 0x88E3 does not take down RTC1. Official MRP TCS is out of scope. */
+    if (et == PN_ETHTYPE_MRP) {
         return 0;
     }
     return 0;
@@ -306,6 +315,10 @@ void pn_stack_poll(pn_stack_t *s)
     if (now - s->last_lldp_ns > 5000000000ull) {
         pn_lldp_send(s);
         s->last_lldp_ns = now;
+    }
+    if (!s->ar.established && now - s->last_hello_ns > 1000000000ull) {
+        pn_dcp_send_hello(s);
+        s->last_hello_ns = now;
     }
 }
 

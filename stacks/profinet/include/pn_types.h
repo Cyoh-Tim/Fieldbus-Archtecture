@@ -7,6 +7,7 @@
 #define PN_ETHTYPE_PN         0x8892u
 #define PN_ETHTYPE_LLDP       0x88CCu
 #define PN_ETHTYPE_VLAN       0x8100u
+#define PN_ETHTYPE_MRP        0x88E3u
 
 #define PN_FRAMEID_DCP_HELLO  0xFEFCu
 #define PN_FRAMEID_DCP_GETSET 0xFEFDu
@@ -64,6 +65,7 @@
 #define PN_BLOCK_PRMEND_RES   0x8110u
 #define PN_BLOCK_APPRDY_RES   0x8112u
 #define PN_BLOCK_RELEASE_RES  0x8114u
+#define PN_BLOCK_DIAGNOSIS    0x0010u
 #define PN_BLOCK_REALIDENT    0x0013u
 #define PN_BLOCK_IM0          0x0020u
 #define PN_BLOCK_PDPORT_REAL  0x020Fu
@@ -91,14 +93,18 @@
 #define PN_DATASTATUS_PROBLEM 0x40u
 
 #define PN_INDEX_IM0            0xAFF0u
+#define PN_INDEX_CHAN_DIAG      0x800Au
+#define PN_INDEX_EXT_CHAN_DIAG  0x8010u
 #define PN_INDEX_REALIDENT_SUB  0x8001u
 #define PN_INDEX_PDPORT_REAL    0x802Au
 #define PN_INDEX_PDIF_REAL      0x8080u
 #define PN_INDEX_REALIDENT_SLOT 0xC001u
 #define PN_INDEX_EXPIDENT_AR    0xE000u
 #define PN_INDEX_REALIDENT_AR   0xE001u
+#define PN_INDEX_DIAG_AR        0xE00Cu
 #define PN_INDEX_WRITE_MULTI    0xE040u
 #define PN_INDEX_REALIDENT_API  0xF000u
+#define PN_USI_CHANNEL_DIAG     0x8000u
 
 #define PN_STATION_NAME_MAX   240
 #define PN_IO_MAX             256
@@ -112,6 +118,7 @@
 
 #define PN_CONFORMANCE_CLASS_B  2
 #define PN_RT_CLASS_1           1
+#define PN_RT_CLASS_3           3
 #define PN_SECURITY_CLASS_1     1
 
 #endif /* PN_TYPES_H */

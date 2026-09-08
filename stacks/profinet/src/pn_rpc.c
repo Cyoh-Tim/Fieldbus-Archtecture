@@ -210,6 +210,18 @@ static int parse_connect_block(uint16_t type, const uint8_t *body, uint16_t blen
         tmp.frame_id = pn_rd_be16(body + 12);
         tmp.send_clock = pn_rd_be16(body + 14);
         tmp.reduction = pn_rd_be16(body + 16);
+        if (blen >= 10) {
+            uint32_t props = pn_rd_be32(body + 6);
+            uint32_t rt = props & 0xFu;
+            /* RT_CLASS_3 / IRT (and IRT FrameID range) is out of product
+             * scope. Reject so lab SPIRTA-shaped tests can assert the NACK. */
+            if (rt >= PN_RT_CLASS_3) {
+                s->connect_reject = 1;
+            }
+            if (tmp.frame_id >= 0x0100u && tmp.frame_id <= 0x0FFFu) {
+                s->connect_reject = 1;
+            }
+        }
         if (blen >= 32) {
             tmp.watchdog = pn_rd_be16(body + 26);
             tmp.datahold = pn_rd_be16(body + 28);
@@ -816,6 +828,14 @@ int pn_rpc_handle_from(pn_stack_t *s, const uint8_t *pdu, size_t len,
         }
         s->ar.initiator_udp = src_port;
         walk_blocks(blocks, blen, parse_connect_block, s);
+        if (s->connect_reject) {
+            LOG_WARN("pn_rpc", "Connect 거부 — RT Class 3 / IRT 미지원");
+            pn_ar_reset(s);
+            uint8_t err[4] = {0x81, 0x54, 0x00, 0x00};
+            so = ndr_wrap(stub_out, err, 4, le);
+            *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so);
+            return 0;
+        }
         finalize_ar(s);
         uint8_t blocks_res[512];
         size_t bn = build_connect_res_blocks(s, blocks_res, sizeof(blocks_res));

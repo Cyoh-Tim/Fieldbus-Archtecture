@@ -9,13 +9,14 @@ PI 인증 대상이 아니다.
 |------|------|
 | CM 기동 | Connect → Write(ACK) → PrmEnd → ApplicationReady → cyclic |
 | RT Class 1 | 비동기 cyclic. C_SDU 에 데이터+IOPS/IOCS. `SendClock×ReductionRatio` |
-| DCP | Identify(필터), Get(요청 속성), Set(Name/IP). Set 시 `apply_os_ip` 이면 OS 주소 적용 |
-| Record | I&M0 (`0xAFF0`), RealIdent (`0xF000`/`0xE001`/`0xC001`/`0x8001`), PDPort/PDInterface Real 스텁. Write / WriteMultiple (`0xE040`) ACK |
+| DCP | Identify(필터), Get(요청 속성), Set(Name/IP). 기동 시 Hello. Set 시 `apply_os_ip` 이면 OS 주소 적용 |
+| Record | I&M0, RealIdent, PDPort/PDIF, ChannelDiagnosis `0x800A` / ExtChannel `0x8010` / AR Diag `0xE00C`, WriteMultiple |
 | LLDP | Chassis/Port/TTL/SysName/MgmtAddr + PN Chassis MAC / Port Status |
 | SNMP | MIB-II system + ifTable(1 port) Get/GetNext. LLDP-MIB loc/rem + LastChange |
 | Watchdog | output CR 가 끊기면 AR down, output image 클리어 |
-| Alarm CR | Connect 에서 AlarmCR_REQ 파싱, AlarmCR.res, DATAEX 후 RTA Data(0xFC01) 1회 + ACK |
-| RT Class 3 / IRT | 구현하지 않음 |
+| Alarm CR | AlarmCR_REQ 파싱, RTA Data(USI ChannelDiagnosis) + ACK |
+| RT Class 3 / IRT | Connect 에서 거부. 구현하지 않음 |
+| MRP | 이더타입 `0x88E3` 무시. 링 클라이언트 미구현 |
 | PI Security Class 1 | 아님. `security_class: 1` 은 스택 로컬 HMAC-SHA256 PSK |
 | PI 인증 / CRA/CE | 아님. 제품 프로세스 |
 
@@ -57,16 +58,27 @@ bash tests/run_pn_fulltest.sh
 
 `run_pn_fulltest.sh` 는 PI Test Bundle 공개 Readme의 RT Device 그룹을 이 환경에서 돌리는 **랩 프리테스트**다. 공식 ART / SPIRTA / ETS 는 PI 회원 전용·Windows ETS 기반이다. 회원 포털에서 계정 권한이 열리기 전에는 zip을 받을 수 없고, 받아도 이 Linux 에이전트에서 ETS를 실행하지 않는다. PITL 인증을 대체하지 않는다.
 
-공개 Readme 기준으로 여기서 하는 것 / 안 하는 것:
+공개 Readme / 이전에 “랩 범위 밖”이던 항목을 **테스트 코드로 대체할 수 있는지**:
+
+| 항목 | 랩에서 하는 일 | 대체 불가능한 것 |
+|------|----------------|------------------|
+| diagnosis ASE | ChannelDiagnosis USI + record `0x800A`/`0x8010`/`0xE00C` | 전체 diagnosis 상태기계, Maintenance ASE, 공식 TCS |
+| IRT / SPIRTA | Connect `RT_CLASS_3` / IRT FrameID **거부** (네거티브 테스트) | 동기 사이클, PTCP, SPIRTA 바이너리, ASIC 타임스탬프 |
+| MRP | `0x88E3` 무시 + GSDML 미선언 + flood 중 RTC1 유지 | MRP Client/Manager 링, CC-B(PA) 공식 TCS |
+| Netload | unicast junk + MRP ethertype flood 중 cyclic | 공식 Netload 프로파일 / ETS 계측 |
+| DCP Hello | 기동·IP Set 후 Hello.req | Hello 타이밍 공식 프로파일 |
+| ART / ETS | 공개 그룹을 랩 케이스로 재구현 | Windows ETS, 회원 TCS zip, 시나리오 XML |
+| TEDCheck | GSDML well-formed + 필수 필드/IRT·MRP 미선언 | GSD Checker / TEDCheck 바이너리 |
+| PITL | 없음. 제품·시험소 프로세스 | 인증서 자체를 테스트로 만들 수 없음 |
 
 | 그룹 | 랩 프리테스트 | 공식 번들 없이 못 하는 것 |
 |------|----------------|---------------------------|
-| DCP | Identify All/Name/DeviceID 필터, Get Name/ID/IP, Set Name 왕복 | DCP Set IP를 OS에 쓰는 경우, Hello |
-| LLDP | sysName + PN OUI `00:0C:CF` 송신, 이웃 Chassis/Port/SysName 수신, Port ID `port-001` | 멀티포트, 공식 LLDP 프로파일 |
+| DCP | Identify All/Name/DeviceID, Get Name/ID/IP, Set Name, Hello | DCP Set IP를 OS에 쓰는 경우의 공식 프로파일 |
+| LLDP | sysName + PN OUI, 이웃 Chassis/Port/SysName, Port ID `port-001` | 멀티포트, 공식 LLDP 프로파일 |
 | SNMP | Get+GetNext: MIB-II system/if, LLDP loc/rem, LastChange, sysUpTime | 전체 MIB-II, SNMP v3, 공식 ART TCS |
-| CM | Connect ARServer + AlarmCR.req/res, Write / WriteMultiple, I&M0, RealIdent, PDPort/PDIF, unknown index 빈 성공, PrmEnd, AppReady, RTA Data/Ack, Release, Reconnect | 전체 diagnosis ASE, 공식 TCS |
-| RTC1 | cyclic + IOPS GOOD, Release 후 송신 중단, ingress flood 중 cyclic 유지 | 공식 Netload 프로파일, IRT/SPIRTA |
-| GSDML | well-formed, VendorID/DeviceID, PDev, RT1, no IRT, SNMP;LLDP, MIB2, NumberOfAR, IO 길이, MAUTypes | TEDCheck / GSD Checker 바이너리 |
+| CM | Connect ARServer + AlarmCR, IRT 거부, WriteMultiple, I&M0, RealIdent, PD*, ChannelDiagnosis, PrmEnd, AppReady, RTA Data/USI/Ack, Release, Reconnect | 공식 TCS XML |
+| RTC1 | cyclic + IOPS GOOD, Release 후 중단, junk/MRP flood 중 유지 | 공식 Netload, IRT/SPIRTA |
+| GSDML | well-formed, PDev, RT1, no IRT/RT3/MRP, SNMP;LLDP, MIB2;LLDP | TEDCheck 바이너리 |
 
 시뮬레이터는 DCP Identify → Set Name 왕복 → Connect (ARServerBlock) → Write / WriteMultiple → Read I&M0 / RealIdent / PD* → PrmEnd → ApplicationReady → RTC1 cyclic 을 실제 Ethernet/UDP 로 주고받는다. Siemens TIA 와 같은 CM 순서이며, 벤더 분기는 없다.
 

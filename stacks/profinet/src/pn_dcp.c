@@ -384,6 +384,18 @@ static void send_dcp(pn_stack_t *s, const uint8_t dst[6], uint16_t fid,
     }
 }
 
+void pn_dcp_send_hello(pn_stack_t *s)
+{
+    static const uint8_t hello_mc[6] = {0x01, 0x0E, 0xCF, 0x00, 0x00, 0x00};
+    uint8_t b[512];
+    size_t n = build_identify_blocks(s, b, sizeof(b));
+    if (!n) {
+        return;
+    }
+    send_dcp(s, hello_mc, PN_FRAMEID_DCP_HELLO, PN_DCP_HELLO, PN_DCP_REQ,
+             (uint32_t)(pn_now_ns() & 0xffffffffu), 0, b, n);
+}
+
 void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
                      size_t plen)
 {
@@ -444,6 +456,9 @@ void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
         size_t n = build_set_ack(blocks, dlen, ok, sizeof(ok));
         send_dcp(s, src, PN_FRAMEID_DCP_GETSET, PN_DCP_SET,
                  PN_DCP_RESP_SUCCESS, xid, 0, ok, n);
+        if (ip_changed) {
+            pn_dcp_send_hello(s);
+        }
         return;
     }
 }

@@ -13,8 +13,10 @@
  *   - Device-side DCP, CM (Connect/Write/WriteMultiple/PrmEnd/ApplicationReady),
  *     RTC1 cyclic IO, record (I&M0, RealIdent, PD*), LLDP, SNMP (MIB-II +
  *     LLDP-MIB Get/GetNext), AlarmCR + one RTA Data/Ack
- *   - Lab Conformance Class B subset (MIB2;LLDP, topology via LLDP RX).
- *     Not PI-certified. RT Class 1 only (unsynchronized cyclic IO). IRT / MRP: no.
+ *   - Lab Conformance Class B subset (MIB2;LLDP, topology via LLDP RX,
+ *     ChannelDiagnosis ASE, AlarmCR + RTA Data/Ack).
+ *     Not PI-certified. RT Class 1 only. IRT / MRP: rejected or ignored,
+ *     not implemented. Official ART/SPIRTA/ETS/PITL are not substituted.
  *   - Optional stack-local HMAC-SHA256 PSK on DCP Set and CM Connect.
  *     This is not PI Security Class 1.
  *

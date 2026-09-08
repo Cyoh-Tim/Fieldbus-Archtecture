@@ -52,8 +52,9 @@ chk("MinDeviceInterval=\"256\"" in text, "LAB-GSD-MDI", "MinDeviceInterval=256 (
 chk("SubslotNumber=\"32768\"" in text and "SubslotNumber=\"32769\"" in text,
     "LAB-GSD-PDEV", "Interface 0x8000 / Port 0x8001")
 chk("RT_CLASS_1" in text, "LAB-GSD-RT1", "SupportedRT_Classes includes RT_CLASS_1")
-chk("IsochroneModeSupported=\"false\"" in text, "LAB-GSD-NO-IRT",
-    "IsochroneModeSupported=false")
+chk("RT_CLASS_3" not in text, "LAB-GSD-NO-RT3", "GSDML does not claim RT_CLASS_3")
+chk("MediaRedundancy" not in text, "LAB-GSD-NO-MRP",
+    "GSDML does not declare MediaRedundancy")
 chk("SupportedProtocols=\"SNMP;LLDP\"" in text, "LAB-GSD-PROTO",
     "SupportedProtocols SNMP;LLDP")
 chk("SupportedMibs=\"MIB2;LLDP\"" in text, "LAB-GSD-MIB2",

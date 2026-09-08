@@ -32,6 +32,7 @@ static int g_pass;
 static int g_fail;
 static int g_saw_lldp;
 static int g_saw_lldp_pn;
+static int g_saw_hello;
 
 static uint64_t now_ms(void)
 {
@@ -153,7 +154,18 @@ static void note_frame(const uint8_t *rx, int n, const char *expect_name)
     if (n < 14) {
         return;
     }
-    if (pn_rd_be16(rx + 12) == PN_ETHTYPE_LLDP) {
+    uint16_t et = pn_rd_be16(rx + 12);
+    size_t off = 14;
+    if (et == PN_ETHTYPE_VLAN && n >= 18) {
+        et = pn_rd_be16(rx + 16);
+        off = 18;
+    }
+    if (et == PN_ETHTYPE_PN && n >= (int)off + 2 &&
+        pn_rd_be16(rx + off) == PN_FRAMEID_DCP_HELLO &&
+        contains(rx, (size_t)n, expect_name)) {
+        g_saw_hello = 1;
+    }
+    if (et == PN_ETHTYPE_LLDP) {
         if (contains(rx, (size_t)n, expect_name)) {
             g_saw_lldp = 1;
         }
@@ -592,7 +604,8 @@ static size_t put_iod_write_hdr(uint8_t *p, uint16_t seq, uint32_t api,
     return 64;
 }
 
-static size_t build_connect(uint8_t *pdu, const uint8_t mac[6])
+static size_t build_connect(uint8_t *pdu, const uint8_t mac[6],
+                            uint32_t iocr_props)
 {
     static const uint8_t uuid[16] = {1, 2, 3, 4, 5, 6, 7, 8,
                                      9, 10, 11, 12, 13, 14, 15, 16};
@@ -617,7 +630,7 @@ static size_t build_connect(uint8_t *pdu, const uint8_t mac[6])
     pn_wr_be16(iin + 0, PN_IOCR_INPUT);
     pn_wr_be16(iin + 2, 1);
     pn_wr_be16(iin + 4, 0x8892);
-    pn_wr_be32(iin + 6, 0x00000001);
+    pn_wr_be32(iin + 6, iocr_props);
     pn_wr_be16(iin + 10, 40);
     pn_wr_be16(iin + 12, 0x8123);
     pn_wr_be16(iin + 14, 32);
@@ -940,13 +953,15 @@ int main(int argc, char **argv)
     /* LLDP: device sends at start and every 5s. Frames may have been seen
      * already while waiting for DCP. */
     uint64_t lldp_end =
-        now_ms() + ((g_saw_lldp && g_saw_lldp_pn) ? 0 : 5500);
-    while ((!g_saw_lldp || !g_saw_lldp_pn) && now_ms() < lldp_end) {
+        now_ms() + ((g_saw_lldp && g_saw_lldp_pn && g_saw_hello) ? 0 : 5500);
+    while ((!g_saw_lldp || !g_saw_lldp_pn || !g_saw_hello) &&
+           now_ms() < lldp_end) {
         n = wait_recv(raw, rx, sizeof(rx), 200);
         note_frame(rx, n, expect_name);
     }
     check(g_saw_lldp, "LAB-LLDP-SYSNAME", "LLDP chassis/sysName");
     check(g_saw_lldp_pn, "LAB-LLDP-PN-TLV", "LLDP PN OUI 00:0C:CF");
+    check(g_saw_hello, "LAB-DCP-HELLO", "DCP Hello.req on start");
 
     static const uint8_t oid_sysname[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x01,
                                           0x05, 0x00};
@@ -1055,14 +1070,21 @@ int main(int argc, char **argv)
 
     int rpc = udp_bind(iface_ipv4(iface), PN_RPC_PORT);
     uint8_t pdu[1200], resp[2048];
+    size_t plen;
+    int rn;
     if (rpc < 0 || !dev_ip) {
         check(0, "LAB-CM-SETUP", "RPC/UDP bind");
         close(raw);
         return 1;
     }
 
-    size_t plen = build_connect(pdu, mymac);
-    int rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    plen = build_connect(pdu, mymac, PN_RT_CLASS_3);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 0 && count_block(resp, (size_t)rn, PN_BLOCK_ARSERVER_RES) == 0,
+          "LAB-CM-NO-IRT", "Connect RT_CLASS_3 rejected (no IRT)");
+
+    plen = build_connect(pdu, mymac, PN_RT_CLASS_1);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     check(rn > 80 && contains(resp, (size_t)rn, expect_name),
           "LAB-CM-CONNECT-ARSERVER", "Connect.res ARServerBlock station name");
     check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_ALARMCR_RES) >= 1,
@@ -1205,6 +1227,11 @@ int main(int argc, char **argv)
                     uint8_t kind = (uint8_t)(rx[poff + 6] & 0x0Fu);
                     if (kind == 1 && !saw_rta) {
                         saw_rta = 1;
+                        if ((size_t)rnraw >= poff + 42 &&
+                            pn_rd_be16(rx + poff + 14 + 26) ==
+                                PN_USI_CHANNEL_DIAG) {
+                            saw_rta = 2;
+                        }
                         send_rta_ack(raw, ifindex, rx, (int)rnraw, poff, mymac);
                         sent_rta_ack = 1;
                     }
@@ -1216,15 +1243,25 @@ int main(int argc, char **argv)
     }
     check(cyclic_in >= 3, "LAB-RT-CYCLIC", "RTC1 input frames");
     check(iops_ok, "LAB-RT-IOPS", "IOPS GOOD");
-    check(saw_rta, "LAB-CM-RTA-DATA", "RTA AlarmNotification after DATAEX");
+    check(saw_rta >= 1, "LAB-CM-RTA-DATA", "RTA AlarmNotification after DATAEX");
+    check(saw_rta == 2, "LAB-CM-RTA-USI", "RTA ChannelDiagnosis USI 0x8000");
     check(sent_rta_ack, "LAB-CM-RTA-ACK", "RTA ACK sent for device Data");
+
+    plen = build_read(pdu, 0, 0x8001, PN_INDEX_CHAN_DIAG);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_DIAGNOSIS) >= 1,
+          "LAB-CM-DIAG-CHAN", "ChannelDiagnosis 0x800A after RTA");
+    plen = build_read(pdu, 0, 0x8001, PN_INDEX_EXT_CHAN_DIAG);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_DIAGNOSIS) >= 1,
+          "LAB-CM-DIAG-EXT", "ExtChannelDiagnosis 0x8010");
 
     for (int i = 0; i < 400; i++) {
         uint8_t junk[64];
         memset(junk, 0xA5, sizeof(junk));
         memcpy(junk, devmac, 6);
         memcpy(junk + 6, mymac, 6);
-        pn_wr_be16(junk + 12, 0x0800);
+        pn_wr_be16(junk + 12, (i & 1) ? PN_ETHTYPE_MRP : 0x0800);
         send_raw(raw, ifindex, junk, 60);
         if ((i % 16) == 0) {
             uint8_t opay[48];
@@ -1291,7 +1328,7 @@ int main(int argc, char **argv)
     check(after_rel == 0, "LAB-CM-RELEASE-CYCLIC-STOP",
           "no input CR after Release");
 
-    plen = build_connect(pdu, mymac);
+    plen = build_connect(pdu, mymac, PN_RT_CLASS_1);
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     check(rn > 80, "LAB-CM-RECONNECT", "Connect after Release");
 

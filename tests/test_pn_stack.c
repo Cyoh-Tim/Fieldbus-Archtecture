@@ -1236,7 +1236,72 @@ static void test_rta_alarm(void)
             }
         }
         expect(!again, "RTA Data not retransmitted immediately after ACK");
+        uint8_t rpdu[256];
+        size_t rlen = 0;
+        size_t plen = build_read_pdu(rpdu, 0, 0x8001, PN_INDEX_CHAN_DIAG);
+        uint8_t rresp[512];
+        expect(pn_stack_handle_rpc(s, rpdu, plen, rresp, sizeof(rresp), &rlen) ==
+                       0 &&
+                   rlen > 80 &&
+                   count_block(rresp, rlen, PN_BLOCK_DIAGNOSIS) >= 1,
+               "ChannelDiagnosis 0x800A after RTA");
     }
+    pn_stack_destroy(s);
+}
+
+static void test_irt_reject(void)
+{
+    tx_cap_t cap;
+    pn_stack_t *s = mock_stack(&cap);
+    uint8_t blocks[512];
+    size_t bn = build_connect_stub(blocks, sizeof(blocks));
+    size_t off = 0;
+    while (off + 12 < bn) {
+        uint16_t type = pn_rd_be16(blocks + off);
+        uint16_t blen = pn_rd_be16(blocks + off + 2);
+        if (type == PN_BLOCK_IOCR_REQ) {
+            pn_wr_be32(blocks + off + 12, PN_RT_CLASS_3);
+        }
+        if (blen < 2) {
+            break;
+        }
+        off += 4u + blen;
+        if (off & 1u) {
+            off++;
+        }
+    }
+    uint8_t stub[600];
+    size_t sn = ndr_wrap_le(stub, blocks, bn);
+    uint8_t pdu[800];
+    size_t plen = rpc_req(pdu, 0, stub, sn);
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    int rc = pn_stack_handle_rpc_from(s, pdu, plen, 0xC0A80001u, 34964, resp,
+                                      sizeof(resp), &rlen);
+    expect(rc == 0 && rlen > 0, "IRT Connect returns RPC");
+    expect(pn_stack_cm_state(s) == PN_CM_OFFLINE,
+           "RT_CLASS_3 Connect is rejected");
+    expect(count_block(resp, rlen, PN_BLOCK_ARSERVER_RES) == 0,
+           "no ARServerBlock on IRT Connect");
+    pn_stack_destroy(s);
+}
+
+static void test_dcp_hello(void)
+{
+    tx_cap_t cap;
+    pn_stack_t *s = mock_stack(&cap);
+    int saw = 0;
+    for (int i = 0; i < cap.n; i++) {
+        if (cap.lens[i] < 16) {
+            continue;
+        }
+        if (pn_rd_be16(cap.frames[i] + 12) == PN_ETHTYPE_PN &&
+            pn_rd_be16(cap.frames[i] + 14) == PN_FRAMEID_DCP_HELLO &&
+            contains(cap.frames[i], cap.lens[i], "sensor-line1")) {
+            saw = 1;
+        }
+    }
+    expect(saw, "DCP Hello sent on start with station name");
     pn_stack_destroy(s);
 }
 
@@ -1269,6 +1334,8 @@ int main(void)
     test_lldp_remote();
     test_snmp_mib();
     test_rta_alarm();
+    test_irt_reject();
+    test_dcp_hello();
     test_watchdog();
     if (g_fail) {
         fprintf(stderr, "pn stack tests FAILED\n");
