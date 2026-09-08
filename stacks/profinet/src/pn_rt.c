@@ -142,15 +142,26 @@ static void pn_rt_cpu_relax(void)
 #endif
 }
 
-static void pn_rt_sleep_until(uint64_t ns)
+static void pn_rt_sleep_until(pn_stack_t *s, uint64_t ns)
 {
-    struct timespec abs;
-    abs.tv_sec = (time_t)(ns / 1000000000ull);
-    abs.tv_nsec = (long)(ns % 1000000000ull);
-    int rc;
-    do {
-        rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &abs, NULL);
-    } while (rc == EINTR);
+    /* Slice sleeps so pn_stack_stop() is not stuck for a 16–512 ms cycle. */
+    while (s->running) {
+        uint64_t now = pn_now_ns();
+        if (now >= ns) {
+            return;
+        }
+        uint64_t wake = ns;
+        if (wake - now > 1000000ull) {
+            wake = now + 1000000ull;
+        }
+        struct timespec abs;
+        abs.tv_sec = (time_t)(wake / 1000000000ull);
+        abs.tv_nsec = (long)(wake % 1000000000ull);
+        int rc;
+        do {
+            rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &abs, NULL);
+        } while (rc == EINTR && s->running);
+    }
 }
 
 static void pn_rt_spin_until(pn_stack_t *s, uint64_t ns)
@@ -199,7 +210,7 @@ static int pn_rt_build_frame(pn_stack_t *s, uint8_t *frame, size_t cap,
     pn_wr_be16(pay, s->ar.in_frame_id);
     n += 2;
     n += build_input_csdu(s, pay + n, sizeof(pay) - n - 4);
-    pn_wr_be16(pay + n, s->cycle_counter++);
+    pn_wr_be16(pay + n, s->cycle_counter);
     n += 2;
     pay[n++] = (uint8_t)(PN_DATASTATUS_PRIMARY | PN_DATASTATUS_VALID |
                          PN_DATASTATUS_RUN);
@@ -234,6 +245,7 @@ static void pn_rt_emit(pn_stack_t *s, const uint8_t *frame, size_t flen)
     if (flen) {
         pn_eth_send(s, frame, flen);
     }
+    s->cycle_counter++;
 }
 
 static void pn_rt_send_locked(pn_stack_t *s)
@@ -358,7 +370,7 @@ static void *pn_rt_thread_main(void *arg)
 
         uint64_t spin_ns = pn_rt_spin_ns(period);
         if (next > now + spin_ns) {
-            pn_rt_sleep_until(next - spin_ns);
+            pn_rt_sleep_until(s, next - spin_ns);
             if (!s->running) {
                 break;
             }

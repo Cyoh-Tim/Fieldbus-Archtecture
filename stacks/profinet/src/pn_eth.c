@@ -176,9 +176,21 @@ int pn_eth_send(pn_stack_t *s, const uint8_t *frame, size_t len)
     sll.sll_ifindex = s->ifindex;
     sll.sll_halen = 6;
     memcpy(sll.sll_addr, frame, 6);
-    ssize_t n = sendto(s->fd_eth, frame, len, 0, (struct sockaddr *)&sll,
-                       sizeof(sll));
-    return n < 0 ? -errno : 0;
+    for (int i = 0; i < 8; i++) {
+        ssize_t n = sendto(s->fd_eth, frame, len, 0, (struct sockaddr *)&sll,
+                           sizeof(sll));
+        if (n >= 0) {
+            return 0;
+        }
+        if (errno != EAGAIN && errno != ENOBUFS) {
+            return -errno;
+        }
+        if (i + 1 < 8) {
+            struct timespec ts = {.tv_sec = 0, .tv_nsec = 10000};
+            nanosleep(&ts, NULL);
+        }
+    }
+    return -EAGAIN;
 }
 
 int pn_eth_recv(pn_stack_t *s, uint8_t *frame, size_t cap)

@@ -434,8 +434,9 @@ void pn_stack_poll(pn_stack_t *s)
     pn_rpc_poll(s);
     pn_snmp_poll(s);
     pn_rt_watchdog(s);
-    /* Dedicated RTC1 thread owns cyclic TX. Poll only drives mock/unit tests. */
-    if (!s->rt_thread_started) {
+    /* Dedicated RTC1 thread owns cyclic TX. Poll still kicks the first
+     * DATAEX frame so AppReady does not wait on the idle 50 us sleep. */
+    if (!s->rt_thread_started || s->next_rt_ns == 0) {
         pn_rt_send_if_due(s);
     }
     pn_alarm_poll(s);
