@@ -380,12 +380,13 @@ static size_t build_iocr_body(uint8_t *b, uint16_t type, uint16_t ref,
     return 60;
 }
 
-static size_t build_expsub_body(uint8_t *b, uint16_t in_len, uint16_t out_len)
+static size_t build_expsub_slot(uint8_t *b, uint16_t slot, uint16_t in_len,
+                                uint16_t out_len)
 {
     memset(b, 0, 48);
     pn_wr_be16(b + 0, 1); /* APIs */
     pn_wr_be32(b + 2, 0);
-    pn_wr_be16(b + 6, 1); /* slot */
+    pn_wr_be16(b + 6, slot);
     pn_wr_be32(b + 8, 0x10);
     pn_wr_be16(b + 12, 0);
     pn_wr_be16(b + 14, 1); /* submodules */
@@ -401,6 +402,48 @@ static size_t build_expsub_body(uint8_t *b, uint16_t in_len, uint16_t out_len)
     b[34] = 1;
     b[35] = 1;
     return 36;
+}
+
+static size_t build_expsub_body(uint8_t *b, uint16_t in_len, uint16_t out_len)
+{
+    return build_expsub_slot(b, 1, in_len, out_len);
+}
+
+static size_t build_iocr_two(uint8_t *b, uint16_t type, uint16_t ref,
+                             uint16_t data_len, uint16_t frame_id, uint16_t sc,
+                             uint16_t rr, uint16_t wd, uint16_t off1,
+                             uint16_t iocs1, uint16_t off2, uint16_t iocs2)
+{
+    memset(b, 0, 80);
+    pn_wr_be16(b + 0, type);
+    pn_wr_be16(b + 2, ref);
+    pn_wr_be16(b + 4, 0x8892);
+    pn_wr_be32(b + 6, 0x00000001);
+    pn_wr_be16(b + 10, data_len);
+    pn_wr_be16(b + 12, frame_id);
+    pn_wr_be16(b + 14, sc);
+    pn_wr_be16(b + 16, rr);
+    pn_wr_be16(b + 18, 1);
+    pn_wr_be32(b + 22, 0xffffffffu);
+    pn_wr_be16(b + 26, wd);
+    pn_wr_be16(b + 28, wd);
+    pn_wr_be16(b + 30, 0xC000);
+    pn_wr_be16(b + 38, 1);
+    pn_wr_be16(b + 44, 2);
+    pn_wr_be16(b + 46, 1);
+    pn_wr_be16(b + 48, 1);
+    pn_wr_be16(b + 50, off1);
+    pn_wr_be16(b + 52, 2);
+    pn_wr_be16(b + 54, 1);
+    pn_wr_be16(b + 56, off2);
+    pn_wr_be16(b + 58, 2);
+    pn_wr_be16(b + 60, 1);
+    pn_wr_be16(b + 62, 1);
+    pn_wr_be16(b + 64, iocs1);
+    pn_wr_be16(b + 66, 2);
+    pn_wr_be16(b + 68, 1);
+    pn_wr_be16(b + 70, iocs2);
+    return 72;
 }
 
 static size_t build_ar_body(uint8_t *b, const uint8_t uuid[16],
@@ -1977,6 +2020,131 @@ static void test_rtc1_16ms(void)
     pn_stack_destroy(s);
 }
 
+static void test_multi_slot(void)
+{
+    tx_cap_t cap;
+    pn_stack_t *s = mock_stack(&cap);
+    static const uint8_t uuid[16] = {1, 2, 3, 4, 5, 6, 7, 8,
+                                     9, 10, 11, 12, 13, 14, 15, 16};
+    static const uint8_t mac[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t ar[64], iin[80], iout[80], exp1[48], exp2[48];
+    size_t an = build_ar_body(ar, uuid, mac);
+    /* 32+IOPS + 32+IOPS; IOCS after both objects. */
+    size_t nin = build_iocr_two(iin, PN_IOCR_INPUT, 1, 68, 0x8123, 32, 8, 3, 0,
+                                66, 33, 67);
+    size_t nout = build_iocr_two(iout, PN_IOCR_OUTPUT, 2, 20, 0xFFFF, 32, 8, 3,
+                                 0, 18, 9, 19);
+    size_t ne1 = build_expsub_slot(exp1, 1, 32, 8);
+    size_t ne2 = build_expsub_slot(exp2, 2, 32, 8);
+    uint8_t blocks[640];
+    size_t n = 0;
+    n += wr_pn_block(blocks + n, PN_BLOCK_AR_REQ, ar, (uint16_t)an);
+    n += wr_pn_block(blocks + n, PN_BLOCK_IOCR_REQ, iin, (uint16_t)nin);
+    n += wr_pn_block(blocks + n, PN_BLOCK_IOCR_REQ, iout, (uint16_t)nout);
+    uint8_t alarmcr[20];
+    memset(alarmcr, 0, sizeof(alarmcr));
+    pn_wr_be16(alarmcr + 0, 1);
+    pn_wr_be16(alarmcr + 2, 0x8892);
+    pn_wr_be32(alarmcr + 4, 0);
+    pn_wr_be16(alarmcr + 8, 1);
+    pn_wr_be16(alarmcr + 10, 3);
+    pn_wr_be16(alarmcr + 12, 3);
+    pn_wr_be16(alarmcr + 14, 200);
+    pn_wr_be16(alarmcr + 16, 0xC000);
+    pn_wr_be16(alarmcr + 18, 0xA000);
+    n += wr_pn_block(blocks + n, PN_BLOCK_ALARMCR_REQ, alarmcr, sizeof(alarmcr));
+    n += wr_pn_block(blocks + n, PN_BLOCK_EXPSUB_REQ, exp1, (uint16_t)ne1);
+    n += wr_pn_block(blocks + n, PN_BLOCK_EXPSUB_REQ, exp2, (uint16_t)ne2);
+    uint8_t stub[720];
+    size_t sn = ndr_wrap_le(stub, blocks, n);
+    uint8_t pdu[900];
+    size_t plen = rpc_req(pdu, 0, stub, sn);
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    int rc = pn_stack_handle_rpc_from(s, pdu, plen, 0xC0A80001u, 34964, resp,
+                                      sizeof(resp), &rlen);
+    expect(rc == 0 && rlen > 80, "2-slot Connect.res");
+    expect(pn_stack_cm_state(s) == PN_CM_CONNECTED, "2-slot CM CONNECTED");
+
+    size_t base = 0, mlen = 0;
+    expect(pn_stack_io_map(s, 1, 1, 0, &base, &mlen) == 0 && base == 0 &&
+               mlen == 32,
+           "slot 1 input map 0/32");
+    expect(pn_stack_io_map(s, 2, 1, 0, &base, &mlen) == 0 && base == 32 &&
+               mlen == 32,
+           "slot 2 input map 32/32");
+    expect(pn_stack_io_map(s, 2, 1, 1, &base, &mlen) == 0 && base == 8 &&
+               mlen == 8,
+           "slot 2 output map 8/8");
+    expect(pn_stack_io_map(s, 3, 1, 0, &base, &mlen) == -ENOENT,
+           "slot 3 not in this AR");
+
+    uint8_t pat[4] = {0xA1, 0xA2, 0xA3, 0xA4};
+    uint8_t got[4];
+    expect(pn_stack_write_input(s, 32, pat, 4) == 0, "write slot 2 image");
+    expect(pn_stack_read_input(s, 32, got, 4) == 0 && memcmp(got, pat, 4) == 0,
+           "read back slot 2 image");
+    uint8_t b;
+    expect(pn_stack_read_input(s, 64, &b, 1) == -EINVAL,
+           "2-slot image still ends at 64");
+
+    plen = build_read_pdu(pdu, 0, 1, PN_INDEX_REALIDENT_API);
+    rlen = 0;
+    rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
+    int saw_s2 = 0;
+    if (rlen > 100) {
+        for (size_t i = 100; i + 6 <= rlen; i++) {
+            if (pn_rd_be16(resp + i) == 2 && pn_rd_be32(resp + i + 2) == 0x10u) {
+                saw_s2 = 1;
+                break;
+            }
+        }
+    }
+    expect(rc == 0 && saw_s2, "RealIdent lists slot 2 module 0x10");
+
+    do_prmend(s);
+    do_apprdy_ack(s);
+    expect(pn_stack_ar_up(s), "2-slot DATAEX");
+    cap.n = 0;
+    pn_stack_poll(s);
+    int saw_slot2_csdu = 0;
+    for (int i = 0; i < cap.n; i++) {
+        if (cap.lens[i] < 16 + 33 + 4) {
+            continue;
+        }
+        if (pn_rd_be16(cap.frames[i] + 12) != PN_ETHTYPE_PN) {
+            continue;
+        }
+        if (pn_rd_be16(cap.frames[i] + 14) != 0x8123) {
+            continue;
+        }
+        if (cap.frames[i][16 + 33] == 0xA1 && cap.frames[i][16 + 34] == 0xA2 &&
+            cap.frames[i][16 + 32] == PN_IOPS_GOOD) {
+            saw_slot2_csdu = 1;
+        }
+    }
+    expect(saw_slot2_csdu, "RTC1 C_SDU carries slot 2 input after IOPS");
+
+    static const uint8_t dst[6] = {0x02, 0xFB, 0x00, 0x00, 0x00, 0x01};
+    static const uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t opay[64];
+    memset(opay, 0, sizeof(opay));
+    pn_wr_be16(opay, 0x8000);
+    opay[2] = 0x11;
+    opay[2 + 8] = PN_IOPS_GOOD;
+    opay[2 + 9] = 0x22;
+    opay[2 + 17] = PN_IOPS_GOOD;
+    opay[2 + 20] = PN_DATASTATUS_PRIMARY | PN_DATASTATUS_VALID | PN_DATASTATUS_RUN;
+    uint8_t oframe[PN_FRAME_MAX];
+    size_t flen =
+        pn_eth_build(oframe, PN_FRAME_MAX, dst, src, PN_ETHTYPE_PN, opay, 26);
+    pn_stack_handle_eth(s, oframe, flen);
+    uint8_t ob = 0;
+    expect(pn_stack_read_output(s, 8, &ob, 1) == 0 && ob == 0x22,
+           "output CR copies slot 2 at PI 8");
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
     test_hmac();
@@ -1998,6 +2166,7 @@ int main(void)
     test_dcp_set_ip_blocked_during_ar();
     test_watchdog();
     test_rtc1_16ms();
+    test_multi_slot();
     if (g_fail) {
         fprintf(stderr, "pn stack tests FAILED\n");
         return 1;

@@ -346,17 +346,27 @@ static void add_sub(pn_ar_t *a, uint16_t slot, uint16_t subslot, uint32_t mid,
     a->sub[a->n_sub++] = sm;
 }
 
-static const pn_submod_t *first_io_sub(const pn_ar_t *a, int want_in)
+static void fill_iocr_from_subs(pn_iocr_t *cr, const pn_ar_t *a, int want_in)
 {
-    for (int i = 0; i < a->n_sub; i++) {
-        if (want_in && a->sub[i].in_len) {
-            return &a->sub[i];
-        }
-        if (!want_in && a->sub[i].out_len) {
-            return &a->sub[i];
-        }
+    if (cr->n_data != 0) {
+        return;
     }
-    return a->n_sub ? &a->sub[0] : NULL;
+    uint16_t off = 0;
+    for (int i = 0; i < a->n_sub && cr->n_data < PN_IOBJ_MAX; i++) {
+        uint16_t len = want_in ? a->sub[i].in_len : a->sub[i].out_len;
+        if (!len) {
+            continue;
+        }
+        cr->data[cr->n_data].slot = a->sub[i].slot;
+        cr->data[cr->n_data].subslot = a->sub[i].subslot;
+        cr->data[cr->n_data].frame_off = off;
+        cr->n_data++;
+        uint16_t iops = a->sub[i].iops_len ? a->sub[i].iops_len : 1;
+        off = (uint16_t)(off + len + iops);
+    }
+    if (cr->data_len == 0 && off) {
+        cr->data_len = off;
+    }
 }
 
 static void finalize_ar(pn_stack_t *s)
@@ -385,29 +395,13 @@ static void finalize_ar(pn_stack_t *s)
     }
     a->in_frame_id = a->iocr_in.frame_id;
     a->out_frame_id = a->iocr_out.frame_id;
+    fill_iocr_from_subs(&a->iocr_in, a, 1);
+    fill_iocr_from_subs(&a->iocr_out, a, 0);
     if (a->iocr_in.data_len == 0) {
         a->iocr_in.data_len = (uint16_t)(a->in_data_len + 1);
     }
     if (a->iocr_out.data_len == 0) {
         a->iocr_out.data_len = (uint16_t)(a->out_data_len + 1);
-    }
-    if (a->iocr_in.n_data == 0) {
-        const pn_submod_t *sm = first_io_sub(a, 1);
-        if (sm) {
-            a->iocr_in.data[0].slot = sm->slot;
-            a->iocr_in.data[0].subslot = sm->subslot;
-            a->iocr_in.data[0].frame_off = 0;
-            a->iocr_in.n_data = 1;
-        }
-    }
-    if (a->iocr_out.n_data == 0) {
-        const pn_submod_t *sm = first_io_sub(a, 0);
-        if (sm) {
-            a->iocr_out.data[0].slot = sm->slot;
-            a->iocr_out.data[0].subslot = sm->subslot;
-            a->iocr_out.data[0].frame_off = 0;
-            a->iocr_out.n_data = 1;
-        }
     }
     if (a->send_clock_factor == 0) {
         a->send_clock_factor = PN_SENDCLOCK_DEFAULT;

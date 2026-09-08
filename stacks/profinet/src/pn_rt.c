@@ -19,8 +19,8 @@ static void copy_from_csdu(pn_stack_t *s, const uint8_t *csdu, size_t clen)
     pthread_mutex_lock(&s->io_lock);
     if (cr->n_data == 0) {
         size_t n = s->ar.out_data_len;
-        if (n > s->cfg.output_len) {
-            n = s->cfg.output_len;
+        if (n > PN_IO_MAX) {
+            n = PN_IO_MAX;
         }
         if (n > clen) {
             n = clen;
@@ -36,11 +36,11 @@ static void copy_from_csdu(pn_stack_t *s, const uint8_t *csdu, size_t clen)
             if ((size_t)off + len > clen) {
                 continue;
             }
-            if ((size_t)pi + len > s->cfg.output_len) {
-                if (pi >= s->cfg.output_len) {
+            if ((size_t)pi + len > PN_IO_MAX) {
+                if (pi >= PN_IO_MAX) {
                     continue;
                 }
-                len = (uint16_t)(s->cfg.output_len - pi);
+                len = (uint16_t)(PN_IO_MAX - pi);
             }
             memcpy(s->output_image + pi, csdu + off, len);
         }
@@ -62,8 +62,8 @@ static size_t build_input_csdu(pn_stack_t *s, uint8_t *csdu, size_t cap)
     pthread_mutex_lock(&s->io_lock);
     if (cr->n_data == 0) {
         size_t n = s->ar.in_data_len;
-        if (n > s->cfg.input_len) {
-            n = s->cfg.input_len;
+        if (n > PN_IO_MAX) {
+            n = PN_IO_MAX;
         }
         if (n > clen) {
             n = clen;

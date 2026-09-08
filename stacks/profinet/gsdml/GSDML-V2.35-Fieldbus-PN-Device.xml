@@ -32,7 +32,7 @@
     </DeviceFunction>
     <ApplicationProcess>
       <DeviceAccessPointList>
-        <DeviceAccessPointItem ID="DAP1" PhysicalSlots="0..1"
+        <DeviceAccessPointItem ID="DAP1" PhysicalSlots="0..8"
                                ModuleIdentNumber="0x00000001"
                                MinDeviceInterval="256"
                                DNS_CompatibleName="fb-arch-pn"
@@ -53,7 +53,7 @@
           </ModuleInfo>
           <IOConfigData MaxInputLength="256" MaxOutputLength="256"/>
           <UseableModules>
-                        <ModuleItemRef ModuleItemTarget="MOD_IO" AllowedInSlots="1"/>
+                        <ModuleItemRef ModuleItemTarget="MOD_IO" AllowedInSlots="1..8"/>
           </UseableModules>
           <VirtualSubmoduleList>
             <VirtualSubmoduleItem ID="DAP_IF" SubmoduleIdentNumber="0x00000001"

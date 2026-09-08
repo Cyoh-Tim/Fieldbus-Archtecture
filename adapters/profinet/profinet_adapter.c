@@ -26,6 +26,8 @@ typedef struct {
     pn_stack_t *stack;
     pn_point_t points[PN_ADAPTER_POINTS_MAX];
     int point_count;
+    uint16_t in_stride;
+    uint16_t out_stride;
     char last_error[128];
 } pn_ctx_t;
 
@@ -214,7 +216,36 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
         return -EINVAL;
     }
 
+    ctx->in_stride = cfg.input_len ? cfg.input_len : 32;
+    ctx->out_stride = cfg.output_len ? cfg.output_len : 8;
     parse_points(ctx, points_json);
+    for (int i = 0; i < ctx->point_count; i++) {
+        const pn_point_t *pt = &ctx->points[i];
+        int slot = pt->slot;
+        if (slot < 1) {
+            slot = 1;
+        }
+        int is_out = strcmp(pt->access, "write") == 0;
+        uint16_t stride = is_out ? ctx->out_stride : ctx->in_stride;
+        int base = 0;
+        if (slot <= PN_SLOT_IO_MAX) {
+            base = (slot - 1) * (int)stride;
+        }
+        int end = base + pt->byte_offset + pt->length;
+        if (end <= 0) {
+            continue;
+        }
+        if (end > PN_IO_MAX) {
+            end = PN_IO_MAX;
+        }
+        if (is_out) {
+            if (cfg.output_len < (uint16_t)end) {
+                cfg.output_len = (uint16_t)end;
+            }
+        } else if (cfg.input_len < (uint16_t)end) {
+            cfg.input_len = (uint16_t)end;
+        }
+    }
     ctx->stack = pn_stack_create(&cfg);
     if (!ctx->stack) {
         free(ctx);
@@ -265,6 +296,34 @@ static pn_point_t *find_point(pn_ctx_t *ctx, const char *name)
     return NULL;
 }
 
+/* byte_offset is relative to the submodule. After Connect, use the AR map. */
+static int point_image_off(pn_ctx_t *ctx, const pn_point_t *pt, int output,
+                           size_t *off, size_t *room)
+{
+    size_t base = 0, mod_len = 0;
+    uint16_t slot = pt->slot < 1 ? 1 : (uint16_t)pt->slot;
+    uint16_t sub = pt->subslot < 1 ? 1 : (uint16_t)pt->subslot;
+    if (pn_stack_io_map(ctx->stack, slot, sub, output, &base, &mod_len) == 0) {
+        if ((size_t)pt->byte_offset >= mod_len) {
+            return -EINVAL;
+        }
+        *off = base + (size_t)pt->byte_offset;
+        *room = mod_len - (size_t)pt->byte_offset;
+        return 0;
+    }
+    uint16_t stride = output ? ctx->out_stride : ctx->in_stride;
+    if (slot > PN_SLOT_IO_MAX) {
+        *off = (size_t)pt->byte_offset;
+    } else {
+        *off = (size_t)(slot - 1) * stride + (size_t)pt->byte_offset;
+    }
+    if (*off >= PN_IO_MAX) {
+        return -EINVAL;
+    }
+    *room = PN_IO_MAX - *off;
+    return 0;
+}
+
 static int pn_read_point(protocol_adapter_t *self, const char *point_name,
                          point_value_t *out)
 {
@@ -277,12 +336,22 @@ static int pn_read_point(protocol_adapter_t *self, const char *point_name,
     if (n > out->len) {
         n = out->len;
     }
-    if (strcmp(pt->access, "write") == 0) {
-        return pn_stack_read_output(ctx->stack, (size_t)pt->byte_offset,
-                                    out->data, n);
+    int output = strcmp(pt->access, "write") == 0;
+    size_t off = 0, room = 0;
+    int rc = point_image_off(ctx, pt, output, &off, &room);
+    if (rc != 0) {
+        return rc;
     }
-    return pn_stack_read_input(ctx->stack, (size_t)pt->byte_offset, out->data,
-                               n);
+    if (n > room) {
+        n = room;
+    }
+    if (n == 0) {
+        return -EINVAL;
+    }
+    if (output) {
+        return pn_stack_read_output(ctx->stack, off, out->data, n);
+    }
+    return pn_stack_read_input(ctx->stack, off, out->data, n);
 }
 
 static int pn_write_point(protocol_adapter_t *self, const char *point_name,
@@ -297,8 +366,18 @@ static int pn_write_point(protocol_adapter_t *self, const char *point_name,
     if ((int)n > pt->length) {
         n = (size_t)pt->length;
     }
-    return pn_stack_write_input(ctx->stack, (size_t)pt->byte_offset, value->data,
-                                n);
+    size_t off = 0, room = 0;
+    int rc = point_image_off(ctx, pt, 0, &off, &room);
+    if (rc != 0) {
+        return rc;
+    }
+    if (n > room) {
+        n = room;
+    }
+    if (n == 0) {
+        return -EINVAL;
+    }
+    return pn_stack_write_input(ctx->stack, off, value->data, n);
 }
 
 static int pn_health(protocol_adapter_t *self, int *connected, char *err_buf,

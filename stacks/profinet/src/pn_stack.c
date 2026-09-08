@@ -462,9 +462,76 @@ int pn_stack_cm_state(const pn_stack_t *s)
     return s ? s->ar.cm_state : PN_CM_OFFLINE;
 }
 
+static size_t pn_in_cap(const pn_stack_t *s)
+{
+    size_t n = s->cfg.input_len;
+    if (s->ar.in_data_len > n) {
+        n = s->ar.in_data_len;
+    }
+    return n > PN_IO_MAX ? PN_IO_MAX : n;
+}
+
+static size_t pn_out_cap(const pn_stack_t *s)
+{
+    size_t n = s->cfg.output_len;
+    if (s->ar.out_data_len > n) {
+        n = s->ar.out_data_len;
+    }
+    return n > PN_IO_MAX ? PN_IO_MAX : n;
+}
+
+int pn_stack_io_map(const pn_stack_t *s, uint16_t slot, uint16_t subslot,
+                    int output, size_t *base, size_t *mod_len)
+{
+    if (!s || !base || !mod_len) {
+        return -EINVAL;
+    }
+    const pn_submod_t *sm = pn_find_sub(&s->ar, slot, subslot);
+    if (!sm || (!output && !sm->in_len) || (output && !sm->out_len)) {
+        return -ENOENT;
+    }
+    *base = output ? sm->out_pi : sm->in_pi;
+    *mod_len = output ? sm->out_len : sm->in_len;
+    return 0;
+}
+
+int pn_stack_sub_count(const pn_stack_t *s)
+{
+    return s ? s->ar.n_sub : 0;
+}
+
+int pn_stack_sub_info(const pn_stack_t *s, int idx, uint16_t *slot,
+                      uint16_t *subslot, uint16_t *in_len, uint16_t *out_len,
+                      uint16_t *in_pi, uint16_t *out_pi)
+{
+    if (!s || idx < 0 || idx >= s->ar.n_sub) {
+        return -EINVAL;
+    }
+    const pn_submod_t *sm = &s->ar.sub[idx];
+    if (slot) {
+        *slot = sm->slot;
+    }
+    if (subslot) {
+        *subslot = sm->subslot;
+    }
+    if (in_len) {
+        *in_len = sm->in_len;
+    }
+    if (out_len) {
+        *out_len = sm->out_len;
+    }
+    if (in_pi) {
+        *in_pi = sm->in_pi;
+    }
+    if (out_pi) {
+        *out_pi = sm->out_pi;
+    }
+    return 0;
+}
+
 int pn_stack_read_output(pn_stack_t *s, size_t off, uint8_t *dst, size_t len)
 {
-    if (!s || !dst || len > s->cfg.output_len || off > s->cfg.output_len - len) {
+    if (!s || !dst || len == 0 || off + len > pn_out_cap(s)) {
         return -EINVAL;
     }
     pthread_mutex_lock(&s->io_lock);
@@ -475,7 +542,7 @@ int pn_stack_read_output(pn_stack_t *s, size_t off, uint8_t *dst, size_t len)
 
 int pn_stack_read_input(pn_stack_t *s, size_t off, uint8_t *dst, size_t len)
 {
-    if (!s || !dst || len > s->cfg.input_len || off > s->cfg.input_len - len) {
+    if (!s || !dst || len == 0 || off + len > pn_in_cap(s)) {
         return -EINVAL;
     }
     pthread_mutex_lock(&s->io_lock);
@@ -487,7 +554,7 @@ int pn_stack_read_input(pn_stack_t *s, size_t off, uint8_t *dst, size_t len)
 int pn_stack_write_input(pn_stack_t *s, size_t off, const uint8_t *src,
                          size_t len)
 {
-    if (!s || !src || len > s->cfg.input_len || off > s->cfg.input_len - len) {
+    if (!s || !src || len == 0 || off + len > pn_in_cap(s)) {
         return -EINVAL;
     }
     pthread_mutex_lock(&s->io_lock);

@@ -23,6 +23,9 @@ if [[ ! -x "${BIN}/test_pn_stack" ]]; then
   exit 1
 fi
 "${BIN}/test_pn_stack" || FAIL=1
+if [[ -x "${BIN}/test_pn_adapter" ]]; then
+  "${BIN}/test_pn_adapter" || FAIL=1
+fi
 
 echo "======== 2/3 GSDML ========"
 if xmllint --noout "${GSD}"; then
@@ -72,6 +75,10 @@ chk("ParameterizationSpeedupSupported=\"true\"" not in text, "LAB-GSD-NO-FSU-CM"
 chk("DNS_CompatibleName=" in text, "LAB-GSD-DNS", "DNS_CompatibleName present")
 chk('Length="32"' in text and 'Length="8"' in text, "LAB-GSD-IO",
     "IO module 32-byte input / 8-byte output")
+chk('PhysicalSlots="0..8"' in text, "LAB-GSD-SLOTS",
+    "DAP PhysicalSlots 0..8")
+chk('AllowedInSlots="1..8"' in text, "LAB-GSD-IO-SLOTS",
+    "MOD_IO AllowedInSlots 1..8")
 chk("MAUTypes=\"16\"" in text, "LAB-GSD-MAU", "Port MAUTypes=16 (100BaseTXFD)")
 chk("OrderNumber" in text, "LAB-GSD-ORDER", "ModuleInfo OrderNumber")
 chk('SubslotNumber="1"' in text, "LAB-GSD-SUBSLOT", "IO submodule SubslotNumber")

@@ -74,6 +74,14 @@ int pn_stack_read_input(pn_stack_t *s, size_t off, uint8_t *dst, size_t len);
 int pn_stack_write_input(pn_stack_t *s, size_t off, const uint8_t *src,
                          size_t len);
 
+/* Slot/subslot → process-image base after Connect. -ENOENT if unknown. */
+int pn_stack_io_map(const pn_stack_t *s, uint16_t slot, uint16_t subslot,
+                    int output, size_t *base, size_t *mod_len);
+int pn_stack_sub_count(const pn_stack_t *s);
+int pn_stack_sub_info(const pn_stack_t *s, int idx, uint16_t *slot,
+                      uint16_t *subslot, uint16_t *in_len, uint16_t *out_len,
+                      uint16_t *in_pi, uint16_t *out_pi);
+
 /* Diagnosis ASE: appear / disappear / process RTA. Idle has no diagnosis. */
 int pn_stack_diag_appear(pn_stack_t *s);
 int pn_stack_diag_clear(pn_stack_t *s);

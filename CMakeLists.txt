@@ -131,6 +131,10 @@ if(ENABLE_PN_TESTS)
     add_executable(pn_codesys_beta tests/pn_codesys_beta.c)
     target_include_directories(pn_codesys_beta PRIVATE stacks/profinet/include include core)
     target_link_libraries(pn_codesys_beta PRIVATE pn_stack)
+
+    add_executable(test_pn_adapter tests/test_pn_adapter.c)
+    target_include_directories(test_pn_adapter PRIVATE include core stacks/profinet/include adapters/profinet)
+    target_link_libraries(test_pn_adapter PRIVATE adapter_profinet)
 endif()
 
 # ---- 데몬 실행파일 ----

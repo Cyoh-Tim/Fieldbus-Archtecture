@@ -141,8 +141,9 @@
 #define PN_PSK_LEN            32
 #define PN_UUID_LEN           16
 #define PN_IOCR_MAX           2
-#define PN_IOBJ_MAX           8
+#define PN_IOBJ_MAX           16
 #define PN_SUBMOD_MAX         16
+#define PN_SLOT_IO_MAX        8 /* GSDML IO slots 1..8 */
 #define PN_DIAG_MAX           4
 #define PN_PDEV_STORE         128
 

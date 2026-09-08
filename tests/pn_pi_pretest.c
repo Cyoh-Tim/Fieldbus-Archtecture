@@ -853,6 +853,127 @@ static size_t build_connect(uint8_t *pdu, const uint8_t mac[6],
     return rpc_req(pdu, 0, stub, sn);
 }
 
+static size_t fill_iocr_two(uint8_t *b, uint16_t type, uint16_t ref,
+                            uint16_t data_len, uint16_t frame_id, uint16_t off1,
+                            uint16_t iocs1, uint16_t off2, uint16_t iocs2)
+{
+    memset(b, 0, 72);
+    pn_wr_be16(b + 0, type);
+    pn_wr_be16(b + 2, ref);
+    pn_wr_be16(b + 4, 0x8892);
+    pn_wr_be32(b + 6, PN_RT_CLASS_1);
+    pn_wr_be16(b + 10, data_len);
+    pn_wr_be16(b + 12, frame_id);
+    pn_wr_be16(b + 14, 32);
+    pn_wr_be16(b + 16, 8);
+    pn_wr_be16(b + 18, 1);
+    pn_wr_be32(b + 22, 0xffffffffu);
+    pn_wr_be16(b + 26, 3);
+    pn_wr_be16(b + 28, 3);
+    pn_wr_be16(b + 30, 0xC000);
+    pn_wr_be16(b + 38, 1);
+    pn_wr_be16(b + 44, 2);
+    pn_wr_be16(b + 46, 1);
+    pn_wr_be16(b + 48, 1);
+    pn_wr_be16(b + 50, off1);
+    pn_wr_be16(b + 52, 2);
+    pn_wr_be16(b + 54, 1);
+    pn_wr_be16(b + 56, off2);
+    pn_wr_be16(b + 58, 2);
+    pn_wr_be16(b + 60, 1);
+    pn_wr_be16(b + 62, 1);
+    pn_wr_be16(b + 64, iocs1);
+    pn_wr_be16(b + 66, 2);
+    pn_wr_be16(b + 68, 1);
+    pn_wr_be16(b + 70, iocs2);
+    return 72;
+}
+
+static size_t fill_expsub_slot(uint8_t *exp, uint16_t slot)
+{
+    memset(exp, 0, 36);
+    pn_wr_be16(exp + 0, 1);
+    pn_wr_be16(exp + 6, slot);
+    pn_wr_be32(exp + 8, 0x10);
+    pn_wr_be16(exp + 14, 1);
+    pn_wr_be16(exp + 16, 1);
+    pn_wr_be32(exp + 18, 0x11);
+    pn_wr_be16(exp + 22, 0x0003);
+    pn_wr_be16(exp + 24, 1);
+    pn_wr_be16(exp + 26, 32);
+    exp[28] = 1;
+    exp[29] = 1;
+    pn_wr_be16(exp + 30, 2);
+    pn_wr_be16(exp + 32, 8);
+    exp[34] = 1;
+    exp[35] = 1;
+    return 36;
+}
+
+static size_t build_connect_two_slots(uint8_t *pdu, const uint8_t mac[6])
+{
+    static const uint8_t uuid[16] = {1, 2, 3, 4, 5, 6, 7, 8,
+                                     9, 10, 11, 12, 13, 14, 15, 16};
+    uint8_t ar[56];
+    memset(ar, 0, sizeof(ar));
+    pn_wr_be16(ar, 0x0001);
+    memcpy(ar + 2, uuid, 16);
+    pn_wr_be16(ar + 18, 1);
+    memcpy(ar + 20, mac, 6);
+    ar[26] = 0xDE;
+    ar[27] = 0xA0;
+    ar[28] = 0x00;
+    ar[29] = 0x02;
+    pn_wr_be32(ar + 42, 0x00000001);
+    pn_wr_be16(ar + 46, 1000);
+    pn_wr_be16(ar + 48, 0x8892);
+    pn_wr_be16(ar + 50, 4);
+    memcpy(ar + 52, "plc1", 4);
+
+    uint8_t iin[72], iout[72], exp1[36], exp2[36], pdev[40];
+    fill_iocr_two(iin, PN_IOCR_INPUT, 1, 68, 0x8123, 0, 66, 33, 67);
+    fill_iocr_two(iout, PN_IOCR_OUTPUT, 2, 20, 0xFFFF, 0, 18, 9, 19);
+    fill_expsub_slot(exp1, 1);
+    fill_expsub_slot(exp2, 2);
+
+    memset(pdev, 0, sizeof(pdev));
+    pn_wr_be16(pdev + 0, 1);
+    pn_wr_be16(pdev + 6, 0);
+    pn_wr_be32(pdev + 8, 1);
+    pn_wr_be16(pdev + 14, 3);
+    pn_wr_be16(pdev + 16, 1);
+    pn_wr_be32(pdev + 18, 1);
+    pn_wr_be16(pdev + 24, 0x8000);
+    pn_wr_be32(pdev + 26, 2);
+    pn_wr_be16(pdev + 32, 0x8001);
+    pn_wr_be32(pdev + 34, 3);
+
+    uint8_t blocks[640];
+    size_t n = 0;
+    uint8_t alarmcr[20];
+    memset(alarmcr, 0, sizeof(alarmcr));
+    pn_wr_be16(alarmcr + 0, 1);
+    pn_wr_be16(alarmcr + 2, 0x8892);
+    pn_wr_be32(alarmcr + 4, 0);
+    pn_wr_be16(alarmcr + 8, 1);
+    pn_wr_be16(alarmcr + 10, 3);
+    pn_wr_be16(alarmcr + 12, 3);
+    pn_wr_be16(alarmcr + 14, 200);
+    pn_wr_be16(alarmcr + 16, 0xC000);
+    pn_wr_be16(alarmcr + 18, 0xA000);
+
+    n += wr_pn_block(blocks + n, PN_BLOCK_AR_REQ, ar, sizeof(ar));
+    n += wr_pn_block(blocks + n, PN_BLOCK_IOCR_REQ, iin, sizeof(iin));
+    n += wr_pn_block(blocks + n, PN_BLOCK_IOCR_REQ, iout, sizeof(iout));
+    n += wr_pn_block(blocks + n, PN_BLOCK_ALARMCR_REQ, alarmcr, sizeof(alarmcr));
+    n += wr_pn_block(blocks + n, PN_BLOCK_EXPSUB_REQ, pdev, sizeof(pdev));
+    n += wr_pn_block(blocks + n, PN_BLOCK_EXPSUB_REQ, exp1, sizeof(exp1));
+    n += wr_pn_block(blocks + n, PN_BLOCK_EXPSUB_REQ, exp2, sizeof(exp2));
+    uint8_t stub[720];
+    size_t sn = ndr_wrap_le(stub, blocks, n);
+    return rpc_req(pdu, 0, stub, sn);
+}
+
 static size_t build_prmend(uint8_t *pdu)
 {
     uint8_t body[26];
@@ -1671,6 +1792,30 @@ int main(int argc, char **argv)
     plen = build_connect(pdu, mymac, PN_RT_CLASS_1);
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     check(rn > 80, "LAB-CM-RECONNECT", "Connect after Release");
+
+    plen = build_release(pdu);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80, "LAB-CM-SLOT2-RELEASE", "Release before 2-slot Connect");
+    usleep(20000);
+
+    plen = build_connect_two_slots(pdu, mymac);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80, "LAB-CM-SLOT2", "Connect ExpectedSub slot 1+2");
+
+    plen = build_read(pdu, 2, 1, PN_INDEX_REALIDENT_SLOT);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    int saw_s2 = 0;
+    if (rn > 100) {
+        for (ssize_t i = 100; i + 6 <= rn; i++) {
+            if (pn_rd_be16(resp + i) == 2 &&
+                pn_rd_be32(resp + i + 2) == 0x10u) {
+                saw_s2 = 1;
+                break;
+            }
+        }
+    }
+    check(rn > 80 && saw_s2, "LAB-CM-SLOT2-REALIDENT",
+          "RealIdent slot 2 module ident 0x10");
 
     close(rpc);
     close(raw);

@@ -83,8 +83,8 @@ JSON 설정만 보면 사용자는 이렇게 적는다.
 "protocol": "profinet",
 "protocol_params": { "device_name": "sensor-line1", "iface": "eth0" },
 "points": [
-  { "name": "barcode_value", "access": "read",  "address": { "profinet": { "byte_offset": 0, "length": 32 } } },
-  { "name": "trigger",       "access": "write", "address": { "profinet": { "byte_offset": 0, "length": 1 } } }
+  { "name": "barcode_value", "access": "read",  "address": { "profinet": { "slot": 1, "subslot": 1, "byte_offset": 0, "length": 32 } } },
+  { "name": "trigger",       "access": "write", "address": { "profinet": { "slot": 1, "subslot": 1, "byte_offset": 0, "length": 1 } } }
 ]
 ```
 
@@ -104,8 +104,10 @@ JSON 설정만 보면 사용자는 이렇게 적는다.
 - 입출력 방향은 “사람이 보기 편한 쪽”이 아니라 **컨트롤러 기준**이다.
   처음 볼 때 가장 헷갈리는 지점이다.
 
-이 스택의 랩 기본값은 입력 32바이트, 출력 8바이트다. GSDML의 슬롯 1
-모듈과 `config/example.profinet.json` 이 같은 크기를 말한다.
+이 스택의 랩 기본값은 입력 32바이트, 출력 8바이트다. GSDML은 IO 모듈
+`MOD_IO` 를 슬롯 **1..8** 에 둘 수 있다. 슬롯마다 같은 32/8 모듈이다.
+랩·CODESYS 기본 경로는 슬롯 1 하나다. 슬롯을 더 쓰면 Connect
+ExpectedSubmodule 과 JSON `slot` 이 같이 늘어야 한다.
 
 이름을 정하는 일(스테이션 네임), IP를 정하는 일, “이제부터 8 ms마다
 이 바이트를 교환하자”는 계약은 전부 주기 데이터보다 **먼저** 일어난다.
@@ -693,33 +695,15 @@ void pn_rt_watchdog(pn_stack_t *s)
 
 JSON 포인트의 `access` 가 이 배열을 고른다.
 
-```268:301:adapters/profinet/profinet_adapter.c
-static int pn_read_point(...)
-{
-    if (strcmp(pt->access, "write") == 0) {
-        return pn_stack_read_output(ctx->stack, (size_t)pt->byte_offset,
-                                    out->data, n);
-    }
-    return pn_stack_read_input(ctx->stack, (size_t)pt->byte_offset, out->data,
-                               n);
-}
-
-static int pn_write_point(...)
-{
-    return pn_stack_write_input(ctx->stack, (size_t)pt->byte_offset, value->data,
-                                n);
-}
-```
-
-즉:
-
 - 앱이 바코드 값을 **쓰면** → `write_point` → `input_image` → PLC가 읽음
 - 앱이 트리거를 **읽으면** → `read_point` + `access: write` → `output_image`
   (PLC가 써 둔 값)
 
-`address.profinet.byte_offset` 은 그 배열 안의 오프셋이다. 슬롯/서브슬롯
-숫자는 GSDML·Connect ExpectedSubmodule 과 맞추기 위한 메타데이터이고,
-코어는 해석하지 않는다.
+`address.profinet.byte_offset` 은 **그 슬롯/서브슬롯 모듈 안**의 오프셋이다.
+Connect 이후 어댑터는 `pn_stack_io_map()` 으로 모듈 시작 주소를 찾는다.
+AR 이 아직 없으면 `protocol_params.input_len`/`output_len`(기본 32/8) 을
+슬롯 간격으로 써서 `(slot-1)*stride + byte_offset` 이다. 슬롯 2 의
+입력 0번 바이트는 이미지 오프셋 32 이다. 코어는 이 필드를 해석하지 않는다.
 
 이미지 접근은 `io_lock` 으로 RTC1 스레드와 poll 스레드가 같은 바이트를
 찢지 않게 한다.
@@ -743,9 +727,10 @@ static int pn_write_point(...)
 | `0xF000` | RealIdentification | 실제 모듈/서브모듈 Ident |
 
 슬롯 0 은 DAP + 인터페이스 서브슬롯 `0x8000`(32768) + 포트 `0x8001`
-(32769) 이다. 슬롯 1 이 32/8 바이트 IO 모듈이다. Connect 의
-ExpectedSubmodule 이 이와 다르면 ModuleDiff 가 나갈 수 있다. 랩
-테스트는 맞춰서 ModuleDiff 가 없기를 기대한다.
+(32769) 이다. 슬롯 1..8 에 같은 32/8 `MOD_IO` 를 넣을 수 있다. 랩
+기본 Connect 는 슬롯 1 만 쓴다. ExpectedSubmodule 이 GSDML 과 다르면
+ModuleDiff 가 나갈 수 있다. 랩 테스트는 맞춰서 ModuleDiff 가 없기를
+기대한다.
 
 I&M0 의 OrderID 는 GSDML `OrderNumber` (`FB-ARCH-PN-DEV`) 와 같아야
 CODESYS 카탈로그가 장치를 알아본다.
@@ -870,7 +855,9 @@ CODESYS: **Tools → Device Repository → Install**. TIA 도 GSD 설치
 | ReductionRatio | 8 16 … 512 | 8–512 ms |
 | SupportedProtocols | SNMP;LLDP | CC-B 토폴로지 |
 | NumberOfAR | 1 | 컨트롤러 하나 |
-| 슬롯 1 DataItem | 32 / 8 바이트 | 프로세스 이미지 |
+| PhysicalSlots | 0..8 | DAP + IO 슬롯 1..8 |
+| AllowedInSlots | 1..8 | `MOD_IO` 를 슬롯 1..8 에 |
+| 슬롯당 DataItem | 32 / 8 바이트 | 모듈 하나. 8슬롯이면 입력 256 |
 
 `RT_CLASS_3` 문자열과 `MediaRedundancy` 는 파일에 없다. 풀테스트가
 그 부재를 검사한다.
@@ -919,11 +906,12 @@ poll_cycle / read_point / write_point / health / destroy.
 | `vendor_id` / `device_id` | 어댑터 | DCP DeviceID. 43981 = 0xABCD |
 | `ip` / `netmask` / `gateway` | 어댑터 | 초기 IPv4. DCP Set 이 AR 없을 때 덮어씀 |
 | `apply_os_ip` | 어댑터 | true 면 커널 주소에도 적용 (권한 필요) |
-| `input_len` / `output_len` | 어댑터 | 프로세스 이미지 크기 |
+| `input_len` / `output_len` | 어댑터 | 슬롯 간격(기본 32/8). 포인트 슬롯에 맞춰 이미지가 커질 수 있음 |
 | `cycle_us` | 어댑터 | Connect 가 RR 생략 시 RTC1 fallback |
 | `security_class` | 어댑터 | 0 = HMAC 없음(기본), 1 = HMAC 필수 |
 | `points[].access` | 어댑터 | `read` = 입력 이미지, `write` = 출력 이미지 |
-| `points[].address.profinet.byte_offset` | 어댑터 | 이미지 오프셋 |
+| `points[].address.profinet.slot` / `subslot` | 어댑터 | 모듈 위치. 기본 1/1 |
+| `points[].address.profinet.byte_offset` | 어댑터 | 그 모듈 안의 오프셋 |
 
 실행:
 
@@ -939,8 +927,9 @@ sudo setcap cap_net_raw,cap_net_bind_service=+ep ./build/multiproto_daemon
 ## 22. 테스트로 확인하는 법
 
 ```
-cmake --build build --target test_pn_stack pn_device_run pn_pi_pretest pn_codesys_beta
+cmake --build build --target test_pn_stack test_pn_adapter pn_device_run pn_pi_pretest pn_codesys_beta
 ./build/test_pn_stack
+./build/test_pn_adapter
 bash tests/run_pn_fulltest.sh
 bash tests/run_pn_codesys_beta.sh
 ```
