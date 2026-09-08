@@ -72,12 +72,15 @@ WIBU **CodeMeter-lite** is a package dependency (`codemeter | codemeter-lite`).
 Official User Runtime DEB (driver-only / lite, amd64, 9.10):
 
 ```
-https://www.wibu.com/support/user/user-software/file/download/17974.html?tx_wibudownloads_downloadlist[directDownload]=directDownload&tx_wibudownloads_downloadlist[useAwsS3]=0
+https://www.wibu.com/support/user/user-software/file/download/17974.html?tx_wibudownloads_downloadlist%5BdirectDownload%5D=directDownload&tx_wibudownloads_downloadlist%5BuseAwsS3%5D=0
 ```
 
-Then `dpkg -i` CodeMeter-lite, `codesyscontrol_linux_*_amd64.deb` from the
-Control SL `.package`, and `codesysedge_edgeamd64_*_amd64.deb` from the Edge
-Gateway `.package`.
+`tests/codesys/try_install_codesys.sh` logs into the Store, accepts the EULA
+(`form_key` cookie + `license/get` + `license/accept`), downloads the
+`.package` files, extracts amd64 debs, and starts the binaries when PID 1 is
+not systemd. Then `dpkg -i` CodeMeter-lite, `codesyscontrol_linux_*_amd64.deb`
+from the Control SL `.package`, and `codesysedge_edgeamd64_*_amd64.deb` from
+the Edge Gateway `.package`.
 
 If PID 1 is not systemd, start the binaries directly (root, for raw Ethernet):
 

@@ -3,6 +3,19 @@ build/
 *.a
 *.so
 compile_commands.json
+__pycache__/
+
+# 벤더 라이선스 코드 - 저장소에 커밋하지 않음
+
+# CODESYS Control/Gateway artifacts if a runtime is started from the repo cwd
+.AuditLog.csv
+.pki/
+SysFileMap.cfg
+codesyscontrol.log
+codesyscontrol.log.*
+codesysedge.log
+codesysedge.log.*
+
 
 # 벤더 라이선스 코드 - 저장소에 커밋하지 않음
 third_party/ethernetip_stack/*

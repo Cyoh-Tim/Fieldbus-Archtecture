@@ -50,9 +50,15 @@ bash tests/codesys/try_install_codesys.sh
 ```
 
 패키지는 `~/.cache/codesys-store/` 에만 받는다. 저장소에 커밋하지 않는다.
-CODESYS 는 컨테이너/VM 용으로 출시하지 않는다. 클라우드 VM 에서 바이너리가
-떠도, Windows IDE 가 이 사설망의 11740/tcp 에 닿지 않으면 IEC 앱을
-다운로드할 수 없다.
+스토어 다운로드는 Magento EULA 팝업 뒤에 있다. `download_codesys_store.py` 가
+`form_key` 쿠키를 맞춘 뒤 `license/get` → `license/accept` → archive GET 을
+탄다. PID 1 이 systemd 가 아니면 스크립트가 CodeMeter / Control / Gateway
+바이너리를 직접 기동한다 (cwd `/var/opt/codesys`, 포트 22350 / 11740 / 1217).
+
+CODESYS 는 컨테이너/VM 용으로 출시하지 않는다. 클라우드 VM 에서 2시간 데모
+런타임이 떠도, Windows IDE 가 이 사설망의 11740/tcp 에 닿지 않으면 IEC 앱을
+다운로드할 수 없다. 빈 런타임은 필드버스 마스터가 아니다.
+
 
 Windows IDE 쪽 클릭 경로 (약 15분, 기존 `docs/codesys_beta.md` 와 동일 + 풀):
 
@@ -80,6 +86,6 @@ SLMP 는 CODESYS 필드버스 목록에 없다. 미쓰비시 PLC 또는
 | SLMP 3E client → PLC stand-in | **PASS** 20 samples, D100.. seq 15→139, state_match |
 | PROFINET CODESYS-profile Controller | **PASS** 16/16 (DCP Nominate, Connect+AlarmCR, Write, PrmEnd, RTC1 8 ms mean 7999 µs, input `BETA-PN-IN`) |
 | CC-Link / EtherCAT | SKIP (스텁 / ESC ASIC) |
-| `codesyscontrol` binary | Store 로그인 성공. 패키지 다운로드는 스토어 EULA 팝업(JS) 뒤에 가려져 이 VM 에서 `.deb` 를 받지 못함. 빈 런타임은 IEC 앱 없이 마스터가 아님. |
+| `codesyscontrol` 4.22.0.0 | **설치·기동됨** (이 VM). CodeMeter 9.10.8166.500 + Control SL + Edge Gateway. 로그: `CODESYS Control ready`, `no runtime license - running in demo mode(~2 hours)`. listen **11740**/tcp, Gateway **1217**/tcp, OPC UA **4840**/tcp, CodeMeter **22350**/tcp. 빈 런타임 — IEC 앱 없음, 필드버스 마스터 아님. XDP/`libxdp.so` 없음은 VM 에서 정상. |
 
 와이어에서 읽은 온도는 200–350 (0.1 °C) 범위에서 매 샘플 바뀌었고, `sensor_demo` 가 쓴 JSON 스냅샷과 일치했다.
