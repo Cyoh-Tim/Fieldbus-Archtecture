@@ -52,6 +52,10 @@ static void wr_be16(uint8_t *p, uint16_t v)
     p[1] = (uint8_t)(v & 0xff);
 }
 
+static int send_all(int fd, const uint8_t *buf, size_t len);
+static int client_recv_adu(mb_stack_t *s, uint16_t expect_tid, uint8_t *resp,
+                           size_t resp_cap, size_t *resp_len);
+
 static int set_nonblock(int fd)
 {
     int flags = fcntl(fd, F_GETFL, 0);
@@ -611,7 +615,7 @@ static void serve_client(mb_stack_t *s, struct mb_client *c)
             if (mb_stack_handle_adu(s, c->rx, need, resp, sizeof(resp),
                                     &resp_len) == 0 &&
                 resp_len > 0) {
-                if (send(c->fd, resp, resp_len, MSG_NOSIGNAL) < 0) {
+                if (send_all(c->fd, resp, resp_len) != 0) {
                     close_client(c);
                     return;
                 }
@@ -622,6 +626,82 @@ static void serve_client(mb_stack_t *s, struct mb_client *c)
     }
 }
 
+static int send_all(int fd, const uint8_t *buf, size_t len)
+{
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = send(fd, buf + off, len - off, MSG_NOSIGNAL);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (n == 0) {
+            return -1;
+        }
+        off += (size_t)n;
+    }
+    return 0;
+}
+
+static int client_recv_adu(mb_stack_t *s, uint16_t expect_tid, uint8_t *resp,
+                           size_t resp_cap, size_t *resp_len)
+{
+    size_t got = 0;
+    int to_ms = s->cfg.client_timeout_ms > 0 ? s->cfg.client_timeout_ms : 200;
+    while (got < MB_MBAP_LEN) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(s->client_fd, &rfds);
+        struct timeval tv = {.tv_sec = to_ms / 1000,
+                             .tv_usec = (to_ms % 1000) * 1000};
+        if (select(s->client_fd + 1, &rfds, NULL, NULL, &tv) <= 0) {
+            snprintf(s->last_error, sizeof(s->last_error), "client read timeout");
+            return -ETIMEDOUT;
+        }
+        ssize_t n = recv(s->client_fd, resp + got, resp_cap - got, 0);
+        if (n <= 0) {
+            s->connected = 0;
+            return -EIO;
+        }
+        got += (size_t)n;
+    }
+    uint16_t tid = rd_be16(resp);
+    uint16_t proto = rd_be16(resp + 2);
+    uint16_t len = rd_be16(resp + 4);
+    if (proto != 0 || len < 2) {
+        return -EIO;
+    }
+    size_t need = (size_t)(MB_MBAP_LEN - 1) + (size_t)len;
+    if (need > resp_cap) {
+        return -ENOSPC;
+    }
+    while (got < need) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(s->client_fd, &rfds);
+        struct timeval tv = {.tv_sec = to_ms / 1000,
+                             .tv_usec = (to_ms % 1000) * 1000};
+        if (select(s->client_fd + 1, &rfds, NULL, NULL, &tv) <= 0) {
+            snprintf(s->last_error, sizeof(s->last_error), "client read timeout");
+            return -ETIMEDOUT;
+        }
+        ssize_t n = recv(s->client_fd, resp + got, need - got, 0);
+        if (n <= 0) {
+            s->connected = 0;
+            return -EIO;
+        }
+        got += (size_t)n;
+    }
+    if (tid != expect_tid) {
+        snprintf(s->last_error, sizeof(s->last_error), "tid mismatch");
+        return -EIO;
+    }
+    *resp_len = need;
+    return 0;
+}
+
 /* Client-role: issue one FC03/04/01/02 into local cache. Used by adapter. */
 static int client_txn(mb_stack_t *s, uint8_t fc, uint16_t addr, uint16_t qty,
                       uint8_t *data_out, size_t *data_len)
@@ -629,8 +709,19 @@ static int client_txn(mb_stack_t *s, uint8_t fc, uint16_t addr, uint16_t qty,
     if (s->client_fd < 0) {
         return -ENOTCONN;
     }
+    if ((fc == MB_FC_READ_HOLDING || fc == MB_FC_READ_INPUT) &&
+        (qty < 1 || qty > 125)) {
+        return -EINVAL;
+    }
+    if ((fc == MB_FC_READ_COILS || fc == MB_FC_READ_DISCRETE) &&
+        (qty < 1 || qty > 2000)) {
+        return -EINVAL;
+    }
     static uint16_t tid_seq;
     uint16_t tid = ++tid_seq;
+    if (tid == 0) {
+        tid = ++tid_seq;
+    }
     uint8_t req[12];
     wr_be16(req, tid);
     wr_be16(req + 2, 0);
@@ -639,31 +730,16 @@ static int client_txn(mb_stack_t *s, uint8_t fc, uint16_t addr, uint16_t qty,
     req[7] = fc;
     wr_be16(req + 8, addr);
     wr_be16(req + 10, qty);
-    if (send(s->client_fd, req, sizeof(req), MSG_NOSIGNAL) != (ssize_t)sizeof(req)) {
+    if (send_all(s->client_fd, req, sizeof(req)) != 0) {
         s->connected = 0;
         return -EIO;
     }
 
-    /* Brief blocking wait for response — poll_cycle is expected to tolerate ms. */
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(s->client_fd, &rfds);
-    int to_ms = s->cfg.client_timeout_ms > 0 ? s->cfg.client_timeout_ms : 200;
-    struct timeval tv = {.tv_sec = to_ms / 1000,
-                         .tv_usec = (to_ms % 1000) * 1000};
-    if (select(s->client_fd + 1, &rfds, NULL, NULL, &tv) <= 0) {
-        snprintf(s->last_error, sizeof(s->last_error), "client read timeout");
-        return -ETIMEDOUT;
-    }
     uint8_t resp[MB_ADU_MAX];
-    ssize_t n = recv(s->client_fd, resp, sizeof(resp), 0);
-    if (n < (ssize_t)(MB_MBAP_LEN + 2)) {
-        s->connected = 0;
-        return -EIO;
-    }
-    uint16_t rlen = rd_be16(resp + 4);
-    if ((size_t)(MB_MBAP_LEN - 1 + rlen) > (size_t)n) {
-        return -EIO;
+    size_t resp_len = 0;
+    int rc = client_recv_adu(s, tid, resp, sizeof(resp), &resp_len);
+    if (rc != 0) {
+        return rc;
     }
     uint8_t rfc = resp[7];
     if (rfc & 0x80) {
@@ -671,11 +747,11 @@ static int client_txn(mb_stack_t *s, uint8_t fc, uint16_t addr, uint16_t qty,
                  resp[8]);
         return -EIO;
     }
-    if (rfc != fc) {
+    if (rfc != fc || resp_len < 9) {
         return -EIO;
     }
     uint8_t nbytes = resp[8];
-    if ((size_t)nbytes + 9 > (size_t)n) {
+    if ((size_t)nbytes + 9 > resp_len) {
         return -EIO;
     }
     if (data_out && data_len) {
@@ -746,30 +822,36 @@ int mb_stack_client_read(mb_stack_t *s, mb_reg_type_t type, uint16_t addr,
 int mb_stack_client_write_regs(mb_stack_t *s, uint16_t addr,
                                const uint16_t *src, uint16_t quantity)
 {
-    if (!s || s->cfg.role != MB_ROLE_CLIENT || !src || quantity == 0) {
+    if (!s || s->cfg.role != MB_ROLE_CLIENT || !src || quantity == 0 ||
+        quantity > 123) {
         return -EINVAL;
     }
     if (s->client_fd < 0) {
         return -ENOTCONN;
     }
+    static uint16_t tid_seq;
+    uint16_t tid = ++tid_seq;
+    if (tid == 0) {
+        tid = ++tid_seq;
+    }
+    uint8_t req[MB_ADU_MAX];
+    size_t total;
     if (quantity == 1) {
-        static uint16_t tid_seq;
-        uint8_t req[12];
-        wr_be16(req, ++tid_seq);
+        wr_be16(req, tid);
         wr_be16(req + 2, 0);
         wr_be16(req + 4, 6);
         req[6] = (uint8_t)s->cfg.unit_id;
         req[7] = MB_FC_WRITE_SINGLE_REG;
         wr_be16(req + 8, addr);
         wr_be16(req + 10, src[0]);
-        if (send(s->client_fd, req, 12, MSG_NOSIGNAL) != 12) {
-            return -EIO;
-        }
+        total = 12;
     } else {
-        static uint16_t tid_seq;
-        uint8_t req[MB_ADU_MAX];
         size_t pdu_len = 6u + (size_t)quantity * 2u;
-        wr_be16(req, ++tid_seq);
+        total = 7 + pdu_len;
+        if (total > MB_ADU_MAX) {
+            return -EINVAL;
+        }
+        wr_be16(req, tid);
         wr_be16(req + 2, 0);
         wr_be16(req + 4, (uint16_t)(1 + pdu_len));
         req[6] = (uint8_t)s->cfg.unit_id;
@@ -780,19 +862,26 @@ int mb_stack_client_write_regs(mb_stack_t *s, uint16_t addr,
         for (uint16_t i = 0; i < quantity; i++) {
             wr_be16(req + 13 + i * 2, src[i]);
         }
-        size_t total = 7 + pdu_len;
-        if (send(s->client_fd, req, total, MSG_NOSIGNAL) != (ssize_t)total) {
-            return -EIO;
-        }
     }
-    /* Drain short ACK. */
-    uint8_t resp[16];
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(s->client_fd, &rfds);
-    struct timeval tv = {.tv_sec = 0, .tv_usec = 200000};
-    if (select(s->client_fd + 1, &rfds, NULL, NULL, &tv) > 0) {
-        (void)recv(s->client_fd, resp, sizeof(resp), 0);
+    if (send_all(s->client_fd, req, total) != 0) {
+        s->connected = 0;
+        return -EIO;
+    }
+    uint8_t resp[MB_ADU_MAX];
+    size_t resp_len = 0;
+    int rc = client_recv_adu(s, tid, resp, sizeof(resp), &resp_len);
+    if (rc != 0) {
+        return rc;
+    }
+    uint8_t rfc = resp[7];
+    if (rfc & 0x80) {
+        snprintf(s->last_error, sizeof(s->last_error), "exception 0x%02x",
+                 resp[8]);
+        return -EIO;
+    }
+    if (rfc != (quantity == 1 ? MB_FC_WRITE_SINGLE_REG
+                              : MB_FC_WRITE_MULTI_REGS)) {
+        return -EIO;
     }
     if (map_ok_regs(s, MB_REG_HOLDING, addr, quantity)) {
         memcpy(&s->holding[addr], src, quantity * sizeof(uint16_t));
@@ -803,30 +892,37 @@ int mb_stack_client_write_regs(mb_stack_t *s, uint16_t addr,
 int mb_stack_client_write_bits(mb_stack_t *s, uint16_t addr, const uint8_t *src,
                                uint16_t quantity)
 {
-    if (!s || s->cfg.role != MB_ROLE_CLIENT || !src || quantity == 0) {
+    if (!s || s->cfg.role != MB_ROLE_CLIENT || !src || quantity == 0 ||
+        quantity > 1968) {
         return -EINVAL;
     }
     if (s->client_fd < 0) {
         return -ENOTCONN;
     }
     static uint16_t tid_seq;
+    uint16_t tid = ++tid_seq;
+    if (tid == 0) {
+        tid = ++tid_seq;
+    }
+    uint8_t req[MB_ADU_MAX];
+    size_t total;
     if (quantity == 1) {
-        uint8_t req[12];
-        wr_be16(req, ++tid_seq);
+        wr_be16(req, tid);
         wr_be16(req + 2, 0);
         wr_be16(req + 4, 6);
         req[6] = (uint8_t)s->cfg.unit_id;
         req[7] = MB_FC_WRITE_SINGLE_COIL;
         wr_be16(req + 8, addr);
         wr_be16(req + 10, src[0] ? 0xFF00 : 0x0000);
-        if (send(s->client_fd, req, 12, MSG_NOSIGNAL) != 12) {
-            return -EIO;
-        }
+        total = 12;
     } else {
         uint8_t nbytes = (uint8_t)((quantity + 7) / 8);
-        uint8_t req[MB_ADU_MAX];
         size_t pdu_len = 6u + nbytes;
-        wr_be16(req, ++tid_seq);
+        total = 7 + pdu_len;
+        if (total > MB_ADU_MAX) {
+            return -EINVAL;
+        }
+        wr_be16(req, tid);
         wr_be16(req + 2, 0);
         wr_be16(req + 4, (uint16_t)(1 + pdu_len));
         req[6] = (uint8_t)s->cfg.unit_id;
@@ -840,18 +936,26 @@ int mb_stack_client_write_bits(mb_stack_t *s, uint16_t addr, const uint8_t *src,
                 req[13 + i / 8] |= (uint8_t)(1u << (i % 8));
             }
         }
-        size_t total = 7 + pdu_len;
-        if (send(s->client_fd, req, total, MSG_NOSIGNAL) != (ssize_t)total) {
-            return -EIO;
-        }
     }
-    uint8_t resp[16];
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(s->client_fd, &rfds);
-    struct timeval tv = {.tv_sec = 0, .tv_usec = 200000};
-    if (select(s->client_fd + 1, &rfds, NULL, NULL, &tv) > 0) {
-        (void)recv(s->client_fd, resp, sizeof(resp), 0);
+    if (send_all(s->client_fd, req, total) != 0) {
+        s->connected = 0;
+        return -EIO;
+    }
+    uint8_t resp[MB_ADU_MAX];
+    size_t resp_len = 0;
+    int rc = client_recv_adu(s, tid, resp, sizeof(resp), &resp_len);
+    if (rc != 0) {
+        return rc;
+    }
+    uint8_t rfc = resp[7];
+    if (rfc & 0x80) {
+        snprintf(s->last_error, sizeof(s->last_error), "exception 0x%02x",
+                 resp[8]);
+        return -EIO;
+    }
+    if (rfc != (quantity == 1 ? MB_FC_WRITE_SINGLE_COIL
+                              : MB_FC_WRITE_MULTI_COILS)) {
+        return -EIO;
     }
     for (uint16_t i = 0; i < quantity; i++) {
         if (map_ok_bits(s, MB_REG_COIL, (uint16_t)(addr + i), 1)) {

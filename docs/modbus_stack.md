@@ -110,4 +110,8 @@
 ./build/multiproto_daemon config/example.modbus.json
 ./build/test_mb_stack
 ./build/test_mb_adapter
+python3 tests/mb_reliability_harness.py --soak-seconds 1200
 ```
+
+신뢰성 하니스는 seeded server + pymodbus poll + multi-master + reconnect +
+장시간 soak + multiproto_daemon 검증을 포함합니다.

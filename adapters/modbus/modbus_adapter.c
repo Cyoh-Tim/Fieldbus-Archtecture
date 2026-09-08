@@ -61,8 +61,11 @@ static int eqi(const char *a, const char *b)
     return *a == 0 && *b == 0;
 }
 
-static mb_reg_type_t parse_reg_type(const char *s)
+static int parse_reg_type(const char *s, int *known)
 {
+    if (known) {
+        *known = 1;
+    }
     if (!s) {
         return MB_REG_HOLDING;
     }
@@ -79,7 +82,14 @@ static mb_reg_type_t parse_reg_type(const char *s)
         eqi(s, "discrete_input") || eqi(s, "digital_input")) {
         return MB_REG_DISCRETE;
     }
-    /* holding, hr, 4x, 4, holding_register, ... */
+    if (eqi(s, "holding") || eqi(s, "hr") || eqi(s, "4x") || eqi(s, "4") ||
+        eqi(s, "holding_register") || eqi(s, "holding_registers") ||
+        eqi(s, "register") || eqi(s, "registers")) {
+        return MB_REG_HOLDING;
+    }
+    if (known) {
+        *known = 0;
+    }
     return MB_REG_HOLDING;
 }
 
@@ -192,7 +202,6 @@ static uint16_t normalize_start(mb_reg_type_t type, int start, int mode_zero)
 
 static int address_mode_zero(const cJSON *mb)
 {
-    int zb = 0;
     const cJSON *z = cJSON_GetObjectItemCaseSensitive(mb, "zero_based");
     if (cJSON_IsTrue(z)) {
         return 1;
@@ -204,7 +213,6 @@ static int address_mode_zero(const cJSON *mb)
     if (base && (eqi(base, "zero") || eqi(base, "pdu") || eqi(base, "0"))) {
         return 1;
     }
-    (void)zb;
     return 0;
 }
 
@@ -267,6 +275,10 @@ static int parse_points(modbus_ctx_t *ctx, const char *points_json)
     cJSON *arr = cJSON_Parse(points_json);
     if (!cJSON_IsArray(arr)) {
         cJSON_Delete(arr);
+        if (points_json && points_json[0] && strcmp(points_json, "[]") != 0) {
+            LOG_ERROR("modbus", "points 가 JSON 배열이 아님");
+            return -EINVAL;
+        }
         return 0;
     }
     cJSON *p;
@@ -342,7 +354,12 @@ static int parse_points(modbus_ctx_t *ctx, const char *points_json)
         if (!rts) {
             rts = json_get_str(mb, "area", "table");
         }
-        pt->reg_type = parse_reg_type(rts);
+        int known_type = 1;
+        pt->reg_type = parse_reg_type(rts, &known_type);
+        if (rts && !known_type) {
+            LOG_WARN("modbus", "point %s 알 수 없는 register_type \"%s\" → holding",
+                     pt->name, rts);
+        }
 
         int start_raw =
             json_get_int(mb, "start", "address", "register", 0, &found);
@@ -371,6 +388,11 @@ static int parse_points(modbus_ctx_t *ctx, const char *points_json)
             json_get_int(mb, "bit_count", "bits", "bit_length", 1, NULL);
         if (pt->bit_count < 1) {
             pt->bit_count = 1;
+        }
+        if (pt->bit_count > 32) {
+            LOG_WARN("modbus", "point %s bit_count=%d > 32, clamp", pt->name,
+                     pt->bit_count);
+            pt->bit_count = 32;
         }
 
         int length = json_get_int(p, "length", "len", "size", 0, NULL);
@@ -480,7 +502,10 @@ static int mb_init(protocol_adapter_t *self, const char *protocol_params_json,
         return -EINVAL;
     }
 
-    parse_points(ctx, points_json);
+    if (parse_points(ctx, points_json) != 0) {
+        free(ctx);
+        return -EINVAL;
+    }
     ctx->role = cfg.role;
     ctx->stack = mb_stack_create(&cfg);
     if (!ctx->stack) {
@@ -853,6 +878,11 @@ static int mb_write_point(protocol_adapter_t *self, const char *point_name,
                 return -EINVAL;
             }
             uint16_t qty = pt->quantity;
+            if (qty > 123) {
+                LOG_ERROR("modbus", "client write quantity %u > 123: %s", qty,
+                          point_name);
+                return -EINVAL;
+            }
             uint16_t *regs = calloc(qty, sizeof(uint16_t));
             if (!regs) {
                 return -ENOMEM;
