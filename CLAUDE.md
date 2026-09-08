@@ -27,8 +27,9 @@
 4. EtherNet/IP 어댑터 — `third_party/ethernetip_stack/`에 벤더 스택이
    배치된 후 진행. 스택 매뉴얼의 초기화/폴링/read-write API를
    `ethernetip_adapter.c`의 TODO 지점에 연결.
-5. PROFINET 어댑터 — 자체 스택 (`stacks/profinet/`). RT Class 1 + Security Class 1.
-   IRT 는 켜지 않는다. 인증/CRA 는 제품 프로세스.
+5. PROFINET 어댑터 — 자체 스택 (`stacks/profinet/`). RT Class 1, 랩 CC-B 서브셋.
+   CC-C IRT 는 켜지 않는다. `security_class: 1` 은 스택 로컬 HMAC이며 PI Security
+   Class 1 이 아니다. 인증/CRA 는 제품 프로세스.
 6. CC-Link 스텁은 사양이 확정되기 전까지 건드리지 않는다.
 
 ## 코딩 컨벤션
