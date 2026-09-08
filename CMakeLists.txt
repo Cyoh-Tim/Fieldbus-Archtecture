@@ -131,6 +131,10 @@ if(ENABLE_MB_TESTS)
     target_include_directories(test_mb_adapter PRIVATE
         stacks/modbus/include include core adapters/modbus)
     target_link_libraries(test_mb_adapter PRIVATE adapter_modbus)
+
+    add_executable(mb_seeded_server tests/mb_seeded_server.c)
+    target_include_directories(mb_seeded_server PRIVATE stacks/modbus/include include core)
+    target_link_libraries(mb_seeded_server PRIVATE mb_stack)
 endif()
 
 # ---- 데몬 실행파일 ----
