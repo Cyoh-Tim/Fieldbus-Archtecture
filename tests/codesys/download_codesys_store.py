@@ -136,13 +136,17 @@ def main() -> int:
         r = sess.get(url, timeout=60)
         print(f"product page status={r.status_code} url={r.url}")
         links = find_package_links(r.text)
+        # Version table uses a license-popup JS widget; dlurl is a mediaasset
+        # path that 404s until the EULA popup sets a signed cookie in a
+        # real browser. Still try it so a future store change is picked up.
+        dlurls = re.findall(r'dlurl":\s*"(https://store.codesys.com/en/mediaasset/[^"]+)"', r.text)
+        links = links + [u.replace("\\/", "/") for u in dlurls[:3]]
         if not links:
-            # Magento downloadable tab for logged-in customers
             r2 = sess.get(f"{STORE}/en/downloadable/customer/products/", timeout=60)
             links = find_package_links(r2.text)
             print(f"customer downloads links={len(links)}")
         if not links:
-            print(f"WARN no package link on {url}")
+            print(f"WARN no package link on {url} (EULA popup may be required in a browser)")
             (CACHE / f"{key}.html").write_text(r.text[:20000], encoding="utf-8")
             continue
         dest = download(sess, links[0], CACHE / f"{key}.package")

@@ -68,3 +68,18 @@ Windows IDE 쪽 클릭 경로 (약 15분, 기존 `docs/codesys_beta.md` 와 동�
 
 SLMP 는 CODESYS 필드버스 목록에 없다. 미쓰비시 PLC 또는
 `config/demo.slmp.plc.json` 시뮬레이터를 쓴다.
+
+## 이 PR 에서 돌린 결과
+
+`bash tests/codesys/run_pooltest.sh` (이 클라우드 VM, 2026-09-08):
+
+| 항목 | 결과 |
+|---|---|
+| Modbus TCP Master ← sensor | **PASS** 20 samples, barcode `BETA-PN-IN/…` seq 52→546, state_match |
+| EtherNet/IP UCMM ← sensor | **PASS** 17 samples, assembly 150 seq 65→481, state_match |
+| SLMP 3E client → PLC stand-in | **PASS** 20 samples, D100.. seq 15→139, state_match |
+| PROFINET CODESYS-profile Controller | **PASS** 16/16 (DCP Nominate, Connect+AlarmCR, Write, PrmEnd, RTC1 8 ms mean 7999 µs, input `BETA-PN-IN`) |
+| CC-Link / EtherCAT | SKIP (스텁 / ESC ASIC) |
+| `codesyscontrol` binary | Store 로그인 성공. 패키지 다운로드는 스토어 EULA 팝업(JS) 뒤에 가려져 이 VM 에서 `.deb` 를 받지 못함. 빈 런타임은 IEC 앱 없이 마스터가 아님. |
+
+와이어에서 읽은 온도는 200–350 (0.1 °C) 범위에서 매 샘플 바뀌었고, `sensor_demo` 가 쓴 JSON 스냅샷과 일치했다.
