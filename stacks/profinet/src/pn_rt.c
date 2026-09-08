@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <sched.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <time.h>
 
 #ifdef __linux__
@@ -226,10 +227,16 @@ static void *pn_rt_thread_main(void *arg)
     prctl(PR_SET_TIMERSLACK, 1UL);
 #endif
     {
+        struct rlimit rl;
+        rl.rlim_cur = 50;
+        rl.rlim_max = 50;
+        (void)setrlimit(RLIMIT_RTPRIO, &rl);
         struct sched_param sp;
         memset(&sp, 0, sizeof(sp));
-        sp.sched_priority = 10;
-        (void)pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+        sp.sched_priority = 50;
+        if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) == 0) {
+            LOG_INFO("pn_rt", "RTC1 thread SCHED_FIFO prio=50");
+        }
     }
 
     while (s->running) {
@@ -247,20 +254,26 @@ static void *pn_rt_thread_main(void *arg)
         }
 
         uint64_t now = pn_now_ns();
-        if (next == 0 || now >= next) {
-            pn_rt_send_if_due(s);
-            continue;
-        }
-
-        struct timespec abs;
-        abs.tv_sec = (time_t)(next / 1000000000ull);
-        abs.tv_nsec = (long)(next % 1000000000ull);
-        int rc;
-        do {
-            rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &abs, NULL);
-        } while (rc == EINTR);
-        if (!s->running) {
-            break;
+        if (next != 0 && now < next) {
+            /* Sleep until 200 us before due, then spin onto the grid.
+             * timer wakeup alone is a few hundred us on non-PREEMPT_RT. */
+            const uint64_t spin_ns = 200000ull;
+            if (next > now + spin_ns) {
+                uint64_t wake = next - spin_ns;
+                struct timespec abs;
+                abs.tv_sec = (time_t)(wake / 1000000000ull);
+                abs.tv_nsec = (long)(wake % 1000000000ull);
+                int rc;
+                do {
+                    rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &abs,
+                                         NULL);
+                } while (rc == EINTR);
+            }
+            while (s->running && pn_now_ns() < next) {
+            }
+            if (!s->running) {
+                break;
+            }
         }
         pn_rt_send_if_due(s);
     }

@@ -843,10 +843,10 @@ int main(int argc, char **argv)
                  (unsigned long long)(min_i == UINT64_MAX ? 0 : min_i / 1000ull),
                  (unsigned long long)(max_i / 1000ull),
                  (unsigned long long)(max_late / 1000ull), nint);
-        /* Non-PREEMPT_RT cloud VMs are not 0.1 ms class. Gate on phase-lock:
-         * mean near 8 ms, late_max well under the old ~1 ms stretch. */
+        /* Non-PREEMPT_RT cloud VMs are not guaranteed 0.1 ms. Gate on
+         * phase-lock: mean near 8 ms, late_max well under the old ~1 ms. */
         check(nint >= 80 && mean >= 7600000ull && mean <= 8400000ull &&
-                  max_late < 800000ull,
+                  max_late < 500000ull,
               "CDS-RTC1-JITTER", jmsg);
     }
 
