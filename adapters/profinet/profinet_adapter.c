@@ -26,6 +26,8 @@ typedef struct {
     pn_stack_t *stack;
     pn_point_t points[PN_ADAPTER_POINTS_MAX];
     int point_count;
+    uint16_t in_stride;
+    uint16_t out_stride;
     char last_error[128];
 } pn_ctx_t;
 
@@ -64,6 +66,9 @@ static uint32_t parse_ipv4(const char *s)
 {
     unsigned a, b, c, d;
     if (sscanf(s, "%u.%u.%u.%u", &a, &b, &c, &d) != 4) {
+        return 0;
+    }
+    if (a > 255 || b > 255 || c > 255 || d > 255) {
         return 0;
     }
     return (a << 24) | (b << 16) | (c << 8) | d;
@@ -105,6 +110,10 @@ static int parse_points(pn_ctx_t *ctx, const char *points_json)
         pt->subslot = cJSON_IsNumber(sub) ? sub->valueint : 1;
         pt->index = cJSON_IsNumber(idx) ? idx->valueint : 1;
         pt->byte_offset = cJSON_IsNumber(off) ? off->valueint : 0;
+        if (pt->byte_offset < 0 || pt->length <= 0) {
+            LOG_WARN("profinet", "point %s skipped (offset/length)", pt->name);
+            continue;
+        }
         ctx->point_count++;
     }
     cJSON_Delete(arr);
@@ -121,8 +130,8 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
 
     pn_cfg_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    cfg.security_class = PN_SECURITY_CLASS_1;
-    cfg.cycle_us = 8000;
+    cfg.security_class = 0; /* lab default: unsigned */
+    cfg.cycle_us = PN_CYCLE_MIN_US;
     cfg.input_len = 32;
     cfg.output_len = 8;
     snprintf(cfg.iface, sizeof(cfg.iface), "mock");
@@ -185,6 +194,17 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
         cJSON *cycle = cJSON_GetObjectItemCaseSensitive(params, "cycle_us");
         if (cJSON_IsNumber(cycle)) {
             cfg.cycle_us = (uint32_t)cycle->valueint;
+        } else {
+            cJSON *cycle_ms = cJSON_GetObjectItemCaseSensitive(params, "cycle_ms");
+            if (cJSON_IsNumber(cycle_ms) && cycle_ms->valueint > 0) {
+                cfg.cycle_us = (uint32_t)cycle_ms->valueint * 1000u;
+            }
+        }
+        cJSON *apply_ip = cJSON_GetObjectItemCaseSensitive(params, "apply_os_ip");
+        if (cJSON_IsBool(apply_ip)) {
+            cfg.apply_os_ip = cJSON_IsTrue(apply_ip) ? 1 : 0;
+        } else if (cJSON_IsNumber(apply_ip)) {
+            cfg.apply_os_ip = apply_ip->valueint ? 1 : 0;
         }
         cJSON_Delete(params);
     }
@@ -196,15 +216,44 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
         return -EINVAL;
     }
 
+    ctx->in_stride = cfg.input_len ? cfg.input_len : 32;
+    ctx->out_stride = cfg.output_len ? cfg.output_len : 8;
     parse_points(ctx, points_json);
+    for (int i = 0; i < ctx->point_count; i++) {
+        const pn_point_t *pt = &ctx->points[i];
+        int slot = pt->slot;
+        if (slot < 1) {
+            slot = 1;
+        }
+        int is_out = strcmp(pt->access, "write") == 0;
+        uint16_t stride = is_out ? ctx->out_stride : ctx->in_stride;
+        int base = 0;
+        if (slot <= PN_SLOT_IO_MAX) {
+            base = (slot - 1) * (int)stride;
+        }
+        int end = base + pt->byte_offset + pt->length;
+        if (end <= 0) {
+            continue;
+        }
+        if (end > PN_IO_MAX) {
+            end = PN_IO_MAX;
+        }
+        if (is_out) {
+            if (cfg.output_len < (uint16_t)end) {
+                cfg.output_len = (uint16_t)end;
+            }
+        } else if (cfg.input_len < (uint16_t)end) {
+            cfg.input_len = (uint16_t)end;
+        }
+    }
     ctx->stack = pn_stack_create(&cfg);
     if (!ctx->stack) {
         free(ctx);
         return -ENOMEM;
     }
     self->ctx = ctx;
-    LOG_INFO("profinet", "init CC-B/RT1/SecClass1 device=%s points=%d (IRT 없음)",
-             cfg.station_name, ctx->point_count);
+    LOG_INFO("profinet", "init RT1 device=%s points=%d sec=%d (IRT 없음)",
+             cfg.station_name, ctx->point_count, cfg.security_class);
     return 0;
 }
 
@@ -247,6 +296,34 @@ static pn_point_t *find_point(pn_ctx_t *ctx, const char *name)
     return NULL;
 }
 
+/* byte_offset is relative to the submodule. After Connect, use the AR map. */
+static int point_image_off(pn_ctx_t *ctx, const pn_point_t *pt, int output,
+                           size_t *off, size_t *room)
+{
+    size_t base = 0, mod_len = 0;
+    uint16_t slot = pt->slot < 1 ? 1 : (uint16_t)pt->slot;
+    uint16_t sub = pt->subslot < 1 ? 1 : (uint16_t)pt->subslot;
+    if (pn_stack_io_map(ctx->stack, slot, sub, output, &base, &mod_len) == 0) {
+        if ((size_t)pt->byte_offset >= mod_len) {
+            return -EINVAL;
+        }
+        *off = base + (size_t)pt->byte_offset;
+        *room = mod_len - (size_t)pt->byte_offset;
+        return 0;
+    }
+    uint16_t stride = output ? ctx->out_stride : ctx->in_stride;
+    if (slot > PN_SLOT_IO_MAX) {
+        *off = (size_t)pt->byte_offset;
+    } else {
+        *off = (size_t)(slot - 1) * stride + (size_t)pt->byte_offset;
+    }
+    if (*off >= PN_IO_MAX) {
+        return -EINVAL;
+    }
+    *room = PN_IO_MAX - *off;
+    return 0;
+}
+
 static int pn_read_point(protocol_adapter_t *self, const char *point_name,
                          point_value_t *out)
 {
@@ -259,12 +336,22 @@ static int pn_read_point(protocol_adapter_t *self, const char *point_name,
     if (n > out->len) {
         n = out->len;
     }
-    if (strcmp(pt->access, "write") == 0) {
-        return pn_stack_read_output(ctx->stack, (size_t)pt->byte_offset,
-                                    out->data, n);
+    int output = strcmp(pt->access, "write") == 0;
+    size_t off = 0, room = 0;
+    int rc = point_image_off(ctx, pt, output, &off, &room);
+    if (rc != 0) {
+        return rc;
     }
-    return pn_stack_read_input(ctx->stack, (size_t)pt->byte_offset, out->data,
-                               n);
+    if (n > room) {
+        n = room;
+    }
+    if (n == 0) {
+        return -EINVAL;
+    }
+    if (output) {
+        return pn_stack_read_output(ctx->stack, off, out->data, n);
+    }
+    return pn_stack_read_input(ctx->stack, off, out->data, n);
 }
 
 static int pn_write_point(protocol_adapter_t *self, const char *point_name,
@@ -279,8 +366,18 @@ static int pn_write_point(protocol_adapter_t *self, const char *point_name,
     if ((int)n > pt->length) {
         n = (size_t)pt->length;
     }
-    return pn_stack_write_input(ctx->stack, (size_t)pt->byte_offset, value->data,
-                                n);
+    size_t off = 0, room = 0;
+    int rc = point_image_off(ctx, pt, 0, &off, &room);
+    if (rc != 0) {
+        return rc;
+    }
+    if (n > room) {
+        n = room;
+    }
+    if (n == 0) {
+        return -EINVAL;
+    }
+    return pn_stack_write_input(ctx->stack, off, value->data, n);
 }
 
 static int pn_health(protocol_adapter_t *self, int *connected, char *err_buf,

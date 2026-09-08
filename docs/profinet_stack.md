@@ -1,29 +1,62 @@
 # PROFINET Device stack (Fieldbus Architecture)
 
-자체 구현 IO **Device** 스택. 컨트롤러/스캐너는 없다. IRT는 없다.
+비전문가용 해설(이 스택 소스를 예로 듦)은
+[`stacks/profinet/GUIDE.md`](../stacks/profinet/GUIDE.md).
+
+자체 구현 IO **Device** 스택. 컨트롤러/스캐너는 없다.
+랩 목표는 **CC-B 서브셋**. **CC-C(IRT)는 구현하지 않는다.**
+PI 인증 대상이 아니다.
+
+## Conformance Class
+
+PI 클래스는 누적이다 (C ⊃ B ⊃ A). 아래는 이 스택의 **랩 구현 범위**이지
+인증 클레임이 아니다.
+
+| 클래스 | 공식 구분 | 이 스택 |
+|--------|-----------|---------|
+| **CC-A** | 비동기 RT Class 1 cyclic, DCP, I&M0, alarm/diagnosis, LLDP 이웃, PDEV | 랩 구현 (CM/RTC1/DCP/I&M0/진단 레코드/AlarmCR/LLDP/PDEV) |
+| **CC-B** | CC-A + SNMP (MIB-II + LLDP-MIB) + SNMP/PDEV 토폴로지. **MRP는 옵션**. CC-B(PA)는 프로세스 자동화 **시스템 리던던시**이며 MRP가 아님 | SNMP Get/GetNext/GetBulk, MIB-II system/if/ip/icmp/udp/snmp + LLDP-MIB loc/rem/stats + LLDP-EXT-PNO. Set 은 읽기 전용 거부. PDEV CheckNeighbors/FSU. MRP Client/Manager **미구현** (`0x88E3` 무시). CC-B(PA) 없음 |
+| **CC-C** | CC-B + **IRT / RT Class 3**, 하드웨어 대역 예약, PTCP/동기. 공식 IRT 테스터는 **SPIRTA** | **구현하지 않음.** Connect `RT_CLASS_3` / IRT FrameID `0x0100–0x0FFF` 는 NDR로 거부. SPIRTA 대체 아님 |
+| (클래스 아님) | ART / ETS / TEDCheck / PITL 는 **인증 프로세스** | 랩 프리테스트만. 시험소·회원 zip 대체 불가 |
+
+IRT / PTCP / SPIRTA 를 “랩 CC-B 스탠드인”으로 부르지 않는다. 그건 CC-C다.
+MRP를 CC-C로 부르지 않는다. 진단/알람은 A/B/C 공통이다.
 
 ## 범위
 
-| 항목 | 상태 |
-|------|------|
-| Conformance Class B 기능 | DCP, RTC1 cyclic IO, record(I&M0), LLDP, SNMP Get(sysName) |
-| RT Class 1 | 비동기 cyclic, `cycle_us` (기본 8ms) |
-| Security Class 1 | HMAC-SHA256 PSK. DCP Set / CM Connect 에 integrity 필수 |
-| RT Class 3 / IRT | 구현하지 않음 |
-| PI 인증 | 아님 |
-| CRA/CE | 제품 프로세스. 스택만으로 통과하지 않음 |
+| 항목 | 상태 | 클래스 |
+|------|------|--------|
+| CM 기동 | Connect → Write(ACK) → PrmEnd → ApplicationReady.req → **ACK 후 DATAEX** → cyclic | A/B |
+| RT Class 1 | 비동기 cyclic. 주기는 Connect `SendClock×ReductionRatio×31.25µs` (GSDML RR 8/16/32/64/128/256/512 → 8–512 ms). `protocol_params.cycle_us`/`cycle_ms` 는 Connect 가 RR 을 안 줄 때의 fallback. TX 는 그 절대 격자에 맞춘다. IRT/PTCP 아님 | A |
+| DCP | Identify(필터: All / Name / DeviceID), Get(요청 속성), Set(Name/IP, AR 없을 때만). 기동 시 Hello. `apply_os_ip` 이면 기동·Set 시 OS 주소 적용 후 UDP 바인드. AR 이 있으면 Set Name/IP 는 BlockError `SET not possible` 로 거부하고 AR 은 유지 (Identify/Get 은 그대로) | A |
+| Record | I&M0–4 (1–4 writable), RealIdent, PDPort/PDIF Real/Adjust/Check/FSU 저장, PD*Statistic, Channel/Ext/Qualified Diagnosis. FSU **CM**(ParameterizationSpeedup) 은 클레임하지 않음 | A/B |
+| LLDP | Chassis/Port/TTL/SysName/MgmtAddr + PN Chassis MAC / Port Status | A (이웃), B (LLDP-MIB) |
+| SNMP | MIB-II system + ifTable/ifXTable + at + ipAddrTable/ipNetToMedia + icmp + tcp + udp/snmp, LLDP-MIB loc/rem/stats/cap, LLDP-EXT-PNO loc/rem delay. Get/GetNext/GetBulk (non-repeaters). Set 은 읽기 전용으로 거부 (SC1) | **B** |
+| Watchdog | output CR 가 끊기면 AR down, output image 클리어 | A |
+| Alarm CR | AlarmCR_REQ 파싱(RTATimeout/Retries), 컨트롤러 RTA Data ACK. 진단 appear/disappear/process 는 API로 발생 (유휴 시 진단 없음) | A/B/C |
+| RT Class 3 / IRT / PTCP | Connect 에서 거부. 구현하지 않음 | **C — 미구현** |
+| MRP | 이더타입 `0x88E3` 무시. 링 클라이언트 미구현 | **B 옵션 — 미구현** |
+| PI Security Class 1 (랩 서브셋) | AR 중 DCP Set Name/IP 거부, SNMP MIB-II 읽기 전용. GSDX 서명·PI 인증 아님 | 클래스 아님 |
+| 스택 로컬 HMAC | `security_class: 1` HMAC-SHA256 PSK. PI SC1 아님 | 클래스 아님 |
+| PI 인증 / CRA/CE | 아님. 제품 프로세스 | 클래스 아님 |
 
-## Security Class 1 프로파일 (이 스택)
+## 랩 기본값
 
-PI 옵션 코드를 사칭하지 않는다. 이 저장소 프로파일이다.
+랩 **PI Security Class 1 서브셋**은 항상 켜져 있다 (HMAC `security_class` 와 별개).
+
+- DCP Identify / Get: AR 과 무관하게 응답
+- DCP Set Name/IP: AR 이 있으면 적용하지 않고 BlockError `0x05` (SET not possible). AR 종료 후 다시 쓰기 가능. 프리테스트·CODESYS Nominate 의 Set Name 은 Connect **전**이라 그대로 통과
+- SNMP: Get/GetNext/GetBulk 유지 (CC-B 토폴로지). Set 은 SNMPv1 `readOnly`(4)
+- GSDX 디지털 서명은 제조사 PKI / 엔지니어링 툴 검증이라 런타임 스택에 넣지 않는다. GSDML 은 2.35 로 두어 CODESYS Device Repository 가 연다. 공식 `DCP_FeaturesSupported=RejectDCPSet` / `SNMP_FeaturesSupported=SNMPAdjust` / `CertificationInfo SecurityClass=1` 은 GSDML 2.4x 스키마·GSDX 이며 여기서는 클레임하지 않는다
+
+`security_class` 기본은 **0** (unsigned HMAC). 실제 PLC/엔지니어링 툴은 스택 로컬 HMAC 블록을 보내지 않는다.
+
+점대점 HMAC 프로파일을 쓰려면:
 
 - 알고리즘: HMAC-SHA256, 32바이트 태그
-- 키: `protocol_params.psk_hex` (64 hex chars). 랩/개발 키를 제품에 두지 말 것
-- DCP Set: option `0xF0` / sub `0x01` 블록이 없으면 거부
-- Connect: block type `0x0E01` 이 없으면 AR 미수립
-- DCP Identify / Get 은 서명하지 않음 (탐색용)
-
-`security_class: 0` 은 랩 전용 unsigned 모드다.
+- 키: `protocol_params.psk_hex` (64 hex chars)
+- DCP Set: option `0xF0` / sub `0x01`
+- Connect: block type `0x0E01`
 
 ## 실행
 
@@ -34,7 +67,7 @@ sudo setcap cap_net_raw,cap_net_bind_service=+ep ./build/multiproto_daemon
 ./build/multiproto_daemon config/example.profinet.json
 ```
 
-`iface` 를 실제 인터페이스로 바꾸고, 그 NIC IP 를 DCP/config IP 와 맞출 것. 스택은 기본적으로 OS 주소를 바꾸지 않는다.
+DCP Set 으로 받은 IP 를 인터페이스에 쓰려면 `apply_os_ip: true` 와 `CAP_NET_ADMIN` 이 필요하다.
 
 단위 테스트는 raw 소켓 없이:
 
@@ -42,9 +75,48 @@ sudo setcap cap_net_raw,cap_net_bind_service=+ep ./build/multiproto_daemon
 ./build/test_pn_stack
 ```
 
+PLC 없이 Device↔Controller 기동 시퀀스는 veth 위에서 컨트롤러 시뮬레이터가 검증한다:
+
+```
+./build/test_pn_stack
+bash tests/run_pn_veth.sh
+bash tests/run_pn_fulltest.sh
+```
+
+`run_pn_fulltest.sh` 는 PI Test Bundle 공개 Readme의 RT Device 그룹을 이 환경에서 돌리는 **랩 프리테스트**다. 공식 **ART**(주로 CC-A/B) / **SPIRTA**(CC-C IRT) / ETS 는 PI 회원 전용·Windows ETS 기반이다. 회원 포털에서 계정 권한이 열리기 전에는 zip을 받을 수 없고, 받아도 이 Linux 에이전트에서 ETS를 실행하지 않는다. PITL 인증을 대체하지 않는다.
+
+### 랩에서 하는 일 vs 클래스를 바꾸지 않는 것
+
+| 항목 | 클래스 | 랩에서 하는 일 | 그게 아닌 것 |
+|------|--------|----------------|--------------|
+| diagnosis ASE | A/B/C | Channel + Ext + Qualified 레코드, appear/disappear/process RTA (이벤트). 유휴 AR 은 진단 없음 | 공식 TCS 전체 시나리오 |
+| SNMP / LLDP-MIB | **B** | Get+GetNext+GetBulk(non-repeaters), Set 거부(SC1 RO), if/at/ip/icmp/tcp/udp/snmp, LLDP loc/rem | SNMPv3, 공식 ART TCS |
+| MRP | **B 옵션** | `0x88E3` 무시 + GSDML 미선언 + flood 중 RTC1 유지 | MRP Client/Manager 링. CC-B(PA) TCS도 아님 |
+| DCP Hello | A | 기동·IP Set 후 Hello.req | Hello 타이밍 공식 프로파일 |
+| Netload | A/B 부하 | unicast junk + MRP ethertype flood 중 cyclic | 공식 Netload 프로파일 / ETS 계측 |
+| IRT / PTCP / SPIRTA | **C** | Connect `RT_CLASS_3` **거부** (CC-C 미지원 확인) | IRT 구현이 아님. SPIRTA 바이너리·ASIC·동기 사이클 대체 불가 |
+| ART / ETS / TEDCheck / PITL | 클래스 아님 | 공개 그룹을 랩 케이스로 재구현, GSDML well-formed | Windows ETS, 회원 TCS zip, GSD Checker, 인증서 |
+
+| 그룹 | 랩 프리테스트 | 공식 번들 없이 못 하는 것 |
+|------|----------------|---------------------------|
+| DCP | Identify All/Name/DeviceID, Get Name/ID/IP, Set Name (pre-AR), Set Name during AR rejected, Hello | DCP Set IP를 OS에 쓰는 경우의 공식 프로파일 |
+| LLDP | sysName + PN OUI, 이웃 Chassis/Port/SysName, Port ID `port-001` | 멀티포트, 공식 LLDP 프로파일 |
+| SNMP | Get+GetNext+GetBulk: MIB-II system/if/at/ip/icmp/tcp/udp/snmp, LLDP loc/rem/cap. Set 은 read-only | SNMPv3, 공식 ART TCS |
+| CM | Connect ARServer + AlarmCR, CC-C IRT Connect 거부, WriteMultiple, I&M0, RealIdent, PD*, ChannelDiagnosis, PrmEnd, AppReady, RTA Data/USI/Ack, Release, Reconnect | 공식 TCS XML |
+| RTC1 | cyclic + IOPS GOOD, Release 후 중단, junk/MRP flood 중 유지 | 공식 Netload. IRT/SPIRTA 는 CC-C라 여기 없음 |
+| GSDML | well-formed, PDev, RT1, CC-C IRT/RT3 미선언, MRP 미선언, SNMP;LLDP, MIB2;LLDP | TEDCheck 바이너리 |
+
+시뮬레이터는 DCP Identify → Set Name 왕복 → Connect (ARServerBlock) → Write / WriteMultiple → Read I&M0 / RealIdent / PD* → PrmEnd → ApplicationReady → RTC1 cyclic 을 실제 Ethernet/UDP 로 주고받는다. Siemens TIA 와 같은 CM 순서이며, 벤더 분기는 없다.
+
+GSDML 은 `stacks/profinet/gsdml/` 에 있다. TIA / **CODESYS Device Repository** 에서 여는 출발점이며 VendorID `0xABCD` 는 PI 할당이 아니다. 최소 사이클은 8ms (`MinDeviceInterval=256`). ReductionRatio `8 16 32 64 128 256 512` 로 8–512 ms 를 연다. `protocol_params.cycle_us`(또는 `cycle_ms`) 는 Connect 가 RR 을 생략할 때의 fallback 이고, 실제 RTC1 격자는 Connect IOCR 이 결정한다. 코어 `cycle_ms` 는 어댑터 `poll_cycle` 주기이며 cyclic TX 와는 별개다.
+
+CODESYS Control SL **2시간 데모**로 Controller 를 붙이는 절차는 [`docs/codesys_beta.md`](codesys_beta.md). Linux SL 런타임은 Store 패키지 + WIBU CodeMeter-lite 로 설치할 수 있다. 빈 런타임은 PN Controller 가 아니고, GSDML·IEC 앱은 Windows Development System 에서 다운로드한다. `tests/run_pn_codesys_beta.sh` 가 같은 CM 순서를 랩에서 재현한다.
+
 ## 점대점 매핑
 
 포인트 `address.profinet.byte_offset` 는 cyclic process image 오프셋이다.
 
 - `access: read`  → device → controller (input image)
 - `access: write` → controller → device (output image)
+
+Connect 의 ExpectedSubmodule / IOCR FrameOffset 이 있으면 그 레이아웃으로 C_SDU 를 채운다.

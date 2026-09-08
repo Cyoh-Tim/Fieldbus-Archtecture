@@ -7,6 +7,7 @@
 #define PN_ETHTYPE_PN         0x8892u
 #define PN_ETHTYPE_LLDP       0x88CCu
 #define PN_ETHTYPE_VLAN       0x8100u
+#define PN_ETHTYPE_MRP        0x88E3u
 
 #define PN_FRAMEID_DCP_HELLO  0xFEFCu
 #define PN_FRAMEID_DCP_GETSET 0xFEFDu
@@ -29,7 +30,7 @@
 #define PN_DCP_OPT_DHCP       0x03u
 #define PN_DCP_OPT_CTRL       0x05u
 #define PN_DCP_OPT_ALL        0xFFu
-/* Stack Security Class 1 profile (not a PI-assigned option). */
+/* Stack-local HMAC profile (not a PI-assigned Security Class 1 option). */
 #define PN_DCP_OPT_SEC        0xF0u
 #define PN_DCP_SUB_SEC_HMAC   0x01u
 
@@ -40,26 +41,98 @@
 #define PN_DCP_SUB_DEV_ID     0x03u
 #define PN_DCP_SUB_DEV_ROLE   0x04u
 #define PN_DCP_SUB_DEV_OPTS   0x05u
+#define PN_DCP_SUB_CTRL_RESP  0x04u
+/* IEC 61158-6-10 DCP BlockError: SET not possible by local reasons. */
+#define PN_DCP_BLOCK_ERROR_SET_NOT_POSSIBLE 0x05u
 
 #define PN_RPC_PORT           34964
 #define PN_SNMP_PORT          161
 
+#define PN_BLOCK_WRITE_REQ    0x0008u
+#define PN_BLOCK_READ_REQ     0x0009u
+#define PN_BLOCK_WRITE_RES    0x8008u
+#define PN_BLOCK_READ_RES     0x8009u
 #define PN_BLOCK_AR_REQ       0x0101u
 #define PN_BLOCK_IOCR_REQ     0x0102u
 #define PN_BLOCK_ALARMCR_REQ  0x0103u
 #define PN_BLOCK_EXPSUB_REQ   0x0104u
+#define PN_BLOCK_PRMEND_REQ   0x0110u
+#define PN_BLOCK_APPRDY_REQ   0x0112u
+#define PN_BLOCK_RELEASE_REQ  0x0114u
 #define PN_BLOCK_AR_RES       0x8101u
 #define PN_BLOCK_IOCR_RES     0x8102u
 #define PN_BLOCK_ALARMCR_RES  0x8103u
-#define PN_BLOCK_SEC_INT      0x0E01u /* stack Security Class 1 integrity block */
+#define PN_BLOCK_MODDIFF      0x8104u
+#define PN_BLOCK_ARSERVER_RES 0x8106u
+#define PN_BLOCK_PRMEND_RES   0x8110u
+#define PN_BLOCK_APPRDY_RES   0x8112u
+#define PN_BLOCK_RELEASE_RES  0x8114u
+#define PN_BLOCK_DIAGNOSIS    0x0010u
+#define PN_BLOCK_REALIDENT    0x0013u
+#define PN_BLOCK_IM0          0x0020u
+#define PN_BLOCK_IM1          0x0021u
+#define PN_BLOCK_IM2          0x0022u
+#define PN_BLOCK_IM3          0x0023u
+#define PN_BLOCK_IM4          0x0024u
+#define PN_BLOCK_PDPORT_CHECK 0x0202u
+#define PN_BLOCK_CHECK_PEERS  0x0203u
+#define PN_BLOCK_PDPORT_REAL  0x020Fu
+#define PN_BLOCK_PDPORT_STAT  0x0251u
+#define PN_BLOCK_PDIF_REAL    0x0240u
+#define PN_BLOCK_PDIF_STAT    0x0250u
+#define PN_BLOCK_PDIF_FSU     0x0252u
+#define PN_BLOCK_SEC_INT      0x0E01u /* stack-local integrity block */
 
 #define PN_IOCR_INPUT         0x0001u
 #define PN_IOCR_OUTPUT        0x0002u
 
+#define PN_CTRL_PRM_END       0x0001u
+#define PN_CTRL_APP_RDY       0x0002u
+#define PN_CTRL_RELEASE       0x0004u
+#define PN_CTRL_DONE          0x0008u
+
+#define PN_CM_OFFLINE         0
+#define PN_CM_CONNECTED       1
+#define PN_CM_W_APPRDY        2
+#define PN_CM_DATAEX          3
+
 #define PN_IOPS_GOOD          0x80u
+#define PN_IOPS_BAD           0x00u
 #define PN_DATASTATUS_PRIMARY 0x01u
 #define PN_DATASTATUS_VALID   0x04u
 #define PN_DATASTATUS_RUN     0x20u
+#define PN_DATASTATUS_PROBLEM 0x40u
+
+#define PN_INDEX_IM0            0xAFF0u
+#define PN_INDEX_IM1            0xAFF1u
+#define PN_INDEX_IM2            0xAFF2u
+#define PN_INDEX_IM3            0xAFF3u
+#define PN_INDEX_IM4            0xAFF4u
+#define PN_INDEX_CHAN_DIAG      0x800Au
+#define PN_INDEX_DIAG_DATA      0x800Cu
+#define PN_INDEX_EXT_CHAN_DIAG  0x8010u
+#define PN_INDEX_QUAL_CHAN_DIAG 0x8011u
+#define PN_INDEX_REALIDENT_SUB  0x8001u
+#define PN_INDEX_PDPORT_REAL    0x802Au
+#define PN_INDEX_PDPORT_CHECK   0x802Bu
+#define PN_INDEX_PDPORT_ADJUST  0x802Cu
+#define PN_INDEX_PDPORT_STAT    0x802Fu
+#define PN_INDEX_PDIF_STAT      0x8071u
+#define PN_INDEX_PDIF_REAL      0x8080u
+#define PN_INDEX_PDIF_ADJUST    0x8081u
+#define PN_INDEX_PDIF_FSU       0x8090u
+#define PN_INDEX_REALIDENT_SLOT 0xC001u
+#define PN_INDEX_EXPIDENT_AR    0xE000u
+#define PN_INDEX_REALIDENT_AR   0xE001u
+#define PN_INDEX_DIAG_AR        0xE00Cu
+#define PN_INDEX_WRITE_MULTI    0xE040u
+#define PN_INDEX_REALIDENT_API  0xF000u
+#define PN_USI_CHANNEL_DIAG     0x8000u
+#define PN_ALARM_TYPE_DIAG      0x0001u
+#define PN_ALARM_TYPE_PROCESS   0x0002u
+#define PN_CHAN_APPEARS         0x0800u
+#define PN_CHAN_DISAPPEARS      0x1000u
+#define PN_CHAN_DISAPPEARS_REM  0x1800u
 
 #define PN_STATION_NAME_MAX   240
 #define PN_IO_MAX             256
@@ -67,9 +140,23 @@
 #define PN_HMAC_LEN           32
 #define PN_PSK_LEN            32
 #define PN_UUID_LEN           16
+#define PN_IOCR_MAX           2
+#define PN_IOBJ_MAX           16
+#define PN_SUBMOD_MAX         16
+#define PN_SLOT_IO_MAX        8 /* GSDML IO slots 1..8 */
+#define PN_DIAG_MAX           4
+#define PN_PDEV_STORE         128
 
 #define PN_CONFORMANCE_CLASS_B  2
 #define PN_RT_CLASS_1           1
+#define PN_RT_CLASS_3           3
 #define PN_SECURITY_CLASS_1     1
+
+/* GSDML MinDeviceInterval=256, SendClock=32, ReductionRatio 8..512 */
+#define PN_SENDCLOCK_DEFAULT    32
+#define PN_REDUCTION_MIN        8
+#define PN_REDUCTION_MAX        512
+#define PN_CYCLE_MIN_US         8000u
+#define PN_CYCLE_MAX_US         512000u
 
 #endif /* PN_TYPES_H */

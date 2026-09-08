@@ -13,35 +13,41 @@ PROFINET 은 구매 스택 래핑이 아니라 `stacks/profinet/` 자체 Device 
 ```
 include/               ProtocolAdapter 공통 인터페이스
 core/                   코어(설정 로더, 스케줄러, 어댑터 레지스트리, main)
-adapters/modbus/        Modbus TCP 어댑터 (libmodbus) - 벤더 의존성 없음
-adapters/slmp/          SLMP 어댑터 (자체 구현, 3E 프레임은 TODO)
+adapters/modbus/        Modbus TCP 어댑터 — 자체 스택 (libmodbus 없음)
+adapters/slmp/          SLMP 어댑터 — Binary 3E 자체 스택
 adapters/cclink/        CC-Link 어댑터 (미확정, 스텁)
-adapters/ethernetip/    EtherNet/IP 어댑터 (구매 스택 래핑, 연동부 TODO)
-adapters/profinet/      PROFINET 어댑터 — 자체 스택 연결 (RT Class 1, IRT 없음)
-stacks/profinet/        PROFINET IO Device 스택 (DCP/LLDP/RPC/RTC1/SNMP/Sec1)
-third_party/            EtherNet/IP 구매 벤더 스택 배치 위치 (git 커밋 안 함)
-config/                 config.schema.json + 예제 설정 파일
+adapters/ethernetip/    EtherNet/IP 어댑터 — 자체 스택
+adapters/profinet/      PROFINET 어댑터 — 자체 스택 (RT Class 1, IRT 없음)
+stacks/modbus/          Modbus TCP 서버/클라이언트
+stacks/slmp/            SLMP Binary 3E
+stacks/ethernetip/      EtherNet/IP Adapter + Originator
+stacks/profinet/        PROFINET IO Device (DCP/LLDP/RPC/RTC1/SNMP)
+demos/sensor/           라이브 센서 데모 (값이 매 사이클 변함)
+tests/codesys/          CODESYS 풀테스트 IEC + 마스터 + 설치 스크립트
+config/                 config.schema.json + 예제/데모 설정
 docs/design.md          설계 배경 전체 문서
 ```
 
 ## 빌드
 ```
-sudo apt install libmodbus-dev   # Modbus 어댑터용
-mkdir build && cd build
-cmake ..
-make
-```
-EtherNet/IP 구매 스택을 `third_party/`에 배치한 뒤에는:
-```
-cmake -DENABLE_ETHERNETIP=ON ..
+sudo apt install libcjson-dev libssl-dev
+cmake -S . -B build && cmake --build build
 ```
 
 ## 실행
 ```
 ./build/multiproto_daemon config/example.modbus.json
 ./build/test_pn_stack
-./build/multiproto_daemon config/example.profinet.json
+./build/sensor_demo config/demo.sensor.modbus.json
 ```
+
+## CODESYS 풀테스트 (센서 라이브 데이터)
+```
+bash tests/codesys/run_pooltest.sh
+```
+설명: [`docs/codesys_pooltest.md`](docs/codesys_pooltest.md).
+CODESYS Control SL 2시간 데모 설치는 `tests/codesys/try_install_codesys.sh`.
+IEC 앱은 `tests/codesys/PLC_PRG_pool.st`.
 
 ## 새 프로토콜(예: EtherCAT) 추가하는 법
 1. `adapters/<name>/` 에 `include/protocol_adapter.h` 구현

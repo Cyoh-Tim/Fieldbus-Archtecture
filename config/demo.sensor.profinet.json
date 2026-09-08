@@ -1,0 +1,68 @@
+{
+  "protocol": "profinet",
+  "device": {
+    "name": "line1_sensor",
+    "role": "server"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "iface": "pn-dev",
+    "device_name": "sensor-line1",
+    "vendor_id": 43981,
+    "device_id": 1,
+    "ip": "192.168.10.2",
+    "netmask": "255.255.255.0",
+    "gateway": "192.168.10.1",
+    "security_class": 0,
+    "input_len": 32,
+    "output_len": 8,
+    "cycle_us": 8000
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "read",
+      "data_type": "string",
+      "length": 16,
+      "address": {
+        "profinet": { "slot": 1, "subslot": 1, "index": 1, "byte_offset": 0, "length": 16 }
+      }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "uint16",
+      "length": 2,
+      "address": {
+        "profinet": { "slot": 1, "subslot": 1, "index": 1, "byte_offset": 16, "length": 2 }
+      }
+    },
+    {
+      "name": "humidity",
+      "access": "read",
+      "data_type": "uint16",
+      "length": 2,
+      "address": {
+        "profinet": { "slot": 1, "subslot": 1, "index": 1, "byte_offset": 18, "length": 2 }
+      }
+    },
+    {
+      "name": "seq",
+      "access": "read",
+      "data_type": "uint16",
+      "length": 2,
+      "address": {
+        "profinet": { "slot": 1, "subslot": 1, "index": 1, "byte_offset": 20, "length": 2 }
+      }
+    },
+    {
+      "name": "trigger",
+      "access": "write",
+      "data_type": "bool",
+      "length": 1,
+      "address": {
+        "profinet": { "slot": 1, "subslot": 1, "index": 1, "byte_offset": 0, "length": 1 }
+      }
+    }
+  ]
+}

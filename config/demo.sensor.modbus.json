@@ -1,0 +1,58 @@
+{
+  "protocol": "modbus_tcp",
+  "device": {
+    "name": "line1_sensor",
+    "role": "server"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "role": "server",
+    "ip": "127.0.0.1",
+    "port": 1502,
+    "unit_id": 1,
+    "max_clients": 4
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "read",
+      "data_type": "string",
+      "length": 32,
+      "address": {
+        "modbus": { "type": "holding", "start": 40001, "quantity": 16 }
+      }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "uint16",
+      "address": {
+        "modbus": { "type": "holding", "start": 40017, "quantity": 1 }
+      }
+    },
+    {
+      "name": "humidity",
+      "access": "read",
+      "data_type": "uint16",
+      "address": {
+        "modbus": { "type": "holding", "start": 40018, "quantity": 1 }
+      }
+    },
+    {
+      "name": "seq",
+      "access": "read",
+      "data_type": "uint16",
+      "address": {
+        "modbus": { "type": "holding", "start": 40019, "quantity": 1 }
+      }
+    },
+    {
+      "name": "trigger",
+      "access": "write",
+      "data_type": "bool",
+      "address": {
+        "modbus": { "type": "coil", "start": 1 }
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "protocol": "slmp",
+  "device": {
+    "name": "codesys_slmp_standin",
+    "role": "server"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "role": "server",
+    "bind_ip": "127.0.0.1",
+    "port": 15000,
+    "network_no": 0,
+    "pc_no": 255
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "write",
+      "data_type": "string",
+      "length": 32,
+      "address": {
+        "slmp": { "device_code": "D", "start": 100 }
+      }
+    }
+  ]
+}

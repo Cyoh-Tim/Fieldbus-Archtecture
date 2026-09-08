@@ -1,0 +1,55 @@
+{
+  "protocol": "slmp",
+  "device": {
+    "name": "line1_sensor",
+    "role": "client"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "role": "client",
+    "plc_ip": "127.0.0.1",
+    "port": 15000,
+    "network_no": 0,
+    "pc_no": 255,
+    "dest_module_io": 1023,
+    "monitoring_timer": 16,
+    "timeout_ms": 1000,
+    "frame": "3E"
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "read",
+      "data_type": "string",
+      "length": 32,
+      "chars_per_word": 2,
+      "address": {
+        "slmp": { "device_code": "D", "start": 100 }
+      }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "uint16",
+      "address": {
+        "slmp": { "device_code": "D", "start": 116, "quantity": 1 }
+      }
+    },
+    {
+      "name": "humidity",
+      "access": "read",
+      "data_type": "uint16",
+      "address": {
+        "slmp": { "device_code": "D", "start": 117, "quantity": 1 }
+      }
+    },
+    {
+      "name": "seq",
+      "access": "read",
+      "data_type": "uint16",
+      "address": {
+        "slmp": { "device_code": "D", "start": 118, "quantity": 1 }
+      }
+    }
+  ]
+}

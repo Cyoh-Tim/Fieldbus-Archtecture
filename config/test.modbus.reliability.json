@@ -1,0 +1,45 @@
+{
+  "protocol": "modbus_tcp",
+  "device": { "name": "reliability_sensor", "role": "server" },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "role": "server",
+    "ip": "127.0.0.1",
+    "port": 1502,
+    "unit_id": 1,
+    "max_clients": 8,
+    "client_timeout_ms": 500,
+    "n_holding": 2000,
+    "n_input": 2000,
+    "n_coil": 2000,
+    "n_discrete": 2000
+  },
+  "points": [
+    {
+      "name": "barcode",
+      "access": "read",
+      "data_type": "string",
+      "length": 32,
+      "address": { "modbus": { "type": "holding", "start": 40001 } }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 0.1,
+      "address": { "modbus": { "type": "4x", "address": "40001", "offset": 16 } }
+    },
+    {
+      "name": "trigger",
+      "access": "write",
+      "data_type": "bool",
+      "address": { "modbus": { "type": "coil", "start": 1 } }
+    },
+    {
+      "name": "alarm_bit",
+      "access": "write",
+      "data_type": "bool",
+      "address": { "modbus": { "type": "hr", "start": 40100, "bit": 3 } }
+    }
+  ]
+}
