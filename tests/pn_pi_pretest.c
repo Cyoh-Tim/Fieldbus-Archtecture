@@ -1162,11 +1162,11 @@ int main(int argc, char **argv)
         uint8_t srx[512];
         int sn = snmp_set_oct(dev_ip, oid_sysloc, sizeof(oid_sysloc), 0x35,
                               "lab-rack", srx, sizeof(srx));
-        check(sn > 0 && contains(srx, (size_t)sn, "lab-rack"),
-              "LAB-SNMP-SET-SYSLOC", "SNMP Set sysLocation");
-        check(snmp_query(dev_ip, oid_sysloc, sizeof(oid_sysloc), 0x36,
-                         "lab-rack"),
-              "LAB-SNMP-GET-SYSLOC", "sysLocation after Set");
+        check(sn > 0 && !contains(srx, (size_t)sn, "lab-rack"),
+              "LAB-SNMP-SET-SYSLOC", "SNMP Set sysLocation read-only (SC1)");
+        check(!snmp_query(dev_ip, oid_sysloc, sizeof(oid_sysloc), 0x36,
+                          "lab-rack"),
+              "LAB-SNMP-GET-SYSLOC", "sysLocation unchanged after Set");
     }
     check(snmp_query(dev_ip, oid_lldp_loc, sizeof(oid_lldp_loc), 0x2c,
                      expect_name),
@@ -1313,6 +1313,48 @@ int main(int argc, char **argv)
     uint16_t out_fid = parse_out_frame_id(resp, rn > 0 ? (size_t)rn : 0);
     check(out_fid == 0x8000, "LAB-CM-CONNECT-OUT-FID",
           "device-assigned output FrameID 0x8000");
+
+    if (devmac[0] | devmac[5]) {
+        const char *hijack = "hijack1";
+        uint8_t nblk[64];
+        size_t nblen = dcp_name_set_block(nblk, hijack);
+        size_t slen = dcp_put_getset(frame, devmac, mymac, PN_DCP_SET,
+                                     0xA10000A0, nblk, nblen);
+        send_raw(raw, ifindex, frame, slen);
+        n = dcp_wait_getset(raw, rx, sizeof(rx), 800, expect_name, 0xA10000A0);
+        int blkerr = -1;
+        if (n >= 34) {
+            uint16_t dlen = pn_rd_be16(rx + 24);
+            const uint8_t *b = rx + 26;
+            if (dlen >= 7 && b[0] == PN_DCP_OPT_CTRL &&
+                b[1] == PN_DCP_SUB_CTRL_RESP) {
+                blkerr = b[6];
+            }
+        }
+        check(n > 26 && blkerr == PN_DCP_BLOCK_ERROR_SET_NOT_POSSIBLE,
+              "LAB-DCP-SET-AR-LOCK",
+              "Set Name during AR: BlockError SET not possible");
+
+        uint8_t ipay[16];
+        pn_wr_be16(ipay, PN_FRAMEID_DCP_ID_REQ);
+        ipay[2] = PN_DCP_IDENTIFY;
+        ipay[3] = PN_DCP_REQ;
+        pn_wr_be32(ipay + 4, 0xA10000A1);
+        pn_wr_be16(ipay + 8, 0);
+        pn_wr_be16(ipay + 10, 4);
+        ipay[12] = PN_DCP_OPT_ALL;
+        ipay[13] = 0xFF;
+        pn_wr_be16(ipay + 14, 0);
+        memcpy(frame, k_dcp_mc, 6);
+        memcpy(frame + 6, mymac, 6);
+        pn_wr_be16(frame + 12, PN_ETHTYPE_PN);
+        memcpy(frame + 14, ipay, 16);
+        send_raw(raw, ifindex, frame, 30);
+        n = dcp_wait_ident(raw, rx, sizeof(rx), 800, expect_name);
+        check(n > 26 && contains(rx, (size_t)n, expect_name) &&
+                  !contains(rx, (size_t)n, hijack),
+              "LAB-DCP-IDENT-AR", "Identify during AR still original name");
+    }
 
     plen = put_iod_write_hdr(pdu, 1, 0, 1, 1, 1, 4);
     memcpy(pdu + plen, "\x00\x00\x00\x00", 4);

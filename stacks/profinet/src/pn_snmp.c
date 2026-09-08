@@ -17,7 +17,7 @@
 #define ASN_COUNTER64  0x46u
 
 #define SNMP_ERR_NOSUCHNAME 2
-#define SNMP_ERR_GENERR     5
+#define SNMP_ERR_READONLY   4
 
 #define OID_MAX 18
 #define LEAF_VAL_MAX 64
@@ -606,7 +606,10 @@ static int leaf_present(const pn_stack_t *s, int id)
 
 static int leaf_writable(int id)
 {
-    return id == L_SYSCONTACT || id == L_SYSNAME || id == L_SYSLOCATION;
+    /* RFC 1213 lists sysContact/sysName/sysLocation as writable.
+     * PI SC1 keeps SNMP read-only (Get still served for CC-B topology). */
+    (void)id;
+    return 0;
 }
 
 static size_t put_str(uint8_t *val, const char *s)
@@ -1438,7 +1441,7 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
             memcpy(out_oid, k_oids[leaf], sizeof(uint32_t) * k_oidn[leaf]);
             out_n = k_oidn[leaf];
         } else if (leaf >= 0) {
-            err = SNMP_ERR_GENERR;
+            err = SNMP_ERR_READONLY;
             memcpy(out_oid, k_oids[leaf], sizeof(uint32_t) * k_oidn[leaf]);
             out_n = k_oidn[leaf];
             asn = ASN_NULL;

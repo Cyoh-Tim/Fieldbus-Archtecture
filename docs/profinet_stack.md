@@ -12,7 +12,7 @@ PI 클래스는 누적이다 (C ⊃ B ⊃ A). 아래는 이 스택의 **랩 구�
 | 클래스 | 공식 구분 | 이 스택 |
 |--------|-----------|---------|
 | **CC-A** | 비동기 RT Class 1 cyclic, DCP, I&M0, alarm/diagnosis, LLDP 이웃, PDEV | 랩 구현 (CM/RTC1/DCP/I&M0/진단 레코드/AlarmCR/LLDP/PDEV) |
-| **CC-B** | CC-A + SNMP (MIB-II + LLDP-MIB) + SNMP/PDEV 토폴로지. **MRP는 옵션**. CC-B(PA)는 프로세스 자동화 **시스템 리던던시**이며 MRP가 아님 | SNMP Get/GetNext/Set/GetBulk, MIB-II system/if/ip/icmp/udp/snmp + LLDP-MIB loc/rem/stats + LLDP-EXT-PNO. PDEV CheckNeighbors/FSU. MRP Client/Manager **미구현** (`0x88E3` 무시). CC-B(PA) 없음 |
+| **CC-B** | CC-A + SNMP (MIB-II + LLDP-MIB) + SNMP/PDEV 토폴로지. **MRP는 옵션**. CC-B(PA)는 프로세스 자동화 **시스템 리던던시**이며 MRP가 아님 | SNMP Get/GetNext/GetBulk, MIB-II system/if/ip/icmp/udp/snmp + LLDP-MIB loc/rem/stats + LLDP-EXT-PNO. Set 은 읽기 전용 거부. PDEV CheckNeighbors/FSU. MRP Client/Manager **미구현** (`0x88E3` 무시). CC-B(PA) 없음 |
 | **CC-C** | CC-B + **IRT / RT Class 3**, 하드웨어 대역 예약, PTCP/동기. 공식 IRT 테스터는 **SPIRTA** | **구현하지 않음.** Connect `RT_CLASS_3` / IRT FrameID `0x0100–0x0FFF` 는 NDR로 거부. SPIRTA 대체 아님 |
 | (클래스 아님) | ART / ETS / TEDCheck / PITL 는 **인증 프로세스** | 랩 프리테스트만. 시험소·회원 zip 대체 불가 |
 
@@ -25,20 +25,28 @@ MRP를 CC-C로 부르지 않는다. 진단/알람은 A/B/C 공통이다.
 |------|------|--------|
 | CM 기동 | Connect → Write(ACK) → PrmEnd → ApplicationReady.req → **ACK 후 DATAEX** → cyclic | A/B |
 | RT Class 1 | 비동기 cyclic. 주기는 Connect `SendClock×ReductionRatio×31.25µs` (GSDML RR 8/16/32/64/128/256/512 → 8–512 ms). `protocol_params.cycle_us`/`cycle_ms` 는 Connect 가 RR 을 안 줄 때의 fallback. TX 는 그 절대 격자에 맞춘다. IRT/PTCP 아님 | A |
-| DCP | Identify(필터: All / Name / DeviceID), Get(요청 속성), Set(Name/IP). 기동 시 Hello. `apply_os_ip` 이면 기동·Set 시 OS 주소 적용 후 UDP 바인드. Set IP 후 RPC/SNMP 재바인드, 열린 AR 은 리셋 | A |
+| DCP | Identify(필터: All / Name / DeviceID), Get(요청 속성), Set(Name/IP, AR 없을 때만). 기동 시 Hello. `apply_os_ip` 이면 기동·Set 시 OS 주소 적용 후 UDP 바인드. AR 이 있으면 Set Name/IP 는 BlockError `SET not possible` 로 거부하고 AR 은 유지 (Identify/Get 은 그대로) | A |
 | Record | I&M0–4 (1–4 writable), RealIdent, PDPort/PDIF Real/Adjust/Check/FSU 저장, PD*Statistic, Channel/Ext/Qualified Diagnosis. FSU **CM**(ParameterizationSpeedup) 은 클레임하지 않음 | A/B |
 | LLDP | Chassis/Port/TTL/SysName/MgmtAddr + PN Chassis MAC / Port Status | A (이웃), B (LLDP-MIB) |
-| SNMP | MIB-II system + ifTable/ifXTable + at + ipAddrTable/ipNetToMedia + icmp + tcp + udp/snmp, LLDP-MIB loc/rem/stats/cap, LLDP-EXT-PNO loc/rem delay. Get/GetNext/Set/GetBulk (non-repeaters) | **B** |
+| SNMP | MIB-II system + ifTable/ifXTable + at + ipAddrTable/ipNetToMedia + icmp + tcp + udp/snmp, LLDP-MIB loc/rem/stats/cap, LLDP-EXT-PNO loc/rem delay. Get/GetNext/GetBulk (non-repeaters). Set 은 읽기 전용으로 거부 (SC1) | **B** |
 | Watchdog | output CR 가 끊기면 AR down, output image 클리어 | A |
 | Alarm CR | AlarmCR_REQ 파싱(RTATimeout/Retries), 컨트롤러 RTA Data ACK. 진단 appear/disappear/process 는 API로 발생 (유휴 시 진단 없음) | A/B/C |
 | RT Class 3 / IRT / PTCP | Connect 에서 거부. 구현하지 않음 | **C — 미구현** |
 | MRP | 이더타입 `0x88E3` 무시. 링 클라이언트 미구현 | **B 옵션 — 미구현** |
-| PI Security Class 1 | 아님. `security_class: 1` 은 스택 로컬 HMAC-SHA256 PSK | 클래스 아님 |
+| PI Security Class 1 (랩 서브셋) | AR 중 DCP Set Name/IP 거부, SNMP MIB-II 읽기 전용. GSDX 서명·PI 인증 아님 | 클래스 아님 |
+| 스택 로컬 HMAC | `security_class: 1` HMAC-SHA256 PSK. PI SC1 아님 | 클래스 아님 |
 | PI 인증 / CRA/CE | 아님. 제품 프로세스 | 클래스 아님 |
 
 ## 랩 기본값
 
-`security_class` 기본은 **0** (unsigned). 실제 PLC/엔지니어링 툴은 스택 로컬 HMAC 블록을 보내지 않는다.
+랩 **PI Security Class 1 서브셋**은 항상 켜져 있다 (HMAC `security_class` 와 별개).
+
+- DCP Identify / Get: AR 과 무관하게 응답
+- DCP Set Name/IP: AR 이 있으면 적용하지 않고 BlockError `0x05` (SET not possible). AR 종료 후 다시 쓰기 가능. 프리테스트·CODESYS Nominate 의 Set Name 은 Connect **전**이라 그대로 통과
+- SNMP: Get/GetNext/GetBulk 유지 (CC-B 토폴로지). Set 은 SNMPv1 `readOnly`(4)
+- GSDX 디지털 서명은 제조사 PKI / 엔지니어링 툴 검증이라 런타임 스택에 넣지 않는다. GSDML 은 2.35 로 두어 CODESYS Device Repository 가 연다. 공식 `DCP_FeaturesSupported=RejectDCPSet` / `SNMP_FeaturesSupported=SNMPAdjust` / `CertificationInfo SecurityClass=1` 은 GSDML 2.4x 스키마·GSDX 이며 여기서는 클레임하지 않는다
+
+`security_class` 기본은 **0** (unsigned HMAC). 실제 PLC/엔지니어링 툴은 스택 로컬 HMAC 블록을 보내지 않는다.
 
 점대점 HMAC 프로파일을 쓰려면:
 
@@ -79,7 +87,7 @@ bash tests/run_pn_fulltest.sh
 | 항목 | 클래스 | 랩에서 하는 일 | 그게 아닌 것 |
 |------|--------|----------------|--------------|
 | diagnosis ASE | A/B/C | Channel + Ext + Qualified 레코드, appear/disappear/process RTA (이벤트). 유휴 AR 은 진단 없음 | 공식 TCS 전체 시나리오 |
-| SNMP / LLDP-MIB | **B** | Get+GetNext+Set+GetBulk(non-repeaters), if/at/ip/icmp/tcp/udp/snmp, LLDP loc/rem | SNMPv3, 공식 ART TCS |
+| SNMP / LLDP-MIB | **B** | Get+GetNext+GetBulk(non-repeaters), Set 거부(SC1 RO), if/at/ip/icmp/tcp/udp/snmp, LLDP loc/rem | SNMPv3, 공식 ART TCS |
 | MRP | **B 옵션** | `0x88E3` 무시 + GSDML 미선언 + flood 중 RTC1 유지 | MRP Client/Manager 링. CC-B(PA) TCS도 아님 |
 | DCP Hello | A | 기동·IP Set 후 Hello.req | Hello 타이밍 공식 프로파일 |
 | Netload | A/B 부하 | unicast junk + MRP ethertype flood 중 cyclic | 공식 Netload 프로파일 / ETS 계측 |
@@ -88,9 +96,9 @@ bash tests/run_pn_fulltest.sh
 
 | 그룹 | 랩 프리테스트 | 공식 번들 없이 못 하는 것 |
 |------|----------------|---------------------------|
-| DCP | Identify All/Name/DeviceID, Get Name/ID/IP, Set Name, Hello | DCP Set IP를 OS에 쓰는 경우의 공식 프로파일 |
+| DCP | Identify All/Name/DeviceID, Get Name/ID/IP, Set Name (pre-AR), Set Name during AR rejected, Hello | DCP Set IP를 OS에 쓰는 경우의 공식 프로파일 |
 | LLDP | sysName + PN OUI, 이웃 Chassis/Port/SysName, Port ID `port-001` | 멀티포트, 공식 LLDP 프로파일 |
-| SNMP | Get+GetNext+Set+GetBulk: MIB-II system/if/at/ip/icmp/tcp/udp/snmp, LLDP loc/rem/cap | SNMPv3, 공식 ART TCS |
+| SNMP | Get+GetNext+GetBulk: MIB-II system/if/at/ip/icmp/tcp/udp/snmp, LLDP loc/rem/cap. Set 은 read-only | SNMPv3, 공식 ART TCS |
 | CM | Connect ARServer + AlarmCR, CC-C IRT Connect 거부, WriteMultiple, I&M0, RealIdent, PD*, ChannelDiagnosis, PrmEnd, AppReady, RTA Data/USI/Ack, Release, Reconnect | 공식 TCS XML |
 | RTC1 | cyclic + IOPS GOOD, Release 후 중단, junk/MRP flood 중 유지 | 공식 Netload. IRT/SPIRTA 는 CC-C라 여기 없음 |
 | GSDML | well-formed, PDev, RT1, CC-C IRT/RT3 미선언, MRP 미선언, SNMP;LLDP, MIB2;LLDP | TEDCheck 바이너리 |

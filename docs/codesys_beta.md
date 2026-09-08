@@ -55,7 +55,8 @@ sudo setcap cap_net_raw,cap_net_bind_service=+ep ./build/multiproto_daemon
 
    Use the same NIC, station name, and IPv4 as the CODESYS device config.
    `security_class` must stay **0**. CODESYS does not send the stack-local HMAC
-   blocks.
+   blocks. DCP Nominate (Set Name) runs **before** Connect, so SC1 AR write
+   protect does not block it. SNMP topology uses Get, not Set.
 
 7. Login, download, start. **Scan for Devices** on PN-Controller should see
    `sensor-line1`. After RUN, `%IB0..31` should update and `%QB0=16#5A` is the

@@ -1631,13 +1631,14 @@ static void test_snmp_mib(void)
     qn = snmp_pdu_set(req, 8, oid_sysloc, sizeof(oid_sysloc), "lab-rack");
     rlen = 0;
     expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
-               contains(resp, rlen, "lab-rack"),
-           "SNMP Set sysLocation");
+               !contains(resp, rlen, "lab-rack") &&
+               snmp_has(resp, rlen, "\x02\x01\x04", 3),
+           "SNMP Set sysLocation is read-only (SC1)");
     qn = snmp_pdu(req, 9, 0xa0, oid_sysloc, sizeof(oid_sysloc));
     rlen = 0;
     expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
-               contains(resp, rlen, "lab-rack"),
-           "SNMP Get sysLocation after Set");
+               !contains(resp, rlen, "lab-rack"),
+           "SNMP Get sysLocation unchanged after Set");
     pn_stack_destroy(s);
 }
 
@@ -1843,7 +1844,25 @@ static void test_dcp_hello(void)
     pn_stack_destroy(s);
 }
 
-static void test_dcp_set_ip_resets_ar(void)
+static int dcp_set_res_block_error(const uint8_t *f, size_t n)
+{
+    if (n < 34) {
+        return -1;
+    }
+    if (pn_rd_be16(f + 12) != PN_ETHTYPE_PN ||
+        pn_rd_be16(f + 14) != PN_FRAMEID_DCP_GETSET || f[16] != PN_DCP_SET) {
+        return -1;
+    }
+    uint16_t dlen = pn_rd_be16(f + 24);
+    const uint8_t *b = f + 26;
+    if (dlen < 7 || b[0] != PN_DCP_OPT_CTRL ||
+        b[1] != PN_DCP_SUB_CTRL_RESP) {
+        return -1;
+    }
+    return b[6];
+}
+
+static void test_dcp_set_ip_blocked_during_ar(void)
 {
     tx_cap_t cap;
     pn_stack_t *s = mock_stack(&cap);
@@ -1856,6 +1875,7 @@ static void test_dcp_set_ip_resets_ar(void)
     expect(pn_stack_read_output(s, 8, &b, 1) == -EINVAL,
            "output read past end rejected");
 
+    uint32_t ip_before = pn_stack_cfg(s)->ip;
     static const uint8_t dst[6] = {0x02, 0xFB, 0x00, 0x00, 0x00, 0x01};
     static const uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
     uint8_t ipb[14];
@@ -1877,10 +1897,32 @@ static void test_dcp_set_ip_resets_ar(void)
     uint8_t frame[PN_FRAME_MAX];
     size_t flen = pn_eth_build(frame, sizeof(frame), dst, src, PN_ETHTYPE_PN,
                                pay, 12 + bn);
+    cap.n = 0;
     pn_stack_handle_eth(s, frame, flen);
-    expect(pn_stack_cfg(s)->ip == 0xC0A80A32u, "DCP Set IP after Connect");
-    expect(pn_stack_cm_state(s) == PN_CM_OFFLINE,
-           "DCP Set IP resets a live AR");
+    expect(pn_stack_cfg(s)->ip == ip_before,
+           "DCP Set IP ignored while AR is up");
+    expect(pn_stack_cm_state(s) == PN_CM_CONNECTED,
+           "DCP Set IP does not drop a live AR");
+    int saw_err = 0;
+    for (int i = 0; i < cap.n; i++) {
+        if (dcp_set_res_block_error(cap.frames[i], cap.lens[i]) ==
+            PN_DCP_BLOCK_ERROR_SET_NOT_POSSIBLE) {
+            saw_err = 1;
+        }
+    }
+    expect(saw_err, "DCP Set-Res BlockError SET not possible");
+
+    cap.n = 0;
+    size_t idlen = 0;
+    build_dcp_identify(frame, &idlen);
+    pn_stack_handle_eth(s, frame, idlen);
+    int saw_name = 0;
+    for (int i = 0; i < cap.n; i++) {
+        if (contains(cap.frames[i], cap.lens[i], "sensor-line1")) {
+            saw_name = 1;
+        }
+    }
+    expect(saw_name, "DCP Identify still works while AR is up");
     pn_stack_destroy(s);
 }
 
@@ -1953,7 +1995,7 @@ int main(void)
     test_rta_alarm();
     test_irt_reject();
     test_dcp_hello();
-    test_dcp_set_ip_resets_ar();
+    test_dcp_set_ip_blocked_during_ar();
     test_watchdog();
     test_rtc1_16ms();
     if (g_fail) {

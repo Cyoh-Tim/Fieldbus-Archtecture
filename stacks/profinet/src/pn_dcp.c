@@ -218,6 +218,17 @@ static int identify_match(const pn_stack_t *s, const uint8_t *blocks,
     return saw_all || saw_specific;
 }
 
+static int dcp_ar_write_protect(const pn_stack_t *s)
+{
+    return s->ar.cm_state != PN_CM_OFFLINE;
+}
+
+static int dcp_is_name_or_ip(uint8_t opt, uint8_t sub)
+{
+    return (opt == PN_DCP_OPT_DEV && sub == PN_DCP_SUB_DEV_NAME) ||
+           (opt == PN_DCP_OPT_IP && sub == PN_DCP_SUB_IP_PARAM);
+}
+
 static int apply_blocks(pn_stack_t *s, const uint8_t *blocks, uint16_t dlen)
 {
     int ip_changed = 0;
@@ -234,7 +245,11 @@ static int apply_blocks(pn_stack_t *s, const uint8_t *blocks, uint16_t dlen)
         const uint8_t *val = (bl >= 2) ? data + 2 : data;
         size_t vlen = (bl >= 2) ? (size_t)bl - 2 : 0;
 
-        if (opt == PN_DCP_OPT_DEV && sub == PN_DCP_SUB_DEV_NAME && vlen > 0) {
+        if (dcp_is_name_or_ip(opt, sub) && dcp_ar_write_protect(s)) {
+            LOG_WARN("pn_dcp",
+                     "AR active: DCP Set Name/IP 거부 (SC1 write protect)");
+        } else if (opt == PN_DCP_OPT_DEV && sub == PN_DCP_SUB_DEV_NAME &&
+                   vlen > 0) {
             size_t n = vlen < PN_STATION_NAME_MAX ? vlen : PN_STATION_NAME_MAX;
             memcpy(s->cfg.station_name, val, n);
             s->cfg.station_name[n] = '\0';
@@ -324,8 +339,8 @@ static size_t build_get_blocks(const pn_stack_t *s, const uint8_t *req,
     return w.n <= cap ? w.n : 0;
 }
 
-static size_t build_set_ack(const uint8_t *req, uint16_t dlen, uint8_t *out,
-                            size_t cap)
+static size_t build_set_ack(const pn_stack_t *s, const uint8_t *req,
+                            uint16_t dlen, uint8_t *out, size_t cap)
 {
     wr_t w = {out, cap, 0};
     int any = 0;
@@ -339,12 +354,16 @@ static size_t build_set_ack(const uint8_t *req, uint16_t dlen, uint8_t *out,
             break;
         }
         if (!(opt == PN_DCP_OPT_SEC && sub == PN_DCP_SUB_SEC_HMAC)) {
+            uint8_t blkerr = 0x00;
+            if (dcp_is_name_or_ip(opt, sub) && dcp_ar_write_protect(s)) {
+                blkerr = PN_DCP_BLOCK_ERROR_SET_NOT_POSSIBLE;
+            }
             wr_u8(&w, PN_DCP_OPT_CTRL);
             wr_u8(&w, PN_DCP_SUB_CTRL_RESP);
             wr_be16(&w, 3);
             wr_u8(&w, opt);
             wr_u8(&w, sub);
-            wr_u8(&w, 0x00);
+            wr_u8(&w, blkerr);
             wr_u8(&w, 0);
             any = 1;
         }
@@ -463,7 +482,7 @@ void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
             pn_stack_rebind_udp(s);
         }
         uint8_t ok[64];
-        size_t n = build_set_ack(blocks, dlen, ok, sizeof(ok));
+        size_t n = build_set_ack(s, blocks, dlen, ok, sizeof(ok));
         send_dcp(s, src, PN_FRAMEID_DCP_GETSET, PN_DCP_SET,
                  PN_DCP_RESP_SUCCESS, xid, 0, ok, n);
         if (ip_changed) {

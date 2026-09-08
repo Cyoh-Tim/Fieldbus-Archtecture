@@ -4,6 +4,9 @@
   RT_CLASS_1 only. Not IRT. Not PI-certified. VendorID 0xABCD is not PI-assigned.
   Slot 0 = DAP + Interface(0x8000) + Port(0x8001). Slot 1 = 32-byte input / 8-byte output.
   CODESYS Device Repository: Tools → Device Repository → Install this XML.
+  Lab SC1 subset is runtime (DCP Name/IP Set rejected while AR is up; SNMP read-only).
+  GSDML stays 2.35 so CODESYS can install it. Official DCP_FeaturesSupported /
+  SNMP_FeaturesSupported / signed GSDX need a newer schema and vendor PKI.
 -->
 <ISO15745Profile xmlns="http://www.profibus.com/GSDML/2003/11/DeviceProfile"
                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">

@@ -13,17 +13,21 @@
  *   - Device-side DCP, CM (Connect/Write/WriteMultiple/PrmEnd/ApplicationReady
  *     ACK then DATAEX), RTC1 cyclic IO, record (I&M0–4, RealIdent, PD*),
  *     LLDP, SNMP (MIB-II system/interfaces/at/ip/icmp/tcp/udp/snmp + ifX,
- *     LLDP-MIB, LLDP-EXT-PNO; Get/GetNext/Set/GetBulk with non-repeaters),
+ *     LLDP-MIB, LLDP-EXT-PNO; Get/GetNext/GetBulk with non-repeaters),
  *     AlarmCR + event-driven RTA appear/disappear/process
  *   - Lab Conformance Class B: RT Class 1, DCP, CM, alarms, SNMP MIB-II +
  *     LLDP-MIB, ChannelDiagnosis ASE, PDEV. Not PI-certified.
+ *     SNMP Get/GetNext/GetBulk with non-repeaters; Set is read-only.
  *   - CC-C / IRT (RT Class 3, PTCP, SPIRTA) is not implemented; Connect
  *     with RT_CLASS_3 is rejected.
  *   - MRP is a CC-B optional (media redundancy), not CC-C. Not implemented;
  *     0x88E3 frames are ignored.
  *   - Official ART/ETS/PITL are not substituted.
- *   - Optional stack-local HMAC-SHA256 PSK on DCP Set and CM Connect.
- *     This is not PI Security Class 1.
+ *   - Lab PI Security Class 1 subset (always on, not a PI certificate):
+ *     DCP Set of Name/IP is rejected while an AR is up; SNMP is read-only
+ *     (Get/GetNext/GetBulk still served for CC-B topology). GSDX signatures
+ *     are not implemented. Optional stack-local HMAC-SHA256 PSK
+ *     (security_class=1) is a separate lab profile, not PI SC1.
  *
  * Not a PI-certified product. CRA/CE is a product process.
  */

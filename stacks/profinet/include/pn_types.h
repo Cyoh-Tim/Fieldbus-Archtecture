@@ -42,6 +42,8 @@
 #define PN_DCP_SUB_DEV_ROLE   0x04u
 #define PN_DCP_SUB_DEV_OPTS   0x05u
 #define PN_DCP_SUB_CTRL_RESP  0x04u
+/* IEC 61158-6-10 DCP BlockError: SET not possible by local reasons. */
+#define PN_DCP_BLOCK_ERROR_SET_NOT_POSSIBLE 0x05u
 
 #define PN_RPC_PORT           34964
 #define PN_SNMP_PORT          161
