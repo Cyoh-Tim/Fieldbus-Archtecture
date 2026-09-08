@@ -21,6 +21,15 @@ void pn_ar_reset(pn_stack_t *s)
     s->last_cpm_ns = 0;
     s->rpc_tx_pending = 0;
     s->rpc_tx_len = 0;
+    s->alarm_peer_ref = 0;
+    s->alarm_cr_ok = 0;
+    s->alarm_rta_sent = 0;
+    s->alarm_rta_acked = 0;
+    s->alarm_send_seq = 0;
+    s->alarm_retries = 0;
+    s->last_alarm_ns = 0;
+    s->alarm_local_ref = 1;
+    s->alarm_max_len = 200;
 }
 
 uint64_t pn_ar_cycle_ns(const pn_ar_t *ar, uint32_t fallback_us)
@@ -105,6 +114,9 @@ pn_stack_t *pn_stack_create(const pn_cfg_t *cfg)
     memset(s->input_image, 0, sizeof(s->input_image));
     memset(s->output_image, 0, sizeof(s->output_image));
     s->start_ns = pn_now_ns();
+    s->lldp_last_change_ns = s->start_ns;
+    s->alarm_local_ref = 1;
+    s->alarm_max_len = 200;
     return s;
 }
 
@@ -208,6 +220,10 @@ int pn_stack_handle_eth(pn_stack_t *s, const uint8_t *frame, size_t len)
             if (ours || dcp_mc) {
                 pn_dcp_on_frame(s, src, payload, plen);
             }
+        } else if (fid == PN_FRAMEID_ALARM_HIGH || fid == PN_FRAMEID_ALARM_LOW) {
+            if (ours) {
+                pn_alarm_on_frame(s, payload, plen);
+            }
         } else if (ours) {
             pn_rt_on_frame(s, payload, plen);
         }
@@ -218,6 +234,12 @@ int pn_stack_handle_eth(pn_stack_t *s, const uint8_t *frame, size_t len)
         return 0;
     }
     return 0;
+}
+
+int pn_stack_handle_snmp(pn_stack_t *s, const uint8_t *req, size_t n,
+                         uint8_t *resp, size_t cap, size_t *out_len)
+{
+    return pn_snmp_handle(s, req, n, resp, cap, out_len);
 }
 
 int pn_stack_handle_rpc(pn_stack_t *s, const uint8_t *udp_payload, size_t len,
@@ -278,6 +300,7 @@ void pn_stack_poll(pn_stack_t *s)
     pn_snmp_poll(s);
     pn_rt_watchdog(s);
     pn_rt_send_if_due(s);
+    pn_alarm_poll(s);
 
     uint64_t now = pn_now_ns();
     if (now - s->last_lldp_ns > 5000000000ull) {

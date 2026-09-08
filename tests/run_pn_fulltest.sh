@@ -56,7 +56,8 @@ chk("IsochroneModeSupported=\"false\"" in text, "LAB-GSD-NO-IRT",
     "IsochroneModeSupported=false")
 chk("SupportedProtocols=\"SNMP;LLDP\"" in text, "LAB-GSD-PROTO",
     "SupportedProtocols SNMP;LLDP")
-chk("SupportedMibs=\"MIB2\"" in text, "LAB-GSD-MIB2", "SupportedMibs=MIB2")
+chk("SupportedMibs=\"MIB2;LLDP\"" in text, "LAB-GSD-MIB2",
+    "SupportedMibs=MIB2;LLDP (CC-B)")
 chk("NumberOfAR=\"1\"" in text, "LAB-GSD-AR", "NumberOfAR=1")
 chk("DNS_CompatibleName=" in text, "LAB-GSD-DNS", "DNS_CompatibleName present")
 chk('Length="32"' in text and 'Length="8"' in text, "LAB-GSD-IO",

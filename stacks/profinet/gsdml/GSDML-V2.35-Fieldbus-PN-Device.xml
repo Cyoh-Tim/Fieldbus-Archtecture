@@ -65,7 +65,7 @@
                                     TextId="T_IF"
                                     SupportedRT_Classes="RT_CLASS_1"
                                     SupportedProtocols="SNMP;LLDP"
-                                    SupportedMibs="MIB2"
+                                    SupportedMibs="MIB2;LLDP"
                                     IsochroneModeSupported="false">
               <ApplicationRelations NumberOfAR="1" StartupMode="Legacy">
                 <TimingProperties SendClock="32"

@@ -1,0 +1,163 @@
+#include "pn_internal.h"
+
+#include "logger.h"
+#include "pn_endian.h"
+
+#include <string.h>
+
+#define RTA_PDU_DATA 1
+#define RTA_PDU_ACK  3
+#define RTA_VERSION  1
+#define RTA_ADDFLAGS 0x21
+#define RTA_TIMEOUT_NS 200000000ull
+#define RTA_MAX_RETRY  8
+
+static void alarm_reset_tx(pn_stack_t *s)
+{
+    s->alarm_rta_sent = 0;
+    s->alarm_rta_acked = 0;
+    s->alarm_send_seq = 0;
+    s->alarm_retries = 0;
+    s->last_alarm_ns = 0;
+}
+
+void pn_alarm_on_connect(pn_stack_t *s, const uint8_t *body, uint16_t blen)
+{
+    if (!s || !body || blen < 14) {
+        return;
+    }
+    /* AlarmCRType, LT, AlarmCRProperties (32), RTATimeout, RTARetries,
+     * LocalAlarmReference (controller), MaxAlarmDataLength, TagHeader* */
+    s->alarm_type = pn_rd_be16(body);
+    uint16_t local_off = 12;
+    if (blen >= 20) {
+        s->alarm_max_len = pn_rd_be16(body + 14);
+        s->alarm_tci = pn_rd_be16(body + 16);
+    } else {
+        /* UINT16 properties variant */
+        local_off = 10;
+        if (blen >= 16) {
+            s->alarm_max_len = pn_rd_be16(body + 12);
+        }
+    }
+    s->alarm_peer_ref = pn_rd_be16(body + local_off);
+    if (!s->alarm_local_ref) {
+        s->alarm_local_ref = 1;
+    }
+    if (!s->alarm_max_len) {
+        s->alarm_max_len = 200;
+    }
+    if (!s->alarm_type) {
+        s->alarm_type = 1;
+    }
+    s->alarm_cr_ok = 1;
+    alarm_reset_tx(s);
+}
+
+static size_t put_notify_high(uint8_t *p)
+{
+    /* AlarmNotification-High: Diagnosis on DAP Port (0x8001). */
+    pn_wr_be16(p, 0x0001);
+    pn_wr_be16(p + 2, 22);
+    p[4] = 1;
+    p[5] = 0;
+    pn_wr_be16(p + 6, 0x0001);  /* AlarmType Diagnosis */
+    pn_wr_be32(p + 8, 0);       /* API */
+    pn_wr_be16(p + 12, 0);      /* Slot */
+    pn_wr_be16(p + 14, 0x8001); /* Port subslot */
+    pn_wr_be32(p + 16, 1);      /* ModuleIdent DAP */
+    pn_wr_be32(p + 20, 3);      /* SubmoduleIdent Port */
+    pn_wr_be16(p + 24, 0x0800); /* ChannelDiagnosis */
+    return 26;
+}
+
+static void send_rta_data(pn_stack_t *s)
+{
+    if (!s->ar.established || s->ar.cm_state != PN_CM_DATAEX) {
+        return;
+    }
+    uint16_t dst_ref = s->alarm_peer_ref ? s->alarm_peer_ref : 1;
+    uint16_t src_ref = s->alarm_local_ref ? s->alarm_local_ref : 1;
+    uint8_t pay[96];
+    size_t n = 0;
+    pn_wr_be16(pay + n, PN_FRAMEID_ALARM_HIGH);
+    n += 2;
+    pn_wr_be16(pay + n, dst_ref);
+    n += 2;
+    pn_wr_be16(pay + n, src_ref);
+    n += 2;
+    pay[n++] = (uint8_t)((RTA_VERSION << 4) | RTA_PDU_DATA);
+    pay[n++] = RTA_ADDFLAGS;
+    pn_wr_be16(pay + n, s->alarm_send_seq);
+    n += 2;
+    pn_wr_be16(pay + n, 0xFFFF);
+    n += 2;
+    size_t vlen_at = n;
+    n += 2;
+    size_t vn = put_notify_high(pay + n);
+    n += vn;
+    pn_wr_be16(pay + vlen_at, (uint16_t)vn);
+
+    uint8_t frame[PN_FRAME_MAX];
+    size_t flen = pn_eth_build(frame, sizeof(frame), s->ar.initiator_mac,
+                               s->cfg.mac, PN_ETHTYPE_PN, pay, n);
+    if (flen) {
+        pn_eth_send(s, frame, flen);
+        s->alarm_rta_sent = 1;
+        s->last_alarm_ns = pn_now_ns();
+        LOG_INFO("pn_alarm", "RTA Data seq=%u dst_ref=%u src_ref=%u",
+                 s->alarm_send_seq, dst_ref, src_ref);
+    }
+}
+
+void pn_alarm_poll(pn_stack_t *s)
+{
+    if (!s->ar.established || s->ar.cm_state != PN_CM_DATAEX) {
+        return;
+    }
+    if (!s->alarm_cr_ok && !s->alarm_peer_ref && !s->alarm_local_ref) {
+        /* Connect.res always offers AlarmCR; send one notify even if the
+         * controller omitted AlarmCR_REQ (lab default refs = 1). */
+        s->alarm_local_ref = 1;
+        s->alarm_peer_ref = 1;
+        s->alarm_max_len = 200;
+        s->alarm_cr_ok = 1;
+    }
+    if (s->alarm_rta_acked) {
+        return;
+    }
+    if (!s->alarm_rta_sent) {
+        send_rta_data(s);
+        return;
+    }
+    uint64_t now = pn_now_ns();
+    if (now - s->last_alarm_ns < RTA_TIMEOUT_NS) {
+        return;
+    }
+    if (s->alarm_retries >= RTA_MAX_RETRY) {
+        return;
+    }
+    s->alarm_retries++;
+    send_rta_data(s);
+}
+
+void pn_alarm_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen)
+{
+    if (!payload || plen < 14) {
+        return;
+    }
+    uint16_t fid = pn_rd_be16(payload);
+    if (fid != PN_FRAMEID_ALARM_HIGH && fid != PN_FRAMEID_ALARM_LOW) {
+        return;
+    }
+    uint16_t dst_ref = pn_rd_be16(payload + 2);
+    uint8_t pdu_type = payload[6];
+    uint16_t ack_seq = pn_rd_be16(payload + 10);
+    uint8_t kind = (uint8_t)(pdu_type & 0x0Fu);
+    uint16_t local = s->alarm_local_ref ? s->alarm_local_ref : 1;
+    if (kind == RTA_PDU_ACK && dst_ref == local &&
+        ack_seq == s->alarm_send_seq) {
+        s->alarm_rta_acked = 1;
+        LOG_INFO("pn_alarm", "RTA ACK seq=%u", ack_seq);
+    }
+}

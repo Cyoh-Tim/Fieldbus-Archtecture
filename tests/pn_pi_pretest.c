@@ -371,8 +371,8 @@ static uint32_t dcp_parse_ip(const uint8_t *rx, int n)
     return 0;
 }
 
-static size_t snmp_build_get(uint8_t *out, uint8_t rid, const uint8_t *oid,
-                             size_t olen)
+static size_t snmp_build(uint8_t *out, uint8_t rid, uint8_t pdu_tag,
+                         const uint8_t *oid, size_t olen)
 {
     uint8_t vb[80];
     size_t i = 0;
@@ -395,7 +395,7 @@ static size_t snmp_build_get(uint8_t *out, uint8_t rid, const uint8_t *oid,
 
     uint8_t pdu[160];
     size_t p = 0;
-    pdu[p++] = 0xa0;
+    pdu[p++] = pdu_tag;
     size_t pdu_len_at = p++;
     pdu[p++] = 0x02;
     pdu[p++] = 0x01;
@@ -426,18 +426,18 @@ static size_t snmp_build_get(uint8_t *out, uint8_t rid, const uint8_t *oid,
     return m;
 }
 
-static int snmp_query(uint32_t dst_ip, const uint8_t *oid, size_t olen,
-                      uint8_t rid, const char *expect)
+static int snmp_exchange(uint32_t dst_ip, uint8_t pdu_tag, const uint8_t *oid,
+                         size_t olen, uint8_t rid, uint8_t *srx, size_t cap)
 {
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0 || !dst_ip) {
         if (fd >= 0) {
             close(fd);
         }
-        return 0;
+        return -1;
     }
     uint8_t req[256];
-    size_t rn = snmp_build_get(req, rid, oid, olen);
+    size_t rn = snmp_build(req, rid, pdu_tag, oid, olen);
     struct sockaddr_in dst;
     memset(&dst, 0, sizeof(dst));
     dst.sin_family = AF_INET;
@@ -448,16 +448,46 @@ static int snmp_query(uint32_t dst_ip, const uint8_t *oid, size_t olen,
     FD_ZERO(&rfds);
     FD_SET(fd, &rfds);
     struct timeval tv = {.tv_sec = 1, .tv_usec = 0};
-    int ok = 0;
+    int n = -1;
     if (select(fd + 1, &rfds, NULL, NULL, &tv) > 0) {
-        uint8_t srx[512];
-        ssize_t sn = recv(fd, srx, sizeof(srx), 0);
-        if (sn > 0 && contains(srx, (size_t)sn, expect)) {
-            ok = 1;
-        }
+        ssize_t sn = recv(fd, srx, cap, 0);
+        n = sn < 0 ? -1 : (int)sn;
     }
     close(fd);
-    return ok;
+    return n;
+}
+
+static int snmp_query(uint32_t dst_ip, const uint8_t *oid, size_t olen,
+                      uint8_t rid, const char *expect)
+{
+    uint8_t srx[512];
+    int sn = snmp_exchange(dst_ip, 0xa0, oid, olen, rid, srx, sizeof(srx));
+    return sn > 0 && contains(srx, (size_t)sn, expect);
+}
+
+static int snmp_query_next(uint32_t dst_ip, const uint8_t *oid, size_t olen,
+                           uint8_t rid, const char *expect)
+{
+    uint8_t srx[512];
+    int sn = snmp_exchange(dst_ip, 0xa1, oid, olen, rid, srx, sizeof(srx));
+    return sn > 0 && contains(srx, (size_t)sn, expect);
+}
+
+static int snmp_has_bytes(uint32_t dst_ip, uint8_t pdu_tag, const uint8_t *oid,
+                          size_t olen, uint8_t rid, const uint8_t *needle,
+                          size_t nlen)
+{
+    uint8_t srx[512];
+    int sn = snmp_exchange(dst_ip, pdu_tag, oid, olen, rid, srx, sizeof(srx));
+    if (sn <= 0 || nlen == 0 || (size_t)sn < nlen) {
+        return 0;
+    }
+    for (int i = 0; i + (int)nlen <= sn; i++) {
+        if (memcmp(srx + i, needle, nlen) == 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void send_lldp_neighbor(int raw, int ifindex, const uint8_t dst[6],
@@ -493,6 +523,55 @@ static void send_lldp_neighbor(int raw, int ifindex, const uint8_t dst[6],
     pn_wr_be16(frame + 12, PN_ETHTYPE_LLDP);
     memcpy(frame + 14, pdu, n);
     send_raw(raw, ifindex, frame, 14 + n);
+}
+
+static int pn_frame_fid(const uint8_t *rx, int n, uint16_t *fid, size_t *off)
+{
+    if (n < 16) {
+        return -1;
+    }
+    uint16_t et = pn_rd_be16(rx + 12);
+    size_t o = 14;
+    if (et == PN_ETHTYPE_VLAN) {
+        if (n < 20) {
+            return -1;
+        }
+        et = pn_rd_be16(rx + 16);
+        o = 18;
+    }
+    if (et != PN_ETHTYPE_PN) {
+        return -1;
+    }
+    *fid = pn_rd_be16(rx + o);
+    *off = o;
+    return 0;
+}
+
+static void send_rta_ack(int raw, int ifindex, const uint8_t *data, int n,
+                         size_t pay_off, const uint8_t mymac[6])
+{
+    if (n < (int)pay_off + 14) {
+        return;
+    }
+    const uint8_t *p = data + pay_off;
+    uint16_t fid = pn_rd_be16(p);
+    uint16_t dst_ref = pn_rd_be16(p + 2);
+    uint16_t src_ref = pn_rd_be16(p + 4);
+    uint16_t send_seq = pn_rd_be16(p + 8);
+    uint8_t ack[64];
+    memset(ack, 0, sizeof(ack));
+    memcpy(ack, data + 6, 6);
+    memcpy(ack + 6, mymac, 6);
+    pn_wr_be16(ack + 12, PN_ETHTYPE_PN);
+    pn_wr_be16(ack + 14, fid);
+    pn_wr_be16(ack + 16, src_ref);
+    pn_wr_be16(ack + 18, dst_ref);
+    ack[20] = 0x13;
+    ack[21] = 0x21;
+    pn_wr_be16(ack + 22, 0xFFFF);
+    pn_wr_be16(ack + 24, send_seq);
+    pn_wr_be16(ack + 26, 0);
+    send_raw(raw, ifindex, ack, 60);
 }
 
 static size_t put_iod_write_hdr(uint8_t *p, uint16_t seq, uint32_t api,
@@ -594,9 +673,22 @@ static size_t build_connect(uint8_t *pdu, const uint8_t mac[6])
 
     uint8_t blocks[512];
     size_t n = 0;
+    uint8_t alarmcr[20];
+    memset(alarmcr, 0, sizeof(alarmcr));
+    pn_wr_be16(alarmcr + 0, 1);
+    pn_wr_be16(alarmcr + 2, 0x8892);
+    pn_wr_be32(alarmcr + 4, 0);
+    pn_wr_be16(alarmcr + 8, 1);
+    pn_wr_be16(alarmcr + 10, 3);
+    pn_wr_be16(alarmcr + 12, 3); /* controller LocalAlarmReference */
+    pn_wr_be16(alarmcr + 14, 200);
+    pn_wr_be16(alarmcr + 16, 0xC000);
+    pn_wr_be16(alarmcr + 18, 0xA000);
+
     n += wr_pn_block(blocks + n, PN_BLOCK_AR_REQ, ar, sizeof(ar));
     n += wr_pn_block(blocks + n, PN_BLOCK_IOCR_REQ, iin, sizeof(iin));
     n += wr_pn_block(blocks + n, PN_BLOCK_IOCR_REQ, iout, sizeof(iout));
+    n += wr_pn_block(blocks + n, PN_BLOCK_ALARMCR_REQ, alarmcr, sizeof(alarmcr));
     n += wr_pn_block(blocks + n, PN_BLOCK_EXPSUB_REQ, pdev, sizeof(pdev));
     n += wr_pn_block(blocks + n, PN_BLOCK_EXPSUB_REQ, exp, sizeof(exp));
     uint8_t stub[600];
@@ -860,20 +952,52 @@ int main(int argc, char **argv)
                                           0x05, 0x00};
     static const uint8_t oid_sysdescr[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x01,
                                            0x01, 0x00};
-    static const uint8_t oid_lldp_loc[] = {0x28, 0xc4, 0x6a, 0x01, 0x01, 0x02,
+    static const uint8_t oid_lldp_loc[] = {0x28, 0xc4, 0x62, 0x01, 0x01, 0x02,
                                            0x01, 0x03, 0x03, 0x00};
-    static const uint8_t oid_lldp_rem[] = {0x28, 0xc4, 0x6a, 0x01, 0x01, 0x02,
+    static const uint8_t oid_lldp_rem[] = {0x28, 0xc4, 0x62, 0x01, 0x01, 0x02,
                                            0x01, 0x04, 0x01, 0x01, 0x09, 0x00,
                                            0x01, 0x01};
+    static const uint8_t oid_sys[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x01};
+    static const uint8_t oid_sysuptime[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x01,
+                                            0x03, 0x00};
+    static const uint8_t oid_ifnumber[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x02,
+                                           0x01, 0x00};
+    static const uint8_t oid_ifphys[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x02,
+                                         0x02, 0x01, 0x06, 0x01};
+    static const uint8_t oid_ifoper[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x02,
+                                         0x02, 0x01, 0x08, 0x01};
+    static const uint8_t oid_lldp_last[] = {0x28, 0xc4, 0x62, 0x01, 0x01, 0x02,
+                                            0x01, 0x02, 0x06, 0x00};
+    static const uint8_t oid_lldp_port[] = {0x28, 0xc4, 0x62, 0x01, 0x01, 0x02,
+                                            0x01, 0x03, 0x07, 0x01, 0x03, 0x01};
+    static const uint8_t mac_dev[] = {0x02, 0xFB, 0x00, 0x00, 0x00, 0x01};
     check(snmp_query(dev_ip, oid_sysname, sizeof(oid_sysname), 0x2a,
                      expect_name),
           "LAB-SNMP-SYSNAME", "SNMP Get sysName");
     check(snmp_query(dev_ip, oid_sysdescr, sizeof(oid_sysdescr), 0x2b,
                      "Fieldbus PN Device"),
           "LAB-SNMP-SYSDESCR", "SNMP Get sysDescr / MIB-II");
+    check(snmp_query_next(dev_ip, oid_sys, sizeof(oid_sys), 0x2e,
+                         "Fieldbus PN Device"),
+          "LAB-SNMP-GETNEXT-SYS", "GetNext 1.3.6.1.2.1.1 → sysDescr");
+    check(snmp_has_bytes(dev_ip, 0xa0, oid_ifnumber, sizeof(oid_ifnumber), 0x2f,
+                         (const uint8_t *)"\x02\x01\x01", 3),
+          "LAB-SNMP-IFNUMBER", "MIB-II ifNumber=1");
+    check(snmp_has_bytes(dev_ip, 0xa0, oid_ifphys, sizeof(oid_ifphys), 0x30,
+                         mac_dev, sizeof(mac_dev)),
+          "LAB-SNMP-IFPHYS", "ifPhysAddress = device MAC");
+    check(snmp_has_bytes(dev_ip, 0xa0, oid_ifoper, sizeof(oid_ifoper), 0x31,
+                         (const uint8_t *)"\x02\x01\x01", 3),
+          "LAB-SNMP-IFOPER", "ifOperStatus up (matches PDPort)");
+    check(snmp_has_bytes(dev_ip, 0xa0, oid_sysuptime, sizeof(oid_sysuptime),
+                         0x32, (const uint8_t *)"\x43", 1),
+          "LAB-SNMP-UPTIME", "sysUpTime TimeTicks");
     check(snmp_query(dev_ip, oid_lldp_loc, sizeof(oid_lldp_loc), 0x2c,
                      expect_name),
           "LAB-SNMP-LLDP-LOC", "SNMP lldpLocSysName");
+    check(snmp_query(dev_ip, oid_lldp_port, sizeof(oid_lldp_port), 0x33,
+                     "port-001"),
+          "LAB-SNMP-LLDP-PORT", "lldpLocPortId port-001");
 
     static const uint8_t lldp_mc[6] = {0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E};
     send_lldp_neighbor(raw, ifindex, lldp_mc, mymac, "ctl-lab1");
@@ -884,6 +1008,9 @@ int main(int argc, char **argv)
     check(snmp_query(dev_ip, oid_lldp_rem, sizeof(oid_lldp_rem), 0x2d,
                      "ctl-lab1"),
           "LAB-SNMP-LLDP-REM", "SNMP lldpRemSysName after LLDP RX");
+    check(snmp_has_bytes(dev_ip, 0xa0, oid_lldp_last, sizeof(oid_lldp_last),
+                         0x34, (const uint8_t *)"\x43", 1),
+          "LAB-SNMP-LLDP-LASTCHG", "lldpStatsRemTablesLastChangeTime");
 
     /* DCP Set NameOfStation round-trip (unsigned; lab security_class 0). */
     if (devmac[0] | devmac[5]) {
@@ -1039,7 +1166,7 @@ int main(int argc, char **argv)
         }
     }
 
-    int cyclic_in = 0, iops_ok = 0;
+    int cyclic_in = 0, iops_ok = 0, saw_rta = 0, sent_rta_ack = 0;
     uint64_t end = now_ms() + 400;
     uint64_t last_out = 0;
     while (now_ms() < end) {
@@ -1062,12 +1189,26 @@ int main(int argc, char **argv)
             last_out = t;
         }
         ssize_t rnraw = recv(raw, rx, sizeof(rx), MSG_DONTWAIT);
-        if (rnraw >= 18 && pn_rd_be16(rx + 12) == PN_ETHTYPE_PN &&
-            pn_rd_be16(rx + 14) == 0x8123) {
-            cyclic_in++;
-            if ((size_t)rnraw > 14 + 2 + 32 &&
-                rx[14 + 2 + 32] == PN_IOPS_GOOD) {
-                iops_ok = 1;
+        if (rnraw >= 16) {
+            uint16_t fid = 0;
+            size_t poff = 0;
+            if (pn_frame_fid(rx, (int)rnraw, &fid, &poff) == 0) {
+                if (fid == 0x8123) {
+                    cyclic_in++;
+                    if ((size_t)rnraw > poff + 2 + 32 &&
+                        rx[poff + 2 + 32] == PN_IOPS_GOOD) {
+                        iops_ok = 1;
+                    }
+                } else if ((fid == PN_FRAMEID_ALARM_HIGH ||
+                            fid == PN_FRAMEID_ALARM_LOW) &&
+                           (size_t)rnraw >= poff + 14) {
+                    uint8_t kind = (uint8_t)(rx[poff + 6] & 0x0Fu);
+                    if (kind == 1 && !saw_rta) {
+                        saw_rta = 1;
+                        send_rta_ack(raw, ifindex, rx, (int)rnraw, poff, mymac);
+                        sent_rta_ack = 1;
+                    }
+                }
             }
         } else if (rnraw < 0) {
             usleep(1000);
@@ -1075,6 +1216,8 @@ int main(int argc, char **argv)
     }
     check(cyclic_in >= 3, "LAB-RT-CYCLIC", "RTC1 input frames");
     check(iops_ok, "LAB-RT-IOPS", "IOPS GOOD");
+    check(saw_rta, "LAB-CM-RTA-DATA", "RTA AlarmNotification after DATAEX");
+    check(sent_rta_ack, "LAB-CM-RTA-ACK", "RTA ACK sent for device Data");
 
     for (int i = 0; i < 400; i++) {
         uint8_t junk[64];

@@ -11,8 +11,10 @@
  *
  * Scope:
  *   - Device-side DCP, CM (Connect/Write/WriteMultiple/PrmEnd/ApplicationReady),
- *     RTC1 cyclic IO, record (I&M0, RealIdent, PD*), LLDP, minimal SNMP
- *   - RT Class 1 only (unsynchronized cyclic IO). IRT / RT Class 3: no.
+ *     RTC1 cyclic IO, record (I&M0, RealIdent, PD*), LLDP, SNMP (MIB-II +
+ *     LLDP-MIB Get/GetNext), AlarmCR + one RTA Data/Ack
+ *   - Lab Conformance Class B subset (MIB2;LLDP, topology via LLDP RX).
+ *     Not PI-certified. RT Class 1 only (unsynchronized cyclic IO). IRT / MRP: no.
  *   - Optional stack-local HMAC-SHA256 PSK on DCP Set and CM Connect.
  *     This is not PI Security Class 1.
  *
@@ -76,6 +78,8 @@ int pn_stack_take_rpc_tx(pn_stack_t *s, uint8_t *out, size_t cap, size_t *len,
 
 const pn_cfg_t *pn_stack_cfg(const pn_stack_t *s);
 int pn_stack_lldp_remote_name(const pn_stack_t *s, char *out, size_t cap);
+int pn_stack_handle_snmp(pn_stack_t *s, const uint8_t *req, size_t n,
+                         uint8_t *resp, size_t cap, size_t *out_len);
 
 size_t pn_eth_build(uint8_t *out, size_t cap, const uint8_t dst[6],
                     const uint8_t src[6], uint16_t ethertype,

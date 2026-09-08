@@ -30,10 +30,11 @@ void pn_lldp_send(pn_stack_t *s)
     memcpy(chassis + 1, s->cfg.mac, 6);
     tlv(pdu, &n, sizeof(pdu), 1, chassis, 7);
 
-    uint8_t port[7];
-    port[0] = 3; /* MAC address */
-    memcpy(port + 1, s->cfg.mac, 6);
-    tlv(pdu, &n, sizeof(pdu), 2, port, 7);
+    static const char port_id[] = "port-001";
+    uint8_t port[1 + sizeof(port_id)];
+    port[0] = 7; /* locally assigned — matches PDPort / LLDP-MIB */
+    memcpy(port + 1, port_id, sizeof(port_id) - 1);
+    tlv(pdu, &n, sizeof(pdu), 2, port, (size_t)(1 + sizeof(port_id) - 1));
 
     uint8_t ttl[2];
     pn_wr_be16(ttl, 20);
@@ -95,6 +96,7 @@ void pn_lldp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
     if (!s || !payload) {
         return;
     }
+    int changed = 0;
     size_t off = 0;
     while (off + 2 <= plen) {
         uint16_t hdr = pn_rd_be16(payload + off);
@@ -108,17 +110,47 @@ void pn_lldp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
             break;
         }
         const uint8_t *val = payload + off;
-        if (type == 1 && len >= 7 && val[0] == 4) {
-            memcpy(s->lldp_rem_mac, val + 1, 6);
+        if (type == 1 && len >= 2) {
+            s->lldp_rem_chassis_subtype = val[0];
+            size_t clen = (size_t)len - 1;
+            if (clen > sizeof(s->lldp_rem_chassis)) {
+                clen = sizeof(s->lldp_rem_chassis);
+            }
+            memcpy(s->lldp_rem_chassis, val + 1, clen);
+            s->lldp_rem_chassis_len = (uint8_t)clen;
+            if (val[0] == 4 && len >= 7) {
+                memcpy(s->lldp_rem_mac, val + 1, 6);
+            }
+            changed = 1;
+        } else if (type == 2 && len >= 2) {
+            s->lldp_rem_port_subtype = val[0];
+            size_t plen_id = (size_t)len - 1;
+            if (val[0] == 7 || val[0] == 5) {
+                size_t n = plen_id < sizeof(s->lldp_rem_port) - 1
+                               ? plen_id
+                               : sizeof(s->lldp_rem_port) - 1;
+                memcpy(s->lldp_rem_port, val + 1, n);
+                s->lldp_rem_port[n] = '\0';
+            } else {
+                s->lldp_rem_port[0] = '\0';
+            }
+            changed = 1;
         } else if (type == 5 && len > 0) {
             size_t n = len < PN_STATION_NAME_MAX ? len : PN_STATION_NAME_MAX;
             memcpy(s->lldp_rem_name, val, n);
             s->lldp_rem_name[n] = '\0';
             s->lldp_rem_set = 1;
+            changed = 1;
         }
         off += len;
     }
     if (!s->lldp_rem_set && src) {
         memcpy(s->lldp_rem_mac, src, 6);
+    }
+    if (changed) {
+        s->lldp_last_change_ns = pn_now_ns();
+        if (s->lldp_rem_name[0] || s->lldp_rem_chassis_len) {
+            s->lldp_rem_set = 1;
+        }
     }
 }

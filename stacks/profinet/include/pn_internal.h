@@ -86,8 +86,26 @@ struct pn_stack {
     uint64_t start_ns;
 
     char lldp_rem_name[PN_STATION_NAME_MAX + 1];
+    char lldp_rem_port[64];
     uint8_t lldp_rem_mac[6];
+    uint8_t lldp_rem_chassis[32];
+    uint8_t lldp_rem_chassis_len;
+    uint8_t lldp_rem_chassis_subtype;
+    uint8_t lldp_rem_port_subtype;
     int lldp_rem_set;
+    uint64_t lldp_last_change_ns;
+
+    uint16_t alarm_type;
+    uint16_t alarm_peer_ref;
+    uint16_t alarm_local_ref;
+    uint16_t alarm_max_len;
+    uint16_t alarm_tci;
+    uint16_t alarm_send_seq;
+    int alarm_cr_ok;
+    int alarm_rta_sent;
+    int alarm_rta_acked;
+    int alarm_retries;
+    uint64_t last_alarm_ns;
 
     uint8_t rpc_tx[PN_FRAME_MAX];
     size_t rpc_tx_len;
@@ -143,6 +161,12 @@ void pn_rpc_poll(pn_stack_t *s);
 void pn_rpc_flush_tx(pn_stack_t *s);
 
 void pn_snmp_poll(pn_stack_t *s);
+int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
+                   size_t cap, size_t *out_len);
+
+void pn_alarm_poll(pn_stack_t *s);
+void pn_alarm_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen);
+void pn_alarm_on_connect(pn_stack_t *s, const uint8_t *body, uint16_t blen);
 int pn_udp_open(uint16_t port);
 int pn_udp_open_ip(uint32_t ip_host, uint16_t port);
 

@@ -95,6 +95,7 @@ add_library(pn_stack STATIC
     stacks/profinet/src/pn_record.c
     stacks/profinet/src/pn_sec.c
     stacks/profinet/src/pn_snmp.c
+    stacks/profinet/src/pn_alarm.c
     stacks/profinet/src/pn_stack.c
 )
 target_include_directories(pn_stack PUBLIC stacks/profinet/include)

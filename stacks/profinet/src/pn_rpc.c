@@ -301,6 +301,8 @@ static int parse_connect_block(uint16_t type, const uint8_t *body, uint16_t blen
                 }
             }
         }
+    } else if (type == PN_BLOCK_ALARMCR_REQ && blen >= 14) {
+        pn_alarm_on_connect(s, body, blen);
     }
     return 0;
 }
@@ -469,10 +471,17 @@ static size_t build_connect_res_blocks(pn_stack_t *s, uint8_t *out, size_t cap)
     n += wr_block(out + n, PN_BLOCK_IOCR_RES, iocr_out, sizeof(iocr_out));
 
     uint8_t alarm[6];
-    pn_wr_be16(alarm, 0x0001);
-    pn_wr_be16(alarm + 2, 1);
-    pn_wr_be16(alarm + 4, 200);
+    pn_wr_be16(alarm, s->alarm_type ? s->alarm_type : 0x0001);
+    pn_wr_be16(alarm + 2, s->alarm_local_ref ? s->alarm_local_ref : 1);
+    pn_wr_be16(alarm + 4, s->alarm_max_len ? s->alarm_max_len : 200);
     n += wr_block(out + n, PN_BLOCK_ALARMCR_RES, alarm, sizeof(alarm));
+    s->alarm_cr_ok = 1;
+    if (!s->alarm_peer_ref) {
+        s->alarm_peer_ref = 1;
+    }
+    if (!s->alarm_local_ref) {
+        s->alarm_local_ref = 1;
+    }
 
     n += wr_arserver(out + n, s->cfg.station_name);
 

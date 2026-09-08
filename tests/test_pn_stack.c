@@ -409,6 +409,18 @@ static size_t build_connect_stub(uint8_t *blocks, size_t cap)
     n += wr_pn_block(blocks + n, PN_BLOCK_AR_REQ, ar, (uint16_t)an);
     n += wr_pn_block(blocks + n, PN_BLOCK_IOCR_REQ, iin, (uint16_t)nin);
     n += wr_pn_block(blocks + n, PN_BLOCK_IOCR_REQ, iout, (uint16_t)nout);
+    uint8_t alarmcr[20];
+    memset(alarmcr, 0, sizeof(alarmcr));
+    pn_wr_be16(alarmcr + 0, 1);
+    pn_wr_be16(alarmcr + 2, 0x8892);
+    pn_wr_be32(alarmcr + 4, 0);
+    pn_wr_be16(alarmcr + 8, 1);
+    pn_wr_be16(alarmcr + 10, 3);
+    pn_wr_be16(alarmcr + 12, 3);
+    pn_wr_be16(alarmcr + 14, 200);
+    pn_wr_be16(alarmcr + 16, 0xC000);
+    pn_wr_be16(alarmcr + 18, 0xA000);
+    n += wr_pn_block(blocks + n, PN_BLOCK_ALARMCR_REQ, alarmcr, sizeof(alarmcr));
     n += wr_pn_block(blocks + n, PN_BLOCK_EXPSUB_REQ, exp, (uint16_t)ne);
     (void)cap;
     return n;
@@ -1020,6 +1032,214 @@ static void test_lldp_remote(void)
     pn_stack_destroy(s);
 }
 
+static size_t snmp_pdu(uint8_t *out, uint8_t rid, uint8_t pdu_tag,
+                       const uint8_t *oid, size_t olen)
+{
+    uint8_t vb[80];
+    size_t i = 0;
+    vb[i++] = 0x30;
+    size_t vb_len_at = i++;
+    vb[i++] = 0x06;
+    vb[i++] = (uint8_t)olen;
+    memcpy(vb + i, oid, olen);
+    i += olen;
+    vb[i++] = 0x05;
+    vb[i++] = 0x00;
+    vb[vb_len_at] = (uint8_t)(i - vb_len_at - 1);
+    uint8_t vbl[96];
+    size_t v = 0;
+    vbl[v++] = 0x30;
+    vbl[v++] = (uint8_t)i;
+    memcpy(vbl + v, vb, i);
+    v += i;
+    uint8_t pdu[160];
+    size_t p = 0;
+    pdu[p++] = pdu_tag;
+    size_t pdu_len_at = p++;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = rid;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = 0x00;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = 0x00;
+    memcpy(pdu + p, vbl, v);
+    p += v;
+    pdu[pdu_len_at] = (uint8_t)(p - pdu_len_at - 1);
+    size_t m = 0;
+    out[m++] = 0x30;
+    size_t msg_len_at = m++;
+    out[m++] = 0x02;
+    out[m++] = 0x01;
+    out[m++] = 0x00;
+    out[m++] = 0x04;
+    out[m++] = 0x06;
+    memcpy(out + m, "public", 6);
+    m += 6;
+    memcpy(out + m, pdu, p);
+    m += p;
+    out[msg_len_at] = (uint8_t)(m - msg_len_at - 1);
+    return m;
+}
+
+static int snmp_has(const uint8_t *resp, size_t n, const void *needle,
+                    size_t nlen)
+{
+    if (!resp || nlen == 0 || n < nlen) {
+        return 0;
+    }
+    for (size_t i = 0; i + nlen <= n; i++) {
+        if (memcmp(resp + i, needle, nlen) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void test_snmp_mib(void)
+{
+    tx_cap_t cap;
+    pn_stack_t *s = mock_stack(&cap);
+    static const uint8_t oid_sys[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x01};
+    static const uint8_t oid_sysname[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x01,
+                                          0x05, 0x00};
+    static const uint8_t oid_ifnumber[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x02,
+                                           0x01, 0x00};
+    static const uint8_t oid_ifphys[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x02,
+                                         0x02, 0x01, 0x06, 0x01};
+    static const uint8_t oid_lldp_loc[] = {0x28, 0xc4, 0x62, 0x01, 0x01, 0x02,
+                                           0x01, 0x03, 0x03, 0x00};
+    static const uint8_t oid_lldp_rem[] = {0x28, 0xc4, 0x62, 0x01, 0x01, 0x02,
+                                           0x01, 0x04, 0x01, 0x01, 0x09, 0x00,
+                                           0x01, 0x01};
+    uint8_t req[256], resp[512];
+    size_t rlen = 0;
+    size_t qn = snmp_pdu(req, 1, 0xa0, oid_sysname, sizeof(oid_sysname));
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               contains(resp, rlen, "sensor-line1"),
+           "SNMP Get sysName");
+    qn = snmp_pdu(req, 2, 0xa1, oid_sys, sizeof(oid_sys));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               contains(resp, rlen, "Fieldbus PN Device"),
+           "SNMP GetNext system → sysDescr");
+    qn = snmp_pdu(req, 3, 0xa0, oid_ifnumber, sizeof(oid_ifnumber));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               snmp_has(resp, rlen, "\x02\x01\x01", 3),
+           "SNMP Get ifNumber=1");
+    static const uint8_t mac[6] = {0x02, 0xFB, 0x00, 0x00, 0x00, 0x01};
+    qn = snmp_pdu(req, 4, 0xa0, oid_ifphys, sizeof(oid_ifphys));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               snmp_has(resp, rlen, mac, 6),
+           "SNMP Get ifPhysAddress");
+    qn = snmp_pdu(req, 5, 0xa0, oid_lldp_loc, sizeof(oid_lldp_loc));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               contains(resp, rlen, "sensor-line1"),
+           "SNMP Get lldpLocSysName");
+
+    static const uint8_t dst[6] = {0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E};
+    static const uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t pdu[64];
+    size_t n = 0;
+    pdu[n++] = 0x02;
+    pdu[n++] = 0x07;
+    pdu[n++] = 4;
+    memcpy(pdu + n, src, 6);
+    n += 6;
+    pdu[n++] = 0x04;
+    pdu[n++] = 0x07;
+    pdu[n++] = 3;
+    memcpy(pdu + n, src, 6);
+    n += 6;
+    pdu[n++] = 0x06;
+    pdu[n++] = 0x02;
+    pdu[n++] = 0x00;
+    pdu[n++] = 0x14;
+    const char *nm = "ctl-lab1";
+    pdu[n++] = 0x0A;
+    pdu[n++] = (uint8_t)strlen(nm);
+    memcpy(pdu + n, nm, strlen(nm));
+    n += strlen(nm);
+    pdu[n++] = 0x00;
+    pdu[n++] = 0x00;
+    uint8_t frame[PN_FRAME_MAX];
+    size_t flen =
+        pn_eth_build(frame, sizeof(frame), dst, src, PN_ETHTYPE_LLDP, pdu, n);
+    pn_stack_handle_eth(s, frame, flen);
+    qn = snmp_pdu(req, 6, 0xa0, oid_lldp_rem, sizeof(oid_lldp_rem));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               contains(resp, rlen, "ctl-lab1"),
+           "SNMP Get lldpRemSysName after LLDP RX");
+    pn_stack_destroy(s);
+}
+
+static void test_rta_alarm(void)
+{
+    tx_cap_t cap;
+    pn_stack_t *s = mock_stack(&cap);
+    do_connect(s);
+    do_prmend(s);
+    cap.n = 0;
+    pn_stack_poll(s);
+    int saw = 0;
+    int idx = -1;
+    for (int i = 0; i < cap.n; i++) {
+        if (cap.lens[i] < 28) {
+            continue;
+        }
+        if (pn_rd_be16(cap.frames[i] + 12) != PN_ETHTYPE_PN) {
+            continue;
+        }
+        uint16_t fid = pn_rd_be16(cap.frames[i] + 14);
+        if (fid == PN_FRAMEID_ALARM_HIGH || fid == PN_FRAMEID_ALARM_LOW) {
+            uint8_t kind = (uint8_t)(cap.frames[i][20] & 0x0Fu);
+            uint16_t dst_ref = pn_rd_be16(cap.frames[i] + 16);
+            if (kind == 1 && dst_ref == 3) {
+                saw = 1;
+                idx = i;
+            }
+        }
+    }
+    expect(saw, "RTA Data 0xFC01 after DATAEX with controller alarm ref");
+    if (saw && idx >= 0) {
+        const uint8_t *f = cap.frames[idx];
+        uint16_t fid = pn_rd_be16(f + 14);
+        uint16_t dst_ref = pn_rd_be16(f + 16);
+        uint16_t src_ref = pn_rd_be16(f + 18);
+        uint16_t send_seq = pn_rd_be16(f + 22);
+        uint8_t ack[64];
+        memset(ack, 0, sizeof(ack));
+        memcpy(ack, f + 6, 6);
+        memcpy(ack + 6, f, 6);
+        pn_wr_be16(ack + 12, PN_ETHTYPE_PN);
+        pn_wr_be16(ack + 14, fid);
+        pn_wr_be16(ack + 16, src_ref);
+        pn_wr_be16(ack + 18, dst_ref);
+        ack[20] = 0x13;
+        ack[21] = 0x21;
+        pn_wr_be16(ack + 22, 0xFFFF);
+        pn_wr_be16(ack + 24, send_seq);
+        pn_stack_handle_eth(s, ack, 60);
+        cap.n = 0;
+        pn_stack_poll(s);
+        int again = 0;
+        for (int i = 0; i < cap.n; i++) {
+            if (cap.lens[i] >= 16 &&
+                pn_rd_be16(cap.frames[i] + 14) == PN_FRAMEID_ALARM_HIGH) {
+                again = 1;
+            }
+        }
+        expect(!again, "RTA Data not retransmitted immediately after ACK");
+    }
+    pn_stack_destroy(s);
+}
+
 static void test_watchdog(void)
 {
     tx_cap_t cap;
@@ -1047,6 +1267,8 @@ int main(void)
     test_cm_pdev_expected();
     test_lldp_start();
     test_lldp_remote();
+    test_snmp_mib();
+    test_rta_alarm();
     test_watchdog();
     if (g_fail) {
         fprintf(stderr, "pn stack tests FAILED\n");
