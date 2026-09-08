@@ -68,7 +68,8 @@
                                     SupportedRT_Classes="RT_CLASS_1"
                                     SupportedProtocols="SNMP;LLDP"
                                     SupportedMibs="MIB2;LLDP"
-                                    IsochroneModeSupported="false">
+                                    IsochroneModeSupported="false"
+                                    ParameterizationSpeedupSupported="true">
               <ApplicationRelations NumberOfAR="1" StartupMode="Legacy">
                 <TimingProperties SendClock="32"
                                   ReductionRatio="8 16 32 64 128 256 512"/>

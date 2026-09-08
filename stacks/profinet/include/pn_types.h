@@ -72,10 +72,13 @@
 #define PN_BLOCK_IM2          0x0022u
 #define PN_BLOCK_IM3          0x0023u
 #define PN_BLOCK_IM4          0x0024u
+#define PN_BLOCK_PDPORT_CHECK 0x0202u
+#define PN_BLOCK_CHECK_PEERS  0x0203u
 #define PN_BLOCK_PDPORT_REAL  0x020Fu
 #define PN_BLOCK_PDPORT_STAT  0x0251u
 #define PN_BLOCK_PDIF_REAL    0x0240u
 #define PN_BLOCK_PDIF_STAT    0x0250u
+#define PN_BLOCK_PDIF_FSU     0x0252u
 #define PN_BLOCK_SEC_INT      0x0E01u /* stack-local integrity block */
 
 #define PN_IOCR_INPUT         0x0001u
@@ -115,6 +118,7 @@
 #define PN_INDEX_PDIF_STAT      0x8071u
 #define PN_INDEX_PDIF_REAL      0x8080u
 #define PN_INDEX_PDIF_ADJUST    0x8081u
+#define PN_INDEX_PDIF_FSU       0x8090u
 #define PN_INDEX_REALIDENT_SLOT 0xC001u
 #define PN_INDEX_EXPIDENT_AR    0xE000u
 #define PN_INDEX_REALIDENT_AR   0xE001u
@@ -122,6 +126,11 @@
 #define PN_INDEX_WRITE_MULTI    0xE040u
 #define PN_INDEX_REALIDENT_API  0xF000u
 #define PN_USI_CHANNEL_DIAG     0x8000u
+#define PN_ALARM_TYPE_DIAG      0x0001u
+#define PN_ALARM_TYPE_PROCESS   0x0002u
+#define PN_CHAN_APPEARS         0x0800u
+#define PN_CHAN_DISAPPEARS      0x1000u
+#define PN_CHAN_DISAPPEARS_REM  0x1800u
 
 #define PN_STATION_NAME_MAX   240
 #define PN_IO_MAX             256

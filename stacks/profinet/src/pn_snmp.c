@@ -19,7 +19,7 @@
 #define SNMP_ERR_NOSUCHNAME 2
 #define SNMP_ERR_GENERR     5
 
-#define OID_MAX 16
+#define OID_MAX 18
 #define LEAF_VAL_MAX 64
 
 static uint32_t ticks_from(const pn_stack_t *s, uint64_t ns)
@@ -36,9 +36,15 @@ static size_t ber_len(uint8_t *p, size_t n)
         p[0] = (uint8_t)n;
         return 1;
     }
-    p[0] = 0x81;
-    p[1] = (uint8_t)n;
-    return 2;
+    if (n < 256) {
+        p[0] = 0x81;
+        p[1] = (uint8_t)n;
+        return 2;
+    }
+    p[0] = 0x82;
+    p[1] = (uint8_t)(n >> 8);
+    p[2] = (uint8_t)n;
+    return 3;
 }
 
 static size_t ber_tlv(uint8_t *p, uint8_t tag, const uint8_t *v, size_t n)
@@ -205,8 +211,12 @@ enum {
     L_LLDP_REM_PORT,
     L_LLDP_REM_SYSNAME,
     L_LLDP_REM_SYSDESC,
+    L_LLDP_REM_CAP_SUP,
+    L_LLDP_REM_CAP_EN,
     L_LLDP_XPNO_TXD,
     L_LLDP_XPNO_RXD,
+    L_LLDP_XPNO_REM_TXD,
+    L_LLDP_XPNO_REM_RXD,
     L_SYSDESCR,
     L_SYSOID,
     L_SYSUPTIME,
@@ -239,6 +249,16 @@ enum {
     L_IFSPEC,
     L_IPFWD,
     L_IPTTL,
+    L_IP_ADENT_ADDR,
+    L_IP_ADENT_IF,
+    L_IP_ADENT_MASK,
+    L_IP_ADENT_BCAST,
+    L_ICMP_IN,
+    L_ICMP_INERR,
+    L_ICMP_INECHO,
+    L_ICMP_INECHOREP,
+    L_ICMP_OUT,
+    L_ICMP_OUTECHO,
     L_UDP_IN,
     L_UDP_NOPORT,
     L_UDP_INERR,
@@ -268,7 +288,7 @@ enum {
     L_COUNT
 };
 
-static const uint32_t k_oids[][OID_MAX] = {
+static uint32_t k_oids[][OID_MAX] = {
     [L_LLDP_TX_INT] = {1, 0, 8802, 1, 1, 2, 1, 1, 1, 0},
     [L_LLDP_TX_HOLD] = {1, 0, 8802, 1, 1, 2, 1, 1, 2, 0},
     [L_LLDP_STATS_INS] = {1, 0, 8802, 1, 1, 2, 1, 2, 2, 0},
@@ -291,8 +311,12 @@ static const uint32_t k_oids[][OID_MAX] = {
     [L_LLDP_REM_PORT] = {1, 0, 8802, 1, 1, 2, 1, 4, 1, 1, 7, 0, 1, 1},
     [L_LLDP_REM_SYSNAME] = {1, 0, 8802, 1, 1, 2, 1, 4, 1, 1, 9, 0, 1, 1},
     [L_LLDP_REM_SYSDESC] = {1, 0, 8802, 1, 1, 2, 1, 4, 1, 1, 10, 0, 1, 1},
+    [L_LLDP_REM_CAP_SUP] = {1, 0, 8802, 1, 1, 2, 1, 4, 1, 1, 11, 0, 1, 1},
+    [L_LLDP_REM_CAP_EN] = {1, 0, 8802, 1, 1, 2, 1, 4, 1, 1, 12, 0, 1, 1},
     [L_LLDP_XPNO_TXD] = {1, 0, 8802, 1, 1, 2, 1, 5, 3791, 1, 2, 3, 1, 1, 1},
     [L_LLDP_XPNO_RXD] = {1, 0, 8802, 1, 1, 2, 1, 5, 3791, 1, 2, 4, 1, 1, 1},
+    [L_LLDP_XPNO_REM_TXD] = {1, 0, 8802, 1, 1, 2, 1, 5, 3791, 1, 3, 3, 1, 1, 0, 1, 1},
+    [L_LLDP_XPNO_REM_RXD] = {1, 0, 8802, 1, 1, 2, 1, 5, 3791, 1, 3, 4, 1, 1, 0, 1, 1},
     [L_SYSDESCR] = {1, 3, 6, 1, 2, 1, 1, 1, 0},
     [L_SYSOID] = {1, 3, 6, 1, 2, 1, 1, 2, 0},
     [L_SYSUPTIME] = {1, 3, 6, 1, 2, 1, 1, 3, 0},
@@ -325,6 +349,16 @@ static const uint32_t k_oids[][OID_MAX] = {
     [L_IFSPEC] = {1, 3, 6, 1, 2, 1, 2, 2, 1, 22, 1},
     [L_IPFWD] = {1, 3, 6, 1, 2, 1, 4, 1, 0},
     [L_IPTTL] = {1, 3, 6, 1, 2, 1, 4, 2, 0},
+    [L_IP_ADENT_ADDR] = {1, 3, 6, 1, 2, 1, 4, 20, 1, 1, 0, 0, 0, 0},
+    [L_IP_ADENT_IF] = {1, 3, 6, 1, 2, 1, 4, 20, 1, 2, 0, 0, 0, 0},
+    [L_IP_ADENT_MASK] = {1, 3, 6, 1, 2, 1, 4, 20, 1, 3, 0, 0, 0, 0},
+    [L_IP_ADENT_BCAST] = {1, 3, 6, 1, 2, 1, 4, 20, 1, 4, 0, 0, 0, 0},
+    [L_ICMP_IN] = {1, 3, 6, 1, 2, 1, 5, 1, 0},
+    [L_ICMP_INERR] = {1, 3, 6, 1, 2, 1, 5, 2, 0},
+    [L_ICMP_INECHO] = {1, 3, 6, 1, 2, 1, 5, 8, 0},
+    [L_ICMP_INECHOREP] = {1, 3, 6, 1, 2, 1, 5, 9, 0},
+    [L_ICMP_OUT] = {1, 3, 6, 1, 2, 1, 5, 14, 0},
+    [L_ICMP_OUTECHO] = {1, 3, 6, 1, 2, 1, 5, 21, 0},
     [L_UDP_IN] = {1, 3, 6, 1, 2, 1, 7, 1, 0},
     [L_UDP_NOPORT] = {1, 3, 6, 1, 2, 1, 7, 2, 0},
     [L_UDP_INERR] = {1, 3, 6, 1, 2, 1, 7, 3, 0},
@@ -364,7 +398,9 @@ static const uint8_t k_oidn[L_COUNT] = {
     [L_LLDP_REM_CHASSIS_ST] = 14, [L_LLDP_REM_CHASSIS] = 14,
     [L_LLDP_REM_PORT_ST] = 14, [L_LLDP_REM_PORT] = 14,
     [L_LLDP_REM_SYSNAME] = 14, [L_LLDP_REM_SYSDESC] = 14,
+    [L_LLDP_REM_CAP_SUP] = 14, [L_LLDP_REM_CAP_EN] = 14,
     [L_LLDP_XPNO_TXD] = 15, [L_LLDP_XPNO_RXD] = 15,
+    [L_LLDP_XPNO_REM_TXD] = 17, [L_LLDP_XPNO_REM_RXD] = 17,
     [L_SYSDESCR] = 9, [L_SYSOID] = 9, [L_SYSUPTIME] = 9, [L_SYSCONTACT] = 9,
     [L_SYSNAME] = 9, [L_SYSLOCATION] = 9, [L_SYSSERVICES] = 9,
     [L_IFNUMBER] = 9,
@@ -375,6 +411,10 @@ static const uint8_t k_oidn[L_COUNT] = {
     [L_IFOUTUCAST] = 11, [L_IFOUTNUCAST] = 11, [L_IFOUTDISC] = 11, [L_IFOUTERR] = 11,
     [L_IFOUTQLEN] = 11, [L_IFSPEC] = 11,
     [L_IPFWD] = 9, [L_IPTTL] = 9,
+    [L_IP_ADENT_ADDR] = 14, [L_IP_ADENT_IF] = 14, [L_IP_ADENT_MASK] = 14,
+    [L_IP_ADENT_BCAST] = 14,
+    [L_ICMP_IN] = 9, [L_ICMP_INERR] = 9, [L_ICMP_INECHO] = 9,
+    [L_ICMP_INECHOREP] = 9, [L_ICMP_OUT] = 9, [L_ICMP_OUTECHO] = 9,
     [L_UDP_IN] = 9, [L_UDP_NOPORT] = 9, [L_UDP_INERR] = 9, [L_UDP_OUT] = 9,
     [L_UDP_LADDR] = 15, [L_UDP_LPORT] = 15,
     [L_SNMP_IN] = 9, [L_SNMP_OUT] = 9, [L_SNMP_INGET] = 9, [L_SNMP_INNEXT] = 9,
@@ -389,7 +429,38 @@ static int leaf_needs_rem(int id)
 {
     return id == L_LLDP_REM_CHASSIS_ST || id == L_LLDP_REM_CHASSIS ||
            id == L_LLDP_REM_PORT_ST || id == L_LLDP_REM_PORT ||
-           id == L_LLDP_REM_SYSNAME || id == L_LLDP_REM_SYSDESC;
+           id == L_LLDP_REM_SYSNAME || id == L_LLDP_REM_SYSDESC ||
+           id == L_LLDP_REM_CAP_SUP || id == L_LLDP_REM_CAP_EN ||
+           id == L_LLDP_XPNO_REM_TXD || id == L_LLDP_XPNO_REM_RXD;
+}
+
+static void bind_ip_oids(const pn_stack_t *s)
+{
+    uint32_t ip = s->cfg.ip;
+    uint32_t a = (ip >> 24) & 0xffu;
+    uint32_t b = (ip >> 16) & 0xffu;
+    uint32_t c = (ip >> 8) & 0xffu;
+    uint32_t d = ip & 0xffu;
+    static const int ids[] = {L_IP_ADENT_ADDR, L_IP_ADENT_IF, L_IP_ADENT_MASK,
+                              L_IP_ADENT_BCAST};
+    for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+        uint8_t n = k_oidn[ids[i]];
+        if (n < 4) {
+            continue;
+        }
+        k_oids[ids[i]][n - 4] = a;
+        k_oids[ids[i]][n - 3] = b;
+        k_oids[ids[i]][n - 2] = c;
+        k_oids[ids[i]][n - 1] = d;
+    }
+}
+
+static void put_ip_oct(uint8_t *val, uint32_t v)
+{
+    val[0] = (uint8_t)((v >> 24) & 0xff);
+    val[1] = (uint8_t)((v >> 16) & 0xff);
+    val[2] = (uint8_t)((v >> 8) & 0xff);
+    val[3] = (uint8_t)(v & 0xff);
 }
 
 static int leaf_present(const pn_stack_t *s, int id)
@@ -546,8 +617,16 @@ static int leaf_value(pn_stack_t *s, int id, uint8_t *asn, uint8_t *val,
         return 0;
     case L_LLDP_XPNO_TXD:
     case L_LLDP_XPNO_RXD:
+    case L_LLDP_XPNO_REM_TXD:
+    case L_LLDP_XPNO_REM_RXD:
         *asn = ASN_GAUGE;
         *vlen = ber_uint(val, ASN_GAUGE, 1000);
+        return 0;
+    case L_LLDP_REM_CAP_SUP:
+    case L_LLDP_REM_CAP_EN:
+        *asn = ASN_OCT;
+        memcpy(val, cap, 2);
+        *vlen = 2;
         return 0;
     case L_SYSDESCR:
         *asn = ASN_OCT;
@@ -658,6 +737,33 @@ static int leaf_value(pn_stack_t *s, int id, uint8_t *asn, uint8_t *val,
     case L_IPTTL:
         *asn = ASN_INT;
         *vlen = ber_int(val, 64);
+        return 0;
+    case L_IP_ADENT_ADDR:
+        *asn = ASN_OCT;
+        put_ip_oct(val, s->cfg.ip);
+        *vlen = 4;
+        return 0;
+    case L_IP_ADENT_IF:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 1);
+        return 0;
+    case L_IP_ADENT_MASK:
+        *asn = ASN_OCT;
+        put_ip_oct(val, s->cfg.netmask);
+        *vlen = 4;
+        return 0;
+    case L_IP_ADENT_BCAST:
+        *asn = ASN_INT;
+        *vlen = ber_int(val, 1);
+        return 0;
+    case L_ICMP_IN:
+    case L_ICMP_INERR:
+    case L_ICMP_INECHO:
+    case L_ICMP_INECHOREP:
+    case L_ICMP_OUT:
+    case L_ICMP_OUTECHO:
+        *asn = ASN_COUNTER;
+        *vlen = ber_uint(val, ASN_COUNTER, 0);
         return 0;
     case L_UDP_IN:
         *asn = ASN_COUNTER;
@@ -786,7 +892,7 @@ static int match_next(pn_stack_t *s, const uint32_t *req, uint8_t rn)
 
 static int snmp_parse(const uint8_t *buf, size_t n, int *rid, int *pdu_type,
                       int *ver, uint32_t *oid, uint8_t *oid_n, uint8_t *vtag,
-                      uint8_t *vbuf, size_t *vlen)
+                      uint8_t *vbuf, size_t *vlen, int *nonrep, int *maxrep)
 {
     if (n < 2 || buf[0] != 0x30) {
         return -1;
@@ -823,7 +929,18 @@ static int snmp_parse(const uint8_t *buf, size_t n, int *rid, int *pdu_type,
         off += (size_t)(buf[off - 1] & 0x7f) - 1;
     }
     *rid = 1;
+    *nonrep = 0;
+    *maxrep = 0;
     if (off < n && ber_parse_int(buf + off, n - off, rid, &used) == 0) {
+        off += used;
+    }
+    int tmp = 0;
+    if (off < n && ber_parse_int(buf + off, n - off, &tmp, &used) == 0) {
+        *nonrep = tmp;
+        off += used;
+    }
+    if (off < n && ber_parse_int(buf + off, n - off, &tmp, &used) == 0) {
+        *maxrep = tmp;
         off += used;
     }
     const uint8_t *found = NULL;
@@ -866,6 +983,28 @@ static size_t wrap_seq(uint8_t *out, const uint8_t *inner, size_t n)
     return i + n;
 }
 
+static size_t encode_varbind(uint8_t *out, const uint32_t *oid, uint8_t on,
+                             int err, uint8_t asn, const uint8_t *val,
+                             size_t vlen)
+{
+    uint8_t inner[192];
+    size_t vi = 0;
+    uint8_t oidber[48];
+    size_t olen = oid_encode(oid, on, oidber);
+    vi += ber_tlv(inner + vi, ASN_OID, oidber, olen);
+    if (err) {
+        vi += ber_tlv(inner + vi, ASN_NULL, NULL, 0);
+    } else if (asn == ASN_OCT) {
+        vi += ber_tlv(inner + vi, ASN_OCT, val, vlen);
+    } else if (asn == ASN_OID) {
+        vi += ber_tlv(inner + vi, ASN_OID, val, vlen);
+    } else {
+        memcpy(inner + vi, val, vlen);
+        vi += vlen;
+    }
+    return wrap_seq(out, inner, vi);
+}
+
 static void store_oct(char *dst, size_t cap, const uint8_t *v, size_t n)
 {
     if (n >= cap) {
@@ -899,17 +1038,19 @@ static int apply_set(pn_stack_t *s, int leaf, uint8_t vtag, const uint8_t *v,
 int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
                    size_t cap, size_t *out_len)
 {
-    int rid = 1, pdu_type = 0xA0, ver = 0;
+    int rid = 1, pdu_type = 0xA0, ver = 0, nonrep = 0, maxrep = 0;
     uint32_t req_oid[OID_MAX];
     uint8_t req_n = 0, vtag = ASN_NULL;
     uint8_t setv[LEAF_VAL_MAX];
     size_t setn = 0;
     if (snmp_parse(req, n, &rid, &pdu_type, &ver, req_oid, &req_n, &vtag, setv,
-                   &setn) != 0) {
+                   &setn, &nonrep, &maxrep) != 0) {
         return -EINVAL;
     }
+    bind_ip_oids(s);
     s->snmp_in_pkts++;
-    int is_next = (pdu_type == 0xA1 || pdu_type == 0xA5);
+    int is_bulk = (pdu_type == 0xA5);
+    int is_next = (pdu_type == 0xA1 || is_bulk);
     int is_set = (pdu_type == 0xA3);
     if (is_set) {
         s->snmp_in_set++;
@@ -919,21 +1060,32 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
         s->snmp_in_get++;
     }
 
-    int leaf = is_next ? match_next(s, req_oid, req_n)
-                       : match_get(s, req_oid, req_n);
+    int reps = 1;
+    if (is_bulk) {
+        reps = maxrep < 1 ? 1 : maxrep;
+        if (reps > 8) {
+            reps = 8;
+        }
+        if (nonrep < 0) {
+            nonrep = 0;
+        }
+    }
 
-    uint8_t vb_inner[192];
-    size_t vi = 0;
+    uint8_t vbs[900];
+    size_t vbs_n = 0;
     int err = 0;
-    uint32_t out_oid[OID_MAX];
-    uint8_t out_n = req_n;
-    memcpy(out_oid, req_oid, sizeof(uint32_t) * req_n);
-
-    uint8_t asn = ASN_NULL;
-    uint8_t val[LEAF_VAL_MAX + 16];
-    size_t vlen = 0;
+    uint32_t walk[OID_MAX];
+    uint8_t wn = req_n;
+    memcpy(walk, req_oid, sizeof(uint32_t) * req_n);
 
     if (is_set) {
+        int leaf = match_get(s, req_oid, req_n);
+        uint8_t asn = ASN_NULL;
+        uint8_t val[LEAF_VAL_MAX + 16];
+        size_t vlen = 0;
+        uint32_t out_oid[OID_MAX];
+        uint8_t out_n = req_n;
+        memcpy(out_oid, req_oid, sizeof(uint32_t) * req_n);
         if (leaf >= 0 && leaf_writable(leaf) &&
             apply_set(s, leaf, vtag, setv, setn) == 0 &&
             leaf_value(s, leaf, &asn, val, &vlen) == 0) {
@@ -943,42 +1095,56 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
             err = SNMP_ERR_GENERR;
             memcpy(out_oid, k_oids[leaf], sizeof(uint32_t) * k_oidn[leaf]);
             out_n = k_oidn[leaf];
+            asn = ASN_NULL;
+            vlen = 0;
         } else {
             err = SNMP_ERR_NOSUCHNAME;
+            asn = ASN_NULL;
+            vlen = 0;
         }
-    } else if (leaf >= 0 && leaf_value(s, leaf, &asn, val, &vlen) == 0) {
-        memcpy(out_oid, k_oids[leaf], sizeof(uint32_t) * k_oidn[leaf]);
-        out_n = k_oidn[leaf];
+        vbs_n += encode_varbind(vbs + vbs_n, out_oid, out_n, err, asn, val,
+                                vlen);
     } else {
-        err = SNMP_ERR_NOSUCHNAME;
-        asn = ASN_NULL;
-        vlen = 0;
-        if (is_next) {
-            memcpy(out_oid, req_oid, sizeof(uint32_t) * req_n);
-            out_n = req_n;
+        int produced = 0;
+        for (int r = 0; r < reps; r++) {
+            int leaf = (r == 0 && !is_next) ? match_get(s, walk, wn)
+                                            : match_next(s, walk, wn);
+            uint8_t asn = ASN_NULL;
+            uint8_t val[LEAF_VAL_MAX + 16];
+            size_t vlen = 0;
+            uint32_t out_oid[OID_MAX];
+            uint8_t out_n = wn;
+            memcpy(out_oid, walk, sizeof(uint32_t) * wn);
+            int this_err = 0;
+            if (leaf >= 0 && leaf_value(s, leaf, &asn, val, &vlen) == 0) {
+                memcpy(out_oid, k_oids[leaf], sizeof(uint32_t) * k_oidn[leaf]);
+                out_n = k_oidn[leaf];
+                memcpy(walk, out_oid, sizeof(uint32_t) * out_n);
+                wn = out_n;
+            } else {
+                this_err = SNMP_ERR_NOSUCHNAME;
+                asn = ASN_NULL;
+                vlen = 0;
+            }
+            if (vbs_n + 208 > sizeof(vbs)) {
+                break;
+            }
+            vbs_n += encode_varbind(vbs + vbs_n, out_oid, out_n, this_err, asn,
+                                    val, vlen);
+            produced++;
+            if (this_err) {
+                if (!is_bulk || produced <= 1) {
+                    err = this_err;
+                }
+                break;
+            }
         }
     }
 
-    uint8_t oidber[48];
-    size_t olen = oid_encode(out_oid, out_n, oidber);
-    vi += ber_tlv(vb_inner + vi, ASN_OID, oidber, olen);
-    if (err) {
-        vi += ber_tlv(vb_inner + vi, ASN_NULL, NULL, 0);
-    } else if (asn == ASN_OCT) {
-        vi += ber_tlv(vb_inner + vi, ASN_OCT, val, vlen);
-    } else if (asn == ASN_OID) {
-        vi += ber_tlv(vb_inner + vi, ASN_OID, val, vlen);
-    } else {
-        memcpy(vb_inner + vi, val, vlen);
-        vi += vlen;
-    }
+    uint8_t vbl[960];
+    size_t vbl_n = wrap_seq(vbl, vbs, vbs_n);
 
-    uint8_t vb[208];
-    size_t vb_n = wrap_seq(vb, vb_inner, vi);
-    uint8_t vbl[220];
-    size_t vbl_n = wrap_seq(vbl, vb, vb_n);
-
-    uint8_t pdu_inner[280];
+    uint8_t pdu_inner[1024];
     size_t p = 0;
     p += ber_int(pdu_inner + p, rid);
     p += ber_int(pdu_inner + p, err);
@@ -986,14 +1152,14 @@ int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t n, uint8_t *resp,
     memcpy(pdu_inner + p, vbl, vbl_n);
     p += vbl_n;
 
-    uint8_t pdu[300];
+    uint8_t pdu[1100];
     size_t pn = 0;
     pdu[pn++] = 0xA2;
     pn += ber_len(pdu + pn, p);
     memcpy(pdu + pn, pdu_inner, p);
     pn += p;
 
-    uint8_t msg_inner[320];
+    uint8_t msg_inner[1200];
     size_t m = 0;
     m += ber_int(msg_inner + m, ver);
     m += ber_tlv(msg_inner + m, ASN_OCT, (const uint8_t *)"public", 6);
@@ -1023,7 +1189,7 @@ void pn_snmp_poll(pn_stack_t *s)
         return;
     }
     s->udp_in++;
-    uint8_t msg[700];
+    uint8_t msg[1400];
     size_t mlen = 0;
     if (pn_snmp_handle(s, buf, (size_t)n, msg, sizeof(msg), &mlen) != 0) {
         return;

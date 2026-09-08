@@ -119,7 +119,9 @@ struct pn_stack {
     int alarm_rta_sent;
     int alarm_rta_acked;
     int alarm_retries;
+    int alarm_kind; /* 0 appear, 1 disappear, 2 process */
     uint64_t last_alarm_ns;
+    uint16_t lldp_rem_ttl;
     int diag_present;
     int n_diag;
     pn_diag_ch_t diag[PN_DIAG_MAX];
@@ -136,6 +138,8 @@ struct pn_stack {
     uint16_t pdport_check_len;
     uint8_t pdif_adjust[PN_PDEV_STORE];
     uint16_t pdif_adjust_len;
+    uint8_t pdif_fsu[PN_PDEV_STORE];
+    uint16_t pdif_fsu_len;
 
     char snmp_syscontact[64];
     char snmp_syslocation[64];
@@ -226,6 +230,7 @@ int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
 int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                     uint16_t index, const uint8_t *data, uint32_t len);
 void pn_diag_arm_default(pn_stack_t *s);
+void pn_diag_disappear(pn_stack_t *s, int all);
 void pn_if_on_rx(pn_stack_t *s, size_t n);
 void pn_if_on_tx(pn_stack_t *s, size_t n);
 

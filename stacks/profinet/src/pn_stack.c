@@ -30,6 +30,7 @@ void pn_ar_reset(pn_stack_t *s)
     s->last_alarm_ns = 0;
     s->alarm_local_ref = 1;
     s->alarm_max_len = 200;
+    s->alarm_kind = 0;
     s->diag_present = 0;
     s->n_diag = 0;
     memset(s->diag, 0, sizeof(s->diag));

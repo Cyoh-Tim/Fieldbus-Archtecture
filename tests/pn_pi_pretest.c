@@ -67,6 +67,20 @@ static int contains(const uint8_t *hay, size_t n, const char *needle)
     return 0;
 }
 
+static int contains_mem(const uint8_t *hay, size_t n, const void *needle,
+                        size_t m)
+{
+    if (!hay || m == 0 || m > n) {
+        return 0;
+    }
+    for (size_t i = 0; i + m <= n; i++) {
+        if (memcmp(hay + i, needle, m) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static size_t wr_pn_block(uint8_t *p, uint16_t type, const uint8_t *body,
                           uint16_t body_len)
 {
@@ -419,6 +433,61 @@ static size_t snmp_build(uint8_t *out, uint8_t rid, uint8_t pdu_tag,
     pdu[p++] = 0x02;
     pdu[p++] = 0x01;
     pdu[p++] = 0x00;
+    memcpy(pdu + p, vbl, v);
+    p += v;
+    pdu[pdu_len_at] = (uint8_t)(p - pdu_len_at - 1);
+
+    size_t m = 0;
+    out[m++] = 0x30;
+    size_t msg_len_at = m++;
+    out[m++] = 0x02;
+    out[m++] = 0x01;
+    out[m++] = 0x00;
+    out[m++] = 0x04;
+    out[m++] = 0x06;
+    memcpy(out + m, "public", 6);
+    m += 6;
+    memcpy(out + m, pdu, p);
+    m += p;
+    out[msg_len_at] = (uint8_t)(m - msg_len_at - 1);
+    return m;
+}
+
+static size_t snmp_build_bulk(uint8_t *out, uint8_t rid, uint8_t max_rep,
+                              const uint8_t *oid, size_t olen)
+{
+    uint8_t vb[80];
+    size_t i = 0;
+    vb[i++] = 0x30;
+    size_t vb_len_at = i++;
+    vb[i++] = 0x06;
+    vb[i++] = (uint8_t)olen;
+    memcpy(vb + i, oid, olen);
+    i += olen;
+    vb[i++] = 0x05;
+    vb[i++] = 0x00;
+    vb[vb_len_at] = (uint8_t)(i - vb_len_at - 1);
+
+    uint8_t vbl[96];
+    size_t v = 0;
+    vbl[v++] = 0x30;
+    vbl[v++] = (uint8_t)i;
+    memcpy(vbl + v, vb, i);
+    v += i;
+
+    uint8_t pdu[160];
+    size_t p = 0;
+    pdu[p++] = 0xA5;
+    size_t pdu_len_at = p++;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = rid;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = 0x00;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = max_rep;
     memcpy(pdu + p, vbl, v);
     p += v;
     pdu[pdu_len_at] = (uint8_t)(p - pdu_len_at - 1);
@@ -1118,6 +1187,64 @@ int main(int argc, char **argv)
     check(snmp_has_bytes(dev_ip, 0xa0, oid_lldp_last, sizeof(oid_lldp_last),
                          0x34, (const uint8_t *)"\x43", 1),
           "LAB-SNMP-LLDP-LASTCHG", "lldpStatsRemTablesLastChangeTime");
+    {
+        uint8_t ipoid[24];
+        static const uint8_t pre[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x04, 0x14,
+                                      0x01, 0x01};
+        memcpy(ipoid, pre, sizeof(pre));
+        size_t on = sizeof(pre);
+        uint8_t b[4] = {(uint8_t)(dev_ip >> 24), (uint8_t)(dev_ip >> 16),
+                        (uint8_t)(dev_ip >> 8), (uint8_t)dev_ip};
+        uint8_t expect_ip[4];
+        memcpy(expect_ip, b, 4);
+        for (int i = 0; i < 4; i++) {
+            if (b[i] >= 128) {
+                ipoid[on++] = (uint8_t)(0x80u | (b[i] >> 7));
+                ipoid[on++] = (uint8_t)(b[i] & 0x7f);
+            } else {
+                ipoid[on++] = b[i];
+            }
+        }
+        check(snmp_has_bytes(dev_ip, 0xa0, ipoid, on, 0x37, expect_ip, 4),
+              "LAB-SNMP-IPADDR", "ipAddrTable ipAdEntAddr");
+    }
+    static const uint8_t oid_icmp[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x05, 0x01,
+                                       0x00};
+    check(snmp_has_bytes(dev_ip, 0xa0, oid_icmp, sizeof(oid_icmp), 0x38,
+                         (const uint8_t *)"\x41", 1),
+          "LAB-SNMP-ICMP", "icmpInMsgs Counter32");
+    {
+        uint8_t req[256], srx[1024];
+        size_t rn = snmp_build_bulk(req, 0x39, 3, oid_sys, sizeof(oid_sys));
+        int fd = socket(AF_INET, SOCK_DGRAM, 0);
+        int ok = 0;
+        if (fd >= 0 && dev_ip) {
+            struct sockaddr_in dst;
+            memset(&dst, 0, sizeof(dst));
+            dst.sin_family = AF_INET;
+            dst.sin_port = htons(PN_SNMP_PORT);
+            dst.sin_addr.s_addr = htonl(dev_ip);
+            sendto(fd, req, rn, 0, (struct sockaddr *)&dst, sizeof(dst));
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(fd, &rfds);
+            struct timeval tv = {.tv_sec = 1, .tv_usec = 0};
+            if (select(fd + 1, &rfds, NULL, NULL, &tv) > 0) {
+                ssize_t sn = recv(fd, srx, sizeof(srx), 0);
+                int n_oid = 0;
+                if (sn > 0) {
+                    for (int i = 0; i + 1 < sn; i++) {
+                        if (srx[i] == 0x06) {
+                            n_oid++;
+                        }
+                    }
+                    ok = n_oid >= 3 && contains(srx, (size_t)sn, "Fieldbus PN Device");
+                }
+            }
+            close(fd);
+        }
+        check(ok, "LAB-SNMP-GETBULK", "GetBulk max-repetitions=3 on system");
+    }
 
     /* DCP Set NameOfStation round-trip (unsigned; lab security_class 0). */
     if (devmac[0] | devmac[5]) {
@@ -1267,6 +1394,17 @@ int main(int argc, char **argv)
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
     check(rn > 80 && contains(resp, (size_t)rn, "port-001"), "LAB-CM-READ-PDPORT",
           "PDPortDataReal stub");
+    check(rn > 80 && contains_mem(resp, (size_t)rn, mymac, 6),
+          "LAB-CM-READ-PDPORT-PEER", "PDPortDataReal peer chassis after LLDP");
+
+    plen = build_read(pdu, 0, 0x8001, PN_INDEX_PDPORT_CHECK);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80 && count_block(resp, (size_t)rn, PN_BLOCK_PDPORT_CHECK) >= 1,
+          "LAB-CM-READ-PDCHECK", "PDPortDataCheck CheckPeers default");
+
+    plen = build_read(pdu, 0, 0x8000, PN_INDEX_PDIF_FSU);
+    rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);
+    check(rn > 80, "LAB-CM-READ-FSU", "PDInterface FSU empty success");
 
     plen = build_read(pdu, 0, 0x8000, PN_INDEX_PDIF_REAL);
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);

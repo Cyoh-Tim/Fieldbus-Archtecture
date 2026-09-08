@@ -22,6 +22,21 @@ static int contains(const uint8_t *hay, size_t n, const char *needle)
     return 0;
 }
 
+static int contains_bytes(const uint8_t *hay, size_t n, const void *needle,
+                          size_t nlen)
+{
+    const uint8_t *nd = needle;
+    if (!hay || nlen == 0 || n < nlen) {
+        return 0;
+    }
+    for (size_t i = 0; i + nlen <= n; i++) {
+        if (memcmp(hay + i, nd, nlen) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void expect(int cond, const char *msg)
 {
     if (!cond) {
@@ -444,6 +459,96 @@ static pn_stack_t *mock_stack(tx_cap_t *cap)
     pn_stack_set_eth_ops(s, ops);
     pn_stack_start(s);
     return s;
+}
+
+static void inject_lldp_neighbor(pn_stack_t *s, const char *name)
+{
+    static const uint8_t dst[6] = {0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E};
+    static const uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t pdu[64];
+    size_t n = 0;
+    pdu[n++] = 0x02;
+    pdu[n++] = 0x07;
+    pdu[n++] = 4;
+    memcpy(pdu + n, src, 6);
+    n += 6;
+    pdu[n++] = 0x04;
+    pdu[n++] = 0x07;
+    pdu[n++] = 3;
+    memcpy(pdu + n, src, 6);
+    n += 6;
+    pdu[n++] = 0x06;
+    pdu[n++] = 0x02;
+    pdu[n++] = 0x00;
+    pdu[n++] = 0x14;
+    size_t nl = strlen(name);
+    pdu[n++] = 0x0A;
+    pdu[n++] = (uint8_t)nl;
+    memcpy(pdu + n, name, nl);
+    n += nl;
+    pdu[n++] = 0x00;
+    pdu[n++] = 0x00;
+    uint8_t frame[PN_FRAME_MAX];
+    size_t flen =
+        pn_eth_build(frame, sizeof(frame), dst, src, PN_ETHTYPE_LLDP, pdu, n);
+    pn_stack_handle_eth(s, frame, flen);
+}
+
+static void pump_output_cr(pn_stack_t *s)
+{
+    static const uint8_t dst[6] = {0x02, 0xFB, 0x00, 0x00, 0x00, 0x01};
+    static const uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t opay[48];
+    memset(opay, 0, sizeof(opay));
+    pn_wr_be16(opay, 0x8000);
+    opay[10] = PN_IOPS_GOOD;
+    opay[44] = PN_DATASTATUS_PRIMARY | PN_DATASTATUS_VALID | PN_DATASTATUS_RUN;
+    uint8_t oframe[PN_FRAME_MAX];
+    size_t flen =
+        pn_eth_build(oframe, PN_FRAME_MAX, dst, src, PN_ETHTYPE_PN, opay, 46);
+    pn_stack_handle_eth(s, oframe, flen);
+}
+
+static int find_rta_data(tx_cap_t *cap, int *idx)
+{
+    for (int i = 0; i < cap->n; i++) {
+        if (cap->lens[i] < 28) {
+            continue;
+        }
+        if (pn_rd_be16(cap->frames[i] + 12) != PN_ETHTYPE_PN) {
+            continue;
+        }
+        uint16_t fid = pn_rd_be16(cap->frames[i] + 14);
+        if (fid == PN_FRAMEID_ALARM_HIGH || fid == PN_FRAMEID_ALARM_LOW) {
+            uint8_t kind = (uint8_t)(cap->frames[i][20] & 0x0Fu);
+            if (kind == 1) {
+                *idx = i;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static void ack_rta_frame(pn_stack_t *s, const uint8_t *f)
+{
+    uint16_t fid = pn_rd_be16(f + 14);
+    uint16_t dst_ref = pn_rd_be16(f + 16);
+    uint16_t src_ref = pn_rd_be16(f + 18);
+    uint16_t send_seq = pn_rd_be16(f + 22);
+    uint8_t ack[64];
+    memset(ack, 0, sizeof(ack));
+    memcpy(ack, f + 6, 6);
+    memcpy(ack + 6, f, 6);
+    pn_wr_be16(ack + 12, PN_ETHTYPE_PN);
+    pn_wr_be16(ack + 14, fid);
+    pn_wr_be16(ack + 16, src_ref);
+    pn_wr_be16(ack + 18, dst_ref);
+    ack[20] = 0x13;
+    ack[21] = 0x21;
+    pn_wr_be16(ack + 22, 0xFFFF);
+    pn_wr_be16(ack + 24, send_seq);
+    pn_stack_handle_eth(s, ack, 60);
 }
 
 static int do_connect(pn_stack_t *s)
@@ -870,11 +975,52 @@ static void test_cm_write_read(void)
     }
     expect(saw_slot1, "RealIdent contains slot 1 module ident 0x10");
 
+    inject_lldp_neighbor(s, "ctl-lab1");
+    static const uint8_t peer_mac[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
     plen = build_read_pdu(pdu, 0, 0x8001, PN_INDEX_PDPORT_REAL);
     rlen = 0;
     rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
     expect(rc == 0 && rlen > 80, "Read PDPortDataReal returned");
     expect(contains(resp, rlen, "port-001"), "PDPortDataReal OwnPortID");
+    expect(contains_bytes(resp, rlen, peer_mac, 6),
+           "PDPortDataReal NumberOfPeers includes LLDP chassis");
+
+    plen = build_read_pdu(pdu, 0, 0x8001, PN_INDEX_PDPORT_CHECK);
+    rlen = 0;
+    rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
+    expect(rc == 0 && rlen > 80 &&
+               count_block(resp, rlen, PN_BLOCK_PDPORT_CHECK) >= 1,
+           "PDPortDataCheck default CheckPeers after LLDP");
+
+    plen = build_read_pdu(pdu, 0, 0x8000, PN_INDEX_PDIF_FSU);
+    rlen = 0;
+    rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
+    expect(rc == 0 && rlen > 80, "PDIF FSU empty success");
+
+    {
+        uint8_t fsu[16];
+        memset(fsu, 0, sizeof(fsu));
+        pn_wr_be16(fsu, PN_BLOCK_PDIF_FSU);
+        pn_wr_be16(fsu + 2, 12);
+        fsu[4] = 1;
+        fsu[6] = 0x11;
+        bn = put_iod_write_hdr(blocks, 6, 0, 0, 0x8000, PN_INDEX_PDIF_FSU,
+                               sizeof(fsu));
+        memcpy(blocks + bn, fsu, sizeof(fsu));
+        bn += sizeof(fsu);
+        sn = ndr_wrap_le(stub, blocks, bn);
+        plen = rpc_req(pdu, 3, stub, sn);
+        rlen = 0;
+        rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
+        expect(rc == 0 && count_block(resp, rlen, PN_BLOCK_WRITE_RES) == 1,
+               "PDIF FSU Write.res");
+        plen = build_read_pdu(pdu, 0, 0x8000, PN_INDEX_PDIF_FSU);
+        rlen = 0;
+        rc = pn_stack_handle_rpc(s, pdu, plen, resp, sizeof(resp), &rlen);
+        expect(rc == 0 && rlen > 80 &&
+                   count_block(resp, rlen, PN_BLOCK_PDIF_FSU) >= 1,
+               "PDIF FSU stored after Write");
+    }
 
     plen = build_read_pdu(pdu, 0, 0x8000, PN_INDEX_PDIF_REAL);
     rlen = 0;
@@ -1035,35 +1181,7 @@ static void test_lldp_remote(void)
 {
     tx_cap_t cap;
     pn_stack_t *s = mock_stack(&cap);
-    static const uint8_t dst[6] = {0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E};
-    static const uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
-    uint8_t pdu[64];
-    size_t n = 0;
-    pdu[n++] = 0x02;
-    pdu[n++] = 0x07;
-    pdu[n++] = 4;
-    memcpy(pdu + n, src, 6);
-    n += 6; /* Chassis ID */
-    pdu[n++] = 0x04;
-    pdu[n++] = 0x07;
-    pdu[n++] = 3;
-    memcpy(pdu + n, src, 6);
-    n += 6; /* Port ID */
-    pdu[n++] = 0x06;
-    pdu[n++] = 0x02;
-    pdu[n++] = 0x00;
-    pdu[n++] = 0x14; /* TTL */
-    const char *nm = "ctl-lab1";
-    pdu[n++] = 0x0A;
-    pdu[n++] = (uint8_t)strlen(nm);
-    memcpy(pdu + n, nm, strlen(nm));
-    n += strlen(nm);
-    pdu[n++] = 0x00;
-    pdu[n++] = 0x00;
-    uint8_t frame[PN_FRAME_MAX];
-    size_t flen =
-        pn_eth_build(frame, sizeof(frame), dst, src, PN_ETHTYPE_LLDP, pdu, n);
-    pn_stack_handle_eth(s, frame, flen);
+    inject_lldp_neighbor(s, "ctl-lab1");
     char rem[64];
     expect(pn_stack_lldp_remote_name(s, rem, sizeof(rem)) == 0 &&
                strcmp(rem, "ctl-lab1") == 0,
@@ -1178,6 +1296,58 @@ static size_t snmp_pdu_set(uint8_t *out, uint8_t rid, const uint8_t *oid,
     return m;
 }
 
+static size_t snmp_pdu_bulk(uint8_t *out, uint8_t rid, uint8_t max_rep,
+                            const uint8_t *oid, size_t olen)
+{
+    uint8_t vb[80];
+    size_t i = 0;
+    vb[i++] = 0x30;
+    size_t vb_len_at = i++;
+    vb[i++] = 0x06;
+    vb[i++] = (uint8_t)olen;
+    memcpy(vb + i, oid, olen);
+    i += olen;
+    vb[i++] = 0x05;
+    vb[i++] = 0x00;
+    vb[vb_len_at] = (uint8_t)(i - vb_len_at - 1);
+    uint8_t vbl[96];
+    size_t v = 0;
+    vbl[v++] = 0x30;
+    vbl[v++] = (uint8_t)i;
+    memcpy(vbl + v, vb, i);
+    v += i;
+    uint8_t pdu[160];
+    size_t p = 0;
+    pdu[p++] = 0xA5;
+    size_t pdu_len_at = p++;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = rid;
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = 0x00; /* non-repeaters */
+    pdu[p++] = 0x02;
+    pdu[p++] = 0x01;
+    pdu[p++] = max_rep;
+    memcpy(pdu + p, vbl, v);
+    p += v;
+    pdu[pdu_len_at] = (uint8_t)(p - pdu_len_at - 1);
+    size_t m = 0;
+    out[m++] = 0x30;
+    size_t msg_len_at = m++;
+    out[m++] = 0x02;
+    out[m++] = 0x01;
+    out[m++] = 0x00;
+    out[m++] = 0x04;
+    out[m++] = 0x06;
+    memcpy(out + m, "public", 6);
+    m += 6;
+    memcpy(out + m, pdu, p);
+    m += p;
+    out[msg_len_at] = (uint8_t)(m - msg_len_at - 1);
+    return m;
+}
+
 static int snmp_has(const uint8_t *resp, size_t n, const void *needle,
                     size_t nlen)
 {
@@ -1208,7 +1378,7 @@ static void test_snmp_mib(void)
     static const uint8_t oid_lldp_rem[] = {0x28, 0xc4, 0x62, 0x01, 0x01, 0x02,
                                            0x01, 0x04, 0x01, 0x01, 0x09, 0x00,
                                            0x01, 0x01};
-    uint8_t req[256], resp[512];
+    uint8_t req[256], resp[1024];
     size_t rlen = 0;
     size_t qn = snmp_pdu(req, 1, 0xa0, oid_sysname, sizeof(oid_sysname));
     expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
@@ -1236,40 +1406,51 @@ static void test_snmp_mib(void)
                contains(resp, rlen, "sensor-line1"),
            "SNMP Get lldpLocSysName");
 
-    static const uint8_t dst[6] = {0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E};
-    static const uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
-    uint8_t pdu[64];
-    size_t n = 0;
-    pdu[n++] = 0x02;
-    pdu[n++] = 0x07;
-    pdu[n++] = 4;
-    memcpy(pdu + n, src, 6);
-    n += 6;
-    pdu[n++] = 0x04;
-    pdu[n++] = 0x07;
-    pdu[n++] = 3;
-    memcpy(pdu + n, src, 6);
-    n += 6;
-    pdu[n++] = 0x06;
-    pdu[n++] = 0x02;
-    pdu[n++] = 0x00;
-    pdu[n++] = 0x14;
-    const char *nm = "ctl-lab1";
-    pdu[n++] = 0x0A;
-    pdu[n++] = (uint8_t)strlen(nm);
-    memcpy(pdu + n, nm, strlen(nm));
-    n += strlen(nm);
-    pdu[n++] = 0x00;
-    pdu[n++] = 0x00;
-    uint8_t frame[PN_FRAME_MAX];
-    size_t flen =
-        pn_eth_build(frame, sizeof(frame), dst, src, PN_ETHTYPE_LLDP, pdu, n);
-    pn_stack_handle_eth(s, frame, flen);
+    static const uint8_t oid_ipaddr[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x04,
+                                         0x14, 0x01, 0x01, 0x00, 0x00, 0x00,
+                                         0x00};
+    qn = snmp_pdu(req, 10, 0xa0, oid_ipaddr, sizeof(oid_ipaddr));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               snmp_has(resp, rlen, "\x00\x00\x00\x00", 4),
+           "SNMP Get ipAdEntAddr 0.0.0.0");
+    static const uint8_t oid_icmp[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x05, 0x01,
+                                       0x00};
+    qn = snmp_pdu(req, 11, 0xa0, oid_icmp, sizeof(oid_icmp));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               snmp_has(resp, rlen, "\x41", 1),
+           "SNMP Get icmpInMsgs Counter32");
+    qn = snmp_pdu_bulk(req, 12, 3, oid_sys, sizeof(oid_sys));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0,
+           "SNMP GetBulk system");
+    {
+        int n_oid = 0;
+        for (size_t i = 0; i + 1 < rlen; i++) {
+            if (resp[i] == 0x06) {
+                n_oid++;
+            }
+        }
+        expect(n_oid >= 3, "SNMP GetBulk max-repetitions returns 3 varbinds");
+        expect(contains(resp, rlen, "Fieldbus PN Device"),
+               "SNMP GetBulk includes sysDescr");
+    }
+
+    inject_lldp_neighbor(s, "ctl-lab1");
     qn = snmp_pdu(req, 6, 0xa0, oid_lldp_rem, sizeof(oid_lldp_rem));
     rlen = 0;
     expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
                contains(resp, rlen, "ctl-lab1"),
            "SNMP Get lldpRemSysName after LLDP RX");
+    static const uint8_t oid_lldp_rem_cap[] = {
+        0x28, 0xc4, 0x62, 0x01, 0x01, 0x02, 0x01, 0x04, 0x01, 0x01, 0x0b, 0x00,
+        0x01, 0x01};
+    qn = snmp_pdu(req, 13, 0xa0, oid_lldp_rem_cap, sizeof(oid_lldp_rem_cap));
+    rlen = 0;
+    expect(pn_stack_handle_snmp(s, req, qn, resp, sizeof(resp), &rlen) == 0 &&
+               snmp_has(resp, rlen, "\x00\x80", 2),
+           "SNMP Get lldpRemSysCapSupported after LLDP RX");
     static const uint8_t oid_ifinoct[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x02,
                                           0x02, 0x01, 0x0a, 0x01};
     qn = snmp_pdu(req, 7, 0xa0, oid_ifinoct, sizeof(oid_ifinoct));
@@ -1365,6 +1546,41 @@ static void test_rta_alarm(void)
                    rlen > 80 &&
                    count_block(rresp, rlen, PN_BLOCK_DIAGNOSIS) >= 1,
                "QualifiedChannelDiagnosis 0x8011");
+        for (int i = 0; i < 80; i++) {
+            pump_output_cr(s);
+            usleep(10000);
+        }
+        cap.n = 0;
+        pn_stack_poll(s);
+        int didx = -1;
+        expect(find_rta_data(&cap, &didx), "RTA disappear after appear ACK");
+        if (didx >= 0) {
+            const uint8_t *df = cap.frames[didx];
+            uint16_t spec = pn_rd_be16(df + 14 + 14 + 30);
+            expect(spec == PN_CHAN_DISAPPEARS_REM || spec == PN_CHAN_DISAPPEARS,
+                   "disappear ChannelProperties 0x1800/0x1000");
+            ack_rta_frame(s, df);
+            plen = build_read_pdu(rpdu, 0, 0x8001, PN_INDEX_CHAN_DIAG);
+            rlen = 0;
+            expect(pn_stack_handle_rpc(s, rpdu, plen, rresp, sizeof(rresp),
+                                       &rlen) == 0 &&
+                       rlen > 80 &&
+                       count_block(rresp, rlen, PN_BLOCK_DIAGNOSIS) >= 1,
+                   "ChannelDiagnosis remains after first disappear");
+            for (int i = 0; i < 80; i++) {
+                pump_output_cr(s);
+                usleep(10000);
+            }
+            cap.n = 0;
+            pn_stack_poll(s);
+            int pidx = -1;
+            expect(find_rta_data(&cap, &pidx), "RTA process alarm after disappear");
+            if (pidx >= 0) {
+                uint16_t altype = pn_rd_be16(cap.frames[pidx] + 14 + 14 + 6);
+                expect(altype == PN_ALARM_TYPE_PROCESS,
+                       "process AlarmType 0x0002");
+            }
+        }
     }
     pn_stack_destroy(s);
 }

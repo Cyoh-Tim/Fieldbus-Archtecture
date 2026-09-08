@@ -135,6 +135,9 @@ void pn_lldp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
                 s->lldp_rem_port[0] = '\0';
             }
             changed = 1;
+        } else if (type == 3 && len >= 2) {
+            s->lldp_rem_ttl = pn_rd_be16(val);
+            changed = 1;
         } else if (type == 5 && len > 0) {
             size_t n = len < PN_STATION_NAME_MAX ? len : PN_STATION_NAME_MAX;
             memcpy(s->lldp_rem_name, val, n);

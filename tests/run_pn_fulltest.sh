@@ -67,6 +67,8 @@ chk('IM_Supported="1 2 3 4"' in text, "LAB-GSD-IM",
 chk("MultipleWriteSupported=\"true\"" in text, "LAB-GSD-MULTIWRITE",
     "MultipleWriteSupported")
 chk("NumberOfAR=\"1\"" in text, "LAB-GSD-AR", "NumberOfAR=1")
+chk("ParameterizationSpeedupSupported=\"true\"" in text, "LAB-GSD-FSU",
+    "ParameterizationSpeedupSupported (FSU record 0x8090)")
 chk("DNS_CompatibleName=" in text, "LAB-GSD-DNS", "DNS_CompatibleName present")
 chk('Length="32"' in text and 'Length="8"' in text, "LAB-GSD-IO",
     "IO module 32-byte input / 8-byte output")

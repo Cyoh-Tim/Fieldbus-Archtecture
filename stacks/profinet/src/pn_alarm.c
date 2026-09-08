@@ -11,6 +11,7 @@
 #define RTA_ADDFLAGS 0x21
 #define RTA_TIMEOUT_NS 200000000ull
 #define RTA_MAX_RETRY  8
+#define RTA_PHASE_NS   750000000ull
 
 static void alarm_reset_tx(pn_stack_t *s)
 {
@@ -19,6 +20,7 @@ static void alarm_reset_tx(pn_stack_t *s)
     s->alarm_send_seq = 0;
     s->alarm_retries = 0;
     s->last_alarm_ns = 0;
+    s->alarm_kind = 0;
 }
 
 void pn_alarm_on_connect(pn_stack_t *s, const uint8_t *body, uint16_t blen)
@@ -54,29 +56,52 @@ void pn_alarm_on_connect(pn_stack_t *s, const uint8_t *body, uint16_t blen)
     alarm_reset_tx(s);
 }
 
-static void put_channel_diag(uint8_t *p)
+static int diag_remaining_after_first(const pn_stack_t *s)
 {
-    pn_wr_be16(p, 0x8000); /* whole submodule */
-    pn_wr_be16(p + 2, 0x0800); /* specifier = appears */
-    pn_wr_be16(p + 4, 0x0010); /* ChannelErrorType: parameter missing */
+    int seen = 0;
+    int remain = 0;
+    for (int i = 0; i < s->n_diag; i++) {
+        if (!s->diag[i].present) {
+            continue;
+        }
+        if (!seen) {
+            seen = 1;
+        } else {
+            remain++;
+        }
+    }
+    return remain;
 }
 
-static size_t put_notify_high(uint8_t *p)
+static size_t put_notify(uint8_t *p, int kind, int remaining)
 {
-    /* AlarmNotification-High + USI ChannelDiagnosis (diagnosis ASE). */
+    uint16_t altype =
+        (kind == 2) ? PN_ALARM_TYPE_PROCESS : PN_ALARM_TYPE_DIAG;
+    uint16_t spec = PN_CHAN_APPEARS;
+    if (kind == 1) {
+        spec = remaining ? PN_CHAN_DISAPPEARS_REM : PN_CHAN_DISAPPEARS;
+    }
+    /* AlarmNotification-High + optional USI ChannelDiagnosis. */
     pn_wr_be16(p, 0x0001);
-    pn_wr_be16(p + 2, 30);
     p[4] = 1;
     p[5] = 0;
-    pn_wr_be16(p + 6, 0x0001);  /* AlarmType Diagnosis */
+    pn_wr_be16(p + 6, altype);
     pn_wr_be32(p + 8, 0);
     pn_wr_be16(p + 12, 0);
     pn_wr_be16(p + 14, 0x8001);
     pn_wr_be32(p + 16, 1);
     pn_wr_be32(p + 20, 3);
-    pn_wr_be16(p + 24, 0x0800);
+    pn_wr_be16(p + 24, spec);
+    if (kind == 2) {
+        pn_wr_be16(p + 2, 24);
+        pn_wr_be16(p + 26, 0);
+        return 28;
+    }
+    pn_wr_be16(p + 2, 30);
     pn_wr_be16(p + 26, PN_USI_CHANNEL_DIAG);
-    put_channel_diag(p + 28);
+    pn_wr_be16(p + 28, 0x8000);
+    pn_wr_be16(p + 30, spec);
+    pn_wr_be16(p + 32, 0x0010);
     return 34;
 }
 
@@ -103,7 +128,8 @@ static void send_rta_data(pn_stack_t *s)
     n += 2;
     size_t vlen_at = n;
     n += 2;
-    size_t vn = put_notify_high(pay + n);
+    size_t vn = put_notify(pay + n, s->alarm_kind,
+                           diag_remaining_after_first(s));
     n += vn;
     pn_wr_be16(pay + vlen_at, (uint16_t)vn);
 
@@ -113,12 +139,24 @@ static void send_rta_data(pn_stack_t *s)
     if (flen) {
         pn_eth_send(s, frame, flen);
         s->alarm_rta_sent = 1;
-        s->diag_present = 1;
-        pn_diag_arm_default(s);
+        if (s->alarm_kind == 0) {
+            s->diag_present = 1;
+            pn_diag_arm_default(s);
+        }
         s->last_alarm_ns = pn_now_ns();
-        LOG_INFO("pn_alarm", "RTA Data seq=%u dst_ref=%u src_ref=%u",
-                 s->alarm_send_seq, dst_ref, src_ref);
+        LOG_INFO("pn_alarm", "RTA Data seq=%u kind=%d dst_ref=%u src_ref=%u",
+                 s->alarm_send_seq, s->alarm_kind, dst_ref, src_ref);
     }
+}
+
+static void start_next_phase(pn_stack_t *s, int kind)
+{
+    s->alarm_kind = kind;
+    s->alarm_send_seq++;
+    s->alarm_rta_sent = 0;
+    s->alarm_rta_acked = 0;
+    s->alarm_retries = 0;
+    send_rta_data(s);
 }
 
 void pn_alarm_poll(pn_stack_t *s)
@@ -134,14 +172,22 @@ void pn_alarm_poll(pn_stack_t *s)
         s->alarm_max_len = 200;
         s->alarm_cr_ok = 1;
     }
+    uint64_t now = pn_now_ns();
     if (s->alarm_rta_acked) {
+        if (s->last_alarm_ns == 0 || now - s->last_alarm_ns < RTA_PHASE_NS) {
+            return;
+        }
+        if (s->alarm_kind == 0) {
+            start_next_phase(s, 1);
+        } else if (s->alarm_kind == 1) {
+            start_next_phase(s, 2);
+        }
         return;
     }
     if (!s->alarm_rta_sent) {
         send_rta_data(s);
         return;
     }
-    uint64_t now = pn_now_ns();
     if (now - s->last_alarm_ns < RTA_TIMEOUT_NS) {
         return;
     }
@@ -169,6 +215,10 @@ void pn_alarm_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen)
     if (kind == RTA_PDU_ACK && dst_ref == local &&
         ack_seq == s->alarm_send_seq) {
         s->alarm_rta_acked = 1;
-        LOG_INFO("pn_alarm", "RTA ACK seq=%u", ack_seq);
+        s->last_alarm_ns = pn_now_ns();
+        if (s->alarm_kind == 1) {
+            pn_diag_disappear(s, 0);
+        }
+        LOG_INFO("pn_alarm", "RTA ACK seq=%u kind=%d", ack_seq, s->alarm_kind);
     }
 }

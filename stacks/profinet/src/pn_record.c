@@ -157,11 +157,30 @@ static size_t put_realident(const pn_stack_t *s, uint16_t slot, uint16_t subslot
     return rec_block(out, cap, PN_BLOCK_REALIDENT, body, (uint16_t)off);
 }
 
-static size_t put_pdport_real(uint16_t slot, uint16_t subslot, uint8_t *out,
-                              size_t cap)
+static void peer_ids(const pn_stack_t *s, const uint8_t **port, size_t *plen,
+                     const uint8_t **ch, size_t *clen)
+{
+    if (s->lldp_rem_port[0]) {
+        *port = (const uint8_t *)s->lldp_rem_port;
+        *plen = strlen(s->lldp_rem_port);
+    } else {
+        *port = s->lldp_rem_mac;
+        *plen = 6;
+    }
+    if (s->lldp_rem_chassis_len) {
+        *ch = s->lldp_rem_chassis;
+        *clen = s->lldp_rem_chassis_len;
+    } else {
+        *ch = s->lldp_rem_mac;
+        *clen = 6;
+    }
+}
+
+static size_t put_pdport_real(const pn_stack_t *s, uint16_t slot,
+                              uint16_t subslot, uint8_t *out, size_t cap)
 {
     static const char port[] = "port-001";
-    uint8_t body[64];
+    uint8_t body[128];
     memset(body, 0, sizeof(body));
     size_t off = 0;
     off += 2; /* align4 after BlockHeader */
@@ -172,9 +191,33 @@ static size_t put_pdport_real(uint16_t slot, uint16_t subslot, uint8_t *out,
     body[off++] = (uint8_t)(sizeof(port) - 1);
     memcpy(body + off, port, sizeof(port) - 1);
     off += sizeof(port) - 1;
-    body[off++] = 0; /* NumberOfPeers */
-    while ((6u + off) & 3u) {
-        body[off++] = 0;
+    if (s->lldp_rem_set) {
+        const uint8_t *pport, *pch;
+        size_t plen, clen;
+        peer_ids(s, &pport, &plen, &pch, &clen);
+        if (plen > 32) {
+            plen = 32;
+        }
+        if (clen > 32) {
+            clen = 32;
+        }
+        body[off++] = 1; /* NumberOfPeers */
+        body[off++] = (uint8_t)plen;
+        memcpy(body + off, pport, plen);
+        off += plen;
+        body[off++] = (uint8_t)clen;
+        memcpy(body + off, pch, clen);
+        off += clen;
+        while ((6u + off) & 3u) {
+            body[off++] = 0;
+        }
+        pn_wr_be32(body + off, 0); /* LineDelay unknown */
+        off += 4;
+    } else {
+        body[off++] = 0; /* NumberOfPeers */
+        while ((6u + off) & 3u) {
+            body[off++] = 0;
+        }
     }
     pn_wr_be16(body + off, 0x0010); /* 100BaseTXFD, GSDML MAUTypes=16 */
     off += 2;
@@ -189,6 +232,49 @@ static size_t put_pdport_real(uint16_t slot, uint16_t subslot, uint8_t *out,
     pn_wr_be32(body + off, 0); /* MediaType copper/unknown */
     off += 4;
     return rec_block(out, cap, PN_BLOCK_PDPORT_REAL, body, (uint16_t)off);
+}
+
+static size_t put_pdport_check_default(const pn_stack_t *s, uint16_t slot,
+                                       uint16_t subslot, uint8_t *out,
+                                       size_t cap)
+{
+    const uint8_t *pport, *pch;
+    size_t plen, clen;
+    peer_ids(s, &pport, &plen, &pch, &clen);
+    if (plen > 32) {
+        plen = 32;
+    }
+    if (clen > 32) {
+        clen = 32;
+    }
+    uint8_t peers[80];
+    size_t po = 0;
+    peers[po++] = 1;
+    peers[po++] = (uint8_t)plen;
+    memcpy(peers + po, pport, plen);
+    po += plen;
+    peers[po++] = (uint8_t)clen;
+    memcpy(peers + po, pch, clen);
+    po += clen;
+    uint8_t inner[96];
+    size_t in = rec_block(inner, sizeof(inner), PN_BLOCK_CHECK_PEERS, peers,
+                          (uint16_t)po);
+    if (in == 0) {
+        return 0;
+    }
+    uint8_t body[112];
+    memset(body, 0, sizeof(body));
+    size_t off = 2;
+    pn_wr_be16(body + off, slot);
+    off += 2;
+    pn_wr_be16(body + off, subslot);
+    off += 2;
+    if (off + in > sizeof(body)) {
+        return 0;
+    }
+    memcpy(body + off, inner, in);
+    off += in;
+    return rec_block(out, cap, PN_BLOCK_PDPORT_CHECK, body, (uint16_t)off);
 }
 
 static size_t put_pdif_real(const pn_stack_t *s, uint8_t *out, size_t cap)
@@ -301,6 +387,43 @@ void pn_diag_arm_default(pn_stack_t *s)
     s->n_diag = 2;
 }
 
+void pn_diag_disappear(pn_stack_t *s, int all)
+{
+    if (!s) {
+        return;
+    }
+    if (all) {
+        memset(s->diag, 0, sizeof(s->diag));
+        s->n_diag = 0;
+        s->diag_present = 0;
+        return;
+    }
+    int first = -1;
+    int remain = 0;
+    for (int i = 0; i < s->n_diag; i++) {
+        if (!s->diag[i].present) {
+            continue;
+        }
+        if (first < 0) {
+            first = i;
+        } else {
+            remain++;
+        }
+    }
+    if (first >= 0) {
+        s->diag[first].properties =
+            remain ? PN_CHAN_DISAPPEARS_REM : PN_CHAN_DISAPPEARS;
+        s->diag[first].present = 0;
+    }
+    int any = 0;
+    for (int i = 0; i < s->n_diag; i++) {
+        if (s->diag[i].present) {
+            any = 1;
+        }
+    }
+    s->diag_present = any;
+}
+
 static void put_channel_diag(uint8_t *p, const pn_diag_ch_t *d)
 {
     pn_wr_be16(p, d->channel);
@@ -383,7 +506,7 @@ int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                index == PN_INDEX_REALIDENT_SUB) {
         n = put_realident(s, slot, subslot, index, out, cap);
     } else if (index == PN_INDEX_PDPORT_REAL) {
-        n = put_pdport_real(slot, subslot ? subslot : (uint16_t)0x8001, out,
+        n = put_pdport_real(s, slot, subslot ? subslot : (uint16_t)0x8001, out,
                             cap);
     } else if (index == PN_INDEX_PDIF_REAL) {
         n = put_pdif_real(s, out, cap);
@@ -399,12 +522,22 @@ int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
         }
     } else if (index == PN_INDEX_PDPORT_CHECK) {
         n = put_stored(out, cap, s->pdport_check, s->pdport_check_len);
+        if (n == 0 && s->lldp_rem_set) {
+            n = put_pdport_check_default(
+                s, slot, subslot ? subslot : (uint16_t)0x8001, out, cap);
+        }
         if (n == 0) {
             *out_len = 0;
             return 0;
         }
     } else if (index == PN_INDEX_PDIF_ADJUST) {
         n = put_stored(out, cap, s->pdif_adjust, s->pdif_adjust_len);
+        if (n == 0) {
+            *out_len = 0;
+            return 0;
+        }
+    } else if (index == PN_INDEX_PDIF_FSU) {
+        n = put_stored(out, cap, s->pdif_fsu, s->pdif_fsu_len);
         if (n == 0) {
             *out_len = 0;
             return 0;
@@ -513,6 +646,14 @@ int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
     }
     if (index == PN_INDEX_PDIF_ADJUST && len >= 6) {
         store_pdev(s->pdif_adjust, &s->pdif_adjust_len, data, len);
+        return 0;
+    }
+    if (index == PN_INDEX_PDIF_FSU && len >= 6) {
+        store_pdev(s->pdif_fsu, &s->pdif_fsu_len, data, len);
+        return 0;
+    }
+    if (index == PN_INDEX_CHAN_DIAG && len < 6) {
+        pn_diag_disappear(s, 1);
         return 0;
     }
     /* Short dummy writes (WriteMultiple 4-byte padding) are ACK'd and ignored. */
