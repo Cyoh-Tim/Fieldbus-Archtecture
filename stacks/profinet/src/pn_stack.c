@@ -13,13 +13,16 @@ static const uint8_t k_dcp_mc[6] = {0x01, 0x0E, 0xCF, 0x00, 0x00, 0x00};
 
 void pn_ar_reset(pn_stack_t *s)
 {
+    pthread_mutex_lock(&s->rt_lock);
     memset(&s->ar, 0, sizeof(s->ar));
     pthread_mutex_lock(&s->io_lock);
     memset(s->input_image, 0, sizeof(s->input_image));
     memset(s->output_image, 0, sizeof(s->output_image));
     pthread_mutex_unlock(&s->io_lock);
     s->last_rt_ns = 0;
+    s->next_rt_ns = 0;
     s->last_cpm_ns = 0;
+    pthread_mutex_unlock(&s->rt_lock);
     s->rpc_tx_pending = 0;
     s->rpc_tx_len = 0;
     s->alarm_peer_ref = 0;
@@ -137,6 +140,7 @@ pn_stack_t *pn_stack_create(const pn_cfg_t *cfg)
         s->cfg.mac_set = 1;
     }
     pthread_mutex_init(&s->io_lock, NULL);
+    pthread_mutex_init(&s->rt_lock, NULL);
     memset(s->input_image, 0, sizeof(s->input_image));
     memset(s->output_image, 0, sizeof(s->output_image));
     memset(s->im1_function, ' ', sizeof(s->im1_function));
@@ -160,6 +164,7 @@ void pn_stack_destroy(pn_stack_t *s)
         return;
     }
     pn_stack_stop(s);
+    pthread_mutex_destroy(&s->rt_lock);
     pthread_mutex_destroy(&s->io_lock);
     free(s);
 }
@@ -236,6 +241,7 @@ int pn_stack_start(pn_stack_t *s)
         }
     }
     s->running = 1;
+    pn_rt_thread_start(s);
     LOG_INFO("pn_stack",
              "start RT1 sec=%d name=%s iface=%s in=%u out=%u cycle=%uus",
              s->cfg.security_class, s->cfg.station_name,
@@ -269,6 +275,7 @@ void pn_stack_rebind_udp(pn_stack_t *s)
 void pn_stack_stop(pn_stack_t *s)
 {
     s->running = 0;
+    pn_rt_thread_stop(s);
     pn_ar_reset(s);
     pn_eth_close(s);
     close_udp(s);

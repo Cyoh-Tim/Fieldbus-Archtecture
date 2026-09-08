@@ -15,6 +15,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,11 +36,16 @@ static const uint8_t k_dcp_mc[6] = {0x01, 0x0E, 0xCF, 0x00, 0x00, 0x00};
 static int g_pass;
 static int g_fail;
 
-static uint64_t now_ms(void)
+static uint64_t now_ns(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+static uint64_t now_ms(void)
+{
+    return now_ns() / 1000000ull;
 }
 
 static void check(int cond, const char *id, const char *msg)
@@ -758,8 +764,23 @@ int main(int argc, char **argv)
     int cyclic_in = 0;
     int iops_ok = 0;
     int pattern_ok = 0;
-    uint64_t end = now_ms() + 1200;
+    uint64_t cyclic_ms = 1200;
+    {
+        const char *e = getenv("PN_BETA_CYCLIC_MS");
+        if (e && atoi(e) > 0) {
+            cyclic_ms = (uint64_t)atoi(e);
+        }
+    }
+    uint64_t end = now_ms() + cyclic_ms;
     uint64_t last_out = 0;
+    uint64_t last_in_ns = 0;
+    const uint64_t period = 8000000ull;
+    const int warmup = 5;
+    int nint = 0;
+    uint64_t sum = 0;
+    uint64_t min_i = UINT64_MAX;
+    uint64_t max_i = 0;
+    uint64_t max_late = 0;
     while (now_ms() < end) {
         uint64_t t = now_ms();
         if (t - last_out >= 8) {
@@ -782,7 +803,23 @@ int main(int argc, char **argv)
         int rnraw = wait_recv(raw, rx, sizeof(rx), 4);
         if (rnraw >= 18 && pn_rd_be16(rx + 12) == PN_ETHTYPE_PN &&
             pn_rd_be16(rx + 14) == 0x8123) {
+            uint64_t ts = now_ns();
             cyclic_in++;
+            if (cyclic_in > warmup && last_in_ns != 0) {
+                uint64_t dt = ts - last_in_ns;
+                sum += dt;
+                nint++;
+                if (dt < min_i) {
+                    min_i = dt;
+                }
+                if (dt > max_i) {
+                    max_i = dt;
+                }
+                if (dt > period && dt - period > max_late) {
+                    max_late = dt - period;
+                }
+            }
+            last_in_ns = ts;
             if ((size_t)rnraw > 14 + 2 + 32 &&
                 rx[14 + 2 + 32] == PN_IOPS_GOOD) {
                 iops_ok = 1;
@@ -792,9 +829,26 @@ int main(int argc, char **argv)
             }
         }
     }
-    check(cyclic_in >= 20, "CDS-RTC1-CYCLIC", "8 ms input CR (CODESYS SendClock)");
+    check(cyclic_in >= 100, "CDS-RTC1-CYCLIC",
+          "8 ms input CR (>=100 frames / 1.2s)");
     check(iops_ok, "CDS-RTC1-IOPS", "IOPS GOOD on input");
     check(pattern_ok, "CDS-RTC1-INPUT", "process input BETA-PN-IN (PLC_PRG mapping)");
+
+    {
+        uint64_t mean = nint ? sum / nint : 0;
+        char jmsg[160];
+        snprintf(jmsg, sizeof(jmsg),
+                 "mean=%lluus min=%lluus max=%lluus late_max=%lluus n=%d",
+                 (unsigned long long)(mean / 1000ull),
+                 (unsigned long long)(min_i == UINT64_MAX ? 0 : min_i / 1000ull),
+                 (unsigned long long)(max_i / 1000ull),
+                 (unsigned long long)(max_late / 1000ull), nint);
+        /* Non-PREEMPT_RT cloud VMs are not 0.1 ms class. Gate on phase-lock:
+         * mean near 8 ms, late_max well under the old ~1 ms stretch. */
+        check(nint >= 80 && mean >= 7600000ull && mean <= 8400000ull &&
+                  max_late < 800000ull,
+              "CDS-RTC1-JITTER", jmsg);
+    }
 
     plen = build_release(pdu);
     rn = rpc_call(rpc, dev_ip, pdu, plen, resp, sizeof(resp), 1500);

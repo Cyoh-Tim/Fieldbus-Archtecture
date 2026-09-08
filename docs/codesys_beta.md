@@ -18,7 +18,9 @@ bash tests/run_pn_codesys_beta.sh
 
 That script walks the same CM path CODESYS uses (DCP scan / Nominate /
 Connect+AlarmCR / sequential Write / PrmEnd / AppReady / 8 ms RTC1 / Release).
-It is **not** a CODESYS binary and not PI ART.
+It is **not** a CODESYS binary and not PI ART. RTC1 TX is phase-locked on an
+absolute 8 ms grid (skip missed cycles, no period stretch). The beta asserts
+≥100 input frames in 1.2 s and mean interval near 8 ms.
 
 ## What you need on a PC (2-hour session)
 

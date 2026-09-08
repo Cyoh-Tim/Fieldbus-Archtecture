@@ -614,10 +614,13 @@ static void queue_apprdy(pn_stack_t *s)
 
 static void enter_dataex(pn_stack_t *s)
 {
+    pthread_mutex_lock(&s->rt_lock);
     s->ar.cm_state = PN_CM_DATAEX;
     s->ar.established = 1;
     s->last_cpm_ns = pn_now_ns();
     s->last_rt_ns = 0;
+    s->next_rt_ns = 0;
+    pthread_mutex_unlock(&s->rt_lock);
     LOG_INFO("pn_rpc", "DATAEX in_fid=0x%04x out_fid=0x%04x cycle=%uus wd=%u",
              s->ar.in_frame_id, s->ar.out_frame_id,
              (unsigned)(pn_ar_cycle_ns(&s->ar, s->cfg.cycle_us) / 1000ull),

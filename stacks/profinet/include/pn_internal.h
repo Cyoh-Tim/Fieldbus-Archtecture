@@ -92,7 +92,8 @@ struct pn_stack {
     uint8_t input_image[PN_IO_MAX];
     uint8_t output_image[PN_IO_MAX];
     uint16_t cycle_counter;
-    uint64_t last_rt_ns;
+    uint64_t last_rt_ns;  /* last cyclic TX timestamp (debug) */
+    uint64_t next_rt_ns;  /* absolute CLOCK_MONOTONIC due; 0 = send now */
     uint64_t last_cpm_ns;
     uint64_t last_lldp_ns;
     uint64_t last_hello_ns;
@@ -170,6 +171,9 @@ struct pn_stack {
     int rpc_tx_pending;
 
     pthread_mutex_t io_lock;
+    pthread_mutex_t rt_lock;
+    pthread_t rt_thread;
+    int rt_thread_started;
 };
 
 uint64_t pn_now_ns(void);
@@ -208,6 +212,8 @@ void pn_lldp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
 void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen);
 void pn_rt_send_if_due(pn_stack_t *s);
 void pn_rt_watchdog(pn_stack_t *s);
+void pn_rt_thread_start(pn_stack_t *s);
+void pn_rt_thread_stop(pn_stack_t *s);
 
 int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
                   size_t cap, size_t *out_len);

@@ -870,6 +870,28 @@ static void test_cm_connect_prmend(void)
     }
     expect(saw_fid, "RTC1 input uses Connect FrameID 0x8123 and process data");
 
+    cap.n = 0;
+    pn_stack_poll(s);
+    int burst = 0;
+    for (int i = 0; i < cap.n; i++) {
+        if (cap.lens[i] >= 16 && pn_rd_be16(cap.frames[i] + 12) == PN_ETHTYPE_PN &&
+            pn_rd_be16(cap.frames[i] + 14) == 0x8123) {
+            burst = 1;
+        }
+    }
+    expect(!burst, "RTC1 does not burst on extra poll within the cycle");
+    usleep(9000);
+    cap.n = 0;
+    pn_stack_poll(s);
+    int after_period = 0;
+    for (int i = 0; i < cap.n; i++) {
+        if (cap.lens[i] >= 16 && pn_rd_be16(cap.frames[i] + 12) == PN_ETHTYPE_PN &&
+            pn_rd_be16(cap.frames[i] + 14) == 0x8123) {
+            after_period = 1;
+        }
+    }
+    expect(after_period, "RTC1 sends again after the 8 ms cycle");
+
     /* controller output CR uses device-assigned 0x8000 */
     uint8_t opay[48];
     memset(opay, 0, sizeof(opay));

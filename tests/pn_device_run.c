@@ -59,7 +59,7 @@ int main(int argc, char **argv)
         'B', 'E', 'T', 'A', '-', 'P', 'N', '-', 'I', 'N', '-',
         '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
         'A', 'B', 'C', 'D', 'E', 'F', '!', '!', '!', '!', '!'};
-    int loops = seconds * 50;
+    int loops = seconds * 1000;
     for (int i = 0; i < loops && g_run; i++) {
         if (beta_io) {
             pn_stack_write_input(s, 0, k_beta_in, sizeof(k_beta_in));
@@ -69,7 +69,7 @@ int main(int argc, char **argv)
             pn_stack_diag_appear(s);
             injected = 1;
         }
-        usleep(20000);
+        usleep(1000);
     }
     pn_stack_destroy(s);
     return 0;
