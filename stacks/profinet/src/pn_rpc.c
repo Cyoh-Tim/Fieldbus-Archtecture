@@ -410,12 +410,11 @@ static void finalize_ar(pn_stack_t *s)
         }
     }
     if (a->send_clock_factor == 0) {
-        a->send_clock_factor = 32;
+        a->send_clock_factor = PN_SENDCLOCK_DEFAULT;
     }
     if (a->reduction_ratio == 0) {
-        uint32_t cyc = s->cfg.cycle_us ? s->cfg.cycle_us : 8000;
-        uint32_t rr = cyc / 1000u;
-        a->reduction_ratio = rr ? (uint16_t)rr : 1;
+        a->reduction_ratio =
+            pn_rr_from_cycle_us(a->send_clock_factor, s->cfg.cycle_us);
     }
     if (a->watchdog_factor == 0) {
         a->watchdog_factor = 3;

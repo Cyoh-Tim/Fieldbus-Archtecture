@@ -42,7 +42,8 @@ absolute 8 ms grid (skip missed cycles, no period stretch). The beta asserts
 4. On the device:
    - Station name: `sensor-line1` (must match `protocol_params.device_name`)
    - IP: `192.168.0.10` (or the NIC you actually use)
-   - Cycle: **8 ms** (SendClock 32 × ReductionRatio 8). Do not set 1 ms.
+   - Cycle: **8 ms** default (SendClock 32 × ReductionRatio 8). GSDML also
+     allows 16/32/64/128/256/512 ms. Do not set 1 ms.
    - Slot 1: IO module already in the GSDML (32 byte in / 8 byte out).
 5. I/O mapping: copy `tests/codesys/PLC_PRG.st` into `PLC_PRG`.
 6. On the Linux target running this stack:

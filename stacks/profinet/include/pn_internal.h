@@ -185,6 +185,7 @@ struct pn_stack {
 
 uint64_t pn_now_ns(void);
 uint64_t pn_ar_cycle_ns(const pn_ar_t *ar, uint32_t fallback_us);
+uint16_t pn_rr_from_cycle_us(uint16_t send_clock, uint32_t cycle_us);
 uint64_t pn_ar_watchdog_ns(const pn_ar_t *ar, uint32_t fallback_us);
 const pn_submod_t *pn_find_sub(const pn_ar_t *ar, uint16_t slot,
                                uint16_t subslot);

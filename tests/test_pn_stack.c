@@ -424,16 +424,16 @@ static size_t build_ar_body(uint8_t *b, const uint8_t uuid[16],
     return 56;
 }
 
-static size_t build_connect_stub(uint8_t *blocks, size_t cap)
+static size_t build_connect_stub(uint8_t *blocks, size_t cap, uint16_t rr)
 {
     static const uint8_t uuid[16] = {1, 2, 3, 4, 5, 6, 7, 8,
                                      9, 10, 11, 12, 13, 14, 15, 16};
     static const uint8_t mac[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
     uint8_t ar[64], iin[64], iout[64], exp[48];
     size_t an = build_ar_body(ar, uuid, mac);
-    size_t nin = build_iocr_body(iin, PN_IOCR_INPUT, 1, 40, 0x8123, 32, 8, 3, 1,
+    size_t nin = build_iocr_body(iin, PN_IOCR_INPUT, 1, 40, 0x8123, 32, rr, 3, 1,
                                  1, 0, 33);
-    size_t nout = build_iocr_body(iout, PN_IOCR_OUTPUT, 2, 40, 0xFFFF, 32, 8, 3,
+    size_t nout = build_iocr_body(iout, PN_IOCR_OUTPUT, 2, 40, 0xFFFF, 32, rr, 3,
                                   1, 1, 0, 9);
     size_t ne = build_expsub_body(exp, 32, 8);
     size_t n = 0;
@@ -567,10 +567,10 @@ static void ack_rta_frame(pn_stack_t *s, const uint8_t *f)
     pn_stack_handle_eth(s, ack, 60);
 }
 
-static int do_connect(pn_stack_t *s)
+static int do_connect_rr(pn_stack_t *s, uint16_t rr)
 {
     uint8_t blocks[512];
-    size_t bn = build_connect_stub(blocks, sizeof(blocks));
+    size_t bn = build_connect_stub(blocks, sizeof(blocks), rr);
     uint8_t stub[600];
     size_t sn = ndr_wrap_le(stub, blocks, bn);
     uint8_t pdu[800];
@@ -615,6 +615,11 @@ static int do_connect(pn_stack_t *s)
     expect(saw_alarm, "Connect.res contains AlarmCRBlockRes 0x8103");
     expect(!saw_moddiff, "Connect.res omits ModuleDiff when ExpectedSubmodule matches");
     return rc;
+}
+
+static int do_connect(pn_stack_t *s)
+{
+    return do_connect_rr(s, 8);
 }
 
 static int do_prmend(pn_stack_t *s)
@@ -890,7 +895,7 @@ static void test_cm_connect_prmend(void)
             after_period = 1;
         }
     }
-    expect(after_period, "RTC1 sends again after the 8 ms cycle");
+    expect(after_period, "RTC1 sends again after the configured cycle");
 
     /* controller output CR uses device-assigned 0x8000 */
     uint8_t opay[48];
@@ -1787,7 +1792,7 @@ static void test_irt_reject(void)
     tx_cap_t cap;
     pn_stack_t *s = mock_stack(&cap);
     uint8_t blocks[512];
-    size_t bn = build_connect_stub(blocks, sizeof(blocks));
+    size_t bn = build_connect_stub(blocks, sizeof(blocks), 8);
     size_t off = 0;
     while (off + 12 < bn) {
         uint16_t type = pn_rd_be16(blocks + off);
@@ -1893,6 +1898,43 @@ static void test_watchdog(void)
     pn_stack_destroy(s);
 }
 
+static int cap_saw_in(const tx_cap_t *cap)
+{
+    for (int i = 0; i < cap->n; i++) {
+        if (cap->lens[i] >= 16 &&
+            pn_rd_be16(cap->frames[i] + 12) == PN_ETHTYPE_PN &&
+            pn_rd_be16(cap->frames[i] + 14) == 0x8123) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void test_rtc1_16ms(void)
+{
+    tx_cap_t cap;
+    pn_stack_t *s = mock_stack(&cap);
+    do_connect_rr(s, 16);
+    do_prmend(s);
+    do_apprdy_ack(s);
+    expect(pn_stack_ar_up(s), "DATAEX at ReductionRatio 16");
+    cap.n = 0;
+    pn_stack_poll(s);
+    expect(cap_saw_in(&cap), "first RTC1 frame on 16 ms AR");
+    cap.n = 0;
+    pn_stack_poll(s);
+    expect(!cap_saw_in(&cap), "no burst within 16 ms");
+    usleep(9000);
+    cap.n = 0;
+    pn_stack_poll(s);
+    expect(!cap_saw_in(&cap), "9 ms is still inside a 16 ms cycle");
+    usleep(8000);
+    cap.n = 0;
+    pn_stack_poll(s);
+    expect(cap_saw_in(&cap), "RTC1 sends after 16 ms");
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
     test_hmac();
@@ -1913,6 +1955,7 @@ int main(void)
     test_dcp_hello();
     test_dcp_set_ip_resets_ar();
     test_watchdog();
+    test_rtc1_16ms();
     if (g_fail) {
         fprintf(stderr, "pn stack tests FAILED\n");
         return 1;

@@ -105,7 +105,7 @@ static size_t build_input_csdu(pn_stack_t *s, uint8_t *csdu, size_t cap)
 static void pn_rt_advance_next(pn_stack_t *s, uint64_t now, uint64_t period)
 {
     if (period == 0) {
-        period = 8000000ull;
+        period = pn_ar_cycle_ns(&s->ar, s->cfg.cycle_us);
     }
     if (s->next_rt_ns == 0) {
         s->next_rt_ns = now + period;
@@ -116,6 +116,21 @@ static void pn_rt_advance_next(pn_stack_t *s, uint64_t now, uint64_t period)
     while (s->next_rt_ns <= now) {
         s->next_rt_ns += period;
     }
+}
+
+static uint64_t pn_rt_spin_ns(uint64_t period)
+{
+    uint64_t spin = period / 8ull;
+    if (spin > 1000000ull) {
+        spin = 1000000ull;
+    }
+    if (spin < 200000ull) {
+        spin = 200000ull;
+    }
+    if (period != 0 && spin * 2ull >= period) {
+        spin = period / 4ull;
+    }
+    return spin ? spin : 200000ull;
 }
 
 static void pn_rt_cpu_relax(void)
@@ -300,7 +315,7 @@ static void *pn_rt_thread_main(void *arg)
     pn_stack_t *s = arg;
 #ifdef __linux__
     prctl(PR_SET_NAME, "pn-rtc1");
-    /* Default slack is 50 us; tighten so 8 ms wakeups stay near the grid. */
+    /* Default slack is 50 us; tighten so cycle wakeups stay near the grid. */
     prctl(PR_SET_TIMERSLACK, 1UL);
 #endif
     {
@@ -316,16 +331,17 @@ static void *pn_rt_thread_main(void *arg)
         }
     }
 
-    /* Sleep until 1 ms before due, build the frame, then spin onto the grid
-     * and sendto. ISA (x86 vs ARM) does not set the period; stretch did. */
-    const uint64_t spin_ns = 1000000ull;
+    /* Sleep until spin_ns before due, build the frame, then sendto on the
+     * configured SendClock×ReductionRatio grid (8 ms min, 16/32/... ms). */
 
     while (s->running) {
         uint64_t next = 0;
+        uint64_t period = 0;
         int active = 0;
         pthread_mutex_lock(&s->rt_lock);
         active = s->ar.established && s->ar.cm_state == PN_CM_DATAEX;
         next = s->next_rt_ns;
+        period = pn_ar_cycle_ns(&s->ar, s->cfg.cycle_us);
         pthread_mutex_unlock(&s->rt_lock);
 
         if (!active) {
@@ -340,6 +356,7 @@ static void *pn_rt_thread_main(void *arg)
             continue;
         }
 
+        uint64_t spin_ns = pn_rt_spin_ns(period);
         if (next > now + spin_ns) {
             pn_rt_sleep_until(next - spin_ns);
             if (!s->running) {

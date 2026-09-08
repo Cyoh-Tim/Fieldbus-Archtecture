@@ -50,13 +50,47 @@ void pn_ar_reset(pn_stack_t *s)
     s->connect_reject = 0;
 }
 
+uint16_t pn_rr_from_cycle_us(uint16_t send_clock, uint32_t cycle_us)
+{
+    static const uint16_t k_rr[] = {8, 16, 32, 64, 128, 256, 512};
+    uint32_t sc = send_clock ? send_clock : PN_SENDCLOCK_DEFAULT;
+    uint32_t want = cycle_us;
+    if (want < PN_CYCLE_MIN_US) {
+        want = PN_CYCLE_MIN_US;
+    }
+    if (want > PN_CYCLE_MAX_US) {
+        want = PN_CYCLE_MAX_US;
+    }
+    uint16_t best = PN_REDUCTION_MIN;
+    uint32_t best_err = 0xffffffffu;
+    for (size_t i = 0; i < sizeof(k_rr) / sizeof(k_rr[0]); i++) {
+        uint32_t got_us = (sc * (uint32_t)k_rr[i] * 31250u) / 1000u;
+        uint32_t err = got_us > want ? got_us - want : want - got_us;
+        if (err < best_err) {
+            best_err = err;
+            best = k_rr[i];
+        }
+    }
+    return best;
+}
+
 uint64_t pn_ar_cycle_ns(const pn_ar_t *ar, uint32_t fallback_us)
 {
-    uint64_t sc = ar->send_clock_factor ? ar->send_clock_factor : 32;
-    uint64_t rr = ar->reduction_ratio ? ar->reduction_ratio : 1;
-    uint64_t ns = sc * rr * 31250ull;
+    uint64_t sc = ar->send_clock_factor ? ar->send_clock_factor
+                                       : PN_SENDCLOCK_DEFAULT;
+    uint64_t ns = 0;
+    if (ar->reduction_ratio != 0) {
+        ns = sc * (uint64_t)ar->reduction_ratio * 31250ull;
+    }
     if (ns == 0) {
-        ns = (uint64_t)(fallback_us ? fallback_us : 8000) * 1000ull;
+        uint32_t us = fallback_us ? fallback_us : PN_CYCLE_MIN_US;
+        ns = (uint64_t)us * 1000ull;
+    }
+    if (ns < (uint64_t)PN_CYCLE_MIN_US * 1000ull) {
+        ns = (uint64_t)PN_CYCLE_MIN_US * 1000ull;
+    }
+    if (ns > (uint64_t)PN_CYCLE_MAX_US * 1000ull) {
+        ns = (uint64_t)PN_CYCLE_MAX_US * 1000ull;
     }
     return ns;
 }
@@ -129,7 +163,17 @@ pn_stack_t *pn_stack_create(const pn_cfg_t *cfg)
         s->cfg.output_len = PN_IO_MAX;
     }
     if (s->cfg.cycle_us == 0) {
-        s->cfg.cycle_us = 8000;
+        s->cfg.cycle_us = PN_CYCLE_MIN_US;
+    }
+    if (s->cfg.cycle_us < PN_CYCLE_MIN_US) {
+        LOG_WARN("pn_stack", "cycle_us=%u below 8 ms min, clamping",
+                 s->cfg.cycle_us);
+        s->cfg.cycle_us = PN_CYCLE_MIN_US;
+    }
+    if (s->cfg.cycle_us > PN_CYCLE_MAX_US) {
+        LOG_WARN("pn_stack", "cycle_us=%u above 512 ms max, clamping",
+                 s->cfg.cycle_us);
+        s->cfg.cycle_us = PN_CYCLE_MAX_US;
     }
     if (s->cfg.vendor_id == 0) {
         s->cfg.vendor_id = 0xABCD;

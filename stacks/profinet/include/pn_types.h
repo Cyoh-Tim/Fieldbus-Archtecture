@@ -149,4 +149,11 @@
 #define PN_RT_CLASS_3           3
 #define PN_SECURITY_CLASS_1     1
 
+/* GSDML MinDeviceInterval=256, SendClock=32, ReductionRatio 8..512 */
+#define PN_SENDCLOCK_DEFAULT    32
+#define PN_REDUCTION_MIN        8
+#define PN_REDUCTION_MAX        512
+#define PN_CYCLE_MIN_US         8000u
+#define PN_CYCLE_MAX_US         512000u
+
 #endif /* PN_TYPES_H */

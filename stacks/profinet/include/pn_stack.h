@@ -46,7 +46,7 @@ typedef struct {
     int psk_set;
     uint16_t input_len;  /* device -> controller */
     uint16_t output_len; /* controller -> device */
-    uint32_t cycle_us;
+    uint32_t cycle_us;   /* RTC1 fallback if Connect omits RR; min 8 ms */
     int apply_os_ip;
 } pn_cfg_t;
 

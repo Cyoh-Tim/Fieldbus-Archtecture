@@ -24,7 +24,7 @@ MRP를 CC-C로 부르지 않는다. 진단/알람은 A/B/C 공통이다.
 | 항목 | 상태 | 클래스 |
 |------|------|--------|
 | CM 기동 | Connect → Write(ACK) → PrmEnd → ApplicationReady.req → **ACK 후 DATAEX** → cyclic | A/B |
-| RT Class 1 | 비동기 cyclic. C_SDU 에 데이터+IOPS/IOCS. `SendClock×ReductionRatio`. TX 는 절대 `CLOCK_MONOTONIC` 격자에 맞춘다 (due 1 ms 전에 프레임을 만들고 시각에 `sendto`). 놓친 사이클은 스킵. ARM에서 보이던 ~8.1 ms 평균은 ISA가 아니라 `last_send=now` 스트레치. IRT/PTCP 아님 | A |
+| RT Class 1 | 비동기 cyclic. 주기는 Connect `SendClock×ReductionRatio×31.25µs` (GSDML RR 8/16/32/64/128/256/512 → 8–512 ms). `protocol_params.cycle_us`/`cycle_ms` 는 Connect 가 RR 을 안 줄 때의 fallback. TX 는 그 절대 격자에 맞춘다. IRT/PTCP 아님 | A |
 | DCP | Identify(필터: All / Name / DeviceID), Get(요청 속성), Set(Name/IP). 기동 시 Hello. `apply_os_ip` 이면 기동·Set 시 OS 주소 적용 후 UDP 바인드. Set IP 후 RPC/SNMP 재바인드, 열린 AR 은 리셋 | A |
 | Record | I&M0–4 (1–4 writable), RealIdent, PDPort/PDIF Real/Adjust/Check/FSU 저장, PD*Statistic, Channel/Ext/Qualified Diagnosis. FSU **CM**(ParameterizationSpeedup) 은 클레임하지 않음 | A/B |
 | LLDP | Chassis/Port/TTL/SysName/MgmtAddr + PN Chassis MAC / Port Status | A (이웃), B (LLDP-MIB) |
@@ -97,7 +97,7 @@ bash tests/run_pn_fulltest.sh
 
 시뮬레이터는 DCP Identify → Set Name 왕복 → Connect (ARServerBlock) → Write / WriteMultiple → Read I&M0 / RealIdent / PD* → PrmEnd → ApplicationReady → RTC1 cyclic 을 실제 Ethernet/UDP 로 주고받는다. Siemens TIA 와 같은 CM 순서이며, 벤더 분기는 없다.
 
-GSDML 은 `stacks/profinet/gsdml/` 에 있다. TIA / **CODESYS Device Repository** 에서 여는 출발점이며 VendorID `0xABCD` 는 PI 할당이 아니다. 최소 사이클은 8ms (`MinDeviceInterval=256`). Interface `SupportedMibs="MIB2;LLDP"` 는 랩 **CC-B** 선언이다. `IsochroneModeSupported=false` / `RT_CLASS_3` 미기재는 **CC-C를 클레임하지 않는다**는 뜻이지, IRT 테스트를 대체한다는 뜻이 아니다. PITL / ART / SPIRTA 인증을 대체하지 않는다.
+GSDML 은 `stacks/profinet/gsdml/` 에 있다. TIA / **CODESYS Device Repository** 에서 여는 출발점이며 VendorID `0xABCD` 는 PI 할당이 아니다. 최소 사이클은 8ms (`MinDeviceInterval=256`). ReductionRatio `8 16 32 64 128 256 512` 로 8–512 ms 를 연다. `protocol_params.cycle_us`(또는 `cycle_ms`) 는 Connect 가 RR 을 생략할 때의 fallback 이고, 실제 RTC1 격자는 Connect IOCR 이 결정한다. 코어 `cycle_ms` 는 어댑터 `poll_cycle` 주기이며 cyclic TX 와는 별개다.
 
 CODESYS Control SL **2시간 데모**로 Controller 를 붙이는 절차는 [`docs/codesys_beta.md`](codesys_beta.md). Linux SL 런타임은 Store 패키지 + WIBU CodeMeter-lite 로 설치할 수 있다. 빈 런타임은 PN Controller 가 아니고, GSDML·IEC 앱은 Windows Development System 에서 다운로드한다. `tests/run_pn_codesys_beta.sh` 가 같은 CM 순서를 랩에서 재현한다.
 

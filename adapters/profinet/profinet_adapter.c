@@ -129,7 +129,7 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
     pn_cfg_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.security_class = 0; /* lab default: unsigned */
-    cfg.cycle_us = 8000;
+    cfg.cycle_us = PN_CYCLE_MIN_US;
     cfg.input_len = 32;
     cfg.output_len = 8;
     snprintf(cfg.iface, sizeof(cfg.iface), "mock");
@@ -192,6 +192,11 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
         cJSON *cycle = cJSON_GetObjectItemCaseSensitive(params, "cycle_us");
         if (cJSON_IsNumber(cycle)) {
             cfg.cycle_us = (uint32_t)cycle->valueint;
+        } else {
+            cJSON *cycle_ms = cJSON_GetObjectItemCaseSensitive(params, "cycle_ms");
+            if (cJSON_IsNumber(cycle_ms) && cycle_ms->valueint > 0) {
+                cfg.cycle_us = (uint32_t)cycle_ms->valueint * 1000u;
+            }
         }
         cJSON *apply_ip = cJSON_GetObjectItemCaseSensitive(params, "apply_os_ip");
         if (cJSON_IsBool(apply_ip)) {
