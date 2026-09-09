@@ -66,6 +66,17 @@ jobs:
       - name: Fake sensor → fb_api readback → CTT mock (all protocols)
         run: examples/run_mock_flow.sh
 
+  codesys-dut:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssl-dev libcjson-dev python3
+      - name: Modbus DUT + CODESYS-shaped stand-in (not SoftPLC)
+        run: examples/run_codesys_dut.sh --stand-in --cycles 16
+
   soak-ci:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.soak == 'true'
     runs-on: ubuntu-latest

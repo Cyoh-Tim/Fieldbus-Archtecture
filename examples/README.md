@@ -135,9 +135,22 @@ read·write).
 
 코어에 프로토콜 분기를 넣지 말 것.
 
+## CODESYS SoftPLC 마스터 (DUT 쪽)
+
+SoftPLC 를 Modbus TCP 마스터로 붙일 때 우리 쪽 기동:
+
+```
+./examples/run_codesys_dut.sh              # 127.0.0.1:15560, IDE 쪽은 수동
+./examples/run_codesys_dut.sh --stand-in  # CI: CODESYS 형태 스탠드인 (SoftPLC 아님)
+```
+
+문서: [`docs/codesys_master_io.md`](../docs/codesys_master_io.md).
+Windows PN 체크리스트는 [`tests/codesys_manual_lab.sh`](../tests/codesys_manual_lab.sh).
+
 ## 인증이 아닌 것
 
 - `ctest -L modbus` green ≠ Modbus.org conformance
 - `ctest -L slmp` green ≠ Mitsubishi 공식 인증
 - PN/EIP CTT green ≠ PI / ODVA 인증
 - 이 예제는 공인 랩·DoC 를 대체하지 않는다
+- `--stand-in` green ≠ CODESYS 가 IO 를 돌린 것

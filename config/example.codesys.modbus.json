@@ -1,0 +1,63 @@
+{
+  "protocol": "modbus_tcp",
+  "device": {
+    "name": "codesys_modbus_dut",
+    "role": "server"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "_comment": "CODESYS SoftPLC as Modbus TCP Master. Bind all IPv4 so SoftPLC can use 127.0.0.1 (same host) or the DUT LAN/Docker-host IP. Same holding map as example.fake_sensor.json. Not certification.",
+    "role": "server",
+    "ip": "0.0.0.0",
+    "port": 15560,
+    "unit_id": 1,
+    "unit_id_any": false,
+    "max_clients": 4,
+    "client_timeout_ms": 2000
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "read",
+      "data_type": "string",
+      "length": 32,
+      "chars_per_register": 2,
+      "trim_null": true,
+      "address": {
+        "modbus": {
+          "type": "holding",
+          "start": 40001,
+          "offset": 0,
+          "byte_offset": 0
+        }
+      }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 0.1,
+      "offset": 0.0,
+      "endian": "ABCD",
+      "address": {
+        "modbus": {
+          "type": "4x",
+          "address": "40001",
+          "offset": 16,
+          "quantity": 1
+        }
+      }
+    },
+    {
+      "name": "trigger",
+      "access": "write",
+      "data_type": "bool",
+      "address": {
+        "modbus": {
+          "type": "coil",
+          "start": 1
+        }
+      }
+    }
+  ]
+}

@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# CODESYS (Windows) manual interoperability checklist — not CI.
+# CODESYS (Windows) manual PROFINET interoperability checklist — not CI.
+#
+# Linux SoftPLC as Modbus TCP master (DUT helper, not this script):
+#   docs/codesys_master_io.md
+#   examples/run_codesys_dut.sh
 #
 # This script never launches CODESYS Control Win. GitHub Actions has no
 # Windows Development System. Use it on a Linux DUT host next to a Windows
@@ -51,6 +55,7 @@ CTT vs CODESYS
   CODESYS is a manual interoperability gate. Green CTT ≠ PI certificate.
 
 Related:
+  docs/codesys_master_io.md     # Linux SoftPLC as Modbus master (DUT + stand-in)
   docs/ctt_lab.md
   tests/run_ctt_lab.sh
   tests/run_pn_device_run.sh

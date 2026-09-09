@@ -10,6 +10,10 @@
 
 ### Added
 
+- CODESYS SoftPLC 를 마스터로 두는 DUT 경로: [`docs/codesys_master_io.md`](docs/codesys_master_io.md),
+  `examples/run_codesys_dut.sh`, CODESYS 형태 Modbus 스탠드인
+  (`examples/codesys_shaped_modbus_master.py`, **SoftPLC 아님**),
+  `config/example.codesys.*.json`. IDE 부트 앱·인증 클레임 없음
 - EtherNet/IP Encaps ListServices YAML (`EIP-A-ENC-003`) — DUT 핸들러 고정
 - Large Forward Open YAML (`EIP-A-CM-004`, CIP `0x5B`) — 기존 DUT 경로 + Class1 IO
 - Timed mock soak: MB/SLMP/EIP `duration_s` + EIP `soak` action, `--seconds` /
@@ -36,7 +40,8 @@
 - PROFINET **CC-B + RT Class 1** only. **IRT / CC-C 는 목표 아님** (permanent non-goal)
 - SLMP **Binary 3E** batch only. ASCII / 4E 는 enum 예약만
 - 기본 CI 에 `CAP_NET_RAW` / sudo / 실 NIC 없음 (`iface: mock`, 루프백)
-- EtherCAT / CC-Link / CODESYS 랩 데모는 main 밖 (PR #1 / #5 / #6 미머지)
+- EtherCAT / CC-Link 랩 데모는 main 밖 (PR #1 / #5 / #6 미머지).
+  CODESYS 는 DUT 쪽 문서·스탠드인만 (SoftPLC 앱 다운로드는 IDE 필요)
 - libmodbus 없음. EIP·PN 런타임은 자체 스택 (구매 스텁 아님)
 
 ### Added
