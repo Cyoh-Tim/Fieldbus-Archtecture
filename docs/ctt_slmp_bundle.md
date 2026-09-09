@@ -73,6 +73,7 @@ protocol: slmp
 | SLMP-3E-CYC-001 | `soak_short.yaml` | cyclic | pass | batch read soak | **thickened** 32×8ms + late/missed/jitter |
 | SLMP-3E-CYC-002 | `batch_cyclic_metrics.yaml` | **cyclic** | pass | Batch metrics | wave 1 48×8ms |
 | SLMP-3E-CYC-003 | `batch_cycle_4ms.yaml` | **cyclic** | pass | Batch 4 ms metrics | **wave 2** 48×4ms |
+| SLMP-3E-CYC-012 | `nightly/soak_nightly.yaml` | cyclic | skip (GLOB 밖) | 1h soak | `duration_s` / `--seconds` |
 | SLMP-3E-NEG-001 | `reject_non_3e.yaml` | NEG | pass | ASCII/4E/unknown cmd | ID only |
 | SLMP-3E-NEG-002 | `frame_malformed.yaml` | **NEG** | pass | Truncated 3E / short write | **new** fail closed |
 | SLMP-3E-NEG-003 | `oob_batch_read.yaml` | **NEG** | pass | OOB batch | **new** read+write end `0xC056`, map 유지 |
@@ -143,7 +144,7 @@ PN/EIP/MB 와 같은 필드. `suite_id` = `SLMP-3E-v1`, `tc_id` = `SLMP-3E-CYC-0
 | 프로파일 | 언제 | 라벨 |
 |----------|------|------|
 | mock | 기본 PR CI | `slmp` (`ctest -L slmp`) |
-| soak_ci / nightly | (없음) | SLMP wave 1 에 30s/1h soak YAML 없음. PN 라벨만 |
+| soak_ci / nightly | nightly YAML | `tests/scenarios/slmp/nightly/soak_nightly.yaml` (GLOB 밖). `tests/run_mock_soak.sh` |
 | lab | TCP :5000 AF_PACKET | **미연결**. `slmp_stack_handle_request` inject 만 |
 
 보드(`docs/ctt_board.html`) 배지는 이 분류를 따른다. **bundle-grade 게이트가

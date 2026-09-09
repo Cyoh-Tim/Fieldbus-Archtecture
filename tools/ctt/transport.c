@@ -66,6 +66,10 @@ void ctt_opts_apply_env(ctt_opts_t *opts)
     if (r && r[0]) {
         snprintf(opts->report, sizeof(opts->report), "%s", r);
     }
+    const char *s = getenv("CTT_SOAK_DURATION_S");
+    if (s && s[0]) {
+        opts->soak_seconds = (unsigned)strtoul(s, NULL, 10);
+    }
 }
 
 static int set_nonblock(int fd)

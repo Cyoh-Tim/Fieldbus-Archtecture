@@ -20,6 +20,7 @@ typedef struct ctt_opts {
     char dut_iface[32]; /* DUT AF_PACKET iface */
     char capture[512];  /* directory or .pcap/.bin */
     char report[512];   /* JSON (.json) or Markdown (.md) run summary */
+    unsigned soak_seconds; /* 0 = YAML duration_s; CLI --seconds / CTT_SOAK_DURATION_S */
 } ctt_opts_t;
 
 typedef struct ctt_metrics {
@@ -76,6 +77,8 @@ int ctt_check(ctt_run_t *run, int step, const char *action, int cond,
 void ctt_metrics_set_cycle_ns(ctt_metrics_t *m, uint64_t cycle_ns);
 void ctt_metrics_note_period(ctt_metrics_t *m, uint64_t dt_ns);
 void ctt_metrics_log(const ctt_run_t *run);
+/* Soak wall time: CLI --seconds / opts.soak_seconds, else YAML duration_s. */
+unsigned ctt_step_duration_s(const ctt_run_t *run, const yaml_node_t *step);
 int ctt_report_write(const ctt_run_t *run, int verdict, uint64_t duration_ns);
 
 int ctt_golden_check(ctt_run_t *run, int step, const char *action,

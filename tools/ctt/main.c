@@ -2,6 +2,7 @@
 #include "transport.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "logger.h"
@@ -50,18 +51,25 @@ int main(int argc, char **argv)
             snprintf(opts.report, sizeof(opts.report), "%s", argv[i] + 9);
         } else if (strcmp(argv[i], "--report") == 0 && i + 1 < argc) {
             snprintf(opts.report, sizeof(opts.report), "%s", argv[++i]);
+        } else if (starts_with(argv[i], "--seconds=")) {
+            opts.soak_seconds = (unsigned)strtoul(argv[i] + 10, NULL, 10);
+        } else if (strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) {
+            opts.soak_seconds = (unsigned)strtoul(argv[++i], NULL, 10);
         } else if (strcmp(argv[i], "--help") == 0 ||
                    strcmp(argv[i], "-h") == 0) {
             LOG_INFO("ctt",
                      "usage: ctt --scenario <file.yaml> "
                      "[--transport=mock|af_packet] [--iface <ctl>] "
                      "[--dut-iface <dut>] [--capture <dir|file.pcap>] "
-                     "[--report <file.json|file.md>]");
+                     "[--report <file.json|file.md>] [--seconds N]");
             LOG_INFO("ctt",
                      "default transport=mock (no AF_PACKET/sudo). "
                      "lab: --transport=af_packet --iface=ctt-ctl "
                      "--dut-iface=ctt-dut (CAP_NET_RAW). env: CTT_TRANSPORT, "
-                     "CTT_IFACE, CTT_DUT_IFACE, CTT_CAPTURE, CTT_REPORT. "
+                     "CTT_IFACE, CTT_DUT_IFACE, CTT_CAPTURE, CTT_REPORT, "
+                     "CTT_SOAK_DURATION_S. --seconds / CTT_SOAK_DURATION_S "
+                     "override soak YAML duration_s only (not soak_short "
+                     "iterations). mock timed soak; not cert. "
                      "report schema: ctt-report/v1 (internal gate, not cert)");
             return 0;
         } else if (!scenario && argv[i][0] != '-') {

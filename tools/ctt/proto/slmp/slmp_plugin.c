@@ -705,17 +705,39 @@ static int step_soak(ctt_run_t *run, slmp_priv_t *priv, const yaml_node_t *step,
         range.addr.unit = SLMP_ACCESS_WORD;
         range.quantity = 1;
     }
-    int iterations = (int)yaml_long(step, "iterations", 32);
+    unsigned duration_s = ctt_step_duration_s(run, step);
+    int iterations =
+        yaml_has(step, "iterations") ? (int)yaml_long(step, "iterations", 0) : 0;
     unsigned cycle_ms = (unsigned)yaml_ulong(step, "cycle_ms", 0);
+    if (!duration_s && !iterations) {
+        iterations = 32;
+    }
     const yaml_node_t *expect = yaml_map_get(step, "expect");
-    int min_ok = expect && yaml_has(expect, "min_ok")
-                     ? (int)yaml_long(expect, "min_ok", iterations)
-                     : iterations;
+    int min_ok;
+    if (expect && yaml_has(expect, "min_ok")) {
+        min_ok = (int)yaml_long(expect, "min_ok", 1);
+    } else if (duration_s) {
+        min_ok = 1;
+    } else {
+        min_ok = iterations;
+    }
     unsigned ok = 0;
     unsigned unexpected = 0;
     uint64_t last_ns = 0;
     ctt_metrics_t before = run->metrics;
-    for (int i = 0; i < iterations; i++) {
+    uint64_t start = ctt_now_ns();
+    uint64_t deadline =
+        duration_s ? start + (uint64_t)duration_s * 1000000000ull : 0;
+    int i = 0;
+    while (1) {
+        if (duration_s) {
+            if (ctt_now_ns() >= deadline) {
+                break;
+            }
+        } else if (i >= iterations) {
+            break;
+        }
+        i++;
         uint8_t req[64];
         size_t req_len = 0;
         if (slmp_encode_batch_read(&priv->cfg, &range, req, sizeof(req),
@@ -748,8 +770,8 @@ static int step_soak(ctt_run_t *run, slmp_priv_t *priv, const yaml_node_t *step,
     }
     run->metrics.unexpected_frames += unexpected;
     int out = ctt_check(run, idx, action, (int)ok >= min_ok,
-                        "ok=%u min_ok=%d unexpected=%u", ok, min_ok,
-                        unexpected);
+                        "ok=%u min_ok=%d unexpected=%u duration_s=%u iterations=%d",
+                        ok, min_ok, unexpected, duration_s, iterations);
     if (expect && yaml_has(expect, "unexpected_frames")) {
         unsigned want = (unsigned)yaml_ulong(expect, "unexpected_frames", 0);
         out |= ctt_check(run, idx, action, unexpected == want,

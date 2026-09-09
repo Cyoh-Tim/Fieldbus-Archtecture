@@ -76,6 +76,7 @@ protocol: modbus_tcp
 | MB-T-CYC-001 | `soak_short.yaml` | cyclic | pass | FC03 soak | **thickened** 32×8ms + late/missed/jitter |
 | MB-T-CYC-002 | `fc03_cyclic_metrics.yaml` | **cyclic** | pass | FC03 metrics | wave 1 48×8ms |
 | MB-T-CYC-003 | `fc03_cycle_4ms.yaml` | **cyclic** | pass | FC03 4 ms metrics | **wave 2** 48×4ms |
+| MB-T-CYC-012 | `nightly/soak_nightly.yaml` | cyclic | skip (GLOB 밖) | 1h soak | `duration_s` / `--seconds` |
 | MB-T-NEG-001 | `exception_illegal_address.yaml` | **NEG** | pass | Exception 0x02 | **thickened** Holding/Coil OOB, qty=0, illegal FC |
 | MB-T-NEG-002 | `adu_malformed.yaml` | **NEG** | pass | Truncated / bad MBAP | **new** fail closed |
 | MB-T-NEG-003 | `exception_illegal_value.yaml` | **NEG** | pass | Exception 0x03 | **new** bad coil value / short PDU |
@@ -148,7 +149,7 @@ PN/EIP 과 같은 필드. `suite_id` = `MB-T-v1`, `tc_id` = `MB-T-CYC-002`.
 | 프로파일 | 언제 | 라벨 |
 |----------|------|------|
 | mock | 기본 PR CI | `modbus` (`ctest -L modbus`) |
-| soak_ci / nightly | (없음) | MB wave 1 에 30s/1h soak YAML 없음. PN 라벨만 |
+| soak_ci / nightly | nightly YAML | `tests/scenarios/modbus/nightly/soak_nightly.yaml` (GLOB 밖). `tests/run_mock_soak.sh` |
 | lab | TCP :502 AF_PACKET | **미연결**. `mb_stack_handle_adu` inject 만 |
 
 보드(`docs/ctt_board.html`) 배지는 이 분류를 따른다. **bundle-grade 게이트가

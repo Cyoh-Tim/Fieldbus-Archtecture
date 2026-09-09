@@ -1817,9 +1817,7 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
 {
     const char *action = "soak";
     const yaml_node_t *expect = yaml_map_get(step, "expect");
-    unsigned duration_s =
-        yaml_has(step, "duration_s") ? (unsigned)yaml_ulong(step, "duration_s", 0)
-                                     : 0;
+    unsigned duration_s = ctt_step_duration_s(run, step);
     int iterations =
         yaml_has(step, "iterations") ? (int)yaml_long(step, "iterations", 0) : 0;
     unsigned cycle_ms = (unsigned)yaml_long(step, "cycle_ms", 8);
