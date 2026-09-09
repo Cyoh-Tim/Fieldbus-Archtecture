@@ -166,6 +166,13 @@ def strip_md(s: str) -> str:
     return s.strip()
 
 
+def split_md_row(line: str) -> list[str]:
+    """Split a markdown table row on `|`, keeping escaped `\\|` as a literal pipe."""
+    body = line.strip().strip("|")
+    cells = re.split(r"(?<!\\)\|", body)
+    return [c.strip().replace("\\|", "|") for c in cells]
+
+
 def parse_md_tables(path: Path) -> list[list[list[str]]]:
     if not path.is_file():
         return []
@@ -178,7 +185,7 @@ def parse_md_tables(path: Path) -> list[list[list[str]]]:
                 tables.append(current)
                 current = None
             continue
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        cells = split_md_row(line)
         if cells and all(re.fullmatch(r":?-{3,}:?", c.replace(" ", "")) for c in cells):
             continue
         if current is None:
@@ -205,8 +212,13 @@ def classify_cover(cover: str) -> str | None:
     return None
 
 
+def matrix_lookup_key(protocol: str, filename: str) -> str:
+    """Protocol-scoped key — soak_short.yaml exists in PN, Modbus, and SLMP."""
+    return f"{protocol}::{Path(filename).name}"
+
+
 def load_matrix_index() -> tuple[dict[str, dict], list[dict]]:
-    """Return (yaml_basename -> meta, extra matrix rows without YAML)."""
+    """Return ((protocol, yaml_basename) -> meta, extra matrix rows without YAML)."""
     by_file: dict[str, dict] = {}
     extras: list[dict] = []
     seen_extra: set[str] = set()
@@ -229,7 +241,7 @@ def load_matrix_index() -> tuple[dict[str, dict], list[dict]]:
                     category = strip_md(row[1]) if len(row) > 1 else ""
                     notes = strip_md(row[-1]) if len(row) > 2 else ""
                     mock = strip_md(row[2]) if len(row) > 2 else ""
-                    by_file[base] = {
+                    by_file[matrix_lookup_key(protocol, base)] = {
                         "title": category,
                         "description": notes or mock,
                         "matrix": rel,
@@ -373,7 +385,7 @@ def collect_yaml_rows(matrix_by_file: dict[str, dict]) -> list[dict]:
         registered = cmake_registered(path)
         labels = ctest_labels(protocol, sc_name, text, registered)
         status, reason = classify_yaml(sc_name, tags, labels, registered)
-        meta = matrix_by_file.get(path.name, {})
+        meta = matrix_by_file.get(matrix_lookup_key(protocol, path.name), {})
         title = meta.get("title") or humanize(sc_name)
         desc = meta.get("description") or ""
         ctest_name = None
@@ -481,6 +493,34 @@ def build_payload() -> dict:
     }
 
 
+def assert_invariants(data: dict) -> None:
+    """Catch matrix key collisions and escaped-pipe truncation."""
+    expected_matrix = {
+        "profinet": "docs/ctt_pi_matrix.md",
+        "ethernetip": "docs/ctt_odva_matrix.md",
+        "modbus_tcp": "docs/ctt_modbus_matrix.md",
+        "slmp": "docs/ctt_slmp_matrix.md",
+    }
+    soak_titles: dict[str, str] = {}
+    for t in data["tests"]:
+        if t["kind"] != "scenario":
+            continue
+        mx = t.get("matrix")
+        want = expected_matrix.get(t["protocol"])
+        if mx and want and mx != want:
+            raise RuntimeError(
+                f"{t['path']}: matrix {mx!r} does not belong to {t['protocol']}"
+            )
+        if t["id"] == "soak_short":
+            soak_titles[t["protocol"]] = t["title"]
+        if t["id"] == "fc22_mask_write":
+            desc = t.get("description") or ""
+            if "(cur & and)" not in desc or "(or & ~and)" not in desc:
+                raise RuntimeError(f"fc22_mask_write description truncated: {desc!r}")
+    if len(soak_titles) >= 2 and len(set(soak_titles.values())) < len(soak_titles):
+        raise RuntimeError(f"soak_short titles collided across protocols: {soak_titles}")
+
+
 EMBED_BEGIN = "<!-- CTT_BOARD_DATA_BEGIN -->"
 EMBED_END = "<!-- CTT_BOARD_DATA_END -->"
 
@@ -532,6 +572,7 @@ def main() -> int:
     )
     args = ap.parse_args()
     data = build_payload()
+    assert_invariants(data)
 
     if args.check:
         if not JSON_OUT.is_file():
