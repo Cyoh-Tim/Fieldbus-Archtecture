@@ -1,6 +1,9 @@
+# Internal TC MB-T-FC-004 — not a Modbus.org conformance case.
 name: fc_server_matrix
+id: MB-T-FC-004
+suite: MB-T-v1
 protocol: modbus_tcp
-tags: [fc, matrix, migrate]
+tags: [fc, matrix, migrate, bundle]
 device:
   role: server
   unit_id: 1

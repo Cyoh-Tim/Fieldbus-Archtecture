@@ -1,0 +1,43 @@
+# Internal TC SLMP-3E-NEG-002 — truncated 3E / short write must fail closed.
+name: frame_malformed
+id: SLMP-3E-NEG-002
+suite: SLMP-3E-v1
+protocol: slmp
+tags: [negative, boundary, 3e, bundle]
+device:
+  role: server
+  frame: 3e_binary
+  pc_no: 0xFF
+  dest_module_io: 0x03FF
+  iface: mock
+steps:
+  - action: seed_words
+    device: D
+    head: 0
+    values: [0xCAFE]
+  - action: inject
+    pdu_hex: "0050"             # shorter than Binary 3E header (21)
+    expect:
+      result: reject
+  - action: inject
+    # 20-byte almost-header (need 21)
+    pdu_hex: "500000fffff03000c0010001040000000000a800"
+    expect:
+      result: reject
+  - action: inject
+    # 21-byte 3E BATCH_WRITE qty=2 with no payload
+    pdu_hex: "500000fffff03000c00100001140000000000a80200"
+    expect:
+      result: reject
+  - action: batch_read
+    device: D
+    head: 0
+    unit: word
+    quantity: 1
+    expect:
+      end_code: 0
+      values: [0xCAFE]
+  - action: map_check_words
+    device: D
+    head: 0
+    values: [0xCAFE]

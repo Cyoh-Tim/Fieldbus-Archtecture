@@ -1,6 +1,9 @@
+# Internal TC SLMP-3E-NEG-001 — ASCII/4E/unknown cmd reject. Not MELSEC cert.
 name: reject_non_3e
+id: SLMP-3E-NEG-001
+suite: SLMP-3E-v1
 protocol: slmp
-tags: [scope, 3e]
+tags: [scope, 3e, bundle]
 device:
   role: server
   frame: 3e_binary

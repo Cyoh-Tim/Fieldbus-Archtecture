@@ -10,6 +10,9 @@ DUT: `stacks/slmp/` 자체 스택. Binary **3E** 일괄 읽기(`0x0401`) /
 **ASCII / 4E 는 영구 비목표** (이 제품 사용자 범위). 시나리오는 거절만
 고정한다.
 
+내부 bundle-grade 카탈로그: [`docs/ctt_slmp_bundle.md`](ctt_slmp_bundle.md)
+(`SLMP-3E-*`, **≠ Mitsubishi 인증**).
+
 커버 열:
 
 | 값 | 의미 |
@@ -21,11 +24,15 @@ DUT: `stacks/slmp/` 자체 스택. Binary **3E** 일괄 읽기(`0x0401`) /
 
 | YAML (`tests/scenarios/slmp/`) | 내부 카테고리 | mock | 비고 |
 |---------------------------------|---------------|------|------|
-| `device_table.yaml` | Device code 표 | mock | D/M/ZR/X, raw `0xA8` |
-| `encode_batch_read.yaml` | 3E encode | mock | subheader `0x0050`, cmd `0x0401`/`0x1401` |
-| `batch_read_write_loopback.yaml` | Batch R/W + bits + ASCII + X hex | mock | `test_slmp_stack` loopback 을 소켓 없이 이전 |
-| `reject_non_3e.yaml` | ASCII/4E/unknown cmd 거절 | mock | create 거절, subheader `0x0054`, cmd `0x0403` → `0xC050` |
-| `soak_short.yaml` | batch read soak (내부) | mock | 32 iterations |
+| `device_table.yaml` | Device code 표 | mock | D/M/ZR/X/Y/W, raw `0xA8`. `SLMP-3E-DEV-001` |
+| `encode_batch_read.yaml` | 3E encode | mock | subheader `0x0050`, cmd `0x0401`/`0x1401`. `SLMP-3E-ENC-001` |
+| `batch_read_write_loopback.yaml` | Batch R/W + bits + ASCII + X hex | mock | `SLMP-3E-CM-001` |
+| `batch_lifetime.yaml` | Batch write/read lifetime | mock | D word + M bit overwrite. `SLMP-3E-CM-002` |
+| `batch_cyclic_metrics.yaml` | Batch cyclic metrics | mock | 48 cycles, late/missed/jitter. `SLMP-3E-CYC-002` |
+| `soak_short.yaml` | batch read soak (내부) | mock | 32 iterations + metrics. `SLMP-3E-CYC-001` |
+| `reject_non_3e.yaml` | ASCII/4E/unknown cmd 거절 | mock | `SLMP-3E-NEG-001` |
+| `frame_malformed.yaml` | Truncated 3E / short write | mock | fail closed. `SLMP-3E-NEG-002` |
+| `oob_batch_read.yaml` | OOB batch read/write | mock | end `0xC056`, map 유지. `SLMP-3E-NEG-003` |
 
 ## 범위 밖 / N/A
 

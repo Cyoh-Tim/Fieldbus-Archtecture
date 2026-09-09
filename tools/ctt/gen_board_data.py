@@ -511,7 +511,8 @@ def build_payload() -> dict:
             "Internal bundle-grade gate != PI / ODVA certification. "
             "PROFINET catalog: docs/ctt_pn_bundle.md (PN-B-* ids). "
             "EtherNet/IP catalog: docs/ctt_eip_bundle.md (EIP-A-* ids). "
-            "Modbus/SLMP catalogs are next after EIP-A-v1."
+            "Modbus TCP catalog: docs/ctt_mb_bundle.md (MB-T-* ids). "
+            "SLMP Binary 3E catalog: docs/ctt_slmp_bundle.md (SLMP-3E-* ids)."
         ),
         "counts": counts,
         "by_protocol": by_proto,
@@ -556,6 +557,20 @@ def assert_invariants(data: dict) -> None:
                 raise RuntimeError(
                     f"{t['path']}: missing/invalid bundle_id {bid!r} "
                     "(expect EIP-A-AREA-NNN; see docs/ctt_eip_bundle.md)"
+                )
+        if t["protocol"] == "modbus_tcp" and t["kind"] == "scenario":
+            bid = t.get("bundle_id") or ""
+            if not re.fullmatch(r"MB-T-[A-Z]+-\d{3}", bid):
+                raise RuntimeError(
+                    f"{t['path']}: missing/invalid bundle_id {bid!r} "
+                    "(expect MB-T-AREA-NNN; see docs/ctt_mb_bundle.md)"
+                )
+        if t["protocol"] == "slmp" and t["kind"] == "scenario":
+            bid = t.get("bundle_id") or ""
+            if not re.fullmatch(r"SLMP-3E-[A-Z]+-\d{3}", bid):
+                raise RuntimeError(
+                    f"{t['path']}: missing/invalid bundle_id {bid!r} "
+                    "(expect SLMP-3E-AREA-NNN; see docs/ctt_slmp_bundle.md)"
                 )
     if len(soak_titles) >= 2 and len(set(soak_titles.values())) < len(soak_titles):
         raise RuntimeError(f"soak_short titles collided across protocols: {soak_titles}")

@@ -1,6 +1,9 @@
+# Internal TC SLMP-3E-DEV-001 — not a Mitsubishi certification case.
 name: device_table
+id: SLMP-3E-DEV-001
+suite: SLMP-3E-v1
 protocol: slmp
-tags: [device, migrate]
+tags: [device, migrate, bundle]
 device:
   role: server
   frame: 3e_binary
@@ -32,6 +35,18 @@ steps:
     expect:
       code: 0x9C
       is_bit: true
+      hex_addr: true
+  - action: device_lookup
+    name: Y
+    expect:
+      code: 0x9D
+      is_bit: true
+      hex_addr: true
+  - action: device_lookup
+    name: W
+    expect:
+      code: 0xB4
+      is_bit: false
       hex_addr: true
   - action: device_lookup
     name: NOPE

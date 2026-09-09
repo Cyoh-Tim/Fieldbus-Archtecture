@@ -1,6 +1,9 @@
+# Internal TC MB-T-FC-002 — not a Modbus.org conformance case.
 name: fc05_write_single_coil
+id: MB-T-FC-002
+suite: MB-T-v1
 protocol: modbus_tcp
-tags: [fc05, migrate]
+tags: [fc05, migrate, bundle]
 device:
   role: server
   unit_id: 1

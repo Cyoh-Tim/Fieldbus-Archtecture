@@ -21,7 +21,8 @@ DUT = in-repo `stacks/ethernetip/` 자체 스택. `adapters/ethernetip/` 데몬
 ## 1. 여섯 기둥 (pillars)
 
 PN (`docs/ctt_pn_bundle.md`) 과 같다. 프로토콜 프레임만 플러그인에 둔다.
-Modbus → SLMP 가 이 다음이다.
+Modbus [`docs/ctt_mb_bundle.md`](ctt_mb_bundle.md) · SLMP
+[`docs/ctt_slmp_bundle.md`](ctt_slmp_bundle.md) 가 같은 기둥을 쓴다.
 
 | # | 기둥 | 이 PR (EIP-A-v1 wave 1) |
 |---|------|-------------------------|
@@ -40,7 +41,7 @@ EIP-A-<AREA>-NNN
 
 | 부분 | 의미 |
 |------|------|
-| `EIP` | 프로토콜 (PN 은 `PN-B-…`, 다음은 Modbus `MB-T-…`, SLMP `SLMP-3E-…`) |
+| `EIP` | 프로토콜 (PN 은 `PN-B-…`, Modbus `MB-T-…`, SLMP `SLMP-3E-…`) |
 | `A` | 제품 프로파일 Adapter Class 1 + Sec1 lab |
 | `AREA` | `ENC` `ID` `CM` `CYC` `NEG` `SEC` `QOS` `ACD` `NBR` |
 | `NNN` | 영역 안 안정 번호. 한 번 붙이면 바꾸지 않는다 |
@@ -163,16 +164,17 @@ PN 과 같은 필드. `suite_id` = `EIP-A-v1`, `tc_id` = `EIP-A-CYC-002`.
 보드(`docs/ctt_board.html`) 배지는 이 분류를 따른다. **bundle-grade 게이트가
 ODVA 인증이 아니다** 는 배너에 고정한다.
 
-## 8. 다음 프로토콜에 같은 기둥을 쓰는 법 (Modbus then SLMP)
+## 8. 같은 기둥 (Modbus / SLMP landed)
 
-1. **카탈로그** — `MB-T-…` / `SLMP-3E-…` ID, YAML `id:` / `suite:`, 기존
-   `docs/ctt_modbus_matrix.md` / `docs/ctt_slmp_matrix.md` 에 내부 매핑
+MB-T-v1 [`docs/ctt_mb_bundle.md`](ctt_mb_bundle.md) (`MB-T-*`).
+SLMP-3E-v1 [`docs/ctt_slmp_bundle.md`](ctt_slmp_bundle.md) (`SLMP-3E-*`).
+CC-Link / EtherCAT 은 사양 확정 전 비목표.
+
+1. **카탈로그** — YAML `id:` / `suite:`, 기존 매트릭스에 내부 매핑
    (공식 인증 번호 복사 금지).
-2. **Cyclic 하네스** — 공통 `ctt_metrics_*`. Modbus ADU / SLMP 3E batch
-   주기를 `ctt_metrics_note_period` 에 넣는다.
-3. **Lifetime** — TCP 세션 재연결 / 3E 재요청. 이미 있는 훅을 두껍게.
-4. **NEG** — truncated ADU / 잘못된 FC / 알 수 없는 3E 커맨드. DUT 가
-   실제로 거부하는 것만. 미구현은 gap.
+2. **Cyclic 하네스** — 공통 `ctt_metrics_*`. 주기를 `ctt_metrics_note_period` 에 넣는다.
+3. **Lifetime** — 세션/맵 재기록. 있는 훅을 두껍게.
+4. **NEG** — truncated / unknown. DUT 가 실제로 거부하는 것만. 미구현은 gap.
 5. **프로파일** — mock 기본 CI.
 6. **리포트** — `--report` 는 프로토콜 무관.
 
@@ -183,6 +185,8 @@ ODVA 인증이 아니다** 는 배너에 고정한다.
 - [`docs/ctt.md`](ctt.md) — 하네스 설계
 - [`docs/ctt_odva_matrix.md`](ctt_odva_matrix.md) — Adapter 내부 매핑 (인증 아님)
 - [`docs/ctt_pn_bundle.md`](ctt_pn_bundle.md) — PN 기둥 (이식 원본)
+- [`docs/ctt_mb_bundle.md`](ctt_mb_bundle.md) — Modbus TCP 기둥
+- [`docs/ctt_slmp_bundle.md`](ctt_slmp_bundle.md) — SLMP 3E 기둥
 - [`docs/ctt_board.md`](ctt_board.md) / [`ctt_board.html`](ctt_board.html)
 - [`tools/ctt/README.md`](../tools/ctt/README.md)
 - [`docs/ethernetip_stack.md`](ethernetip_stack.md)

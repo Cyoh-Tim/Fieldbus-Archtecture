@@ -1,6 +1,9 @@
+# Internal TC MB-T-FC-001 — not a Modbus.org conformance case.
 name: fc03_read_holding
+id: MB-T-FC-001
+suite: MB-T-v1
 protocol: modbus_tcp
-tags: [fc03, migrate]
+tags: [fc03, migrate, bundle]
 device:
   role: server
   unit_id: 1
@@ -24,3 +27,7 @@ steps:
       length: 13
       byte_count: 4
       values: [0x1234, 0xABCD]
+  - action: map_check
+    type: holding
+    address: 0
+    values: [0x1234, 0xABCD]

@@ -1,0 +1,53 @@
+# Internal TC MB-T-NEG-002 — truncated / bad MBAP must fail closed.
+name: adu_malformed
+id: MB-T-NEG-002
+suite: MB-T-v1
+protocol: modbus_tcp
+tags: [negative, boundary, bundle]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 16
+  n_input: 8
+  n_coil: 8
+  n_discrete: 8
+  iface: mock
+steps:
+  - action: seed
+    type: holding
+    address: 0
+    values: [0xCAFE]
+  - action: adu_inject
+    pdu_hex: "0001"             # shorter than MBAP+FC (8)
+    expect:
+      handle_ok: false
+  - action: adu_inject
+    pdu_hex: "0001000000"       # 5 bytes
+    expect:
+      handle_ok: false
+  - action: adu_inject
+    # 7-byte MBAP claiming length=10 with no PDU
+    pdu_hex: "00010000000A01"
+    expect:
+      handle_ok: false
+  - action: adu_inject
+    # 8-byte: proto=0, length=0, unit+FC present
+    pdu_hex: "0001000000000103"
+    expect:
+      handle_ok: false
+  - action: adu_inject
+    # protocol id != 0
+    pdu_hex: "0001000100020103"
+    expect:
+      handle_ok: false
+  - action: request
+    fc: 0x03
+    address: 0
+    quantity: 1
+    expect:
+      fc: 0x03
+      values: [0xCAFE]
+  - action: map_check
+    type: holding
+    address: 0
+    values: [0xCAFE]

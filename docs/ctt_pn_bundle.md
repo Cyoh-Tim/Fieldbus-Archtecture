@@ -37,7 +37,7 @@ PN-B-<AREA>-NNN
 
 | 부분 | 의미 |
 |------|------|
-| `PN` | 프로토콜 (EIP 다음은 `EIP-A-…`, Modbus `MB-T-…`, SLMP `SLMP-3E-…`) |
+| `PN` | 프로토콜 (EIP `EIP-A-…`, Modbus `MB-T-…`, SLMP `SLMP-3E-…`) |
 | `B` | 제품 프로파일 CC-B + RTC1 |
 | `AREA` | `DCP` `CM` `CYC` `NEG` `SEC` `ALM` `REC` `NBR` |
 | `NNN` | 영역 안 안정 번호. 한 번 붙이면 바꾸지 않는다 |
@@ -185,16 +185,17 @@ EIP/Modbus/SLMP 도 같은 runner 플래그를 쓴다. 메트릭 키 이름은 �
 보드(`docs/ctt_board.html`) 배지는 이 분류를 따른다. **bundle-grade 게이트가
 PI 인증이 아니다** 는 배너에 고정한다.
 
-## 8. 다음 프로토콜에 같은 기둥을 쓰는 법 (EIP done → Modbus → SLMP)
+## 8. 같은 기둥 (EIP / Modbus / SLMP landed)
 
-EIP-A-v1 은 [`docs/ctt_eip_bundle.md`](ctt_eip_bundle.md) (`EIP-A-*`, 공통
-`ctt_metrics_*` / `--report`). **다음은 Modbus, 그다음 SLMP.**
+EIP-A-v1 [`docs/ctt_eip_bundle.md`](ctt_eip_bundle.md) (`EIP-A-*`).
+Modbus MB-T-v1 [`docs/ctt_mb_bundle.md`](ctt_mb_bundle.md) (`MB-T-*`).
+SLMP SLMP-3E-v1 [`docs/ctt_slmp_bundle.md`](ctt_slmp_bundle.md) (`SLMP-3E-*`).
+공통 `ctt_metrics_*` / `--report`. CC-Link / EtherCAT 은 사양 확정 전 비목표.
 
-1. **카탈로그** — `MB-T-…` / `SLMP-3E-…` ID, YAML `id:` / `suite:`,
-   기존 매트릭스에 내부 매핑 (공식 인증 번호 복사 금지).
-2. **Cyclic 하네스** — 이미 공통 `ctt_metrics_*`. TCP ADU / 3E batch 주기를
-   `ctt_metrics_note_period` 에 넣는다.
-3. **Lifetime** — 세션/커넥션 재연결. 있는 훅을 두껍게.
+1. **카탈로그** — YAML `id:` / `suite:`, 기존 매트릭스에 내부 매핑
+   (공식 인증 번호 복사 금지).
+2. **Cyclic 하네스** — 공통 `ctt_metrics_*`. 주기를 `ctt_metrics_note_period` 에 넣는다.
+3. **Lifetime** — 세션/맵 재기록. 있는 훅을 두껍게.
 4. **NEG** — truncated / unknown 을 플러그인 액션으로. DUT 미구현은 gap.
 5. **프로파일** — mock 기본 CI, soak 라벨, lab 은 별도.
 6. **리포트** — `--report` 는 프로토콜 무관. `tc_id` 만 카탈로그.
@@ -208,3 +209,4 @@ EIP-A-v1 은 [`docs/ctt_eip_bundle.md`](ctt_eip_bundle.md) (`EIP-A-*`, 공통
 - [`docs/ctt_board.md`](ctt_board.md) / [`ctt_board.html`](ctt_board.html)
 - [`tools/ctt/README.md`](../tools/ctt/README.md)
 - [`docs/ctt_odva_matrix.md`](ctt_odva_matrix.md) — EIP 내부 매핑. 이식됨: [`docs/ctt_eip_bundle.md`](ctt_eip_bundle.md)
+- [`docs/ctt_mb_bundle.md`](ctt_mb_bundle.md) · [`docs/ctt_slmp_bundle.md`](ctt_slmp_bundle.md)

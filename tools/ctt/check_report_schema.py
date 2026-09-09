@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Run one CTT scenario with --report and check ctt-report/v1 keys.
 
-Used by ctest (`ctt_report_schema_v1`, `ctt_report_schema_eip_v1`). Stdlib only.
-Internal bundle-grade report != PI / ODVA certification evidence.
+Used by ctest (`ctt_report_schema_v1`, `ctt_report_schema_eip_v1`,
+`ctt_report_schema_mb_v1`, `ctt_report_schema_slmp_v1`). Stdlib only.
+Internal bundle-grade report != PI / ODVA / Modbus.org / Mitsubishi
+certification evidence.
 """
 
 from __future__ import annotations
