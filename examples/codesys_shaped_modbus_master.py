@@ -12,6 +12,8 @@ Usage (DUT already listening):
   python3 examples/codesys_shaped_modbus_master.py --host 127.0.0.1 --port 15560 --cycles 32
 
 See docs/codesys_master_io.md.
+First-class non-CODESYS soak (Modbus + SLMP + EIP): examples/sw_master.py
+and docs/sw_master_io.md.
 """
 from __future__ import annotations
 

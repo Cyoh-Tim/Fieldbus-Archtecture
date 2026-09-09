@@ -37,6 +37,13 @@ xdg-open docs/json-config-flow.html
 ```
 
 상세: [`examples/README.md`](examples/README.md).
+CODESYS 없이 우리 서버/Adapter 에 실제 TCP IO 를 돌릴 때:
+[`docs/sw_master_io.md`](docs/sw_master_io.md).
+
+```
+./examples/run_sw_master_soak.sh          # Modbus + SLMP + EIP (PROFINET 제외)
+```
+
 CODESYS SoftPLC 를 마스터로 둘 때(앱은 IDE 수동): [`docs/codesys_master_io.md`](docs/codesys_master_io.md).
 
 ```
@@ -86,10 +93,10 @@ tests/scenarios/        CTT YAML (profinet/, ethernetip/, modbus/, slmp/)
 third_party/            (선택) 향후 벤더 EIP 스택 교체 위치 — git 커밋 안 함
 config/                 config.schema.json + 예제 설정 파일
 examples/               fb_api_demo + 장비 없는 fake sensor → CTT mock 플로
-                        + CODESYS SoftPLC 마스터용 DUT 헬퍼 (스탠드인 ≠ CODESYS)
+                        + 소프트웨어 마스터 soak (CODESYS 없음) + SoftPLC DUT 헬퍼
 docs/demo.md            장비 없는 10분 데모 스크립트
+docs/sw_master_io.md    소프트웨어 마스터 ↔ 우리 DUT (MB/SLMP/EIP 라이브 루프백)
 docs/codesys_master_io.md  CODESYS SoftPLC 마스터 ↔ 우리 디바이스
-docs/demo.md            장비 없는 10분 데모 스크립트
 docs/index.html         데모 HTML 허브
 docs/json-config-flow.html  JSON → 런타임 애니메이션 (데모 정본 HTML)
 docs/config-viz.html    (선택) 필드 의미·메모리 맵 시각화

@@ -71,6 +71,7 @@ xdg-open docs/ctt_board.html
 | 라이브 앱에 CTT 를 붙이기 | in-process DUT (`stacks/`) |
 
 랩(AF_PACKET)은 기본 데모가 아니다: [`ctt_lab.md`](ctt_lab.md), `tests/run_ctt_lab.sh`.
+소프트웨어 마스터(CODESYS 없이 라이브 TCP 루프백): [`sw_master_io.md`](sw_master_io.md).
 CODESYS SoftPLC 마스터(Modbus 정본, 앱은 IDE 수동): [`codesys_master_io.md`](codesys_master_io.md).
 
 선택 시각화(정본 아님): 필드 의미·메모리 맵 [`config-viz.html`](config-viz.html).

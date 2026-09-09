@@ -152,6 +152,9 @@ CTT YAML 은 `handle_adu` / `handle_request` / Encaps inject 다. **`:502` /
 |------|------|------|
 | `fake_sensor_app` Modbus | `127.0.0.1:15560` | `examples/run_mock_flow.sh modbus` |
 | CODESYS-shaped Modbus stand-in | `127.0.0.1:15560` | `examples/run_codesys_dut.sh --stand-in` (**SoftPLC 아님**) |
+| software master Modbus | `127.0.0.1:15560` | `examples/run_sw_master_soak.sh modbus` |
+| software master SLMP 3E | `127.0.0.1:15561` | `examples/run_sw_master_soak.sh slmp` |
+| software master EIP Class1 | `127.0.0.1:15562` TCP / `15563` UDP | `examples/run_sw_master_soak.sh ethernetip` (`mock: false`, **CAP_NET_RAW 없음**) |
 | `fake_sensor_app` SLMP lab 서버 | `127.0.0.1:15561` | `examples/run_mock_flow.sh slmp` |
 | `test_slmp_stack` client/server loopback | `127.0.0.1:15557` | `ctest -R test_slmp_stack` (daemon job) |
 | 데몬 `example.modbus.json` | 설정 포트 (예: 1502) | 수동 |

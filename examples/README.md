@@ -135,6 +135,18 @@ read·write).
 
 코어에 프로토콜 분기를 넣지 말 것.
 
+## 소프트웨어 마스터 soak (CODESYS 없음)
+
+우리 DUT 스택에 실제 TCP(/UDP) 로 주기 읽기/쓰기. PROFINET 라이브 마스터 없음.
+
+```
+./examples/run_sw_master_soak.sh              # Modbus + SLMP + EIP
+./examples/run_sw_master_soak.sh modbus --seconds 8
+```
+
+문서: [`docs/sw_master_io.md`](../docs/sw_master_io.md).
+CODESYS 경로와 다름 (`--stand-in` ≠ SoftPLC). 인증 아님.
+
 ## CODESYS SoftPLC 마스터 (DUT 쪽)
 
 SoftPLC 를 Modbus TCP 마스터로 붙일 때 우리 쪽 기동:
@@ -154,3 +166,5 @@ Windows PN 체크리스트는 [`tests/codesys_manual_lab.sh`](../tests/codesys_m
 - PN/EIP CTT green ≠ PI / ODVA 인증
 - 이 예제는 공인 랩·DoC 를 대체하지 않는다
 - `--stand-in` green ≠ CODESYS 가 IO 를 돌린 것
+- `run_sw_master_soak.sh` green ≠ PI / ODVA / Modbus.org / Mitsubishi / CODESYS 인증
+- PROFINET 소프트웨어 마스터 라이브 경로 없음 (mock / 랩 NIC 만)

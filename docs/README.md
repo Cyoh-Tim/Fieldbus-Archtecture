@@ -6,6 +6,7 @@
 | 열기 | 역할 |
 |------|------|
 | [`demo.md`](demo.md) | **10분 스크립트** (이 저장소의 “보여 줘”) |
+| [`sw_master_io.md`](sw_master_io.md) | 소프트웨어 마스터 soak (MB/SLMP/EIP 라이브 루프백; PN 은 mock 만) |
 | [`codesys_master_io.md`](codesys_master_io.md) | CODESYS SoftPLC 마스터 ↔ 우리 DUT (Modbus 정본; SoftPLC 앱은 수동) |
 | [`index.html`](index.html) | 브라우저 허브 (이 폴더를 파일로 열 때) |
 | [`json-config-flow.html`](json-config-flow.html) | JSON → 런타임 애니메이션 (데모 정본 HTML) |

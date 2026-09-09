@@ -474,7 +474,7 @@ CC-Link 플러그인은 사양 확정 전 이 페이즈에 넣지 않는다.
 - 공식 Modbus.org / Mitsubishi 인증 — 멤버십·공인 랩. CTT green 이 대체하지 않음
 - CODESYS Windows Development System 은 CI 에 없음 (`tests/codesys_manual_lab.sh`).
   Linux SoftPLC 마스터 DUT 경로는 `docs/codesys_master_io.md` (앱 다운로드는 IDE 수동;
-  스탠드인 ≠ CODESYS)
+  스탠드인 ≠ CODESYS). CODESYS 없는 라이브 TCP 마스터 soak 는 `docs/sw_master_io.md`
 - MRP / Fast Start-Up — **DUT not implemented** (풀 스택을 이 페이즈에서 만들지 않음)
 
 ## 5. 디렉터리 레이아웃

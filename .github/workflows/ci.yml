@@ -47,7 +47,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libssl-dev libcjson-dev
+          sudo apt-get install -y build-essential cmake libssl-dev libcjson-dev python3
       - name: Configure (product daemon, no libmodbus)
         run: cmake -S . -B build-daemon -DBUILD_DAEMON=ON -DBUILD_CTT=OFF -DENABLE_PN_TESTS=ON -DENABLE_EIP_TESTS=ON -DENABLE_MB_TESTS=ON -DENABLE_SLMP_TESTS=ON
       - name: Build
@@ -76,6 +76,17 @@ jobs:
           sudo apt-get install -y build-essential cmake libssl-dev libcjson-dev python3
       - name: Modbus DUT + CODESYS-shaped stand-in (not SoftPLC)
         run: examples/run_codesys_dut.sh --stand-in --cycles 16
+
+  sw-master-soak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssl-dev libcjson-dev python3
+      - name: Software masters vs live loopback DUT (MB+SLMP+EIP, not CODESYS)
+        run: examples/run_sw_master_soak.sh all --seconds 3
 
   soak-ci:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.soak == 'true'

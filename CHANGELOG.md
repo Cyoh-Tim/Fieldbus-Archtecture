@@ -20,6 +20,11 @@
 
 ### Added
 
+- 소프트웨어 마스터 soak (CODESYS 없음): Modbus TCP · SLMP Binary 3E · EtherNet/IP
+  Class 1(또는 explicit) 가 우리 DUT 스택에 **라이브 TCP(/UDP) 루프백** IO.
+  [`docs/sw_master_io.md`](docs/sw_master_io.md), `examples/sw_master.py`,
+  `examples/run_sw_master_soak.sh`, `config/example.sw_master.ethernetip.json`.
+  PROFINET 은 라이브 마스터 없음 (mock 안내만). 인증/PREEMPT_RT/`CAP_NET_RAW` 아님
 - CODESYS SoftPLC 를 마스터로 두는 DUT 경로: [`docs/codesys_master_io.md`](docs/codesys_master_io.md),
   `examples/run_codesys_dut.sh`, CODESYS 형태 Modbus 스탠드인
   (`examples/codesys_shaped_modbus_master.py`, **SoftPLC 아님**),
