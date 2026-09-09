@@ -17,13 +17,15 @@ config.json 설정만으로 선택해 동작시키는 필드버스 런타임.
   [`docs/ethernetip_guide.md`](docs/ethernetip_guide.md)
 
 전체 설계 배경은 [`docs/design.md`](docs/design.md).
+앱은 프로토콜 헤더 없이 [`docs/app_api.md`](docs/app_api.md) 의 포인트 API
+(`include/fb_api.h`) 만 사용한다.
 CTT 설계(공통 runner + 프로토콜 플러그인)는 [`docs/ctt.md`](docs/ctt.md).
 비전문가용 JSON→데몬 동작 애니메이션 데모: [docs/json-config-flow.html](docs/json-config-flow.html) (브라우저에서 열기).
 
 ## 디렉토리 구조
 ```
-include/               ProtocolAdapter 공통 인터페이스
-core/                   코어(설정 로더, 스케줄러, 어댑터 레지스트리, main)
+include/               ProtocolAdapter 공통 인터페이스 + 앱 API (`fb_api.h`)
+core/                   코어(설정 로더, 스케줄러, 레지스트리, fb_api, main)
 adapters/modbus/        Modbus TCP 어댑터 — 자체 스택 연결
 adapters/slmp/          SLMP 어댑터 — 자체 Binary 3E 스택 연결
 adapters/cclink/        CC-Link 어댑터 (미확정, 스텁)
@@ -38,6 +40,7 @@ tests/scenarios/        CTT YAML (profinet/, ethernetip/, modbus/, slmp/)
 third_party/            (선택) 향후 벤더 EIP 스택 교체 위치 — git 커밋 안 함
 config/                 config.schema.json + 예제 설정 파일
 docs/design.md          설계 배경 전체 문서
+docs/app_api.md         애플리케이션 C API (포인트 읽기/쓰기, 스레드, reload)
 docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)
 docs/json-config-flow.html  비전문가 JSON 설정 → 데몬 동작 애니메이션 데모
 ```
@@ -47,7 +50,7 @@ docs/json-config-flow.html  비전문가 JSON 설정 → 데몬 동작 애니메
 ```
 sudo apt install libssl-dev libcjson-dev   # EIP: OpenSSL; 데몬: cJSON (없으면 FetchContent)
 mkdir build && cd build
-cmake ..
+cmake ..   # BUILD_DAEMON=ON, BUILD_API=ON (기본) → 데몬 + fb_api + CTT
 make
 ```
 외부 Modbus 라이브러리(libmodbus)는 **필요 없다**.
@@ -61,6 +64,7 @@ ctest --test-dir build --output-on-failure -LE soak_ci
 
 ## 실행
 ```
+./build/fb_api_demo config/example.modbus.json
 ./build/multiproto_daemon config/example.modbus.json
 ./build/multiproto_daemon config/example.slmp.json
 ./build/multiproto_daemon config/example.ethernetip.json
