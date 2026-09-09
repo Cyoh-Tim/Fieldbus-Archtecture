@@ -500,6 +500,7 @@ tests/pn_device_run.c            # 수동 랩. BUILD_PN_LAB_TOOLS
 tests/run_ctt_lab.sh             # Phase 3 veth AF_PACKET (not default ctest)
 .github/workflows/ci.yml         # Phase 1–3 mock ctest; lab via workflow_dispatch
 docs/ctt.md                      # 이 문서
+docs/demo.md                     # 장비 없는 10분 데모 (JSON HTML → mock 플로 → 보드)
 docs/ctt_board.html              # 시나리오 현황 보드 (인증 아님). 재생성: tools/ctt/gen_board_data.py
 docs/ctt_lab.md                  # Phase 3 lab / veth / CODESYS
 docs/ctt_pi_matrix.md            # CC-A/B 내부 매핑 (인증 evidence 아님)

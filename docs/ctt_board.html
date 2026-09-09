@@ -160,11 +160,31 @@
   .legend p { margin: 0; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
 
   footer { margin-top: 18px; color: #6f82a6; font-size: 0.78rem; line-height: 1.5; }
-  footer a { color: var(--accent); }
+  footer a, a { color: var(--accent); }
+  .demo-nav {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin: 0 0 18px; font-size: 0.82rem;
+  }
+  .demo-nav a {
+    color: var(--muted); text-decoration: none;
+    padding: 6px 12px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel);
+    font-weight: 600;
+  }
+  .demo-nav a:hover { color: var(--text); border-color: #46608a; }
+  .demo-nav a.on {
+    color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  }
 </style>
 </head>
 <body>
   <div class="wrap">
+    <nav class="demo-nav" aria-label="데모 경로">
+      <a href="index.html">데모 허브</a>
+      <a href="json-config-flow.html">JSON 흐름</a>
+      <a href="ctt_board.html" class="on">CTT 보드</a>
+      <a href="demo.md">10분 스크립트</a>
+    </nav>
     <h1>CTT 테스트 보드</h1>
     <p class="sub">
       Controller Test Tool 시나리오 현황 — <strong>무엇이 기본 CI에서 도는지</strong>,
@@ -249,6 +269,8 @@
       <a href="ctt_modbus_matrix.md">Modbus</a> ·
       <a href="ctt_slmp_matrix.md">SLMP</a>
       · CTT: <a href="ctt.md">docs/ctt.md</a>
+      · 데모: <a href="demo.md">docs/demo.md</a>
+      · JSON 흐름: <a href="json-config-flow.html">json-config-flow.html</a>
     </footer>
   </div>
 

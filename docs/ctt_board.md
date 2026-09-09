@@ -3,6 +3,9 @@
 내부 시나리오 현황을 브라우저에서 보는 보드다. **CLI CTT 엔진을 대체하지 않는다.**
 PI / ODVA / Modbus.org / Mitsubishi **인증 evidence 가 아니다.**
 
+장비 없는 제품 데모의 3번째 화면이다. 스크립트: [`docs/demo.md`](demo.md).
+JSON 애니메이션: [`json-config-flow.html`](json-config-flow.html).
+
 | 파일 | 역할 |
 |------|------|
 | [`docs/ctt_board.html`](ctt_board.html) | 보드 UI (빌드 없이 브라우저에서 열기) |

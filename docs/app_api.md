@@ -138,6 +138,7 @@ cmake --build build-daemon
 
 장비 없는 게시→readback→CTT mock (Modbus / SLMP / EIP / PROFINET) 한 줄:
 [`examples/README.md`](../examples/README.md) (`./examples/run_mock_flow.sh`).
+한 화면 데모(JSON HTML → mock 플로 → CTT 보드): [`docs/demo.md`](demo.md).
 
 CTT (`BUILD_DAEMON=OFF -DBUILD_CTT=ON`) 는 이 라이브러리를 링크하지 않으며
 동작이 바뀌지 않는다.

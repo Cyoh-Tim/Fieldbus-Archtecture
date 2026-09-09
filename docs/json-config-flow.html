@@ -197,17 +197,58 @@
   }
   .narration em { color: var(--accent); font-style: normal; font-weight: 700; }
 
-  footer { margin-top: 18px; color: #6f82a6; font-size: 0.78rem; }
+  footer { margin-top: 18px; color: #6f82a6; font-size: 0.78rem; line-height: 1.5; }
+  footer a, a { color: var(--accent); }
+  code { font-family: var(--mono); font-size: 0.86em; color: #c9d7f2; }
+  .demo-nav {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin: 0 0 18px; font-size: 0.82rem;
+  }
+  .demo-nav a {
+    color: var(--muted); text-decoration: none;
+    padding: 6px 12px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel);
+    font-weight: 600;
+  }
+  .demo-nav a:hover { color: var(--text); border-color: #46608a; }
+  .demo-nav a.on {
+    color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  }
+  .banner {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 12px 14px; margin-bottom: 16px;
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+    background: color-mix(in srgb, var(--warn) 10%, var(--panel));
+    border-radius: 14px; color: #fde7b0; font-size: 0.9rem; line-height: 1.5;
+  }
+  .banner .mark {
+    flex: 0 0 auto; font-weight: 800; letter-spacing: .04em; font-size: 0.72rem;
+    padding: 4px 8px; border-radius: 999px; background: #3a2a12; color: var(--warn);
+  }
 </style>
 </head>
 <body>
   <div class="wrap">
+    <nav class="demo-nav" aria-label="데모 경로">
+      <a href="index.html">데모 허브</a>
+      <a href="json-config-flow.html" class="on">JSON 흐름</a>
+      <a href="ctt_board.html">CTT 보드</a>
+      <a href="demo.md">10분 스크립트</a>
+    </nav>
     <h1>JSON만 바꾸면, 프로토콜은 알아서</h1>
     <p class="sub">
       비전문가는 통신 가이드의 <strong>주소·스케일</strong>만 <code>points</code>에 채웁니다.
       <code>protocol</code> 한 줄이 바뀌면 코어가 <strong>어댑터</strong>를 고르고, 스택이 실제 통신을 처리합니다.
-      (Fieldbus-Archtecture · <code>multiproto_daemon</code>)
+      (Fieldbus-Archtecture · <code>multiproto_daemon</code> / <code>fb_api</code>)
     </p>
+    <div class="banner" role="note">
+      <span class="mark">NO HW · NOT CERT</span>
+      <div>
+        PLC / NIC / <code>CAP_NET_RAW</code> 없이 보는 애니메이션입니다.
+        실제 실행은 저장소 루트 <code>./examples/run_mock_flow.sh</code>.
+        <strong>인증이 아닙니다.</strong> IRT / CC-C 는 제품 범위 밖입니다.
+      </div>
+    </div>
 
     <div class="toolbar">
       <div class="proto-tabs" id="tabs">
@@ -316,6 +357,9 @@
     <footer>
       데모용 시각화입니다. 실제 바이너리·CTT 동작과 1:1은 아니지만,
       <code>config/example.*.json</code> + README의 “한 번에 하나의 프로토콜 / points만 채우면 됨” 모델을 그대로 따릅니다.
+      다음 단계: 저장소 루트 <code>./examples/run_mock_flow.sh</code>
+      · 커버리지 보드(인증 아님): <a href="ctt_board.html">ctt_board.html</a>
+      · 스크립트: <a href="demo.md">docs/demo.md</a>.
       CC-C / IRT·공식 PI/ODVA 인증 경로는 제품 범위 밖입니다.
     </footer>
   </div>

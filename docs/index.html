@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fieldbus · 장비 없는 데모</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #121a2b;
+    --panel2: #182338;
+    --line: #2a3a55;
+    --text: #e8eefc;
+    --muted: #93a4c3;
+    --accent: #3dd6c6;
+    --warn: #ffb020;
+    --ok: #4ade80;
+    --font: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: radial-gradient(1200px 600px at 10% -10%, #1a2744 0%, var(--bg) 55%); color: var(--text); font-family: var(--font); }
+  body { padding: 28px 20px 48px; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.55rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 16px; line-height: 1.55; font-size: 0.98rem; }
+  .sub strong { color: var(--accent); font-weight: 600; }
+  code { font-family: var(--mono); font-size: 0.86em; color: #c9d7f2; }
+  a { color: var(--accent); }
+  .banner {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 12px 14px; margin-bottom: 18px;
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+    background: color-mix(in srgb, var(--warn) 10%, var(--panel));
+    border-radius: 14px; color: #fde7b0; font-size: 0.9rem; line-height: 1.5;
+  }
+  .banner .mark {
+    flex: 0 0 auto; font-weight: 800; letter-spacing: .04em; font-size: 0.72rem;
+    padding: 4px 8px; border-radius: 999px; background: #3a2a12; color: var(--warn);
+  }
+  .steps { display: grid; gap: 12px; }
+  .card {
+    background: linear-gradient(180deg, var(--panel), var(--panel2));
+    border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.22); text-decoration: none; color: inherit;
+    display: block;
+  }
+  a.card:hover { border-color: #46608a; }
+  .n {
+    display: inline-flex; width: 1.6rem; height: 1.6rem; align-items: center; justify-content: center;
+    border-radius: 999px; background: #24344f; color: var(--accent); font-weight: 800; font-size: 0.82rem;
+    margin-right: 8px;
+  }
+  h2 { margin: 0 0 6px; font-size: 1.05rem; }
+  p { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+  pre {
+    margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; overflow: auto;
+    background: #0c1424; border: 1px solid var(--line); color: #c9d7f2;
+    font-family: var(--mono); font-size: 0.82rem;
+  }
+  footer { margin-top: 18px; color: #6f82a6; font-size: 0.78rem; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>장비 없는 제품 데모</h1>
+    <p class="sub">
+      JSON 이 프로토콜을 고른다 → 가짜 센서가 포인트를 게시한다 → 내부 CTT mock 이 같은 스택을 확인한다.
+      <strong>PLC / NIC 없음.</strong> 한 화면 스크립트는 <a href="demo.md">docs/demo.md</a>.
+    </p>
+    <div class="banner" role="note">
+      <span class="mark">NOT CERT</span>
+      <div>
+        내부 데모·CTT 보드 ≠ PI / ODVA / Modbus.org / Mitsubishi 인증.
+        PROFINET 은 CC-B + RT Class 1 만 (IRT / CC-C 없음).
+        <code>CAP_NET_RAW</code> 불필요.
+      </div>
+    </div>
+    <div class="steps">
+      <a class="card" href="json-config-flow.html">
+        <h2><span class="n">1</span> JSON 흐름</h2>
+        <p>빌드 없이 브라우저에서. 탭을 Modbus → SLMP → EtherNet/IP → PROFINET 으로 바꾸고 ▶ 동작 보기.</p>
+      </a>
+      <div class="card">
+        <h2><span class="n">2</span> 가짜 센서 → fb_api → CTT mock</h2>
+        <p>저장소 루트 터미널. sudo / 원시 소켓 없음. 하나만 돌리면 <code>modbus</code> 가 가장 짧다.</p>
+        <pre>./examples/run_mock_flow.sh
+./examples/run_mock_flow.sh modbus</pre>
+      </div>
+      <a class="card" href="ctt_board.html">
+        <h2><span class="n">3</span> CTT 커버리지 보드</h2>
+        <p>통과 / 건너뜀 / 갭 / 범위 밖. 공식 인증 evidence 가 아니다.</p>
+      </a>
+    </div>
+    <footer>
+      앱 API: <a href="app_api.md">app_api.md</a>
+      · mock 플로 상세: <a href="../examples/README.md">examples/README.md</a>
+      · 보드 배지: <a href="ctt_board.md">ctt_board.md</a>
+      · 문서 목록: <a href="README.md">docs/README.md</a>
+    </footer>
+  </div>
+</body>
+</html>

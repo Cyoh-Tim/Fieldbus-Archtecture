@@ -5,6 +5,10 @@
 **이건 인증이 아니다.** CTT green 은 PI / ODVA / Modbus.org / Mitsubishi 공인
 랩 evidence 가 아니다. 내부 mock 게이트일 뿐이다.
 
+한 화면 데모 스크립트: [`docs/demo.md`](../docs/demo.md).
+JSON 애니메이션: [`docs/json-config-flow.html`](../docs/json-config-flow.html).
+CTT 커버리지 보드 (인증 아님): [`docs/ctt_board.html`](../docs/ctt_board.html).
+
 앱은 프로토콜 헤더 없이 [`include/fb_api.h`](../include/fb_api.h) 만 포함한다.
 포인트 의미는 [`docs/app_api.md`](../docs/app_api.md). 프로토콜은 config JSON
 이 고른다.
