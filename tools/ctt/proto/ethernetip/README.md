@@ -8,3 +8,6 @@ not a CTT DUT.
 
 When implemented: Scanner/Originator stub + `tests/scenarios/ethernetip/*.yaml`,
 selected by `protocol: ethernetip` on the same `./build/ctt` binary.
+
+ODVA CT category mapping is a stub in `docs/ctt_pi_matrix.md` until this plugin
+exists. Phase 3 does not implement the EIP plugin.

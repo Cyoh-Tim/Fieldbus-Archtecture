@@ -299,8 +299,10 @@ steps:
       ethertype: 0x8892
 ```
 
-Golden은 선택이다. 바이트 단위 고정이 필요한 step만 `golden: tests/golden/profinet/dcp_identify_res.bin` 을 붙인다.
-FrameID·NameOfStation 같은 필드 assert가 기본이다.
+Golden은 선택이다. 바이트 단위 고정이 필요한 step만 `golden: tests/golden/profinet/dcp_identify_res.pcap` 을 붙인다.
+FrameID·NameOfStation 같은 필드 assert가 기본이다. mock 에서 full-frame 비교.
+`--transport=af_packet` 에서는 MAC/패딩 때문에 golden 을 skip 한다.
+
 
 ## 4. Phase 계획
 
@@ -371,14 +373,28 @@ Modbus / SLMP / CC-Link 플러그인은 이 페이즈에 넣지 않는다.
 
 ### Phase 3 — 랩 / golden / 인증 매핑
 
-- lab runner profile: veth, CODESYS, EIP Scanner. 가능하면 같은 YAML. IRT 랩·CC-C 컨트롤러는 대상이 아니다
-- PCAP capture/replay → `tests/golden/<protocol>/`
-- PN 시나리오 ↔ PI Test Bundle 문서 매트릭스는 **CC-A / CC-B 해당 카테고리만**. Bundle 접근 전까지 문서만. **CC-C 카테고리는 매핑하지 않고, 이후 페이즈로 확장하지 않는다**
-- EIP는 ODVA CT 카테고리 매핑도 문서만 (공인 랩 전)
+구현 상태 (이 트리, **CC-B / RTC1 only**. CC-C 없음):
 
-## 5. 디렉터리 레이아웃 (제안)
+| 항목 | 상태 |
+|------|------|
+| Lab transport | `--transport=mock\|af_packet --iface --dut-iface`. 같은 YAML. 기본은 mock |
+| veth 스크립트 | `tests/run_ctt_lab.sh` (Identify 필수; RTC1 은 in-process Connect + 와이어) |
+| CODESYS | CI 없음. `docs/ctt_lab.md` 수동 bring-up. `pn_device_run` / `dcp_probe` 래퍼 |
+| Golden capture | `--capture <dir>` + `tests/regen_ctt_goldens.sh` |
+| Golden replay | YAML `golden: tests/golden/profinet/…` mock `ctest` (`-L golden`) |
+| PI 매핑 | `docs/ctt_pi_matrix.md` CC-A/B only. 내부 준비도. Bundle 접근 없음 |
+| ODVA | stub 절: EIP 플러그인 이후 |
+| default CI | mock `ctest` (Phase 1+2 + golden replay). lab 은 workflow_dispatch |
 
-구현 시 목표 트리. 지금 PR에 디렉터리를 만들지 않는다.
+남은 갭 (하네스 100% 쪽, 인증 아님):
+
+- 실 UDP CM (34964) / SNMP :161 을 CTT stub 에 연결
+- DCP Get/Hello/Set IP, CM Write, I&M1–4, MRP, FSU
+- CODESYS 상호운용은 수동
+- 공식 PI Test Bundle 실행·evidence — 공인 랩. 이 페이즈의 목표가 아님
+- EIP 플러그인 / ODVA 매핑 — 플러그인 이후
+
+## 5. 디렉터리 레이아웃
 
 ```
 tools/ctt/                       # 공통 runner, report, soak, mock-transport, CI
@@ -388,15 +404,20 @@ tests/scenarios/
   profinet/                      # protocol: profinet
   ethernetip/                    # 예약
 tests/golden/
-  profinet/
-  ethernetip/
+  profinet/                  # mock PCAP goldens (Phase 3)
+  ethernetip/                # 예약
+
 tests/test_pn_crypto.c           # HMAC 등 thin unit (이름 가칭)
 tests/test_pn_stack.c            # Phase 1 이후: 잔여 또는 삭제
 tests/test_eip_stack.c           # PR #4. 플러그인 이후 이전 대상
-tests/dcp_probe.c                # 수동 랩. CMake 타깃 아님
-tests/pn_device_run.c            # 수동 랩. CMake 타깃 아님
-.github/workflows/ci.yml         # Phase 1 (공통 ctt 엔트리)
+tests/dcp_probe.c                # 수동 랩. BUILD_PN_LAB_TOOLS
+tests/pn_device_run.c            # 수동 랩. BUILD_PN_LAB_TOOLS
+tests/run_ctt_lab.sh             # Phase 3 veth AF_PACKET (not default ctest)
+.github/workflows/ci.yml         # Phase 1–3 mock ctest; lab via workflow_dispatch
 docs/ctt.md                      # 이 문서
+docs/ctt_lab.md                  # Phase 3 lab / veth / CODESYS
+docs/ctt_pi_matrix.md            # CC-A/B 내부 매핑 (인증 evidence 아님)
+
 ```
 
 `tools/ctt` 는 코어/어댑터와 분리한다. `core/` 에 프로토콜 분기를 넣지 않는다.
@@ -418,6 +439,14 @@ Phase 2 (PROFINET, 이 트리):
 - `soak_short` 가 기본 `ctest`에 포함. `soak_ci` (30s) 는 `-LE soak_ci` 로 PR 게이트에서 제외
 - 메트릭(unexpected / AR drop / period histogram)을 `LOG_INFO` 로 남김
 - EIP / Modbus / SLMP 플러그인 없음. CC-C / IRT 시나리오 없음
+
+Phase 3 (하네스, 이 트리):
+
+- 같은 YAML 이 `--transport=mock` (기본 `ctest`) 과 `--transport=af_packet` 에서 돈다
+- mock golden replay (`dcp_identify_res.pcap`, Sec1 Set accept) 가 기본 CI 에 포함
+- `tests/run_ctt_lab.sh` + `docs/ctt_lab.md` + `docs/ctt_pi_matrix.md`
+- default CI 에 sudo/AF_PACKET 없음. lab 은 workflow_dispatch
+- CC-C 시나리오/매핑 없음. EIP 플러그인 없음
 
 EIP 플러그인 (PR #4 merge 후):
 

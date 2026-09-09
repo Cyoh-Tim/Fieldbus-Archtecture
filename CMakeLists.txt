@@ -9,6 +9,8 @@ option(ENABLE_ETHERNETIP "EtherNet/IP 어댑터 빌드 (구매 스택 필요)" O
 option(ENABLE_PN_TESTS "PROFINET HMAC 단위 테스트" ON)
 option(BUILD_DAEMON "multiproto_daemon + 어댑터 (libmodbus, cJSON 필요)" ON)
 option(BUILD_CTT "Controller Test Tool (pn_stack + YAML 시나리오)" ON)
+option(ENABLE_CTT_AF_PACKET "Compile CTT AF_PACKET lab transport (not used by default ctest)" ON)
+option(BUILD_PN_LAB_TOOLS "Build dcp_probe / pn_device_run (manual lab; not ctest)" ON)
 
 find_package(Threads REQUIRED)
 
@@ -128,6 +130,8 @@ if(BUILD_CTT)
         tools/ctt/runner.c
         tools/ctt/yaml_mini.c
         tools/ctt/mock_eth.c
+        tools/ctt/transport.c
+        tools/ctt/pcap.c
         tools/ctt/plugin_registry.c
         tools/ctt/proto/profinet/pn_plugin.c
     )
@@ -138,6 +142,17 @@ if(BUILD_CTT)
         core
     )
     target_link_libraries(ctt PRIVATE pn_stack)
+    if(ENABLE_CTT_AF_PACKET)
+        target_compile_definitions(ctt PRIVATE CTT_ENABLE_AF_PACKET=1)
+    endif()
+endif()
+
+if(BUILD_PN_LAB_TOOLS)
+    add_executable(dcp_probe tests/dcp_probe.c)
+    target_include_directories(dcp_probe PRIVATE stacks/profinet/include)
+    add_executable(pn_device_run tests/pn_device_run.c)
+    target_include_directories(pn_device_run PRIVATE stacks/profinet/include include core)
+    target_link_libraries(pn_device_run PRIVATE pn_stack)
 endif()
 
 if(ENABLE_PN_TESTS)
@@ -158,11 +173,19 @@ if(BUILD_CTT)
     foreach(sc ${CTT_PN_SCENARIOS})
         get_filename_component(sc_name ${sc} NAME_WE)
         add_test(NAME ctt_pn_${sc_name} COMMAND ctt --scenario ${sc})
+        set_tests_properties(ctt_pn_${sc_name} PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
         # 30s duration soak: optional. Default CI uses -LE soak_ci.
         if(sc_name STREQUAL "soak_ci")
             set_tests_properties(ctt_pn_${sc_name} PROPERTIES
                 LABELS "soak_ci"
                 TIMEOUT 90)
         endif()
+        # Golden replay is mock-only (no NIC). Identify / Sec1 Set carry golden:.
+        if(sc_name STREQUAL "dcp_identify_name_of_station" OR
+           sc_name STREQUAL "dcp_set_sec_class1")
+            set_tests_properties(ctt_pn_${sc_name} PROPERTIES LABELS "golden")
+        endif()
     endforeach()
+    # Lab AF_PACKET is tests/run_ctt_lab.sh — not registered (needs CAP_NET_RAW).
 endif()

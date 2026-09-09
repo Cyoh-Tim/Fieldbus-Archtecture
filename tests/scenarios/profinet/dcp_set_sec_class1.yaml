@@ -21,3 +21,4 @@ steps:
     expect:
       result: accept
       station_name: new-name
+    golden: tests/golden/profinet/dcp_set_sec_class1_accept.pcap

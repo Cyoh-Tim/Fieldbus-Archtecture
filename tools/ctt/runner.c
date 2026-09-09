@@ -1,4 +1,5 @@
 #include "ctt.h"
+#include "transport.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -94,7 +95,7 @@ int ctt_check(ctt_run_t *run, int step, const char *action, int cond,
     return -1;
 }
 
-int ctt_run_file(const char *path)
+int ctt_run_file(const char *path, const ctt_opts_t *opts)
 {
     char err[256];
     yaml_node_t *root = yaml_parse_file(path, err, sizeof(err));
@@ -109,6 +110,12 @@ int ctt_run_file(const char *path)
     run.root = root;
     run.name = yaml_cstr(root, "name", path);
     run.protocol = yaml_cstr(root, "protocol", "");
+    run.af_fd = -1;
+    if (opts) {
+        run.opts = *opts;
+    } else {
+        ctt_opts_init(&run.opts);
+    }
     ctt_mock_init(&run.mock);
 
     if (!run.protocol[0]) {
@@ -127,8 +134,10 @@ int ctt_run_file(const char *path)
         return 1;
     }
 
-    LOG_INFO("ctt", "run protocol=%s scenario=%s file=%s", run.protocol,
-             run.name, path);
+    LOG_INFO("ctt", "run protocol=%s scenario=%s file=%s transport=%s",
+             run.protocol, run.name, path,
+             run.opts.transport == CTT_TRANSPORT_AF_PACKET ? "af_packet"
+                                                          : "mock");
 
     if (plugin->setup(&run) != 0) {
         LOG_ERROR("ctt", "FAIL protocol=%s scenario=%s: plugin setup",
@@ -159,7 +168,8 @@ int ctt_run_file(const char *path)
         }
     }
 
-    if (run.mock.to_dut.overflow || run.mock.to_ctl.overflow) {
+    if (run.opts.transport == CTT_TRANSPORT_MOCK &&
+        (run.mock.to_dut.overflow || run.mock.to_ctl.overflow)) {
         ctt_failf(&run, 0, "mock_eth",
                   "ring overflow (unexpected drop) to_dut=%d to_ctl=%d",
                   run.mock.to_dut.overflow, run.mock.to_ctl.overflow);
