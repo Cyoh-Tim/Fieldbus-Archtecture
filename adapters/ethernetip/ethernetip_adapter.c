@@ -411,47 +411,44 @@ static int eip_read_point(protocol_adapter_t *self, const char *point_name,
 {
     eip_ctx_t *ctx = self->ctx;
     eip_point_t *pt = find_point(ctx, point_name);
-    if (!pt || !out) {
+    if (!pt || !out || !out->data) {
         return -EINVAL;
     }
     size_t n = (size_t)pt->length;
-    uint8_t *buf = malloc(n ? n : 1);
-    if (!buf) {
-        return -ENOMEM;
+    if (n > out->len) {
+        n = out->len;
     }
 
     int rc = -1;
     if (ctx->role == EIP_ROLE_ORIGINATOR && pt->kind == EIP_ADDR_TAG) {
         size_t got = n;
-        rc = eip_stack_tag_read(ctx->stack, pt->tag, buf, &got);
-        n = got;
-    } else if (ctx->role == EIP_ROLE_ORIGINATOR &&
-               pt->kind == EIP_ADDR_CIP_PATH) {
-        size_t got = n;
-        rc = eip_stack_explicit_get(ctx->stack, pt->class_id, pt->instance,
-                                    pt->attribute, buf, &got);
-        n = got;
-    } else if (strcmp(pt->access, "write") == 0) {
-        rc = eip_stack_read_output(ctx->stack, (size_t)pt->byte_offset, buf, n);
-        if (rc > 0) {
-            n = (size_t)rc;
-            rc = 0;
+        rc = eip_stack_tag_read(ctx->stack, pt->tag, out->data, &got);
+        if (rc == 0) {
+            out->len = got;
         }
-    } else {
-        rc = eip_stack_read_input(ctx->stack, (size_t)pt->byte_offset, buf, n);
-        if (rc > 0) {
-            n = (size_t)rc;
-            rc = 0;
-        }
-    }
-
-    if (rc != 0) {
-        free(buf);
         return rc;
     }
-    out->data = buf;
-    out->len = n;
-    return 0;
+    if (ctx->role == EIP_ROLE_ORIGINATOR && pt->kind == EIP_ADDR_CIP_PATH) {
+        size_t got = n;
+        rc = eip_stack_explicit_get(ctx->stack, pt->class_id, pt->instance,
+                                    pt->attribute, out->data, &got);
+        if (rc == 0) {
+            out->len = got;
+        }
+        return rc;
+    }
+    if (strcmp(pt->access, "write") == 0) {
+        rc = eip_stack_read_output(ctx->stack, (size_t)pt->byte_offset,
+                                   out->data, n);
+    } else {
+        rc = eip_stack_read_input(ctx->stack, (size_t)pt->byte_offset,
+                                  out->data, n);
+    }
+    if (rc > 0) {
+        out->len = (size_t)rc;
+        return 0;
+    }
+    return rc;
 }
 
 static int eip_write_point(protocol_adapter_t *self, const char *point_name,

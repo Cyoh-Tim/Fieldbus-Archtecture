@@ -209,12 +209,36 @@ void eip_sec_tls_stop(eip_stack_t *s)
     }
 }
 
-static void tls_accept(eip_stack_t *s)
+static int tls_set_nonblock(int fd)
+{
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) {
+        return -1;
+    }
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+static void tls_drop(eip_tls_client_t *c)
+{
+    if (c->ssl) {
+        SSL_free(c->ssl);
+        c->ssl = NULL;
+    }
+    if (c->fd >= 0) {
+        close(c->fd);
+        c->fd = -1;
+    }
+    c->active = 0;
+    c->hs_done = 0;
+    c->rx_len = 0;
+}
+
+static void tls_accept(eip_stack_t *s, int budget)
 {
     if (s->tls_listen_fd < 0 || !s->tls_ctx) {
         return;
     }
-    for (;;) {
+    while (budget-- > 0) {
         int fd = accept(s->tls_listen_fd, NULL, NULL);
         if (fd < 0) {
             break;
@@ -230,6 +254,10 @@ static void tls_accept(eip_stack_t *s)
             close(fd);
             continue;
         }
+        if (tls_set_nonblock(fd) != 0) {
+            close(fd);
+            continue;
+        }
         SSL *ssl = SSL_new(s->tls_ctx);
         if (!ssl) {
             close(fd);
@@ -237,43 +265,53 @@ static void tls_accept(eip_stack_t *s)
         }
         SSL_set_fd(ssl, fd);
         SSL_set_ex_data(ssl, 0, s);
-        if (SSL_accept(ssl) <= 0) {
-            SSL_free(ssl);
-            close(fd);
-            continue;
-        }
+        SSL_set_accept_state(ssl);
+        SSL_set_mode(ssl, SSL_MODE_ENABLE_PARTIAL_WRITE |
+                              SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
         memset(&s->tls_clients[slot], 0, sizeof(s->tls_clients[slot]));
         s->tls_clients[slot].fd = fd;
         s->tls_clients[slot].ssl = ssl;
         s->tls_clients[slot].active = 1;
-        LOG_INFO("ethernetip", "TLS session accepted (CIP Security port)");
+        s->tls_clients[slot].hs_done = 0;
     }
 }
 
-static void tls_service(eip_stack_t *s, eip_tls_client_t *c)
+static int tls_handshake(eip_tls_client_t *c)
 {
+    int n = SSL_accept(c->ssl);
+    if (n == 1) {
+        c->hs_done = 1;
+        LOG_INFO("ethernetip", "TLS session accepted (CIP Security port)");
+        return 0;
+    }
+    int err = SSL_get_error(c->ssl, n);
+    if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
+        return 0;
+    }
+    tls_drop(c);
+    return -1;
+}
+
+static void tls_service(eip_stack_t *s, eip_tls_client_t *c, int budget)
+{
+    if (!c->hs_done) {
+        if (tls_handshake(c) != 0 || !c->hs_done) {
+            return;
+        }
+    }
     uint8_t tmp[2048];
-    for (;;) {
+    while (budget-- > 0) {
         int n = SSL_read(c->ssl, tmp, (int)sizeof(tmp));
         if (n <= 0) {
             int err = SSL_get_error(c->ssl, n);
             if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
                 break;
             }
-            SSL_free(c->ssl);
-            c->ssl = NULL;
-            close(c->fd);
-            c->fd = -1;
-            c->active = 0;
-            c->rx_len = 0;
+            tls_drop(c);
             break;
         }
         if (c->rx_len + (size_t)n > sizeof(c->rx)) {
-            SSL_free(c->ssl);
-            c->ssl = NULL;
-            close(c->fd);
-            c->fd = -1;
-            c->active = 0;
+            tls_drop(c);
             break;
         }
         memcpy(c->rx + c->rx_len, tmp, (size_t)n);
@@ -290,7 +328,15 @@ static void tls_service(eip_stack_t *s, eip_tls_client_t *c)
             eip_encap_process(s, c->rx, need, resp, sizeof(resp), &resp_len);
             pthread_mutex_unlock(&s->lock);
             if (resp_len > 0) {
-                (void)SSL_write(c->ssl, resp, (int)resp_len);
+                int w = SSL_write(c->ssl, resp, (int)resp_len);
+                if (w <= 0) {
+                    int err = SSL_get_error(c->ssl, w);
+                    if (err != SSL_ERROR_WANT_READ &&
+                        err != SSL_ERROR_WANT_WRITE) {
+                        tls_drop(c);
+                        return;
+                    }
+                }
             }
             memmove(c->rx, c->rx + need, c->rx_len - need);
             c->rx_len -= need;
@@ -303,10 +349,12 @@ void eip_sec_tls_poll(eip_stack_t *s)
     if (!eip_sec_confidentiality(s) || s->cfg.mock) {
         return;
     }
-    tls_accept(s);
-    for (int i = 0; i < EIP_TLS_CLIENTS_MAX; i++) {
+    int budget = EIP_POLL_TLS_BUDGET;
+    tls_accept(s, budget);
+    for (int i = 0; i < EIP_TLS_CLIENTS_MAX && budget > 0; i++) {
         if (s->tls_clients[i].active) {
-            tls_service(s, &s->tls_clients[i]);
+            tls_service(s, &s->tls_clients[i], budget);
+            budget--;
         }
     }
 }

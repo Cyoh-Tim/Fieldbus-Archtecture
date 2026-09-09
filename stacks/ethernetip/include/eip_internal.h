@@ -35,7 +35,8 @@ typedef struct {
     uint32_t originator_serial;
     uint8_t timeout_multiplier;
     uint32_t watchdog_us; /* derived close timeout */
-    uint8_t last_produce[16 + EIP_ASSEMBLY_SIZE_MAX];
+    /* CPF: item count(2) + seq addr(12) + connected hdr(4) + seq(2) + data */
+    uint8_t last_produce[20 + EIP_ASSEMBLY_SIZE_MAX];
     size_t last_produce_len;
     int produce_ready;
 } eip_class1_conn_t;
@@ -51,6 +52,7 @@ typedef struct {
 typedef struct {
     int fd;
     int active;
+    int hs_done; /* 0 until SSL_accept completes (non-blocking) */
     SSL *ssl;
     uint8_t rx[EIP_TCP_BUF_MAX];
     size_t rx_len;
@@ -158,6 +160,21 @@ int eip_path_parse(const uint8_t *path, size_t path_bytes, uint16_t *class_id,
                    size_t tag_cap);
 
 uint64_t eip_now_ns(void);
+
+/* CIP Vol1: timeout = 4 * RPI * 2^timeout_multiplier. TM=0 is valid (4*RPI). */
+static inline uint32_t eip_class1_watchdog_us(uint32_t rpi_us,
+                                              uint8_t timeout_mult)
+{
+    if (rpi_us == 0) {
+        rpi_us = 8000;
+    }
+    unsigned shift = timeout_mult > 7u ? 7u : (unsigned)timeout_mult;
+    uint64_t us = (uint64_t)rpi_us * 4ull * (1ull << shift);
+    if (us > 0xffffffffull) {
+        return 0xffffffffu;
+    }
+    return (uint32_t)us;
+}
 
 /* Class1 watchdog — close stale connections */
 void eip_io_watchdog(eip_stack_t *s);

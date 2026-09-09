@@ -145,14 +145,7 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     c->timeout_multiplier = timeout_mult;
     {
         uint32_t rpi = o2t_rpi ? o2t_rpi : s->cfg.rpi_us;
-        if (rpi == 0) {
-            rpi = 8000;
-        }
-        c->watchdog_us =
-            rpi * 4u *
-            (uint32_t)((timeout_mult ? timeout_mult
-                                     : EIP_CLASS1_TIMEOUT_MULT_DEFAULT) +
-                       1u);
+        c->watchdog_us = eip_class1_watchdog_us(rpi, timeout_mult);
     }
     c->last_rx_ns = 0; /* arm after first IO */
     c->last_tx_ns = 0;

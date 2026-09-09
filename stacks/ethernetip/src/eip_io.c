@@ -86,13 +86,7 @@ void eip_io_watchdog(eip_stack_t *s)
         uint32_t wd = c->watchdog_us;
         if (wd == 0) {
             uint32_t rpi = c->o2t_rpi_us ? c->o2t_rpi_us : s->cfg.rpi_us;
-            if (rpi == 0) {
-                rpi = 8000;
-            }
-            uint8_t mult = c->timeout_multiplier
-                               ? c->timeout_multiplier
-                               : EIP_CLASS1_TIMEOUT_MULT_DEFAULT;
-            wd = rpi * 4u * (uint32_t)(mult + 1u);
+            wd = eip_class1_watchdog_us(rpi, c->timeout_multiplier);
             c->watchdog_us = wd;
         }
         /* Only arm after first O->T so FO without IO yet is not killed */
@@ -127,6 +121,14 @@ void eip_io_produce(eip_stack_t *s)
         }
 
         uint8_t *frame = c->last_produce;
+        size_t cap = sizeof(c->last_produce);
+        size_t need = 20u + (size_t)s->input_size;
+        if (need > cap) {
+            LOG_ERROR("ethernetip",
+                      "Class1 produce overflow need=%zu cap=%zu input=%u",
+                      need, cap, s->input_size);
+            continue;
+        }
         size_t off = 0;
         eip_wr_le16(frame + off, 2);
         off += 2;
@@ -147,6 +149,10 @@ void eip_io_produce(eip_stack_t *s)
         eip_wr_le16(frame + off, (uint16_t)(c->t2o_seq & 0xffff));
         off += 2;
         if (s->input_data && s->input_size) {
+            if (off + s->input_size > cap) {
+                LOG_ERROR("ethernetip", "Class1 produce truncated");
+                continue;
+            }
             memcpy(frame + off, s->input_data, s->input_size);
             off += s->input_size;
         }
