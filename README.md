@@ -6,6 +6,40 @@ config.json 설정만으로 선택해 동작시키는 필드버스 런타임.
 담당자가 각 프로토콜을 몰라도, 통신 가이드의 주소만 `points`에 채우면 되도록
 프로토콜 지식은 어댑터/스택 안에 캡슐화한다.
 
+## 10분 데모 (장비 없음)
+
+PLC·NIC·`CAP_NET_RAW` 없이 제품 스토리를 본다. **인증이 아니다**
+(CTT green ≠ PI / ODVA / Modbus.org / Mitsubishi).
+한 화면 스크립트: [`docs/demo.md`](docs/demo.md).
+브라우저 허브: [`docs/index.html`](docs/index.html).
+
+1. **JSON이 프로토콜을 고르는 방식** (빌드 없음)
+
+```
+xdg-open docs/json-config-flow.html
+```
+
+탭을 Modbus → SLMP → EtherNet/IP → PROFINET 순으로 바꾸고 ▶ 동작 보기.
+
+2. **가짜 센서 → fb_api 게시/readback → CTT mock**
+
+```
+./examples/run_mock_flow.sh              # 네 프로토콜
+./examples/run_mock_flow.sh modbus       # 하나만
+```
+
+상세: [`examples/README.md`](examples/README.md).
+
+3. **내부 커버리지 보드** (인증 evidence 아님)
+
+```
+xdg-open docs/ctt_board.html
+```
+
+통과/건너뜀/갭/범위 밖. 이 HTML 이 공식 랩 리포트를 대체하지 않는다.
+
+## 프로토콜 범위
+
 - **PROFINET**: `stacks/profinet/` 자체 Device 스택 (CC-B + RT Class 1 + Sec Class 1).
   **IRT / CC-C 는 목표 아님.** 상세: [`docs/profinet_stack.md`](docs/profinet_stack.md)
 - **Modbus TCP**: `stacks/modbus/` 자체 스택 (기본 서버/슬레이브, **libmodbus 없음**).
@@ -19,9 +53,7 @@ config.json 설정만으로 선택해 동작시키는 필드버스 런타임.
 전체 설계 배경은 [`docs/design.md`](docs/design.md).
 앱은 프로토콜 헤더 없이 [`docs/app_api.md`](docs/app_api.md) 의 포인트 API
 (`include/fb_api.h`) 만 사용한다.
-CTT 설계(공통 runner + 프로토콜 플러그인)는 [`docs/ctt.md`](docs/ctt.md).
-CTT 시나리오 현황 보드: [docs/ctt_board.html](docs/ctt_board.html) (브라우저에서 열기, 인증 아님).
-비전문가용 JSON→데몬 동작 애니메이션 데모: [docs/json-config-flow.html](docs/json-config-flow.html) (브라우저에서 열기).
+CTT 설계는 [`docs/ctt.md`](docs/ctt.md). 문서 목록: [`docs/README.md`](docs/README.md).
 
 ## 디렉토리 구조
 ```
@@ -41,11 +73,13 @@ tests/scenarios/        CTT YAML (profinet/, ethernetip/, modbus/, slmp/)
 third_party/            (선택) 향후 벤더 EIP 스택 교체 위치 — git 커밋 안 함
 config/                 config.schema.json + 예제 설정 파일
 examples/               fb_api_demo + 장비 없는 fake sensor → CTT mock 플로
+docs/demo.md            장비 없는 10분 데모 스크립트
+docs/index.html         데모 HTML 허브
+docs/json-config-flow.html  JSON → 런타임 애니메이션
+docs/ctt_board.html     CTT 시나리오 현황 보드 (통과/건너뜀/갭/범위 밖, 인증 아님)
 docs/design.md          설계 배경 전체 문서
 docs/app_api.md         애플리케이션 C API (포인트 읽기/쓰기, 스레드, reload)
 docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)
-docs/ctt_board.html     CTT 시나리오 현황 보드 (통과/건너뜀/갭/범위 밖)
-docs/json-config-flow.html  비전문가 JSON 설정 → 데몬 동작 애니메이션 데모
 ```
 
 ## 빌드
@@ -65,14 +99,12 @@ cmake --build build
 ctest --test-dir build --output-on-failure -LE soak_ci
 ```
 
-## 실행
-장비 없는 제품 스토리(가짜 센서 `fb_write_*` → 같은 세션 `fb_read_*` → CTT
-mock). Modbus TCP / SLMP Binary 3E / EtherNet/IP / PROFINET CC-B.
-PLC/NIC/`CAP_NET_RAW` 없음. **인증이 아니다.**
-상세: [`examples/README.md`](examples/README.md).
+## 실행 (개발자)
+
+데모는 위 **10분 데모** (`./examples/run_mock_flow.sh`) 가 정본이다.
+아래는 개별 바이너리·시나리오다. 랩 AF_PACKET / `CAP_NET_RAW` 는 기본 경로가 아니다.
+
 ```
-./examples/run_mock_flow.sh
-./examples/run_mock_flow.sh modbus
 ./build/fake_sensor_app --once config/example.fake_sensor.json
 ./build/fb_api_demo config/example.modbus.json
 ./build/multiproto_daemon config/example.modbus.json
@@ -87,20 +119,16 @@ PLC/NIC/`CAP_NET_RAW` 없음. **인증이 아니다.**
 ./build/ctt --scenario tests/scenarios/modbus/fc03_read_holding.yaml
 ./build/ctt --scenario tests/scenarios/slmp/encode_batch_read.yaml
 ```
-CTT 설계·시나리오 스키마는 [`docs/ctt.md`](docs/ctt.md), 사용법은 [`tools/ctt/README.md`](tools/ctt/README.md).
-시나리오 통과/건너뜀/갭 보드는 [`docs/ctt_board.html`](docs/ctt_board.html).
-랩/golden 은 [`docs/ctt_lab.md`](docs/ctt_lab.md).
-PI 매핑은 [`docs/ctt_pi_matrix.md`](docs/ctt_pi_matrix.md).
-PN 내부 bundle-grade 로드맵·TC ID (`PN-B-*`, **≠ PI 인증**):
-[`docs/ctt_pn_bundle.md`](docs/ctt_pn_bundle.md).
-EIP 내부 bundle-grade 로드맵·TC ID (`EIP-A-*`, **≠ ODVA 인증**):
-[`docs/ctt_eip_bundle.md`](docs/ctt_eip_bundle.md).
-EIP 내부 ODVA 매핑은 [`docs/ctt_odva_matrix.md`](docs/ctt_odva_matrix.md).
-Modbus 내부 bundle-grade 카탈로그·TC ID (`MB-T-*`, **≠ Modbus.org 인증**):
-[`docs/ctt_mb_bundle.md`](docs/ctt_mb_bundle.md).
-SLMP 내부 bundle-grade 카탈로그·TC ID (`SLMP-3E-*`, **≠ Mitsubishi 인증**):
-[`docs/ctt_slmp_bundle.md`](docs/ctt_slmp_bundle.md).
-Modbus/SLMP 내부 매트릭스: [`docs/ctt_modbus_matrix.md`](docs/ctt_modbus_matrix.md),
+CTT 사용법: [`tools/ctt/README.md`](tools/ctt/README.md).
+랩/golden: [`docs/ctt_lab.md`](docs/ctt_lab.md).
+내부 bundle-grade 카탈로그 (**≠ 인증**):
+[`docs/ctt_pn_bundle.md`](docs/ctt_pn_bundle.md) (`PN-B-*`),
+[`docs/ctt_eip_bundle.md`](docs/ctt_eip_bundle.md) (`EIP-A-*`),
+[`docs/ctt_mb_bundle.md`](docs/ctt_mb_bundle.md) (`MB-T-*`),
+[`docs/ctt_slmp_bundle.md`](docs/ctt_slmp_bundle.md) (`SLMP-3E-*`).
+매핑: [`docs/ctt_pi_matrix.md`](docs/ctt_pi_matrix.md),
+[`docs/ctt_odva_matrix.md`](docs/ctt_odva_matrix.md),
+[`docs/ctt_modbus_matrix.md`](docs/ctt_modbus_matrix.md),
 [`docs/ctt_slmp_matrix.md`](docs/ctt_slmp_matrix.md).
 
 ## 새 프로토콜(예: EtherCAT) 추가하는 법

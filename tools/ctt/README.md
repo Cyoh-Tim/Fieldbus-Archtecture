@@ -21,6 +21,8 @@ ctest --test-dir build --output-on-failure -L profinet
 ```
 
 CI uses mock Ethernet (`iface: mock`). No AF_PACKET / sudo.
+Equipment-free product demo (JSON HTML → mock flow → this board): `docs/demo.md`.
+Coverage board (not certification): `docs/ctt_board.html`.
 
 Lab (optional, not default `ctest`):
 
