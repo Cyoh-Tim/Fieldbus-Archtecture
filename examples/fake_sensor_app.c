@@ -12,8 +12,9 @@
  *
  * Publishes PLC-read points (barcode + temperature) with fb_write_*,
  * then reads them back with fb_read_* so the values are visibly stored.
- * Default config is a Modbus TCP server on loopback — no PLC, no NIC,
- * no CAP_NET_RAW.
+ * Protocol is selected by the config JSON (Modbus TCP server, SLMP Binary
+ * 3E lab server, EtherNet/IP mock adapter, PROFINET CC-B mock device).
+ * No PLC, no NIC, no CAP_NET_RAW.
  *
  * Usage:
  *   fake_sensor_app [--once | --seconds N | --cycles N] [config.json]
@@ -34,7 +35,10 @@ static void usage(const char *argv0)
             "  --once       publish + readback once, then exit (script/CI)\n"
             "  --seconds N  publish every 1s for N seconds (SIGINT also stops)\n"
             "  --cycles N   publish every cycle_ms for N cycles\n"
-            "  default config: config/example.fake_sensor.json\n",
+            "  default config: config/example.fake_sensor.json (Modbus TCP)\n"
+            "  also: example.fake_sensor.slmp.json /\n"
+            "        example.fake_sensor.ethernetip.json /\n"
+            "        example.fake_sensor.profinet.json\n",
             argv0);
 }
 
@@ -178,8 +182,8 @@ int main(int argc, char **argv)
 
     printf("=== fake sensor (no PLC, no NIC) ===\n");
     printf("config=%s\n", config);
-    printf("access: app writes PLC-read points; PLC would FC03 them.\n");
-    printf("this is not PI / ODVA / Modbus.org certification.\n");
+    printf("access: app writes PLC-read points; a PLC would read them.\n");
+    printf("this is not PI / ODVA / Modbus.org / Mitsubishi certification.\n");
     fflush(stdout);
 
     fb_health_t h;
@@ -188,6 +192,11 @@ int main(int argc, char **argv)
         printf("protocol=%s device=%s cycle_ms=%d connected=%d gen=%u\n",
                h.protocol, h.device_name, h.cycle_ms, h.connected,
                h.generation);
+        if (!h.connected) {
+            printf("note: connected=0 is expected for some mocks "
+                   "(e.g. PROFINET without an AR); fb_read/write still "
+                   "use the local process image.\n");
+        }
     }
 
     size_t n = 0;

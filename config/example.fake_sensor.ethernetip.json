@@ -1,0 +1,63 @@
+{
+  "protocol": "ethernetip",
+  "device": {
+    "name": "fake_barcode_temp_1",
+    "role": "server"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "role": "server",
+    "bind_ip": "127.0.0.1",
+    "port": 15562,
+    "udp_io_port": 15563,
+    "vendor_id": 43981,
+    "device_type": 12,
+    "product_code": 1,
+    "serial_number": 305419896,
+    "product_name": "FieldbusSensor",
+    "input_assembly": 150,
+    "output_assembly": 101,
+    "config_assembly": 100,
+    "input_size": 64,
+    "output_size": 16,
+    "rpi_us": 8000,
+    "security_class": 1,
+    "psk_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "secure_tcp_port": 15564,
+    "protection_mode": 0,
+    "lldp_enable": true,
+    "lldp_tx_interval_sec": 30,
+    "acd_enable": true,
+    "iface": "mock",
+    "mock": true
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "read",
+      "data_type": "string",
+      "length": 32,
+      "address": {
+        "ethernetip": {
+          "tag": "Sensor1.Barcode",
+          "assembly": 150,
+          "byte_offset": 0,
+          "length": 32
+        }
+      }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "float",
+      "length": 4,
+      "address": {
+        "ethernetip": {
+          "assembly": 150,
+          "byte_offset": 32,
+          "length": 4
+        }
+      }
+    }
+  ]
+}

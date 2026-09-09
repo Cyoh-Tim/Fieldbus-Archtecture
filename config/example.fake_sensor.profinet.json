@@ -1,0 +1,54 @@
+{
+  "protocol": "profinet",
+  "device": {
+    "name": "fake_barcode_temp_1",
+    "role": "server"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "iface": "mock",
+    "device_name": "sensor-line1",
+    "vendor_id": 43981,
+    "device_id": 1,
+    "ip": "192.168.0.10",
+    "netmask": "255.255.255.0",
+    "gateway": "192.168.0.1",
+    "security_class": 1,
+    "psk_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "input_len": 40,
+    "output_len": 8,
+    "cycle_us": 8000
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "read",
+      "data_type": "string",
+      "length": 32,
+      "address": {
+        "profinet": {
+          "slot": 1,
+          "subslot": 1,
+          "index": 1,
+          "byte_offset": 0,
+          "length": 32
+        }
+      }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "float",
+      "length": 4,
+      "address": {
+        "profinet": {
+          "slot": 1,
+          "subslot": 1,
+          "index": 1,
+          "byte_offset": 32,
+          "length": 4
+        }
+      }
+    }
+  ]
+}

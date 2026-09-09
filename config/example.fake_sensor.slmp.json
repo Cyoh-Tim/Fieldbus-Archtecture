@@ -1,0 +1,43 @@
+{
+  "protocol": "slmp",
+  "device": {
+    "name": "fake_barcode_temp_1",
+    "role": "server"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "role": "server",
+    "ip": "127.0.0.1",
+    "port": 15561,
+    "network_no": 0,
+    "pc_no": 255,
+    "dest_module_io": 1023,
+    "monitoring_timer": 16,
+    "timeout_ms": 200,
+    "max_clients": 2,
+    "frame": "3E"
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "read",
+      "data_type": "string",
+      "length": 32,
+      "chars_per_word": 2,
+      "trim_null": true,
+      "address": {
+        "slmp": { "device_code": "D", "start": 100 }
+      }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 0.1,
+      "endian": "ABCD",
+      "address": {
+        "slmp": { "device": "D", "address": "110", "quantity": 1 }
+      }
+    }
+  ]
+}

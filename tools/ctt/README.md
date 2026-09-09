@@ -17,6 +17,7 @@ ctest --test-dir build --output-on-failure -LE soak_ci
 ctest --test-dir build --output-on-failure -L ethernetip
 ctest --test-dir build --output-on-failure -L modbus
 ctest --test-dir build --output-on-failure -L slmp
+ctest --test-dir build --output-on-failure -L profinet
 ```
 
 CI uses mock Ethernet (`iface: mock`). No AF_PACKET / sudo.
