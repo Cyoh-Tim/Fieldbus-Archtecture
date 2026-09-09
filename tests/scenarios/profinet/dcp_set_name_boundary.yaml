@@ -32,4 +32,4 @@ steps:
     expect:
       result: accept
       station_name: sensor-line1
-      station_name_len: 13
+      station_name_len: 12
