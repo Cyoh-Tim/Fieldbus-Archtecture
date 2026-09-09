@@ -1,0 +1,43 @@
+name: sec_integrity_fo
+protocol: ethernetip
+tags: [security, forward_open, migrate]
+device:
+  iface: mock
+  security_class: 1
+  psk_hex: "1111111111111111111111111111111111111111111111111111111111111111"
+  input_size: 8
+  output_size: 8
+  input_assembly: 150
+  output_assembly: 101
+  config_assembly: 100
+steps:
+  - action: register_session
+    expect:
+      session_handle: nonzero
+  - action: forward_open
+    integrity: false
+    serial: 0x55
+    orig_serial: 1
+    rpi_us: 8000
+    o2t_size: 8
+    t2o_size: 8
+    expect:
+      privilege: true
+      class1: down
+  - action: forward_open
+    integrity: true
+    serial: 0x55
+    orig_serial: 1
+    rpi_us: 8000
+    o2t_size: 8
+    t2o_size: 8
+    expect:
+      cip_status: 0
+      class1: up
+  - action: get_attr
+    class_id: 0x5E
+    instance: 1
+    attribute: 2
+    expect:
+      cip_status: 0
+      u32: 1

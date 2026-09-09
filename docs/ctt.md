@@ -1,7 +1,7 @@
 # Controller Test Tool (CTT)
 
 저장소 내부용 **통합** 필드버스 테스트 하네스 설계.
-구현 코드는 후속 PR. 이 문서는 범위·인터페이스·시나리오·페이즈만 고정한다.
+이 통합 트리에서 Phase 1–3 + PN fill + Modbus/SLMP/EIP 플러그인이 구현된다.
 
 **결정: 도구는 하나, 프로토콜은 플러그인.**
 프로토콜마다 별도 툴을 두지 않고, PN+EIP 프레임 로직을 하나의 stub에 섞지도 않는다.
@@ -10,8 +10,8 @@ Phase 1 DUT: `stacks/profinet/` — **CC-B + RT Class 1** + Security Class 1 HMA
 **CC-C (IRT / RT Class 3) 는 이 제품·CTT에서 영구 제외**다. 후속 페이즈로 올리지 않는다.
 PN 플러그인 역할: **Controller stub + DCP station** (RT Class 1). Device 스택을 대체하지 않는다.
 
-EtherNet/IP 플러그인 DUT는 자체 스택 `stacks/ethernetip/` (draft PR #4)가 main에 들어온 뒤다.
-그 전까지 슬롯만 예약한다. main의 `adapters/ethernetip/` 구매 스택 스텁은 CTT DUT가 아니다.
+EtherNet/IP 플러그인 DUT는 자체 스택 `stacks/ethernetip/` 이다.
+`adapters/ethernetip/` 구매 스택 스텁은 CTT DUT가 아니다.
 
 Modbus TCP DUT는 `stacks/modbus/` (`protocol: modbus_tcp`). SLMP DUT는
 `stacks/slmp/` Binary 3E (`protocol: slmp`). libmodbus / ASCII·4E 는 CTT DUT가 아니다.
@@ -48,8 +48,8 @@ PROFINET DUT 목표는 **Conformance Class B (CC-B) + RT Class 1** 뿐이다.
 
 - CTT = 공통 runner + 프로토콜 플러그인. CI 엔트리는 `./build/ctt` 하나
 - Phase 1 DUT = PROFINET IO Device (**CC-B + RT Class 1**). CTT PN 플러그인 = in-process Controller + DCP. IRT Controller가 아니다
-- Phase 1–2에 넣을 다음 플러그인은 EtherNet/IP (PR #4 merge 후). Scanner/Originator stub
-- 플러그인 슬롯 패턴은 이후 프로토콜에도 열 수 있다. **지금 구현 범위는 PN 다음 EIP까지**
+- EtherNet/IP 플러그인 = Scanner/Originator stub. DUT = `stacks/ethernetip/` 자체 스택
+- 플러그인 슬롯 패턴은 이후 프로토콜에도 열 수 있다. **지금 구현 범위는 PN + EIP + Modbus TCP + SLMP 3E**
 - 단위 CI 경로에는 실제 NIC가 없다
 
 ## 1. 아키텍처
@@ -63,9 +63,12 @@ PROFINET DUT 목표는 **Conformance Class B (CC-B) + RT Class 1** 뿐이다.
         ┌────────┼────────┬──────────────┐
         ▼        ▼        ▼              ▼
   proto/profinet/ proto/ethernetip/ proto/modbus/  proto/slmp/
-  Controller      (예약, PR #4)    TCP client stub  3E client stub
+  Controller      Scanner stub      TCP client     3E client stub
         ↕                 ↕     mock / in-process inject
    pn_stack DUT        eip_stack     mb_stack         slmp_stack
+        └────────┬────────┴──────────────┘
+                 ▼
+          asserts / golden / metrics
 ```
 
 공통과 플러그인을 나눈다.
@@ -105,18 +108,25 @@ PN 플러그인은 같은 ops를 **양방향 링**으로 바꾼다.
 RPC는 Device 쪽 UDP 34964. Phase 1 mock은 `pn_stack_handle_rpc` 를 Controller API로 감싼다.
 Ethernet 링과 RPC 주입은 같은 시나리오에서 섞는다 (Identify → Connect → IO cycle).
 
-### 1.2 EtherNet/IP 플러그인 — 슬롯 예약
+### 1.2 EtherNet/IP 플러그인 — DUT 훅
 
-main에는 자체 EIP 스택이 없다. `adapters/ethernetip/` 는 구매 스택 래핑 TODO다.
+DUT = `stacks/ethernetip/` 자체 Adapter 스택. `adapters/ethernetip/` 구매 스택
+스텁은 CTT DUT가 아니다. 훅은 `stacks/ethernetip/include/eip_stack.h`.
 
-draft PR #4 (`stacks/ethernetip/`, `tests/test_eip_stack.c`)가 merge 되면:
+| 훅 | CTT에서의 역할 |
+|----|----------------|
+| `eip_cfg_t.mock` | 소켓 없이 start/poll. CI 기본값 |
+| `eip_stack_set_transport_ops` | DUT UDP/TCP TX → Controller RX 링 |
+| `eip_stack_handle_encap` | Scanner TX Encapsulation → Adapter RX |
+| `eip_stack_handle_io` | Class 1 UDP IO 주입 (O→T) |
+| `eip_stack_class1_up` / `eip_stack_rt_stats` | expect: Class 1, watchdog |
+| `eip_stack_acd_conflict` / `eip_stack_lldp_frame` | ACD / LLDP TX |
 
-- DUT = 그 자체 Adapter 스택. 훅은 `eip_*` (inject / poll / session 상태)
-- 플러그인 = Scanner/Originator stub + EIP step actions
-- `test_eip_stack` 케이스를 `tests/scenarios/ethernetip/*.yaml` 로 이전
-- crypto/parser 단위 테스트는 `tests/test_*.c` 에 남긴다 (PN HMAC와 같은 규칙)
+플러그인 = Scanner/Originator stub + EIP step actions.
+`test_eip_stack` 의 중요 케이스는 `tests/scenarios/ethernetip/*.yaml` 로 이전.
+HMAC RFC4231 은 `tests/test_eip_crypto.c`. 잔여 `tests/test_eip_stack.c` 는
+DUT 단위 경로로 유지.
 
-merge 전에는 `tools/ctt/proto/ethernetip/` 와 `tests/scenarios/ethernetip/` 자리를 비워 둔다.
 구매 스택을 CTT DUT로 쓰지 않는다.
 
 ### 1.3 Modbus TCP / SLMP Binary 3E 플러그인
@@ -135,10 +145,10 @@ DUT 는 자체 스택이다. 공통 runner 는 `protocol:` 만 고른다.
 
 - `tools/ctt/` — 공통 runner, report, soak, mock-transport, CI 엔트리
 - `tools/ctt/proto/profinet/` — Controller stub + PN step actions (CC-B / RTC1 only)
+- `tools/ctt/proto/ethernetip/` — Scanner stub + EIP steps
 - `tools/ctt/proto/modbus/` — Modbus TCP client stub (`mb_stack_handle_adu`)
 - `tools/ctt/proto/slmp/` — SLMP Binary 3E stub (`slmp_stack_handle_request`)
-- `tools/ctt/proto/ethernetip/` — 예약. PR #4 이후 Scanner stub + EIP steps
-- `tests/scenarios/profinet/` · `modbus/` · `slmp/` · `ethernetip/` (예약)
+- `tests/scenarios/profinet/` · `ethernetip/` · `modbus/` · `slmp/`
 - `tests/golden/` — 선택적 binary/hex. 프로토콜별 서브디리 권장
 - `tests/test_*.c` — 스택 전체가 필요 없는 crypto/parser. HMAC RFC4231은 여기
 
@@ -210,8 +220,23 @@ steps:
 
 HMAC 단위 테스트는 YAML이 아니다. `tests/test_pn_crypto.c` (또는 기존 `test_pn_stack.c`의 `test_hmac`)에 남긴다.
 
-EIP step 이름(ListIdentity, ForwardOpen, Class 1 IO 등)은 PR #4 merge 후 `proto/ethernetip/` 가 정한다.
-PN 테이블에 CIP 액션을 넣지 않는다.
+### 3.6 EtherNet/IP step actions
+
+PN 테이블에 CIP 액션을 넣지 않는다. EIP 플러그인 소유.
+
+| action | 의미 | expect 예 |
+|--------|------|-----------|
+| `register_session` | Encapsulation `0x0065` | `session_handle: nonzero` |
+| `list_identity` | Encapsulation `0x0063` | vendor_id, product_name |
+| `get_attr` | UCMM Get_Attribute_Single | `cip_status`, `u8`/`u16`/`u32`, vendor_id |
+| `write_input` / `read_input` / `read_output` | Assembly process image | ASCII `data` 또는 `u8` |
+| `forward_open` | CM Forward Open. `integrity: true` 이면 CPF `0x00C1` HMAC | `class1: up` 또는 `privilege: true` |
+| `class1_io` | UDP Class 1 O→T | consumed `u8` |
+| `io_cycle` | Class 1 consume + produce | `min_frames` |
+| `acd_conflict` | `eip_stack_acd_conflict` | 이후 Identity state / TCP/IP ACD |
+| `lldp` | `eip_stack_lldp_frame` | ethertype `0x88CC` |
+| `watchdog` | sleep + `eip_stack_poll` | `class1: down`, `timeouts_min` |
+| `poll` | DUT `eip_stack_poll` | (없음) |
 
 아래 예시는 현재 `tests/test_pn_stack.c` 세 케이스를 옮긴 것이다. HMAC는 제외.
 
@@ -344,15 +369,21 @@ ctest --output-on-failure
 ./build/ctt --scenario tests/scenarios/profinet/dcp_identify_name_of_station.yaml
 ```
 
-### EtherNet/IP 플러그인 — draft PR #4 merge 이후
+### EtherNet/IP 플러그인 (이 트리)
 
 - DUT = `stacks/ethernetip/` 자체 스택. 구매 스택 스텁은 대상 아님
 - `tools/ctt/proto/ethernetip/` Scanner/Originator stub
-- `tests/test_eip_stack.c` 를 `tests/scenarios/ethernetip/` 로 이전 (단위 crypto/parser는 유지)
-- 같은 `./build/ctt` 엔트리. `protocol: ethernetip` 로 플러그인 선택
+- `tests/scenarios/ethernetip/*.yaml` — register / identity / assembly+FO+IO /
+  Sec1 FO reject/accept / QoS / ACD / LLDP / watchdog / ListIdentity
+- HMAC 단위 테스트 `tests/test_eip_crypto.c`. 잔여 `tests/test_eip_stack.c`
+- 같은 `./build/ctt` 엔트리. `protocol: ethernetip`
+- CI: `ctest -L ethernetip` (mock, no NIC). `libssl-dev` 필요
+- 내부 매핑: `docs/ctt_odva_matrix.md` (공식 CT 아님)
 
-선택: CMake 플래그로 `ctt_pn` / `ctt_eip` 바이너리를 나눠 링크해도 된다.
-문서·시나리오 트리·CI 워크플로는 복제하지 않는다.
+```
+./build/ctt --scenario tests/scenarios/ethernetip/register_session.yaml
+ctest --test-dir build --output-on-failure -L ethernetip
+```
 
 ### Phase 2 — 시나리오 라이브러리 + soak
 
@@ -379,9 +410,9 @@ PROFINET (Phase 1 플러그인 위, **CC-B / RTC1만**). 구현 상태 (이 트�
 IRT 동기, PTCP, RT Class 3, CC-C 전용 시나리오는 추가하지 않는다.
 EtherNet/IP / Modbus / SLMP 플러그인은 이 페이즈에 넣지 않는다.
 
-EtherNet/IP (플러그인이 생긴 뒤):
+EtherNet/IP (이 트리, mock):
 
-- PR #4 테스트가 커버하던 register / identity / assembly / ForwardOpen / security / QoS / ACD / LLDP / watchdog / ListIdentity 를 시나리오로 확장
+- register / identity / assembly / ForwardOpen / security / QoS / ACD / LLDP / watchdog / ListIdentity 시나리오 (`tests/scenarios/ethernetip/`)
 
 공통:
 
@@ -402,36 +433,37 @@ Modbus / SLMP / CC-Link 플러그인은 이 페이즈에 넣지 않는다.
 | Golden capture | `--capture <dir>` + `tests/regen_ctt_goldens.sh` |
 | Golden replay | YAML `golden: tests/golden/profinet/…` mock `ctest` (`-L golden`) |
 | PI 매핑 | `docs/ctt_pi_matrix.md` CC-A/B only. 내부 준비도. Bundle 접근 없음 |
-| ODVA | stub 절: EIP 플러그인 이후 |
+| ODVA | `docs/ctt_odva_matrix.md` 내부 매핑. 공식 CT 아님 |
 | default CI | mock `ctest` (Phase 1+2 + golden replay). lab 은 workflow_dispatch |
 
 남은 갭 (인증·멤버십·DUT 부재 — 하네스가 메우지 않음):
 
 - 공식 PI Test Bundle 실행·evidence — 공인 랩 / PI membership
+- 공식 ODVA CT 랩 실행 — 멤버십. CTT green 이 인증을 대체하지 않음
+- 공식 Modbus.org / Mitsubishi 인증 — 멤버십·공인 랩. CTT green 이 대체하지 않음
 - CODESYS Windows Development System 은 CI 에 없음 (`tests/codesys_manual_lab.sh`)
 - MRP / Fast Start-Up — **DUT not implemented** (풀 스택을 이 페이즈에서 만들지 않음)
-- EIP 플러그인 / ODVA CT 매핑 — 플러그인 이후
 
 ## 5. 디렉터리 레이아웃
 
 ```
 tools/ctt/                       # 공통 runner, report, soak, mock-transport, CI
   proto/profinet/                # Controller stub + PN steps (CC-B / RTC1, no IRT)
-  proto/modbus/                # Modbus TCP client stub (self stack)
-  proto/slmp/                  # SLMP Binary 3E stub (no 4E/ASCII)
-  proto/ethernetip/              # 예약. PR #4 이후 Scanner stub + EIP steps
+  proto/ethernetip/              # Scanner stub + EIP steps (self stack DUT)
+  proto/modbus/                  # Modbus TCP client stub (self stack)
+  proto/slmp/                    # SLMP Binary 3E stub (no 4E/ASCII)
 tests/scenarios/
   profinet/                      # protocol: profinet
+  ethernetip/                    # protocol: ethernetip
   modbus/                        # protocol: modbus_tcp
   slmp/                          # protocol: slmp
-  ethernetip/                    # 예약
 tests/golden/
   profinet/                  # mock PCAP goldens (Phase 3)
-  ethernetip/                # 예약
+  ethernetip/                # (none yet)
 
-tests/test_pn_crypto.c           # HMAC 등 thin unit (이름 가칭)
-tests/test_pn_stack.c            # Phase 1 이후: 잔여 또는 삭제
-tests/test_eip_stack.c           # PR #4. 플러그인 이후 이전 대상
+tests/test_pn_crypto.c           # HMAC RFC4231
+tests/test_eip_crypto.c          # HMAC RFC4231
+tests/test_eip_stack.c           # residual DUT unit (YAML 이 CTT 경로)
 tests/dcp_probe.c                # 수동 랩. BUILD_PN_LAB_TOOLS
 tests/pn_device_run.c            # 수동 랩. BUILD_PN_LAB_TOOLS
 tests/run_ctt_lab.sh             # Phase 3 veth AF_PACKET (not default ctest)
@@ -439,11 +471,15 @@ tests/run_ctt_lab.sh             # Phase 3 veth AF_PACKET (not default ctest)
 docs/ctt.md                      # 이 문서
 docs/ctt_lab.md                  # Phase 3 lab / veth / CODESYS
 docs/ctt_pi_matrix.md            # CC-A/B 내부 매핑 (인증 evidence 아님)
+docs/ctt_odva_matrix.md          # EIP 내부 CT-style 매핑 (공식 CT 아님)
+docs/ctt_modbus_matrix.md        # Modbus TCP FC (공식 Modbus.org 아님)
+docs/ctt_slmp_matrix.md          # SLMP Binary 3E (Mitsubishi 공식 인증 아님)
 
 ```
 
 `tools/ctt` 는 코어/어댑터와 분리한다. `core/` 에 프로토콜 분기를 넣지 않는다.
-PN DUT는 `stacks/profinet/`. EIP DUT는 merge 후 `stacks/ethernetip/`.
+PN DUT는 `stacks/profinet/`. EIP DUT는 `stacks/ethernetip/`.
+Modbus DUT는 `stacks/modbus/`. SLMP DUT는 `stacks/slmp/`.
 
 ## 6. 성공 기준
 
@@ -460,7 +496,7 @@ Phase 2 (PROFINET, 이 트리):
 - Release, Alarm TX, I&M0 record, LLDP, SNMP sysName, Sec1 Connect **success** (`integrity: true`) 시나리오가 mock에서 green
 - `soak_short` 가 기본 `ctest`에 포함. `soak_ci` (30s) 는 `-LE soak_ci` 로 PR 게이트에서 제외
 - 메트릭(unexpected / AR drop / period histogram)을 `LOG_INFO` 로 남김
-- EIP / Modbus / SLMP 플러그인 없음. CC-C / IRT 시나리오 없음
+- 이 페이즈의 PN 범위만. CC-C / IRT 시나리오 없음. (통합 트리에서는 EIP/Modbus/SLMP 플러그인이 같은 runner 에 있음)
 
 Phase 3 (하네스, 이 트리):
 
@@ -468,12 +504,18 @@ Phase 3 (하네스, 이 트리):
 - mock golden replay (`dcp_identify_res.pcap`, Sec1 Set accept) 가 기본 CI 에 포함
 - `tests/run_ctt_lab.sh` + `docs/ctt_lab.md` + `docs/ctt_pi_matrix.md`
 - default CI 에 sudo/AF_PACKET 없음. lab 은 workflow_dispatch
-- CC-C 시나리오/매핑 없음. EIP 플러그인 없음
+- CC-C 시나리오/매핑 없음. 공식 PI Bundle / ODVA CT 실행 없음
 
-EIP 플러그인 (PR #4 merge 후):
+EIP 플러그인 (이 트리):
 
-- `protocol: ethernetip` 시나리오가 같은 ctt 엔트리에서 green
+- `protocol: ethernetip` 시나리오가 같은 ctt 엔트리에서 green (`ctest -L ethernetip`)
 - `test_eip_stack` 에서 옮긴 행동이 빠지지 않음
+- DUT 는 자체 스택. 구매 스택 스텁 아님
+
+Modbus TCP / SLMP 플러그인 (이 트리):
+
+- `protocol: modbus_tcp` / `protocol: slmp` 시나리오가 같은 `./build/ctt` 에서 green
+- DUT 는 `stacks/modbus/` · `stacks/slmp/` (libmodbus / ASCII·4E 아님)
 
 신뢰성 문화:
 
@@ -496,12 +538,15 @@ CMake `ENABLE_PN_TESTS=ON` (기본) 일 때 `./build/test_pn_stack`. `ctest` 등
 없는 것 (CC-B, Phase 3 랩): 실 NIC / AF_PACKET, PI Test Bundle 매핑.
 의도적으로 없는 것: IRT / PTCP / RT Class 3 / CC-C. 갭이 아니라 제품 범위 밖이다.
 
-### EtherNet/IP (main vs PR #4)
+### EtherNet/IP
 
 | 위치 | 상태 | CTT |
 |------|------|-----|
-| `adapters/ethernetip/` (main) | 구매 스택 래핑 스텁. `third_party/` 연동 TODO | DUT 아님 |
-| `stacks/ethernetip/` + `tests/test_eip_stack.c` | draft PR #4. Adapter Class 1, UCMM Originator, Sec 1/2 등 | merge 후 플러그인 DUT / 시나리오 이전 대상 |
+| `adapters/ethernetip/` | 자체 스택 연결 (데몬). 구매 스텁 아님 | DUT 아님 |
+| `stacks/ethernetip/` | Adapter Class 1, UCMM, Sec 1/2, LLDP/ACD/QoS | **DUT** |
+| `tests/scenarios/ethernetip/` | YAML (register … ListIdentity) | `ctest -L ethernetip` |
+| `tests/test_eip_crypto.c` | HMAC RFC4231 | 단위 테스트 |
+| `tests/test_eip_stack.c` | 잔여 DUT 단위 | `ENABLE_EIP_TESTS` |
 
 ### 수동 랩 도구 (CMake 타깃 아님)
 
@@ -514,12 +559,10 @@ CMake `ENABLE_PN_TESTS=ON` (기본) 일 때 `./build/test_pn_stack`. `ctest` 등
 
 ### CI
 
-저장소에 `.github/` 가 없다. 자동 테스트는 로컬 `./build/test_pn_stack` 뿐이다.
-Phase 1 workflow가 첫 PR 게이트가 된다. job은 공통 `ctt` (또는 `test_pn_stack` 잔여) 하나다.
-프로토콜별 workflow를 복제하지 않는다.
-
-전체 `multiproto_daemon` 링크는 `libmodbus` 가 `REQUIRED` 다. pn_stack 테스트만 돌릴 거면
-`pn_stack` + `ctt` 타깃만 빌드하는 옵션을 Phase 1에서 검토한다.
+`.github/workflows/ci.yml` 이 mock `ctest` 게이트다. job 은 공통 `./build/ctt` 하나
+(`BUILD_DAEMON=OFF`). 프로토콜별 workflow 를 복제하지 않는다.
+`libssl-dev` 는 EIP 스택용. 전체 `multiproto_daemon` 링크는 `libmodbus` 가
+`REQUIRED` 이므로 기본 PR job 은 데몬을 켜지 않는다.
 
 ## 8. 리스크 / 제약
 
@@ -531,4 +574,4 @@ Phase 1 workflow가 첫 PR 게이트가 된다. job은 공통 `ctt` (또는 `tes
 - mock은 큐 깊이·단일 스레드 가정이다. 실제 스위치/멀티캐스트/VLAN 태깅 이상은 Phase 3
 - 플러그인 stub이 너무 두꺼워지면 DUT 버그를 stub이 가린다. stub은 프레임 조립/파싱만, 상태 머신은 시나리오 step에 둔다
 - 공통 runner가 `if (protocol == profinet)` 로 프레임을 다루기 시작하면 플러그인 경계 위반이다. 그건 `proto/<name>/` 으로 옮긴다
-- EIP 플러그인을 구매 스택 스텁에 붙이면 시나리오가 공허해진다. DUT는 PR #4 자체 스택 merge를 기다린다
+- EIP 플러그인을 구매 스택 스텁에 붙이면 시나리오가 공허해진다. DUT는 `stacks/ethernetip/` 자체 스택이다

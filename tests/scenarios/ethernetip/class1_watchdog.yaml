@@ -1,0 +1,31 @@
+name: class1_watchdog
+protocol: ethernetip
+tags: [class1, watchdog, rt, migrate]
+device:
+  iface: mock
+  input_size: 8
+  output_size: 8
+  rpi_us: 1000
+steps:
+  - action: forward_open
+    serial: 0x77
+    orig_serial: 7
+    rpi_us: 100
+    timeout_mult: 0
+    o2t_size: 8
+    t2o_size: 8
+    expect:
+      cip_status: 0
+      class1: up
+  - action: class1_io
+    fill: 0
+    length: 8
+    seq: 1
+    expect:
+      class1: up
+  - action: watchdog
+    sleep_us: 2000
+    expect:
+      class1: down
+      timeouts_min: 1
+      rt_stats: true

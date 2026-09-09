@@ -1,0 +1,23 @@
+name: list_identity
+protocol: ethernetip
+tags: [encap, identity, protection, migrate]
+device:
+  iface: mock
+  vendor_id: 0x1234
+  protection_mode: 0x1
+  product_name: ProtSensor
+  input_size: 8
+  output_size: 8
+steps:
+  - action: list_identity
+    expect:
+      cmd: 0x0063
+      vendor_id: 0x1234
+      product_name: ProtSensor
+  - action: get_attr
+    class_id: 0x01
+    instance: 1
+    attribute: 17
+    expect:
+      cip_status: 0
+      u32: 1

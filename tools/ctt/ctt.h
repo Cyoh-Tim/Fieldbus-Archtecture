@@ -72,6 +72,7 @@ int ctt_capture_step_frame(ctt_run_t *run, int step, const char *action,
                            const uint8_t *frame, size_t len);
 
 extern const ctt_plugin_t ctt_plugin_profinet;
+extern const ctt_plugin_t ctt_plugin_ethernetip;
 extern const ctt_plugin_t ctt_plugin_modbus_tcp;
 extern const ctt_plugin_t ctt_plugin_slmp;
 

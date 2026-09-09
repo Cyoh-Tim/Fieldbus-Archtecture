@@ -7,6 +7,9 @@ PROFINET 은 구매 스택 래핑이 아니라 `stacks/profinet/` 자체 Device 
 범위는 **CC-B + RT Class 1 + Security Class 1(HMAC integrity)**. IRT 없음.
 자세한 내용은 [`docs/profinet_stack.md`](docs/profinet_stack.md).
 
+EtherNet/IP 는 `stacks/ethernetip/` 자체 Adapter 스택이다 (구매 스텁 아님).
+CTT Scanner 플러그인: [`docs/ctt.md`](docs/ctt.md), [`docs/ctt_odva_matrix.md`](docs/ctt_odva_matrix.md).
+
 전체 설계 배경은 [`docs/design.md`](docs/design.md).
 CTT 설계(공통 runner + 프로토콜 플러그인)는 [`docs/ctt.md`](docs/ctt.md).
 
@@ -17,14 +20,15 @@ core/                   코어(설정 로더, 스케줄러, 어댑터 레지스�
 adapters/modbus/        Modbus TCP 어댑터 (daemon: libmodbus; CTT DUT 는 stacks/modbus)
 adapters/slmp/          SLMP 어댑터 (daemon stub on this tree; CTT DUT 는 stacks/slmp)
 adapters/cclink/        CC-Link 어댑터 (미확정, 스텁)
-adapters/ethernetip/    EtherNet/IP 어댑터 (구매 스택 래핑, 연동부 TODO)
+adapters/ethernetip/    EtherNet/IP 어댑터 — 자체 스택 연결
 adapters/profinet/      PROFINET 어댑터 — 자체 스택 연결 (RT Class 1, IRT 없음)
+stacks/ethernetip/      EtherNet/IP Adapter(+Originator) 스택
 stacks/profinet/        PROFINET IO Device 스택 (DCP/LLDP/RPC/RTC1/SNMP/Sec1)
 stacks/modbus/          Modbus TCP 자체 스택 (CTT DUT, libmodbus 아님)
 stacks/slmp/            SLMP Binary 3E 자체 스택 (CTT DUT, ASCII/4E 없음)
 tools/ctt/              Controller Test Tool (공통 runner + proto plugins)
-tests/scenarios/        CTT YAML (profinet/, modbus/, slmp/; ethernetip/ 예약)
-third_party/            EtherNet/IP 구매 벤더 스택 배치 위치 (git 커밋 안 함)
+tests/scenarios/        CTT YAML (profinet/, ethernetip/, modbus/, slmp/)
+third_party/            (선택) 향후 벤더 EIP 스택 교체 위치 — git 커밋 안 함
 config/                 config.schema.json + 예제 설정 파일
 docs/design.md          설계 배경 전체 문서
 docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)
@@ -32,21 +36,17 @@ docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)
 
 ## 빌드
 ```
-sudo apt install libmodbus-dev   # Modbus 어댑터 / 데몬용
+sudo apt install libmodbus-dev libssl-dev   # 데몬: libmodbus; EIP 스택: OpenSSL
 mkdir build && cd build
 cmake ..
 make
 ```
-EtherNet/IP 구매 스택을 `third_party/`에 배치한 뒤에는:
-```
-cmake -DENABLE_ETHERNETIP=ON ..
-```
 
-PN 스택 + Controller Test Tool 만 (libmodbus 불필요):
+PN + EIP 스택 + Controller Test Tool 만 (libmodbus 불필요):
 ```
 cmake -S . -B build -DBUILD_DAEMON=OFF
 cmake --build build
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure -LE soak_ci
 ```
 
 ## 실행
@@ -54,10 +54,14 @@ ctest --test-dir build --output-on-failure
 ./build/multiproto_daemon config/example.modbus.json
 ./build/multiproto_daemon config/example.profinet.json
 ./build/ctt --scenario tests/scenarios/profinet/dcp_identify_name_of_station.yaml
+./build/ctt --scenario tests/scenarios/ethernetip/register_session.yaml
 ./build/test_pn_crypto
+./build/test_eip_crypto
+./build/test_eip_stack
 ```
 CTT 설계·시나리오 스키마는 [`docs/ctt.md`](docs/ctt.md), 사용법은 [`tools/ctt/README.md`](tools/ctt/README.md).
 랩/golden/PI 매핑은 [`docs/ctt_lab.md`](docs/ctt_lab.md), [`docs/ctt_pi_matrix.md`](docs/ctt_pi_matrix.md).
+EIP 내부 ODVA 매핑은 [`docs/ctt_odva_matrix.md`](docs/ctt_odva_matrix.md).
 Modbus/SLMP 내부 매트릭스: [`docs/ctt_modbus_matrix.md`](docs/ctt_modbus_matrix.md),
 [`docs/ctt_slmp_matrix.md`](docs/ctt_slmp_matrix.md).
 

@@ -1,14 +1,18 @@
 # Controller Test Tool (CTT)
 
 In-repo fieldbus scenario harness: **one runner**, protocol plugins.
-DUT is `stacks/profinet/` (**CC-B + RT Class 1** only). CC-C / IRT are
-out of scope permanently. EtherNet/IP plugin remains a reserved slot until
-`stacks/ethernetip/` lands. **Modbus TCP** (`stacks/modbus/`) and **SLMP
-Binary 3E** (`stacks/slmp/`) plugins share the same `./build/ctt` entry.
+DUT is `stacks/profinet/` (**CC-B + RT Class 1** only),
+`stacks/ethernetip/` (Adapter Class 1, mock), **Modbus TCP**
+(`stacks/modbus/`), and **SLMP Binary 3E** (`stacks/slmp/`). CC-C / IRT
+are out of scope permanently. Purchased EIP stub is not a CTT DUT.
 
 ```
 ./build/ctt --scenario tests/scenarios/profinet/dcp_identify_name_of_station.yaml
+./build/ctt --scenario tests/scenarios/ethernetip/register_session.yaml
+./build/ctt --scenario tests/scenarios/modbus/fc03_read_holding.yaml
+./build/ctt --scenario tests/scenarios/slmp/encode_batch_read.yaml
 ctest --test-dir build --output-on-failure -LE soak_ci
+ctest --test-dir build --output-on-failure -L ethernetip
 ```
 
 CI uses mock Ethernet (`iface: mock`). No AF_PACKET / sudo.
@@ -56,15 +60,16 @@ by the plugin. The common runner does not parse DCP/CIP frames.
 |------|------|
 | `tools/ctt/` | runner, report, mock eth ring, **AF_PACKET lab transport**, PCAP golden |
 | `tools/ctt/proto/profinet/` | Controller stub + PN steps |
+| `tools/ctt/proto/ethernetip/` | Scanner stub + EIP steps (`stacks/ethernetip/` DUT) |
 | `tools/ctt/proto/modbus/` | Modbus TCP client stub (`mb_stack_handle_adu`) |
 | `tools/ctt/proto/slmp/` | SLMP Binary 3E stub (`slmp_stack_handle_request`) |
-| `tools/ctt/proto/ethernetip/` | reserved until `stacks/ethernetip/` lands |
-| `tests/scenarios/<protocol>/` | YAML; `protocol:` is `profinet` / `modbus_tcp` / `slmp` |
+| `tests/scenarios/<protocol>/` | YAML; `protocol:` is `profinet` / `ethernetip` / `modbus_tcp` / `slmp` |
 | `docs/ctt_modbus_matrix.md` | Modbus FC coverage (not Modbus.org cert) |
 | `docs/ctt_slmp_matrix.md` | SLMP 3E coverage (not Mitsubishi cert) |
 | `tests/golden/profinet/` | mock PCAPs for `golden:` replay |
 | `docs/ctt_lab.md` | veth / CODESYS / `pn_device_run` |
 | `docs/ctt_pi_matrix.md` | CC-A/B internal mapping (not certification) |
+| `docs/ctt_odva_matrix.md` | EIP internal CT-style mapping (not official CT) |
 
 PROFINET actions (CC-B / RTC1):
 
@@ -91,6 +96,17 @@ SLMP (`protocol: slmp`, Binary 3E only): `device_lookup`, `encode_batch_read` /
 `encode_batch_write`, `batch_read` / `batch_write`, `seed_words` / `seed_bits`,
 `map_check_*`, `inject`, `soak`, `create_stack` (ASCII/4E reject).
 4E/ASCII are out of scope.
+
+EtherNet/IP actions (mock `eip_cfg_t.mock`; no NIC):
+
+| action | notes |
+|--------|--------|
+| `register_session` / `list_identity` | Encapsulation |
+| `get_attr` | UCMM Get_Attribute_Single (`class_id`, `instance`, `attribute`) |
+| `write_input` / `read_input` / `read_output` | Assembly image |
+| `forward_open` | `integrity: true` adds CPF `0x00C1` HMAC |
+| `class1_io` / `io_cycle` | O→T inject; produce via transport ops |
+| `acd_conflict` / `lldp` / `watchdog` / `poll` | ACD, LLDP TX, Class 1 timeout |
 
 ## Soak / metrics
 
