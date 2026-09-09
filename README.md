@@ -8,6 +8,7 @@ PROFINET 은 구매 스택 래핑이 아니라 `stacks/profinet/` 자체 Device 
 자세한 내용은 [`docs/profinet_stack.md`](docs/profinet_stack.md).
 
 전체 설계 배경은 [`docs/design.md`](docs/design.md).
+CTT 설계(공통 runner + 프로토콜 플러그인)는 [`docs/ctt.md`](docs/ctt.md).
 
 ## 디렉토리 구조
 ```
@@ -22,6 +23,7 @@ stacks/profinet/        PROFINET IO Device 스택 (DCP/LLDP/RPC/RTC1/SNMP/Sec1)
 third_party/            EtherNet/IP 구매 벤더 스택 배치 위치 (git 커밋 안 함)
 config/                 config.schema.json + 예제 설정 파일
 docs/design.md          설계 배경 전체 문서
+docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)
 ```
 
 ## 빌드
