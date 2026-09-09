@@ -20,6 +20,7 @@ config.json 설정만으로 선택해 동작시키는 필드버스 런타임.
 앱은 프로토콜 헤더 없이 [`docs/app_api.md`](docs/app_api.md) 의 포인트 API
 (`include/fb_api.h`) 만 사용한다.
 CTT 설계(공통 runner + 프로토콜 플러그인)는 [`docs/ctt.md`](docs/ctt.md).
+CTT 시나리오 현황 보드: [docs/ctt_board.html](docs/ctt_board.html) (브라우저에서 열기, 인증 아님).
 비전문가용 JSON→데몬 동작 애니메이션 데모: [docs/json-config-flow.html](docs/json-config-flow.html) (브라우저에서 열기).
 
 ## 디렉토리 구조
@@ -42,6 +43,7 @@ config/                 config.schema.json + 예제 설정 파일
 docs/design.md          설계 배경 전체 문서
 docs/app_api.md         애플리케이션 C API (포인트 읽기/쓰기, 스레드, reload)
 docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)
+docs/ctt_board.html     CTT 시나리오 현황 보드 (통과/건너뜀/갭/범위 밖)
 docs/json-config-flow.html  비전문가 JSON 설정 → 데몬 동작 애니메이션 데모
 ```
 
@@ -78,6 +80,7 @@ ctest --test-dir build --output-on-failure -LE soak_ci
 ./build/ctt --scenario tests/scenarios/slmp/encode_batch_read.yaml
 ```
 CTT 설계·시나리오 스키마는 [`docs/ctt.md`](docs/ctt.md), 사용법은 [`tools/ctt/README.md`](tools/ctt/README.md).
+시나리오 통과/건너뜀/갭 보드는 [`docs/ctt_board.html`](docs/ctt_board.html).
 랩/golden/PI 매핑은 [`docs/ctt_lab.md`](docs/ctt_lab.md), [`docs/ctt_pi_matrix.md`](docs/ctt_pi_matrix.md).
 EIP 내부 ODVA 매핑은 [`docs/ctt_odva_matrix.md`](docs/ctt_odva_matrix.md).
 Modbus/SLMP 내부 매트릭스: [`docs/ctt_modbus_matrix.md`](docs/ctt_modbus_matrix.md),

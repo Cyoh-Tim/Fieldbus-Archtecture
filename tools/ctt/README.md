@@ -70,6 +70,7 @@ by the plugin. The common runner does not parse DCP/CIP frames.
 | `docs/ctt_lab.md` | veth / CODESYS / `pn_device_run` |
 | `docs/ctt_pi_matrix.md` | CC-A/B internal mapping (not certification) |
 | `docs/ctt_odva_matrix.md` | EIP internal CT-style mapping (not official CT) |
+| `docs/ctt_board.html` | scenario status board (pass / skip / gap / out of scope; not cert) |
 
 PROFINET actions (CC-B / RTC1):
 
