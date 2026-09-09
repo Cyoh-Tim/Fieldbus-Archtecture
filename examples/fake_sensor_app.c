@@ -81,6 +81,7 @@ static int publish_and_readback(fb_runtime_t *rt, unsigned seq, int do_poll)
 
     printf("write barcode_value=\"%s\" temperature=%.1f\n", barcode,
            (double)temp);
+    fflush(stdout);
 
     rc = fb_write_string(rt, "barcode_value", barcode);
     if (rc != FB_OK) {
@@ -128,6 +129,7 @@ static int publish_and_readback(fb_runtime_t *rt, unsigned seq, int do_poll)
         return 1;
     }
     printf("ok    values are readable via fb_read_*\n");
+    fflush(stdout);
     return 0;
 }
 
@@ -167,17 +169,18 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("=== fake sensor (no PLC, no NIC) ===\n");
-    printf("config=%s\n", config);
-    printf("access: app writes PLC-read points; PLC would FC03 them.\n");
-    printf("this is not PI / ODVA / Modbus.org certification.\n");
-
     fb_runtime_t *rt = NULL;
     int rc = fb_open(config, &rt);
     if (rc != FB_OK) {
         fprintf(stderr, "fb_open: %s\n", fb_strerror(rc));
         return 1;
     }
+
+    printf("=== fake sensor (no PLC, no NIC) ===\n");
+    printf("config=%s\n", config);
+    printf("access: app writes PLC-read points; PLC would FC03 them.\n");
+    printf("this is not PI / ODVA / Modbus.org certification.\n");
+    fflush(stdout);
 
     fb_health_t h;
     memset(&h, 0, sizeof(h));
@@ -202,12 +205,13 @@ int main(int argc, char **argv)
             free(pts);
         }
     }
+    fflush(stdout);
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
 
     int cycle_ms = h.cycle_ms > 0 ? h.cycle_ms : 8;
-    unsigned seq = 1;
+    unsigned seq = 0;
     int failed = 0;
     struct timespec t0;
     clock_gettime(CLOCK_MONOTONIC, &t0);
