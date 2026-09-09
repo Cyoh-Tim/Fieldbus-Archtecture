@@ -131,6 +131,60 @@
     pre { margin: 8px 0 0; background: #0c1014; border-radius: 8px; padding: 10px; overflow: auto; font: 11px/1.4 var(--mono); color: #c5d3de; }
     footer { padding: 0 24px 28px; color: var(--muted); font-size: 12px; }
     a { color: var(--sensor); }
+    .analogy {
+      background: #243018;
+      border: 1px solid #4a5c28;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+    .boot { margin: 0 0 12px; padding-left: 1.2rem; }
+    .boot li { margin: 4px 0; }
+    .stage {
+      display: grid;
+      grid-template-columns: 1fr 1.4fr 1fr;
+      gap: 8px;
+      align-items: center;
+      margin: 12px 0;
+    }
+    .wire {
+      position: relative;
+      height: 72px;
+      background: linear-gradient(var(--line), var(--line)) 0 50% / 100% 2px no-repeat;
+    }
+    .packet {
+      position: absolute;
+      top: 20px;
+      left: 42%;
+      max-width: 58%;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      opacity: 0;
+      transition: left 0.8s ease, opacity 0.2s;
+      pointer-events: none;
+    }
+    .packet.show { opacity: 1; }
+    .packet.s2p { background: #215c4a; }
+    .packet.p2s { background: #6b4e1e; }
+    .now {
+      min-height: 3.6em;
+      background: var(--panel2);
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 15px;
+    }
+    .now .json-bit { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .play-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+    .pt { grid-template-columns: 140px 88px 1fr; }
+    .pt .story { grid-column: 1 / -1; font-size: 13px; color: #d5e0e8; }
+    .pt.active { outline: 1px solid #6ee7b7; }
+    .app { font-family: var(--mono); font-size: 12px; color: #9ec9e8; }
   </style>
 </head>
 <body>
@@ -138,9 +192,9 @@
     <div>
       <h1>Config 시각화</h1>
       <p class="sub">
-        프로토콜을 몰라도 됩니다. 예제 JSON을 그림으로 보면
-        <b>누가 서버인지</b>, <b>PLC가 읽는 값/쓰는 값</b>, <b>주소가 어디에 붙는지</b>가 보입니다.
-        벤더 통신 가이드의 숫자를 이 칸에 옮기면 데몬이 동작합니다.
+        산업 프로토콜을 몰라도 됩니다. JSON을 이렇게 적으면
+        <b>현장에서 누가 기다리고, 누가 붙고, 한 사이클에 어떤 값이 어느 쪽으로 가는지</b>까지
+        한 화면에서 재생해 봅니다. 벤더 통신 가이드의 숫자만 칸에 옮기면 됩니다.
       </p>
     </div>
     <div class="actions">
@@ -158,9 +212,24 @@
         <span id="parse-err" class="err"></span>
       </div>
     </div>
+    <section class="card">
+      <h2>이 JSON이면 이렇게 동작합니다</h2>
+      <div class="analogy" id="analogy"></div>
+      <ol class="boot" id="boot"></ol>
+      <div class="stage">
+        <div class="node plc" id="stage-plc"></div>
+        <div class="wire"><div class="packet" id="pkt"></div></div>
+        <div class="node sensor" id="stage-sensor"></div>
+      </div>
+      <div class="now" id="now"></div>
+      <div class="play-row">
+        <button id="play" type="button">한 사이클 재생</button>
+        <span class="hint" id="play-hint">포인트마다 값이 어느 쪽으로 가는지 순서대로 보여 줍니다.</span>
+      </div>
+    </section>
     <div class="row">
       <section class="card">
-        <h2>누가 누구와 말하는가</h2>
+        <h2>누가 붙는가 (연결)</h2>
         <div class="topo" id="topo"></div>
         <p class="hint" id="topo-hint" style="margin:12px 0 0"></p>
       </section>
@@ -494,6 +563,130 @@
       return "<p class='hint'>이 프로토콜은 맵 프리셋이 없습니다. 포인트 목록을 보세요.</p>";
     }
 
+    function analogy(proto) {
+      return {
+        modbus_tcp: "비유: 센서가 편지함(레지스터)을 열어 두고, PLC가 찾아와 쪽지를 꺼내거나 넣습니다.",
+        slmp: "비유: 센서가 PLC 책상 서랍(D·M·X)에 직접 쪽지를 넣고 꺼냅니다. PLC는 자기 서랍만 보면 됩니다.",
+        ethernetip: "비유: 8ms마다 상자 두 개를 통째로 맞바꿉니다. 입력 상자(센서→PLC), 출력 상자(PLC→센서).",
+        profinet: "비유: 컨트롤러가 센서의 입·출력 사진(프로세스 이미지)을 8ms마다 통째로 맞바꿉니다. IRT는 없습니다."
+      }[proto] || "이 프로토콜은 포인트 access 만 보면 방향을 알 수 있습니다.";
+    }
+
+    function bootSteps(cfg) {
+      const pp = cfg.protocol_params || {};
+      const cycle = cfg.cycle_ms || 8;
+      const name = (cfg.device && cfg.device.name) || "센서";
+      if (cfg.protocol === "modbus_tcp") {
+        return [
+          name + " 데몬이 " + (pp.ip || "0.0.0.0") + ":" + (pp.port || 502) + " 에서 <b>기다립니다</b> (role: server).",
+          "PLC가 TCP로 붙습니다. 이후 약 " + cycle + "ms 마다 레지스터·코일을 읽고 씁니다.",
+          "앱은 프레임을 몰라도 됩니다. write_point / read_point 만 하면 데몬이 편지함에 넣고 꺼냅니다."
+        ];
+      }
+      if (cfg.protocol === "slmp") {
+        return [
+          name + " 데몬이 PLC " + (pp.plc_ip || pp.ip || "?") + ":" + (pp.port || 5000) + " 에 <b>먼저 접속합니다</b> (role: client, frame " + (pp.frame || "3E") + ").",
+          "매 " + cycle + "ms 폴링마다 센서가 PLC 메모리에 일괄 쓰기/읽기를 합니다 (Binary 3E batch).",
+          "access=read 는 센서가 PLC에 값을 <b>써 넣는</b> 칸, access=write 는 PLC가 켠 값을 센서가 <b>읽어 오는</b> 칸입니다."
+        ];
+      }
+      if (cfg.protocol === "ethernetip") {
+        const rpi = (pp.rpi_us || 8000) / 1000;
+        return [
+          name + " 데몬이 TCP " + (pp.port || 44818) + " 에서 Adapter로 <b>기다립니다</b>.",
+          "PLC(스캐너)가 세션을 열고 Class 1 으로 Assembly " + (pp.input_assembly || "?") + " ↔ " + (pp.output_assembly || "?") + " 를 약 " + rpi + "ms 마다 교환합니다.",
+          "앱은 Assembly 칸에 바코드·트리거만 넣거나 읽으면 됩니다."
+        ];
+      }
+      if (cfg.protocol === "profinet") {
+        const us = pp.cycle_us || 8000;
+        return [
+          name + " 데몬이 Device 로 대기합니다 (이름 " + (pp.device_name || "") + ", IRT 없음).",
+          "컨트롤러가 DCP로 장치를 찾고, 약 " + (us / 1000) + "ms 주기 IO 로 프로세스 이미지를 맞바꿉니다.",
+          "access=read 는 센서→컨트롤러 입력 이미지, access=write 는 컨트롤러→센서 출력 이미지입니다."
+        ];
+      }
+      return ["이 JSON의 protocol 값으로 데몬이 어댑터를 고릅니다."];
+    }
+
+    function pointStory(cfg, p) {
+      const acc = p.access || "read";
+      const addr = prettyAddr(cfg, p);
+      const scale = (p.scale != null && p.scale !== 1) ? " 원값×" + p.scale : "";
+      if (acc === "write") {
+        return {
+          dir: "p2s",
+          line: "PLC가 <b>" + esc(addr) + "</b>에 <b>" + esc(p.name) + "</b>를 넣습니다." + (scale ? esc(scale) : ""),
+          app: "앱: read_point(\"" + p.name + "\")  → PLC가 시킨 일(트리거 등)",
+          json: "access: \"" + acc + "\"  = PLC가 쓰는 칸 → 센서가 받음"
+        };
+      }
+      return {
+        dir: "s2p",
+        line: "센서가 <b>" + esc(p.name) + "</b>를 <b>" + esc(addr) + "</b>에 올립니다." + (scale ? esc(scale) : ""),
+        app: "앱: write_point(\"" + p.name + "\", 측정값)  → PLC가 읽어 감",
+        json: "access: \"read\"  = PLC가 읽는 칸 ← 센서가 게시"
+      };
+    }
+
+    let currentCfg = null;
+    let playTimer = null;
+    let playIdx = 0;
+
+    function stopPlay() {
+      if (playTimer) {
+        clearTimeout(playTimer);
+        playTimer = null;
+      }
+    }
+
+    function setPacket(dir, label) {
+      const pkt = document.getElementById("pkt");
+      pkt.className = "packet " + dir;
+      pkt.textContent = label;
+      pkt.style.left = dir === "s2p" ? "62%" : "6%";
+      pkt.classList.add("show");
+      requestAnimationFrame(() => {
+        pkt.style.left = dir === "s2p" ? "6%" : "62%";
+      });
+    }
+
+    function showNow(html) {
+      document.getElementById("now").innerHTML = html;
+    }
+
+    function highlightPoint(i) {
+      document.querySelectorAll(".pt").forEach((el, idx) => el.classList.toggle("active", idx === i));
+    }
+
+    function playCycle() {
+      if (!currentCfg) return;
+      stopPlay();
+      const pts = currentCfg.points || [];
+      const steps = [];
+      bootSteps(currentCfg).forEach((t) => steps.push({ kind: "boot", html: t }));
+      pts.forEach((p, i) => {
+        const s = pointStory(currentCfg, p);
+        steps.push({ kind: "pt", i: i, dir: s.dir, name: p.name, html: s.line + "<div class='app'>" + esc(s.app) + "</div><div class='json-bit'>" + esc(s.json) + "</div>" });
+      });
+      steps.push({ kind: "end", html: "한 사이클이 끝났습니다. 데몬은 cycle_ms 마다 이 일을 반복합니다. 다시 재생을 누르면 또 봅니다." });
+      playIdx = 0;
+      const tick = () => {
+        if (playIdx >= steps.length) return;
+        const st = steps[playIdx];
+        highlightPoint(st.kind === "pt" ? st.i : -1);
+        if (st.kind === "pt") setPacket(st.dir, st.name);
+        else {
+          const pkt = document.getElementById("pkt");
+          pkt.classList.remove("show");
+        }
+        showNow(st.html);
+        playIdx += 1;
+        if (playIdx < steps.length) playTimer = setTimeout(tick, st.kind === "pt" ? 1400 : 1100);
+      };
+      tick();
+    }
+
     function kv(label, value) {
       if (value === undefined || value === null || value === "") return "";
       let v = value;
@@ -508,6 +701,15 @@
       const role = (cfg.device && cfg.device.role) || pp.role || "server";
       const sensorIsServer = role === "server" || role === "adapter" || proto === "profinet" || proto === "ethernetip" && role !== "client";
       const name = (cfg.device && cfg.device.name) || "device";
+      currentCfg = cfg;
+      stopPlay();
+
+      document.getElementById("analogy").textContent = analogy(proto);
+      document.getElementById("boot").innerHTML = bootSteps(cfg).map((t) => "<li>" + t + "</li>").join("");
+      document.getElementById("stage-plc").innerHTML = "<div class='k'>PLC / 컨트롤러</div><div class='n'>값을 읽거나 명령을 넣음</div>";
+      document.getElementById("stage-sensor").innerHTML = "<div class='k'>이 데몬 · " + esc(name) + "</div><div class='n'>" + esc(meta.label) + "</div>";
+      showNow("아래 <b>한 사이클 재생</b>을 누르면, 이 JSON이 한 바퀴 도는 모습이 나옵니다.");
+      document.getElementById("pkt").classList.remove("show");
 
       document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.key === sourceKey));
 
@@ -539,16 +741,18 @@
         if (p.scale != null) extra.push("scale " + p.scale);
         if (p.endian) extra.push(p.endian);
         if (p.length) extra.push(p.length + "B");
+        const s = pointStory(cfg, p);
         return `<div class="pt">
           <div class="name">${esc(p.name)}</div>
           <div><span class="pill ${accessClass(p.access)}">${esc(p.access || "read")}</span></div>
-          <div class="hint">${esc(p.data_type || "")}${extra.length ? " · " + extra.join(" · ") : ""}</div>
-          <div class="addr">${esc(prettyAddr(cfg, p))}</div>
+          <div class="addr">${esc(prettyAddr(cfg, p))} · ${esc(p.data_type || "")}${extra.length ? " · " + extra.join(" · ") : ""}</div>
+          <div class="story">${s.line}<div class="app">${esc(s.app)}</div></div>
         </div>`;
       }).join("") || "<p class='hint'>points 배열이 비어 있습니다.</p>";
 
       document.getElementById("raw").textContent = JSON.stringify(cfg, null, 2);
       document.getElementById("editor").value = JSON.stringify(cfg, null, 2);
+      playTimer = setTimeout(playCycle, 400);
     }
 
     const tabOrder = ["modbus_tcp", "slmp", "ethernetip", "profinet"];
@@ -589,6 +793,8 @@
       };
       r.readAsText(f);
     });
+
+    document.getElementById("play").addEventListener("click", playCycle);
 
     render(EXAMPLES.modbus_tcp, "modbus_tcp");
   </script>
