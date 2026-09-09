@@ -59,6 +59,27 @@ typedef struct {
     size_t stub_len;
 } sec_walk_t;
 
+typedef struct {
+    uint16_t slot;
+    uint16_t subslot;
+    uint16_t index;
+    int saw;
+} read_walk_t;
+
+static int parse_read_req(uint16_t type, const uint8_t *body, uint16_t blen,
+                          void *u)
+{
+    read_walk_t *r = u;
+    /* IODReadReq: seq(2) ARUUID(16) API(4) slot(2) subslot(2) pad(2) index(2) */
+    if (type == PN_BLOCK_IOD_READ_REQ && blen >= 30) {
+        r->slot = pn_rd_be16(body + 22);
+        r->subslot = pn_rd_be16(body + 24);
+        r->index = pn_rd_be16(body + 28);
+        r->saw = 1;
+    }
+    return 0;
+}
+
 static int strip_sec_cb(uint16_t type, const uint8_t *body, uint16_t blen,
                         void *u)
 {
@@ -317,7 +338,14 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
     } else if (op == OP_READ) {
         uint8_t rec[256];
         size_t rlen = 0;
-        pn_record_read(s, 0, 1, 0xAFF0, rec, sizeof(rec), &rlen);
+        read_walk_t rw = {.slot = 0, .subslot = 1, .index = 0xAFF0, .saw = 0};
+        size_t blen = 0;
+        const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
+        if (blocks) {
+            walk_blocks(blocks, blen, parse_read_req, &rw);
+        }
+        pn_record_read(s, rw.slot, rw.subslot, rw.index, rec, sizeof(rec),
+                       &rlen);
         so = ndr_wrap(stub_out, rec, rlen);
     } else if (op == OP_WRITE) {
         uint8_t z[4] = {0};

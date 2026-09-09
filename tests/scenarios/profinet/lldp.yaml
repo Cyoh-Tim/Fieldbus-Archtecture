@@ -1,0 +1,12 @@
+name: lldp
+protocol: profinet
+tags: [lldp, phase2]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+steps:
+  - action: lldp
+    expect:
+      ethertype: 0x88CC
+      name_of_station: sensor-line1

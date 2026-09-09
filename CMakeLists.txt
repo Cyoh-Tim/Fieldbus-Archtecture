@@ -158,5 +158,11 @@ if(BUILD_CTT)
     foreach(sc ${CTT_PN_SCENARIOS})
         get_filename_component(sc_name ${sc} NAME_WE)
         add_test(NAME ctt_pn_${sc_name} COMMAND ctt --scenario ${sc})
+        # 30s duration soak: optional. Default CI uses -LE soak_ci.
+        if(sc_name STREQUAL "soak_ci")
+            set_tests_properties(ctt_pn_${sc_name} PROPERTIES
+                LABELS "soak_ci"
+                TIMEOUT 90)
+        endif()
     endforeach()
 endif()

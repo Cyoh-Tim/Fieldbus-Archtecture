@@ -76,6 +76,8 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
 void pn_rpc_poll(pn_stack_t *s);
 
 void pn_snmp_poll(pn_stack_t *s);
+int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t len, uint8_t *resp,
+                   size_t cap, size_t *out_len);
 int pn_udp_open(uint16_t port);
 
 int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,

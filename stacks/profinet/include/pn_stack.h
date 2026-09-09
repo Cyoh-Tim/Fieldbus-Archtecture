@@ -65,6 +65,13 @@ void pn_stack_set_eth_ops(pn_stack_t *s, pn_eth_ops_t ops);
 int pn_stack_handle_eth(pn_stack_t *s, const uint8_t *frame, size_t len);
 int pn_stack_handle_rpc(pn_stack_t *s, const uint8_t *udp_payload, size_t len,
                         uint8_t *resp, size_t resp_cap, size_t *resp_len);
+/* Mock SNMP (UDP 161). Same idea as handle_rpc: no bind, no sudo. */
+int pn_stack_handle_snmp(pn_stack_t *s, const uint8_t *req, size_t len,
+                         uint8_t *resp, size_t resp_cap, size_t *resp_len);
+
+/* Device TX helpers for CTT (CC-B). Alarm requires an established AR. */
+int pn_stack_send_alarm(pn_stack_t *s);
+void pn_stack_send_lldp(pn_stack_t *s);
 
 const pn_cfg_t *pn_stack_cfg(const pn_stack_t *s);
 
