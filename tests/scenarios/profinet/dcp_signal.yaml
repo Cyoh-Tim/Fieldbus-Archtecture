@@ -1,0 +1,13 @@
+name: dcp_signal
+protocol: profinet
+tags: [dcp, signal]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+steps:
+  - action: dcp_signal
+    xid: 0xA1B2C3D4
+    expect:
+      result: accept
+    golden: tests/golden/profinet/dcp_signal_accept.pcap

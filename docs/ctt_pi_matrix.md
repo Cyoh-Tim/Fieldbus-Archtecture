@@ -13,7 +13,7 @@
 |----|------|
 | mock | `./build/ctt --transport=mock` / 기본 `ctest` |
 | lab | `tests/run_ctt_lab.sh` / `--transport=af_packet` 로 의미 있음 |
-| not yet | YAML·훅이 아직 없음. 후속 하네스 작업 |
+| DUT not implemented | 스택에 기능이 없음. CTT 하네스 공백이 아님 |
 | N/A (CC-C) | 제품·CTT 범위 밖. 계획하지 않음 |
 | N/A | 이 DUT 프로파일과 무관 |
 
@@ -22,15 +22,22 @@
 | YAML (`tests/scenarios/profinet/`) | 내부 카테고리 (CC-A/B) | mock | lab | 비고 |
 |-------------------------------------|-------------------------|------|-----|------|
 | `dcp_identify_name_of_station.yaml` | DCP Identify | mock + **golden replay** | Identify on veth | FrameID `0xFEFF`, NameOfStation |
+| `dcp_get.yaml` | DCP Get | mock + golden | Get on veth | FrameID `0xFEFD`, unicast |
+| `dcp_hello.yaml` | DCP Hello TX | mock + golden | Hello on veth | FrameID `0xFEFC`, DUT TX helper |
+| `dcp_signal.yaml` | DCP Signal | mock + golden | Set Signal on veth | Control/Signal, LED stub |
+| `dcp_set_ip.yaml` | DCP Set IP + Hello | mock + golden | Set IP + Hello on veth | IP apply 후 Hello.Req |
 | `dcp_set_sec_class1.yaml` | DCP Set + Security lab profile | mock + golden (accept) | Ethernet Set 가능, HMAC 동일 | option `0xF0` 은 이 저장소 프로파일 |
-| `rpc_connect_without_integrity.yaml` | CM Connect reject (Sec1) | mock | RPC 는 in-process 훅 | 실 UDP 34964 아님 |
-| `rpc_connect_sec1_integrity.yaml` | CM Connect + Sec1 integrity | mock | 훅 + 이후 RTC1 은 veth 가능 | block `0x0E01` |
-| `rtc1_io_cycle_smoke.yaml` | RTC1 cyclic IO (CC-A/B) | mock | Connect 훅 + RTC1 on veth | IRT 아님. soft ms bound |
-| `rpc_release.yaml` | CM Release | mock | 훅 | |
+| `rpc_connect_without_integrity.yaml` | CM Connect reject (Sec1) | mock | **UDP 34964** when `device.ip` set | |
+| `rpc_connect_sec1_integrity.yaml` | CM Connect + Sec1 integrity | mock | UDP + 이후 RTC1 은 veth | block `0x0E01` |
+| `rtc1_io_cycle_smoke.yaml` | RTC1 cyclic IO (CC-A/B) | mock | UDP Connect + RTC1 on veth | IRT 아님. soft ms bound |
+| `rpc_release.yaml` | CM Release | mock | UDP | |
+| `rpc_write_prmend_appready.yaml` | CM Write / ParameterEnd / ApplicationReady | mock | UDP CODESYS-like | I&M1 write + PrmEnd + DUT AppReady |
 | `alarm_tx.yaml` | Alarm High TX | mock | TX on veth (AR 후) | dummy TX, 풀 상태머신 아님 |
-| `record_read_im0.yaml` | Record / I&M0 | mock | 훅 | index `0xAFF0` |
+| `alarm_low.yaml` | Alarm Low TX | mock + golden | TX on veth | FrameID `0xFE01` |
+| `record_read_im0.yaml` | Record / I&M0 | mock | UDP | index `0xAFF0` |
+| `record_read_im1_4.yaml` | Record / I&M1–4 | mock | UDP | `0xAFF1`–`0xAFF4` |
 | `lldp.yaml` | LLDP (CC-B) | mock | veth 가능 | ethertype `0x88CC` |
-| `snmp_get_sysname.yaml` | SNMP (CC-B) | mock | **not yet** on wire | `handle_snmp`, UDP 161 아님 |
+| `snmp_get_sysname.yaml` | SNMP (CC-B) | mock (`handle_snmp`) | **UDP 161** when `device.ip` set | sysName; mock 경로 유지 |
 | `soak_short.yaml` | RTC1 soak (내부) | mock (`ctest`) | 권장하지 않음 | 회귀 길이 |
 | `soak_ci.yaml` | RTC1 soak 30s | mock (`-L soak_ci`) | 수동 | PR 기본 게이트 제외 |
 | `nightly/soak_nightly.yaml` | soak 1h | 수동 mock | 수동 | ctest 미등록 |
@@ -39,14 +46,9 @@
 
 | 카테고리 | 커버 | 메모 |
 |----------|------|------|
-| DCP Get / Hello / Signal / Set IP | not yet | Identify/Set Name 만 있음 |
-| CM Write / ParameterEnd / ApplicationReady | not yet | Connect/Release/Read 만 |
-| Alarm Low / 진단 상태머신 | not yet | High dummy TX 만 |
-| I&M1–4 / 기타 record index | not yet | I&M0 만 |
-| Fast Start-Up | not yet | DUT 미구현 |
-| MRP (CC-B 옵션) | not yet | DUT 미구현 |
-| 실 UDP RPC (CM) / SNMP :161 | not yet | lab 문서화, CTT stub 미연결 |
-| 스위치/VLAN/멀티캐스트 스트레스 | not yet | mock 단일 스레드 |
+| Fast Start-Up | **DUT not implemented** | 스택에 FSU 훅 없음. CTT 갭이 아님. 이 PR 에서 FSU 스택을 만들지 않음 |
+| MRP (CC-B 옵션) | **DUT not implemented** | MRP 미디어 리던던시 없음. CTT 갭이 아님. 풀 MRP 스택 비목표 |
+| 스위치/VLAN/멀티캐스트 스트레스 | N/A (harness) | mock 단일 스레드. Device DUT 기능이 아님 |
 | **IRT / PTCP / RT Class 3 / CC-C** | **N/A (CC-C)** | 시나리오·TODO·매핑 없음 |
 | PI 인증 리포트 / 공식 Bundle 실행 | N/A | 공인 랩. 이 하네스가 대체하지 않음 |
 

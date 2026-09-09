@@ -1,0 +1,20 @@
+name: alarm_low
+protocol: profinet
+tags: [alarm, low]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  ip: 192.168.200.2
+  netmask: 255.255.255.0
+steps:
+  - action: rpc_connect
+    integrity: false
+    expect:
+      ar: up
+  - action: alarm
+    priority: low
+    expect:
+      ethertype: 0x8892
+      frame_id: 0xFE01
+    golden: tests/golden/profinet/alarm_low.pcap

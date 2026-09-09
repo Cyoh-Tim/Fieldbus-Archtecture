@@ -6,7 +6,7 @@
 
 | 항목 | 상태 |
 |------|------|
-| Conformance Class B 기능 | DCP, RTC1 cyclic IO, record(I&M0), LLDP, SNMP Get(sysName) |
+| Conformance Class B 기능 | DCP (Identify/Get/Set/Hello/Signal), RTC1, I&M0–4, Alarm High/Low TX, LLDP, SNMP Get(sysName) |
 | RT Class 1 | 비동기 cyclic, `cycle_us` (기본 8ms) |
 | Security Class 1 | HMAC-SHA256 PSK. DCP Set / CM Connect 에 integrity 필수 |
 | RT Class 3 / IRT | 구현하지 않음 |

@@ -46,26 +46,33 @@ tests/run_ctt_lab.sh
 
 1. `ctt-ctl` ↔ `ctt-dut` veth 쌍 생성
 2. MAC 을 mock 과 맞춤 (`00:11:22:33:44:55` / `02:fb:00:00:00:01`)
-3. **DCP Identify** 시나리오를 같은 YAML 로 실행 (와이어 필수)
-4. `rtc1_io_cycle_smoke` — Connect 는 in-process `pn_stack_handle_rpc`,
-   RTC1 프레임은 veth
+3. IPv4 `192.168.200.1/24` (ctl) / `192.168.200.2/24` (dut)
+   (`CTT_LAB_CTL_IP` / `CTT_LAB_DUT_IP`)
+4. DCP Identify / Get / Signal / Hello / Set IP, LLDP (이더넷)
+5. SNMP GET sysName — **UDP 161**
+6. CM Connect / Write / ParameterEnd / ApplicationReady / Read / Release —
+   **UDP 34964**. RTC1·Alarm 프레임은 veth
+
+`device.ip` 가 YAML 에 있으면 lab 에서 실 UDP 를 쓴다. 없으면 mock 과 같이
+`pn_stack_handle_rpc` / `pn_stack_handle_snmp` 훅이다.
 
 권한이 없으면 **SKIP (exit 0)**. `CTT_LAB_REQUIRE=1` 이면 권한 부족을 실패로 본다.
 
 GitHub Actions 는 `workflow_dispatch` 입력 `lab=true` 로 이 스크립트를 돌린다.
 sudo 가 없으면 skip.
 
-## RPC / SNMP 는 아직 실 UDP가 기본이 아님
+Soak YAML 은 랩에서 돌리지 않는다 (mock `ctest` / `-L soak_ci`).
 
-| 동작 | mock | lab (`af_packet`) |
-|------|------|-------------------|
-| DCP Identify / Set | mock 링 | veth Ethernet |
-| LLDP / Alarm TX / RTC1 | mock 링 | veth Ethernet (AR 은 in-process Connect 후) |
-| CM Connect / Release / Record | `pn_stack_handle_rpc` | **같은 훅** (실 UDP 34964 아님) |
-| SNMP GET | `pn_stack_handle_snmp` | 같은 훅 (실 UDP 161 아님) |
+## RPC / SNMP transport
 
-랩에서 DUT 가 `use_eth_ops=0` 이면 스택이 UDP 34964/161 을 bind 하려고 한다.
-CTT Controller stub 은 아직 그 소켓으로 Connect 를 보내지 않는다.
+| 동작 | mock | lab (`af_packet` + `device.ip`) |
+|------|------|----------------------------------|
+| DCP Identify / Get / Set / Signal / Hello | mock 링 | veth Ethernet |
+| LLDP / Alarm TX / RTC1 | mock 링 | veth Ethernet |
+| CM Connect / Write / Control / Read / Release | `pn_stack_handle_rpc` | **UDP 34964** |
+| ApplicationReady (Device → Controller) | `pn_stack_take_rpc_tx` | DUT `sendto` last RPC peer |
+| SNMP GET | `pn_stack_handle_snmp` | **UDP 161** |
+
 CODESYS 가 Device 로 붙을 때는 아래 `pn_device_run` 경로를 쓴다.
 
 ## 기존 수동 도구 (`dcp_probe` / `pn_device_run`)
@@ -91,17 +98,29 @@ veth 양끝에 붙인다. `pn_device_run` + `dcp_probe` 는 **두 프로세스**
 
 ## CODESYS (Windows) — CI 에 넣지 않음
 
-CODESYS Control Win / SoftPLC 는 이 저장소 CI 에 없다. 랩에서 Device 를
-CODESYS Controller 에 붙이려면:
+CODESYS Control Win / SoftPLC / Development System 은 이 저장소 CI 에 없다.
+GitHub Actions 에서 Windows CODESYS 를 실행하지 않는다.
 
-1. Linux 쪽에 `pn_device_run <iface>` 또는 데몬 `config/example.profinet.json`
-2. 그 NIC 를 CODESYS 가 있는 네트워크(또는 USB 이더넷 / 브리지)에 연결
-3. NameOfStation `sensor-line1`, RT Class 1, cycle 8ms. IRT 프로젝트 쓰지 말 것
-4. CTT 는 CODESYS 대신이 아니다. CTT 는 YAML 회귀. CODESYS 는 수동 상호운용
+랩에서 Device 를 CODESYS Controller 에 붙이려면 체크리스트 스크립트:
 
-PR #1 랩 자산(프로젝트 파일 등)이 이 브랜치에 없으면, 위 절차만으로 충분하다.
-CTT lab profile 이 Identify 를 veth 에서 자동화하고, CODESYS 는 그 다음
-수동 게이트다.
+```
+tests/codesys_manual_lab.sh           # print checklist
+tests/codesys_manual_lab.sh eth0      # then start pn_device_run
+```
+
+수동 순서 (요약):
+
+1. Linux: `pn_device_run <iface>` 또는 데몬 `config/example.profinet.json`
+2. 그 NIC 를 CODESYS 가 있는 네트워크(USB 이더넷 / 브리지)에 연결
+3. GSDML: `stacks/profinet/gsdml/GSDML-V2.35-Fieldbus-PN-Device.xml`
+4. NameOfStation `sensor-line1`, RT Class 1, cycle 8ms. **IRT 프로젝트 쓰지 말 것**
+5. Engineering 스캔 → DCP Identify → 필요 시 Set IP
+6. 기대 CM 시퀀스 (CTT `rpc_write_prmend_appready.yaml` 과 같음):
+   Connect → Write(옵션) → ParameterEnd → Device ApplicationReady → RTC1
+7. CTT 는 CODESYS 대신이 아니다. CTT 는 YAML 회귀. CODESYS 는 수동 상호운용
+
+PASS 메모 (인증 evidence 아님): Identify 로 이름 확인, AR + cyclic IO,
+PrmEnd/AppReady 가 fault 가 아님. IRT/PTCP/CC-C 를 켜지 말 것.
 
 ## Golden PCAP
 
@@ -116,3 +135,4 @@ CTT lab profile 이 Identify 를 veth 에서 자동화하고, CODESYS 는 그 �
 
 랩 green ≠ PI 인증. 매핑은 [`docs/ctt_pi_matrix.md`](ctt_pi_matrix.md).
 공식 Test Bundle 접근을 가정하지 않는다. CC-C 카테고리는 매핑하지 않는다.
+MRP / Fast Start-Up 은 DUT 미구현이다 (하네스 공백으로 적지 않음).

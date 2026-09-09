@@ -62,17 +62,21 @@ by the plugin. The common runner does not parse DCP/CIP frames.
 
 PROFINET actions (CC-B / RTC1):
 
-| action | Phase | notes |
-|--------|-------|--------|
-| `dcp_identify` / `dcp_set` | 1 | Identify.Res, Sec1 HMAC Set |
-| `rpc_connect` | 1–2 | `integrity: false` reject; `integrity: true` block `0x0E01` AR up |
-| `io_cycle` | 1 | RTC1 cyclic smoke + period stats |
-| `rpc_release` | 2 | AR down |
-| `alarm` | 2 | Device TX Alarm High (`0xFC01`); AR must be up |
-| `record_read` | 2 | I&M0 index `0xAFF0` |
-| `lldp` | 2 | ethertype `0x88CC`, NameOfStation |
-| `snmp_get` | 2 | sysName via `pn_stack_handle_snmp` (no UDP :161) |
-| `soak` | 2 | `duration_s` and/or `iterations`; unexpected frames / AR drops |
+| action | notes |
+|--------|--------|
+| `dcp_identify` / `dcp_get` / `dcp_set` | Identify.Res, Get.Res, Sec1 HMAC Set |
+| `dcp_set_ip` | DCP Set IP + DUT Hello (`0xFEFC`) |
+| `dcp_signal` | Control/Signal Set (LED stub) |
+| `dcp_hello` | DUT Hello TX helper |
+| `rpc_connect` | mock: `handle_rpc`. lab + `device.ip`: UDP 34964 |
+| `rpc_write` / `rpc_control` / `rpc_application_ready` | Write, ParameterEnd, Device AppReady indication |
+| `rpc_release` | AR down |
+| `io_cycle` | RTC1 cyclic smoke + period stats |
+| `alarm` | High (`0xFC01`) or `priority: low` (`0xFE01`) |
+| `record_read` | I&M0 `0xAFF0` … I&M4 `0xAFF4` |
+| `lldp` | ethertype `0x88CC`, NameOfStation |
+| `snmp_get` | mock `handle_snmp`; lab UDP 161 when `device.ip` |
+| `soak` | `duration_s` and/or `iterations`; unexpected frames / AR drops |
 
 ## Soak / metrics
 

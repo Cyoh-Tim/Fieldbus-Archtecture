@@ -181,9 +181,9 @@ if(BUILD_CTT)
                 LABELS "soak_ci"
                 TIMEOUT 90)
         endif()
-        # Golden replay is mock-only (no NIC). Identify / Sec1 Set carry golden:.
-        if(sc_name STREQUAL "dcp_identify_name_of_station" OR
-           sc_name STREQUAL "dcp_set_sec_class1")
+        # Golden replay is mock-only (no NIC). Any YAML with golden: is labeled.
+        file(READ "${sc}" _sc_txt)
+        if(_sc_txt MATCHES "golden:")
             set_tests_properties(ctt_pn_${sc_name} PROPERTIES LABELS "golden")
         endif()
     endforeach()

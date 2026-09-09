@@ -1,0 +1,16 @@
+name: dcp_set_ip
+protocol: profinet
+tags: [dcp, set, ip, hello]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+steps:
+  - action: dcp_set_ip
+    xid: 0x01020304
+    ip: 192.168.200.2
+    netmask: 255.255.255.0
+    gateway: 192.168.200.1
+    expect:
+      hello: true
+    golden: tests/golden/profinet/dcp_hello_after_set_ip.pcap

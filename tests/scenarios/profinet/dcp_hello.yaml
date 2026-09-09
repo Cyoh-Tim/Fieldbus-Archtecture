@@ -1,0 +1,12 @@
+name: dcp_hello
+protocol: profinet
+tags: [dcp, hello]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+steps:
+  - action: dcp_hello
+    expect:
+      name_of_station: sensor-line1
+    golden: tests/golden/profinet/dcp_hello.pcap
