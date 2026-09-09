@@ -7,7 +7,9 @@ add_definitions(-D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE)
 
 option(ENABLE_EIP_TESTS "EtherNet/IP HMAC + residual stack tests" ON)
 option(ENABLE_PN_TESTS "PROFINET HMAC 단위 테스트" ON)
-option(BUILD_DAEMON "multiproto_daemon + 어댑터 (libmodbus, cJSON 필요)" ON)
+option(ENABLE_MB_TESTS "Modbus TCP stack/adapter unit tests" ON)
+option(ENABLE_SLMP_TESTS "SLMP Binary 3E stack/adapter unit tests" ON)
+option(BUILD_DAEMON "multiproto_daemon + 어댑터 (cJSON 필요, libmodbus 없음)" ON)
 option(BUILD_CTT "Controller Test Tool (pn/eip/mb/slmp stacks + YAML 시나리오)" ON)
 option(ENABLE_CTT_AF_PACKET "Compile CTT AF_PACKET lab transport (not used by default ctest)" ON)
 option(BUILD_PN_LAB_TOOLS "Build dcp_probe / pn_device_run (manual lab; not ctest)" ON)
@@ -16,7 +18,7 @@ find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
 
 # ---- PROFINET IO Device 스택 (자체 구현, CC-B / RT Class 1 / Sec Class 1) ----
-# 데몬과 CTT가 공유. BUILD_DAEMON=OFF 이면 libmodbus 없이 pn_stack+ctt 만 빌드.
+# 데몬과 CTT가 공유. BUILD_DAEMON=OFF 이면 cJSON/어댑터 없이 스택+ctt 만 빌드.
 add_library(pn_stack STATIC
     stacks/profinet/src/pn_crypto.c
     stacks/profinet/src/pn_eth.c
@@ -45,7 +47,7 @@ target_include_directories(slmp_stack PRIVATE include core)
 target_link_libraries(slmp_stack PUBLIC Threads::Threads)
 
 # ---- EtherNet/IP Adapter(+Originator) 스택 (자체 구현, 벤더 SDK 불필요) ----
-# 데몬과 CTT가 공유. BUILD_DAEMON=OFF 이면 libmodbus 없이 eip_stack+ctt.
+# 데몬과 CTT가 공유. BUILD_DAEMON=OFF 이면 어댑터 없이 eip_stack+ctt.
 add_library(eip_stack STATIC
     stacks/ethernetip/src/eip_path_asm.c
     stacks/ethernetip/src/eip_cip.c
@@ -83,11 +85,13 @@ if(BUILD_DAEMON)
         set(ENABLE_CJSON_TEST OFF CACHE BOOL "" FORCE)
         set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(cjson_src)
-        set(CJSON_TARGET cjson)
+        FetchContent_GetProperties(cjson_src)
+        # Do not mutate the upstream cjson target (install export rejects SOURCE_DIR).
+        add_library(cjson_local INTERFACE)
+        target_link_libraries(cjson_local INTERFACE cjson)
+        target_include_directories(cjson_local INTERFACE ${cjson_src_SOURCE_DIR})
+        set(CJSON_TARGET cjson_local)
     endif()
-
-    # libmodbus: pkg-config 로 탐색 (배포판 패키지: libmodbus-dev)
-    pkg_check_modules(LIBMODBUS REQUIRED libmodbus)
 
     # ---- 코어 ----
     add_library(core STATIC
@@ -103,21 +107,26 @@ if(BUILD_DAEMON)
         adapters/cclink
         adapters/ethernetip
         adapters/profinet
-        ${LIBMODBUS_INCLUDE_DIRS}
     )
     target_link_libraries(core PUBLIC ${CJSON_TARGET})
 
-    # ---- 어댑터: Modbus (항상 빌드, 벤더 의존성 없음) ----
-    add_library(adapter_modbus STATIC adapters/modbus/modbus_adapter.c)
+    # ---- 어댑터: Modbus (자체 스택 stacks/modbus/, libmodbus 없음) ----
+    add_library(adapter_modbus STATIC
+        adapters/modbus/modbus_adapter.c
+        adapters/modbus/modbus_codec.c
+    )
     target_include_directories(adapter_modbus PUBLIC adapters/modbus)
-    target_include_directories(adapter_modbus PRIVATE include core ${LIBMODBUS_INCLUDE_DIRS})
-    target_link_libraries(adapter_modbus PUBLIC ${CJSON_TARGET} ${LIBMODBUS_LIBRARIES})
+    target_include_directories(adapter_modbus PRIVATE include core stacks/modbus/include)
+    target_link_libraries(adapter_modbus PUBLIC ${CJSON_TARGET} mb_stack m)
 
-    # ---- 어댑터: SLMP (항상 빌드, 벤더 의존성 없음) ----
-    add_library(adapter_slmp STATIC adapters/slmp/slmp_adapter.c)
+    # ---- 어댑터: SLMP (자체 스택 stacks/slmp/, Binary 3E) ----
+    add_library(adapter_slmp STATIC
+        adapters/slmp/slmp_adapter.c
+        adapters/slmp/slmp_codec.c
+    )
     target_include_directories(adapter_slmp PUBLIC adapters/slmp)
-    target_include_directories(adapter_slmp PRIVATE include core)
-    target_link_libraries(adapter_slmp PUBLIC ${CJSON_TARGET})
+    target_include_directories(adapter_slmp PRIVATE include core stacks/slmp/include)
+    target_link_libraries(adapter_slmp PUBLIC ${CJSON_TARGET} slmp_stack m)
 
     # ---- 어댑터: CC-Link (스텁, 항상 빌드) ----
     add_library(adapter_cclink STATIC adapters/cclink/cclink_adapter.c)
@@ -200,6 +209,34 @@ if(ENABLE_EIP_TESTS)
     target_link_libraries(test_eip_stack PRIVATE eip_stack)
 endif()
 
+if(ENABLE_MB_TESTS)
+    add_executable(test_mb_stack tests/test_mb_stack.c)
+    target_include_directories(test_mb_stack PRIVATE stacks/modbus/include include core)
+    target_link_libraries(test_mb_stack PRIVATE mb_stack)
+    if(BUILD_DAEMON)
+        add_executable(test_mb_adapter tests/test_mb_adapter.c)
+        target_include_directories(test_mb_adapter PRIVATE
+            stacks/modbus/include include core adapters/modbus)
+        target_link_libraries(test_mb_adapter PRIVATE adapter_modbus)
+
+        add_executable(mb_seeded_server tests/mb_seeded_server.c)
+        target_include_directories(mb_seeded_server PRIVATE stacks/modbus/include include core)
+        target_link_libraries(mb_seeded_server PRIVATE mb_stack)
+    endif()
+endif()
+
+if(ENABLE_SLMP_TESTS)
+    add_executable(test_slmp_stack tests/test_slmp_stack.c)
+    target_include_directories(test_slmp_stack PRIVATE stacks/slmp/include include core)
+    target_link_libraries(test_slmp_stack PRIVATE slmp_stack Threads::Threads)
+    if(BUILD_DAEMON)
+        add_executable(test_slmp_adapter tests/test_slmp_adapter.c)
+        target_include_directories(test_slmp_adapter PRIVATE
+            stacks/slmp/include include core adapters/slmp)
+        target_link_libraries(test_slmp_adapter PRIVATE adapter_slmp m)
+    endif()
+endif()
+
 enable_testing()
 
 if(ENABLE_PN_TESTS)
@@ -209,6 +246,20 @@ endif()
 if(ENABLE_EIP_TESTS)
     add_test(NAME test_eip_crypto COMMAND test_eip_crypto)
     add_test(NAME test_eip_stack COMMAND test_eip_stack)
+endif()
+
+if(ENABLE_MB_TESTS)
+    add_test(NAME test_mb_stack COMMAND test_mb_stack)
+    if(BUILD_DAEMON)
+        add_test(NAME test_mb_adapter COMMAND test_mb_adapter)
+    endif()
+endif()
+
+if(ENABLE_SLMP_TESTS)
+    add_test(NAME test_slmp_stack COMMAND test_slmp_stack)
+    if(BUILD_DAEMON)
+        add_test(NAME test_slmp_adapter COMMAND test_slmp_adapter)
+    endif()
 endif()
 
 if(BUILD_CTT)

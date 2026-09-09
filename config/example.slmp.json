@@ -6,20 +6,69 @@
   },
   "cycle_ms": 8,
   "protocol_params": {
+    "role": "client",
     "plc_ip": "192.168.0.20",
     "port": 5000,
     "network_no": 0,
     "pc_no": 255,
+    "dest_module_io": 1023,
+    "monitoring_timer": 16,
+    "timeout_ms": 1000,
     "frame": "3E"
   },
   "points": [
     {
       "name": "barcode_value",
-      "access": "write",
+      "access": "read",
       "data_type": "string",
       "length": 32,
+      "chars_per_word": 2,
+      "trim_null": true,
       "address": {
         "slmp": { "device_code": "D", "start": 100 }
+      }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 0.1,
+      "endian": "ABCD",
+      "address": {
+        "slmp": { "device": "D", "address": "110", "quantity": 1 }
+      }
+    },
+    {
+      "name": "pressure",
+      "access": "read",
+      "data_type": "float",
+      "endian": "CDAB",
+      "address": {
+        "slmp": { "device_code": "D", "start": 200, "quantity": 2 }
+      }
+    },
+    {
+      "name": "plc_trigger",
+      "access": "write",
+      "data_type": "bool",
+      "address": {
+        "slmp": { "device_code": "M", "start": 10, "unit": "bit" }
+      }
+    },
+    {
+      "name": "alarm_bit",
+      "access": "write",
+      "data_type": "bool",
+      "address": {
+        "slmp": { "device_code": "D", "start": 300, "bit": 3, "bit_count": 1 }
+      }
+    },
+    {
+      "name": "input_x",
+      "access": "write",
+      "data_type": "bool",
+      "address": {
+        "slmp": { "device_code": "X", "start": "1A", "unit": "bit" }
       }
     }
   ]

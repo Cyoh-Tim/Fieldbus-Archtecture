@@ -3,8 +3,8 @@
 내부 하네스 **준비도** 표다. **Modbus.org 공식 conformance / 유료 랩 인증
 evidence 가 아니다.** 인증 리포트를 이 green 으로 대체하지 않는다.
 
-DUT: `stacks/modbus/` 자체 TCP 서버 (`mb_stack_handle_adu`). libmodbus
-클라이언트는 CTT DUT 가 아니다. **RTU 는 범위 밖.**
+DUT: `stacks/modbus/` 자체 TCP 서버 (`mb_stack_handle_adu`). 데몬도 동일 스택
+(`adapters/modbus/`, libmodbus 없음). **RTU 는 범위 밖.**
 
 커버 열:
 

@@ -28,18 +28,39 @@
         "required": ["name", "access", "address"],
         "properties": {
           "name": { "type": "string" },
-          "access": { "type": "string", "enum": ["read", "write"] },
+          "access": {
+            "type": "string",
+            "description": "read|write|readwrite (PLC 관점). 기본은 read|write."
+          },
           "data_type": {
             "type": "string",
-            "enum": ["uint16", "int16", "uint32", "int32", "float32", "bool", "string"]
+            "description": "uint8/16/32/64, int*, float32/64, bool, string/ascii, raw, bcd16/32 및 별칭(u16, REAL, qword …). 어댑터가 수용. 상세는 docs/modbus_stack.md, docs/slmp_stack.md."
           },
           "length": { "type": "integer" },
           "scale": { "type": "number", "default": 1.0 },
-          "offset": { "type": "number", "default": 0.0 },
+          "gain": { "type": "number", "description": "scale 별칭" },
+          "offset": {
+            "type": "number",
+            "default": 0.0,
+            "description": "엔지니어링 오프셋. eng = raw * scale + offset"
+          },
           "byte_order": { "type": "string", "enum": ["big", "little"] },
+          "word_order": {
+            "type": "string",
+            "enum": ["ab", "ba", "ABCD", "CDAB", "cdab"]
+          },
+          "endian": {
+            "type": "string",
+            "enum": ["ABCD", "BADC", "CDAB", "DCBA", "big", "little", "BE", "LE"],
+            "description": "32/64비트 센서 엔디안. byte_order+word_order 대신 사용 가능"
+          },
+          "chars_per_register": { "type": "integer", "enum": [1, 2] },
+          "chars_per_word": { "type": "integer", "enum": [1, 2] },
+          "string_swap": { "type": "boolean" },
+          "trim_null": { "type": "boolean", "default": true },
           "address": {
             "type": "object",
-            "description": "선택된 protocol 에 해당하는 서브키만 있으면 됨 (modbus/slmp/cclink/ethernetip/profinet)"
+            "description": "선택된 protocol 서브키만 있으면 됨. modbus: register_type/type, start/address, offset, byte_offset, quantity/count, bit, bit_count, zero_based/address_base. slmp: device_code/device, start/address, unit, bit, bit_count."
           }
         }
       }

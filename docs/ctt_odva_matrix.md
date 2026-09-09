@@ -6,7 +6,7 @@
 **내부 라벨** 이다.
 
 DUT: self-implemented `stacks/ethernetip/` (Adapter Class 1 + UCMM + Sec 1/2
-lab profile). `adapters/ethernetip/` 구매 스택 스텁은 DUT 가 아니다.
+lab profile). `adapters/ethernetip/` 데몬 어댑터는 DUT 가 아니다.
 
 커버 열:
 
