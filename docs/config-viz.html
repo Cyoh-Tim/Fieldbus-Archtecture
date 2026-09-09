@@ -352,8 +352,9 @@
       const a = (p.address && p.address.modbus) || {};
       const type = mbNorm(a.register_type || a.type);
       const start = numish(a.start ?? a.address, 0) + numish(a.offset, 0);
-      const qty = numish(a.quantity ?? a.count, p.length ? Math.max(1, Math.ceil(p.length / 2)) : 1);
-      return { type, start, qty, bit: a.bit, bit_count: a.bit_count };
+      const qtyExplicit = a.quantity ?? a.count;
+      const qty = numish(qtyExplicit, p.length ? Math.max(1, Math.ceil(p.length / 2)) : 1);
+      return { type, start, qty, qtyExplicit, bit: a.bit, bit_count: a.bit_count, len: p.length };
     }
 
     function slmpPoint(p) {
@@ -385,8 +386,9 @@
       if (proto === "modbus_tcp") {
         const m = mbPoint(p);
         let s = m.type + " " + m.start;
-        if (m.qty > 1) s += " ×" + m.qty;
-        if (m.bit != null) s += " bit" + m.bit + (m.bit_count > 1 ? ".." + (m.bit + m.bit_count - 1) : "");
+        if (m.qtyExplicit != null && m.qty > 1) s += " ×" + m.qty + "reg";
+        else if (m.len) s += " (" + m.len + "B)";
+        if (m.bit != null) s += " bit" + m.bit + (m.bit_count > 1 ? ".." + (Number(m.bit) + Number(m.bit_count || 1) - 1) : "");
         return s;
       }
       if (proto === "slmp") {
