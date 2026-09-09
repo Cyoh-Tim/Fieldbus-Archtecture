@@ -1,4 +1,5 @@
 #include "ctt.h"
+#include "transport.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -19,7 +20,6 @@ typedef struct {
 } pn_priv_t;
 
 static const uint8_t k_dcp_mc[6] = {0x01, 0x0E, 0xCF, 0x00, 0x00, 0x00};
-static const uint8_t k_ctl_mac[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
 static const uint8_t k_lldp_mc[6] = {0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E};
 
 #define RPC_OP_CONNECT 0
@@ -93,11 +93,46 @@ static size_t wr_pn_block(uint8_t *p, uint16_t type, const uint8_t *body,
     return n;
 }
 
+static void pump(ctt_run_t *run, pn_priv_t *priv)
+{
+    pn_stack_poll(priv->stack);
+    ctt_ctl_harvest(run);
+}
+
 static void inject_eth(ctt_run_t *run, pn_priv_t *priv, const uint8_t *frame,
                        size_t len)
 {
-    (void)ctt_ring_push(&run->mock.to_dut, frame, len, ctt_now_ns());
-    pn_stack_poll(priv->stack);
+    (void)ctt_ctl_send(run, frame, len);
+    if (run->opts.transport == CTT_TRANSPORT_AF_PACKET) {
+        for (int i = 0; i < 40; i++) {
+            pump(run, priv);
+            if (run->mock.to_ctl.count > 0) {
+                break;
+            }
+            sleep_ms(2);
+        }
+    } else {
+        pump(run, priv);
+    }
+}
+
+static int finish_eth_step(ctt_run_t *run, const yaml_node_t *step, int idx,
+                           const char *action, int found, const uint8_t *frame,
+                           size_t n)
+{
+    int rc = 0;
+    if (found && n > 0) {
+        (void)ctt_capture_step_frame(run, idx, action, frame, n);
+        const char *g = yaml_cstr(step, "golden", NULL);
+        if (g && g[0]) {
+            rc |= ctt_golden_check(run, idx, action, frame, n, g);
+        }
+    } else if (yaml_cstr(step, "golden", NULL) &&
+               run->opts.transport == CTT_TRANSPORT_MOCK) {
+        ctt_failf(run, idx, action, "golden: set but no matching frame");
+        rc = -1;
+    }
+    return rc;
 }
 
 static uint8_t dcp_status_from_str(const char *s)
@@ -153,7 +188,7 @@ static int step_dcp_identify(ctt_run_t *run, pn_priv_t *priv,
     size_t flen = pn_eth_build(frame, sizeof(frame), k_dcp_mc, priv->ctl_mac,
                                PN_ETHTYPE_PN, pay, 16);
 
-    ctt_ring_clear(&run->mock.to_ctl);
+    ctt_ctl_clear_rx(run);
     inject_eth(run, priv, frame, flen);
 
     unsigned long want_et =
@@ -170,8 +205,10 @@ static int step_dcp_identify(ctt_run_t *run, pn_priv_t *priv,
 
     int found = 0;
     uint8_t buf[CTT_FRAME_MAX];
-    int n;
+    int n = 0;
+    int last_n = 0;
     while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), NULL)) > 0) {
+        last_n = n;
         if (n < 18) {
             continue;
         }
@@ -183,18 +220,21 @@ static int step_dcp_identify(ctt_run_t *run, pn_priv_t *priv,
             sid == want_svc && st == want_st &&
             (!want_name || contains(buf, (size_t)n, want_name))) {
             found = 1;
+            last_n = n;
             break;
         }
     }
-    return ctt_check(run, idx, action, found,
-                     "expect Identify.Res et=0x%04lx fid=0x%04lx service=%s "
-                     "status=%s name=%s (TX FrameID=0xFEFE multicast "
-                     "01:0E:CF:00:00:00)",
-                     want_et, want_fid,
-                     expect ? yaml_cstr(expect, "service", "identify")
-                            : "identify",
-                     expect ? yaml_cstr(expect, "status", "success") : "success",
-                     want_name ? want_name : "(any)");
+    int rc = ctt_check(run, idx, action, found,
+                       "expect Identify.Res et=0x%04lx fid=0x%04lx service=%s "
+                       "status=%s name=%s (TX FrameID=0xFEFE multicast "
+                       "01:0E:CF:00:00:00)",
+                       want_et, want_fid,
+                       expect ? yaml_cstr(expect, "service", "identify")
+                              : "identify",
+                       expect ? yaml_cstr(expect, "status", "success") : "success",
+                       want_name ? want_name : "(any)");
+    rc |= finish_eth_step(run, step, idx, action, found, buf, (size_t)last_n);
+    return rc;
 }
 
 static int step_dcp_set(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
@@ -250,7 +290,7 @@ static int step_dcp_set(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step
     size_t flen = pn_eth_build(frame, sizeof(frame), cfg->mac, priv->ctl_mac,
                                PN_ETHTYPE_PN, pay, plen);
 
-    ctt_ring_clear(&run->mock.to_ctl);
+    ctt_ctl_clear_rx(run);
     inject_eth(run, priv, frame, flen);
 
     const char *want_result = expect ? yaml_cstr(expect, "result", NULL) : NULL;
@@ -269,7 +309,9 @@ static int step_dcp_set(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step
         int reject = strcmp(want_result, "reject") == 0;
         int ok = 0;
         uint8_t buf[CTT_FRAME_MAX];
-        int n;
+        uint8_t match[CTT_FRAME_MAX];
+        int n = 0;
+        size_t match_n = 0;
         while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), NULL)) >
                0) {
             if (n < 18) {
@@ -283,9 +325,13 @@ static int step_dcp_set(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step
                 sid == PN_DCP_SET) {
                 if (accept && st == PN_DCP_RESP_SUCCESS) {
                     ok = 1;
+                    memcpy(match, buf, (size_t)n);
+                    match_n = (size_t)n;
                 }
                 if (reject && st == PN_DCP_RESP_UNSUP) {
                     ok = 1;
+                    memcpy(match, buf, (size_t)n);
+                    match_n = (size_t)n;
                 }
             }
         }
@@ -296,6 +342,9 @@ static int step_dcp_set(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step
         rc |= ctt_check(run, idx, action, ok,
                         "result expect=%s station_name=%s signed=%s",
                         want_result, got_sta, signed_req ? "true" : "false");
+        rc |= finish_eth_step(run, step, idx, action, ok, match, match_n);
+    } else {
+        rc |= finish_eth_step(run, step, idx, action, 0, NULL, 0);
     }
     return rc;
 }
@@ -549,7 +598,7 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
         return -1;
     }
 
-    ctt_ring_clear(&run->mock.to_ctl);
+    ctt_ctl_clear_rx(run);
 
     int got = 0;
     uint64_t last_ts = 0;
@@ -561,7 +610,7 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
     uint64_t deadline = ctt_now_ns() + budget_ns;
 
     while (got < min_frames && ctt_now_ns() < deadline) {
-        pn_stack_poll(priv->stack);
+        pump(run, priv);
         drain_io_frames(run, &got, &last_ts, want_et, 0);
         if (got < min_frames) {
             sleep_ms(1);
@@ -639,18 +688,20 @@ static int step_alarm(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
         return -1;
     }
 
-    ctt_ring_clear(&run->mock.to_ctl);
+    ctt_ctl_clear_rx(run);
     int src = pn_stack_send_alarm(priv->stack);
     if (src != 0) {
         ctt_failf(run, idx, action, "pn_stack_send_alarm rc=%d", src);
         return -1;
     }
-    pn_stack_poll(priv->stack);
+    pump(run, priv);
 
     int found = 0;
     uint8_t buf[CTT_FRAME_MAX];
-    int n;
+    int n = 0;
+    int last_n = 0;
     while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), NULL)) > 0) {
+        last_n = n;
         if (n < 16) {
             continue;
         }
@@ -658,12 +709,15 @@ static int step_alarm(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
         uint16_t fid = pn_rd_be16(buf + 14);
         if (et == (uint16_t)want_et && fid == (uint16_t)want_fid) {
             found = 1;
+            last_n = n;
             break;
         }
     }
-    return ctt_check(run, idx, action, found,
-                     "expect Alarm TX et=0x%04lx fid=0x%04lx (CC-B RTA, not IRT)",
-                     want_et, want_fid);
+    int rc = ctt_check(run, idx, action, found,
+                       "expect Alarm TX et=0x%04lx fid=0x%04lx (CC-B RTA, not IRT)",
+                       want_et, want_fid);
+    rc |= finish_eth_step(run, step, idx, action, found, buf, (size_t)last_n);
+    return rc;
 }
 
 static int step_record_read(ctt_run_t *run, pn_priv_t *priv,
@@ -743,14 +797,16 @@ static int step_lldp(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
                                                    ->station_name)
                                    : pn_stack_cfg(priv->stack)->station_name;
 
-    ctt_ring_clear(&run->mock.to_ctl);
+    ctt_ctl_clear_rx(run);
     pn_stack_send_lldp(priv->stack);
-    pn_stack_poll(priv->stack);
+    pump(run, priv);
 
     int found = 0;
     uint8_t buf[CTT_FRAME_MAX];
-    int n;
+    int n = 0;
+    int last_n = 0;
     while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), NULL)) > 0) {
+        last_n = n;
         if (n < 14) {
             continue;
         }
@@ -759,12 +815,15 @@ static int step_lldp(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
         if (et == (uint16_t)want_et && mc &&
             (!want_name || contains(buf, (size_t)n, want_name))) {
             found = 1;
+            last_n = n;
             break;
         }
     }
-    return ctt_check(run, idx, action, found,
-                     "expect LLDP et=0x%04lx dst=01:80:C2:00:00:0E name=%s",
-                     want_et, want_name ? want_name : "(any)");
+    int rc = ctt_check(run, idx, action, found,
+                       "expect LLDP et=0x%04lx dst=01:80:C2:00:00:0E name=%s",
+                       want_et, want_name ? want_name : "(any)");
+    rc |= finish_eth_step(run, step, idx, action, found, buf, (size_t)last_n);
+    return rc;
 }
 
 static int step_snmp_get(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
@@ -842,7 +901,7 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
         return -1;
     }
 
-    ctt_ring_clear(&run->mock.to_ctl);
+    ctt_ctl_clear_rx(run);
     unsigned unexp_before = run->metrics.unexpected_frames;
     unsigned drops_before = run->metrics.ar_drops;
     unsigned rtc1_before = run->metrics.rtc1_frames;
@@ -862,7 +921,7 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
         if (!duration_s && iterations > 0 && got >= iterations) {
             break;
         }
-        pn_stack_poll(priv->stack);
+        pump(run, priv);
         drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1);
         if (!pn_stack_ar_up(priv->stack)) {
             run->metrics.ar_drops++;
@@ -871,7 +930,7 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
         sleep_ms(1);
     }
     /* catch frames that arrived on the last poll */
-    pn_stack_poll(priv->stack);
+    pump(run, priv);
     drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1);
 
     unsigned unexp = run->metrics.unexpected_frames - unexp_before;
@@ -907,12 +966,23 @@ static int pn_setup(ctt_run_t *run)
     memset(&cfg, 0, sizeof(cfg));
 
     const char *iface = dev ? yaml_cstr(dev, "iface", "mock") : "mock";
-    if (strcmp(iface, "mock") != 0) {
-        LOG_ERROR("ctt_pn", "CTT CI path only supports iface=mock (got %s)",
-                  iface);
-        return -EINVAL;
+    if (run->opts.transport == CTT_TRANSPORT_AF_PACKET) {
+        if (!run->opts.iface[0] || !run->opts.dut_iface[0]) {
+            LOG_ERROR("ctt_pn",
+                      "transport=af_packet needs --iface and --dut-iface "
+                      "(see tests/run_ctt_lab.sh)");
+            return -EINVAL;
+        }
+        snprintf(cfg.iface, sizeof(cfg.iface), "%s", run->opts.dut_iface);
+    } else {
+        if (strcmp(iface, "mock") != 0) {
+            LOG_ERROR("ctt_pn",
+                      "iface=%s needs --transport=af_packet (CI default is mock)",
+                      iface);
+            return -EINVAL;
+        }
+        snprintf(cfg.iface, sizeof(cfg.iface), "mock");
     }
-    snprintf(cfg.iface, sizeof(cfg.iface), "%s", iface);
 
     const char *sta = dev ? yaml_cstr(dev, "station_name", NULL) : NULL;
     if (sta) {
@@ -933,7 +1003,6 @@ static int pn_setup(ctt_run_t *run)
     if (!priv) {
         return -ENOMEM;
     }
-    memcpy(priv->ctl_mac, k_ctl_mac, 6);
 
     const char *psk_hex = dev ? yaml_cstr(dev, "psk_hex", NULL) : NULL;
     if (psk_hex) {
@@ -948,21 +1017,30 @@ static int pn_setup(ctt_run_t *run)
         priv->psk_set = 1;
     }
 
+    if (ctt_transport_open(run) != 0) {
+        free(priv);
+        return -EIO;
+    }
+    memcpy(priv->ctl_mac, run->ctl_mac, 6);
+
     pn_stack_t *s = pn_stack_create(&cfg);
     if (!s) {
         LOG_ERROR("ctt_pn", "pn_stack_create failed");
+        ctt_transport_close(run);
         free(priv);
         return -ENOMEM;
     }
     priv->stack = s;
     run->priv = priv;
 
-    pn_eth_ops_t ops = {.send = ctt_mock_dut_send,
-                        .recv = ctt_mock_dut_recv,
-                        .ctx = &run->mock};
-    pn_stack_set_eth_ops(s, ops);
+    if (run->opts.transport == CTT_TRANSPORT_MOCK) {
+        pn_eth_ops_t ops = {.send = ctt_mock_run_send,
+                            .recv = ctt_mock_run_recv,
+                            .ctx = run};
+        pn_stack_set_eth_ops(s, ops);
+    }
     if (pn_stack_start(s) != 0) {
-        LOG_ERROR("ctt_pn", "pn_stack_start failed");
+        LOG_ERROR("ctt_pn", "pn_stack_start failed (iface=%s)", cfg.iface);
         return -EIO;
     }
     return 0;
@@ -971,14 +1049,14 @@ static int pn_setup(ctt_run_t *run)
 static void pn_teardown(ctt_run_t *run)
 {
     pn_priv_t *priv = run->priv;
-    if (!priv) {
-        return;
+    if (priv) {
+        if (priv->stack) {
+            pn_stack_destroy(priv->stack);
+        }
+        free(priv);
+        run->priv = NULL;
     }
-    if (priv->stack) {
-        pn_stack_destroy(priv->stack);
-    }
-    free(priv);
-    run->priv = NULL;
+    ctt_transport_close(run);
 }
 
 static int pn_step(ctt_run_t *run, const yaml_node_t *step, int index)

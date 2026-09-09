@@ -14,3 +14,4 @@ steps:
       service: identify
       status: success           # PN_DCP_RESP_SUCCESS
       name_of_station: sensor-line1
+    golden: tests/golden/profinet/dcp_identify_res.pcap
