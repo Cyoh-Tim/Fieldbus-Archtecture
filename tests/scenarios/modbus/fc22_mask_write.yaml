@@ -1,0 +1,28 @@
+name: fc22_mask_write
+protocol: modbus_tcp
+tags: [fc22, migrate]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 16
+  n_input: 8
+  n_coil: 8
+  n_discrete: 8
+  iface: mock
+steps:
+  - action: seed
+    type: holding
+    address: 0
+    values: [0xFFFF]
+  - action: request
+    fc: 0x16
+    tid: 9
+    address: 0
+    and_mask: 0xF0F0
+    or_mask: 0x000F
+    expect:
+      fc: 0x16
+  - action: map_check
+    type: holding
+    address: 0
+    values: [0xF0FF]

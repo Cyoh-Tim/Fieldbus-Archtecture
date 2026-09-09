@@ -1,0 +1,32 @@
+name: string_bytes
+protocol: modbus_tcp
+tags: [bytes, migrate]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 32
+  n_input: 8
+  n_coil: 8
+  n_discrete: 8
+  iface: mock
+steps:
+  - action: seed
+    type: holding
+    address: 0
+    ascii: "ABC123"
+  - action: map_check
+    type: holding
+    address: 0
+    ascii: "ABC123"
+  - action: map_check
+    type: holding
+    address: 0
+    values: [0x4142, 0x4331, 0x3233]
+  - action: request
+    fc: 0x03
+    address: 0
+    quantity: 3
+    expect:
+      fc: 0x03
+      values: [0x4142, 0x4331, 0x3233]
+      ascii: "ABC123"

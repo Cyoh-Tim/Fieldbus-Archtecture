@@ -6,6 +6,8 @@ const ctt_plugin_t *ctt_plugin_lookup(const char *protocol)
 {
     static const ctt_plugin_t *plugins[] = {
         &ctt_plugin_profinet,
+        &ctt_plugin_modbus_tcp,
+        &ctt_plugin_slmp,
         NULL,
     };
     if (!protocol) {

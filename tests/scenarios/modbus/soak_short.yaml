@@ -1,0 +1,24 @@
+name: soak_short
+protocol: modbus_tcp
+tags: [soak]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 16
+  n_input: 8
+  n_coil: 8
+  n_discrete: 8
+  iface: mock
+steps:
+  - action: seed
+    type: holding
+    address: 0
+    values: [0x1111, 0x2222]
+  - action: soak
+    fc: 0x03
+    address: 0
+    quantity: 2
+    iterations: 32
+    expect:
+      min_ok: 32
+      unexpected_frames: 0

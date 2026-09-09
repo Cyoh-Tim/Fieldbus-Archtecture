@@ -1,0 +1,32 @@
+name: encode_batch_read
+protocol: slmp
+tags: [encode, 3e, migrate]
+device:
+  role: server
+  frame: 3e_binary
+  network_no: 0
+  pc_no: 0xFF
+  dest_module_io: 0x03FF
+  monitoring_timer: 0x0010
+  iface: mock
+steps:
+  - action: encode_batch_read
+    device: D
+    head: 100
+    unit: word
+    quantity: 2
+    expect:
+      length: 21
+      subheader: 0x0050
+      cmd: 0x0401
+      device_code: 0xA8
+      quantity: 2
+      pc_no: 0xFF
+  - action: encode_batch_write
+    device: M
+    head: 0
+    unit: bit
+    bits: [1, 0, 1, 1]
+    expect:
+      cmd: 0x1401
+      length: 25

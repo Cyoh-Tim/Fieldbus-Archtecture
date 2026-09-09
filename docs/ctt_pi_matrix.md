@@ -62,7 +62,12 @@ profile” 은 DCP Set `0xF0/0x01` 과 Connect block `0x0E01` 회귀를 뜻한�
 
 EIP 플러그인은 **예약**이다 (`tools/ctt/proto/ethernetip/`, PR #4 merge 후).
 ODVA CT 카테고리 매핑은 플러그인이 생긴 뒤에 이 문서에 짧은 표를 추가한다.
-지금은 행을 만들지 않는다. Modbus / SLMP 플러그인도 이 페이즈에 없다.
+지금은 행을 만들지 않는다.
+
+Modbus / SLMP 내부 매트릭스는 별도 문서다 (이 PI 표에 섞지 않음):
+
+- `docs/ctt_modbus_matrix.md` — TCP FC, 공식 Modbus.org 인증 아님
+- `docs/ctt_slmp_matrix.md` — Binary 3E batch, Mitsubishi 공식 인증 아님
 
 ## 이 표가 말해 주지 않는 것
 

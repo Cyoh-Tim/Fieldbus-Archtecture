@@ -13,6 +13,9 @@ PN 플러그인 역할: **Controller stub + DCP station** (RT Class 1). Device �
 EtherNet/IP 플러그인 DUT는 자체 스택 `stacks/ethernetip/` (draft PR #4)가 main에 들어온 뒤다.
 그 전까지 슬롯만 예약한다. main의 `adapters/ethernetip/` 구매 스택 스텁은 CTT DUT가 아니다.
 
+Modbus TCP DUT는 `stacks/modbus/` (`protocol: modbus_tcp`). SLMP DUT는
+`stacks/slmp/` Binary 3E (`protocol: slmp`). libmodbus / ASCII·4E 는 CTT DUT가 아니다.
+
 ## 0. 배경 / 목표
 
 자체 구현 스택(지금 PROFINET, 곧 EtherNet/IP)은 상용 벤더가 사내에 두는 것과 같은 **자동 시나리오 하네스**가 필요하다.
@@ -52,20 +55,17 @@ PROFINET DUT 목표는 **Conformance Class B (CC-B) + RT Class 1** 뿐이다.
 ## 1. 아키텍처
 
 ```
-  tests/scenarios/<proto>/*.yaml     protocol: profinet | ethernetip
+  tests/scenarios/<proto>/*.yaml     protocol: profinet | ethernetip | modbus_tcp | slmp
                  │
                  ▼
            tools/ctt/   공통 runner / report / soak / CI
                  │  plugin select
-        ┌────────┴────────┐
-        ▼                 ▼
-  proto/profinet/    proto/ethernetip/     (슬롯 예약, PR #4 merge 후)
-  Controller stub    Scanner/Originator stub
-        ↕                 ↕     mock transport (later: AF_PACKET/veth)
-   pn_stack DUT        eip_stack DUT
-        └────────┬────────┘
-                 ▼
-          asserts / golden / metrics
+        ┌────────┼────────┬──────────────┐
+        ▼        ▼        ▼              ▼
+  proto/profinet/ proto/ethernetip/ proto/modbus/  proto/slmp/
+  Controller      (예약, PR #4)    TCP client stub  3E client stub
+        ↕                 ↕     mock / in-process inject
+   pn_stack DUT        eip_stack     mb_stack         slmp_stack
 ```
 
 공통과 플러그인을 나눈다.
@@ -119,12 +119,26 @@ draft PR #4 (`stacks/ethernetip/`, `tests/test_eip_stack.c`)가 merge 되면:
 merge 전에는 `tools/ctt/proto/ethernetip/` 와 `tests/scenarios/ethernetip/` 자리를 비워 둔다.
 구매 스택을 CTT DUT로 쓰지 않는다.
 
-구성 요소 (구현 위치는 후속 PR):
+### 1.3 Modbus TCP / SLMP Binary 3E 플러그인
+
+DUT 는 자체 스택이다. 공통 runner 는 `protocol:` 만 고른다.
+
+| 플러그인 | protocol: | DUT | inject 훅 | 범위 밖 |
+|----------|-----------|-----|-----------|---------|
+| `proto/modbus/` | `modbus_tcp` | `stacks/modbus/` | `mb_stack_handle_adu` | RTU, Modbus.org 공인 랩 |
+| `proto/slmp/` | `slmp` | `stacks/slmp/` | `slmp_stack_handle_request` | ASCII, 4E, Mitsubishi 공식 인증 |
+
+시나리오 디렉터리는 `tests/scenarios/modbus/` · `tests/scenarios/slmp/`.
+내부 매트릭스: `docs/ctt_modbus_matrix.md`, `docs/ctt_slmp_matrix.md`.
+
+구성 요소:
 
 - `tools/ctt/` — 공통 runner, report, soak, mock-transport, CI 엔트리
 - `tools/ctt/proto/profinet/` — Controller stub + PN step actions (CC-B / RTC1 only)
+- `tools/ctt/proto/modbus/` — Modbus TCP client stub (`mb_stack_handle_adu`)
+- `tools/ctt/proto/slmp/` — SLMP Binary 3E stub (`slmp_stack_handle_request`)
 - `tools/ctt/proto/ethernetip/` — 예약. PR #4 이후 Scanner stub + EIP steps
-- `tests/scenarios/profinet/` · `tests/scenarios/ethernetip/`
+- `tests/scenarios/profinet/` · `modbus/` · `slmp/` · `ethernetip/` (예약)
 - `tests/golden/` — 선택적 binary/hex. 프로토콜별 서브디리 권장
 - `tests/test_*.c` — 스택 전체가 필요 없는 crypto/parser. HMAC RFC4231은 여기
 
@@ -164,10 +178,11 @@ EIP 플러그인은 같은 링 개념에 `eip_*` inject를 묶는다. PN 프레�
 
 ```
 name: string
-protocol: profinet | ethernetip
+protocol: profinet | ethernetip | modbus_tcp | slmp
 tags: [string]
 device:
   # 플러그인별. 아래는 profinet
+  station_name: string
   station_name: string
   security_class: 0 | 1
   psk_hex: string          # 64 hex chars, Sec Class 1
@@ -402,9 +417,13 @@ Modbus / SLMP / CC-Link 플러그인은 이 페이즈에 넣지 않는다.
 ```
 tools/ctt/                       # 공통 runner, report, soak, mock-transport, CI
   proto/profinet/                # Controller stub + PN steps (CC-B / RTC1, no IRT)
+  proto/modbus/                # Modbus TCP client stub (self stack)
+  proto/slmp/                  # SLMP Binary 3E stub (no 4E/ASCII)
   proto/ethernetip/              # 예약. PR #4 이후 Scanner stub + EIP steps
 tests/scenarios/
   profinet/                      # protocol: profinet
+  modbus/                        # protocol: modbus_tcp
+  slmp/                          # protocol: slmp
   ethernetip/                    # 예약
 tests/golden/
   profinet/                  # mock PCAP goldens (Phase 3)
