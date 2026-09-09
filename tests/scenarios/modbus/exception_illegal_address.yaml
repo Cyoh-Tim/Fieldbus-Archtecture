@@ -1,0 +1,22 @@
+name: exception_illegal_address
+protocol: modbus_tcp
+tags: [exception, migrate]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 10
+  n_input: 10
+  n_coil: 10
+  n_discrete: 10
+  iface: mock
+steps:
+  - action: request
+    fc: 0x03
+    tid: 1
+    address: 9
+    quantity: 2
+    expect:
+      exception: true
+      fc: 0x83
+      exception_code: 0x02
+      length: 9

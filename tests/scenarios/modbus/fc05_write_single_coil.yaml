@@ -1,0 +1,24 @@
+name: fc05_write_single_coil
+protocol: modbus_tcp
+tags: [fc05, migrate]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 16
+  n_input: 16
+  n_coil: 16
+  n_discrete: 16
+  iface: mock
+steps:
+  - action: request
+    fc: 0x05
+    tid: 0x0002
+    address: 0
+    value: 0xFF00
+    expect:
+      fc: 0x05
+      length: 12
+  - action: map_check
+    type: coil
+    address: 0
+    bits: [1]

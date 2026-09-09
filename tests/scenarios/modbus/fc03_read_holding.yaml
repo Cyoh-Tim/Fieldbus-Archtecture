@@ -1,0 +1,26 @@
+name: fc03_read_holding
+protocol: modbus_tcp
+tags: [fc03, migrate]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 64
+  n_input: 64
+  n_coil: 64
+  n_discrete: 64
+  iface: mock
+steps:
+  - action: seed
+    type: holding
+    address: 0
+    values: [0x1234, 0xABCD]
+  - action: request
+    fc: 0x03
+    tid: 0x0001
+    address: 0
+    quantity: 2
+    expect:
+      fc: 0x03
+      length: 13
+      byte_count: 4
+      values: [0x1234, 0xABCD]
