@@ -1,0 +1,36 @@
+# Internal TC EIP-A-NEG-002 — truncated / unknown Encaps must fail closed.
+name: encap_malformed
+id: EIP-A-NEG-002
+suite: EIP-A-v1
+protocol: ethernetip
+tags: [encap, negative, boundary, bundle]
+device:
+  iface: mock
+  input_size: 8
+  output_size: 8
+steps:
+  - action: encap_inject
+    pdu_hex: "0065"             # shorter than Encaps header (24)
+    expect:
+      encap_ok: false
+      class1: down
+  - action: encap_inject
+    # 24-byte RegisterSession header claiming length=4 with no body
+    pdu_hex: "006500040000000000000000000000000000000000000000"
+    expect:
+      encap_ok: false
+      class1: down
+  - action: encap_inject
+    cmd: 0x00FE                 # unknown Encaps command
+    expect:
+      encap_ok: true
+      encap_status: 1
+      class1: down
+  - action: io_cycle
+    require_class1: false
+    count: 8
+    cycle_ms: 8
+    expect:
+      class1: down
+      min_frames: 0
+      max_frames: 0

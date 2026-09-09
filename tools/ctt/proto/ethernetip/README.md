@@ -18,3 +18,4 @@ Mock only (`eip_cfg_t.mock=1`, `eip_stack_handle_encap` / `handle_io`).
 No NIC / AF_PACKET for CIP TCP in this plugin.
 
 Internal ODVA CT-style mapping: `docs/ctt_odva_matrix.md` (not official CT).
+Internal bundle-grade catalog: `docs/ctt_eip_bundle.md` (`EIP-A-*`, not certification).

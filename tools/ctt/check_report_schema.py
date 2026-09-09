@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run one CTT scenario with --report and check ctt-report/v1 keys.
 
-Used by ctest (ctt_report_schema_v1). Stdlib only.
+Used by ctest (`ctt_report_schema_v1`, `ctt_report_schema_eip_v1`). Stdlib only.
 Internal bundle-grade report != PI / ODVA certification evidence.
 """
 
@@ -47,6 +47,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ctt", required=True)
     ap.add_argument("--scenario", required=True)
+    ap.add_argument(
+        "--protocol",
+        default="profinet",
+        help="expected report protocol (profinet, ethernetip, ...)",
+    )
     args = ap.parse_args()
     sc = Path(args.scenario)
     if not sc.is_file():
@@ -74,8 +79,8 @@ def main() -> int:
     if data["verdict"] != "pass":
         print(f"expected pass, got {data['verdict']!r}", file=sys.stderr)
         return 1
-    if data["protocol"] != "profinet":
-        print(f"expected profinet, got {data['protocol']!r}", file=sys.stderr)
+    if data["protocol"] != args.protocol:
+        print(f"expected {args.protocol}, got {data['protocol']!r}", file=sys.stderr)
         return 1
     if not data.get("tc_id"):
         print("tc_id empty", file=sys.stderr)

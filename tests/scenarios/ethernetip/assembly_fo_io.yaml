@@ -1,6 +1,9 @@
+# Internal TC EIP-A-CM-001 — not an ODVA CT case.
 name: assembly_fo_io
+id: EIP-A-CM-001
+suite: EIP-A-v1
 protocol: ethernetip
-tags: [assembly, forward_open, class1, migrate]
+tags: [assembly, forward_open, class1, migrate, bundle]
 device:
   iface: mock
   product_name: AsmTest

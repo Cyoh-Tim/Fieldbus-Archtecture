@@ -1,0 +1,29 @@
+# Internal TC EIP-A-NEG-003 — no Forward Open ⇒ no Class1 produce.
+name: io_without_fo
+id: EIP-A-NEG-003
+suite: EIP-A-v1
+protocol: ethernetip
+tags: [class1, negative, bundle]
+device:
+  iface: mock
+  input_size: 8
+  output_size: 8
+  rpi_us: 8000
+  cycle_us: 8000
+steps:
+  - action: class1_io
+    require_class1: false
+    fill: 0x5A
+    length: 8
+    seq: 1
+    expect:
+      io_ok: false
+      class1: down
+  - action: io_cycle
+    require_class1: false
+    count: 8
+    cycle_ms: 8
+    expect:
+      class1: down
+      min_frames: 0
+      max_frames: 0

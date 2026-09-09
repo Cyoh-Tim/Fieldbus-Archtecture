@@ -1,6 +1,9 @@
+# Internal TC EIP-A-NBR-001 — not an ODVA CT case.
 name: lldp_mgmt
+id: EIP-A-NBR-001
+suite: EIP-A-v1
 protocol: ethernetip
-tags: [lldp, migrate]
+tags: [lldp, migrate, bundle]
 device:
   iface: eth0
   lldp_enable: true

@@ -185,21 +185,20 @@ EIP/Modbus/SLMP 도 같은 runner 플래그를 쓴다. 메트릭 키 이름은 �
 보드(`docs/ctt_board.html`) 배지는 이 분류를 따른다. **bundle-grade 게이트가
 PI 인증이 아니다** 는 배너에 고정한다.
 
-## 8. 다음 프로토콜에 같은 기둥을 쓰는 법 (EIP first)
+## 8. 다음 프로토콜에 같은 기둥을 쓰는 법 (EIP done → Modbus → SLMP)
 
-1. **카탈로그** — `EIP-A-CYC-001` 식 ID, YAML `id:` / `suite: EIP-A-v1`,
-   `docs/ctt_odva_matrix.md` 에 내부 매핑 (공식 CT 번호 복사 금지).
-2. **Cyclic 하네스** — 이미 공통 `ctt_metrics_*`. EIP 플러그인이 Class1
-   produce 주기를 `ctt_metrics_note_period` 에 넣으면 됨 (`eip_plugin.c` 의
-   `io_cycle` / `class1_io`).
-3. **Lifetime** — Forward Open → IO → Close → re-Open. 새 YAML, 새 DUT 훅
-   필요 시 스택 API 만.
-4. **NEG** — Sec1 FO without integrity 는 이미 있음. truncated Encaps /
-   bad HMAC 를 `eip` 액션으로 두껍게.
+EIP-A-v1 은 [`docs/ctt_eip_bundle.md`](ctt_eip_bundle.md) (`EIP-A-*`, 공통
+`ctt_metrics_*` / `--report`). **다음은 Modbus, 그다음 SLMP.**
+
+1. **카탈로그** — `MB-T-…` / `SLMP-3E-…` ID, YAML `id:` / `suite:`,
+   기존 매트릭스에 내부 매핑 (공식 인증 번호 복사 금지).
+2. **Cyclic 하네스** — 이미 공통 `ctt_metrics_*`. TCP ADU / 3E batch 주기를
+   `ctt_metrics_note_period` 에 넣는다.
+3. **Lifetime** — 세션/커넥션 재연결. 있는 훅을 두껍게.
+4. **NEG** — truncated / unknown 을 플러그인 액션으로. DUT 미구현은 gap.
 5. **프로파일** — mock 기본 CI, soak 라벨, lab 은 별도.
-6. **리포트** — `--report` 는 프로토콜 무관. `tc_id` 만 EIP 카탈로그.
+6. **리포트** — `--report` 는 프로토콜 무관. `tc_id` 만 카탈로그.
 
-Modbus / SLMP 는 TCP ADU / 3E batch 주기에 같은 메트릭 버킷을 붙인다.
 `core/` 에 프로토콜 분기를 넣지 않는다.
 
 ## 9. 관련 문서
@@ -208,4 +207,4 @@ Modbus / SLMP 는 TCP ADU / 3E batch 주기에 같은 메트릭 버킷을 붙인
 - [`docs/ctt_pi_matrix.md`](ctt_pi_matrix.md) — CC-A/B 내부 매핑 (인증 아님)
 - [`docs/ctt_board.md`](ctt_board.md) / [`ctt_board.html`](ctt_board.html)
 - [`tools/ctt/README.md`](../tools/ctt/README.md)
-- [`docs/ctt_odva_matrix.md`](ctt_odva_matrix.md) — EIP 다음 이식 대상
+- [`docs/ctt_odva_matrix.md`](ctt_odva_matrix.md) — EIP 내부 매핑. 이식됨: [`docs/ctt_eip_bundle.md`](ctt_eip_bundle.md)
