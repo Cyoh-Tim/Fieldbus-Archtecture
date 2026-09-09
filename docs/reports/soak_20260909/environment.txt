@@ -1,0 +1,19 @@
+utc=2026-09-09T15:05:28Z
+soak_wall_utc=2026-09-09T15:09:56Z/2026-09-09T15:29:56Z
+soak_seconds=300
+commit=0f721acf08d4f5396efc569283785399a5f21aa2
+branch=cursor/mock-soak-report-90be
+uname=Linux cursor 6.12.94+ #1 SMP PREEMPT_DYNAMIC Mon Sep  7 16:15:06 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+nproc=4
+PREEMPT_RT=no
+cmake_ctt=BUILD_DAEMON=OFF BUILD_CTT=ON ENABLE_PN_TESTS=ON ENABLE_EIP_TESTS=ON ENABLE_MB_TESTS=ON ENABLE_SLMP_TESTS=ON
+cmake_mock=BUILD_DAEMON=ON BUILD_API=ON BUILD_CTT=ON (build-mock)
+cc=Ubuntu clang version 18.1.3 (1ubuntu1)
+cmake=cmake version 3.28.3
+openssl=OpenSSL 3.0.13 30 Jan 2024 (Library: OpenSSL 3.0.13 30 Jan 2024)
+mem_kb=16398384
+CPU(s):                                  4
+On-line CPU(s) list:                     0-3
+Model name:                              Intel(R) Xeon(R) Processor
+Thread(s) per core:                      1
+NUMA node0 CPU(s):                       0-3

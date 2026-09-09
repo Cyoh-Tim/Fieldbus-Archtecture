@@ -278,18 +278,18 @@
 <!-- CTT_BOARD_DATA_BEGIN -->
 <script type="application/json" id="ctt-board-data">
 {
-  "generated_at": "2026-09-09T10:34:14Z",
+  "generated_at": "2026-09-09T15:01:07Z",
   "generator": "tools/ctt/gen_board_data.py",
   "disclaimer": "내부 CTT 보드입니다. 내부 bundle-grade 게이트 ≠ PI / ODVA / Modbus.org / Mitsubishi 공식 인증. 배지는 시나리오가 기본 mock CI(`ctest -LE soak_ci`)에 등록되는지·매트릭스에 갭/범위 밖으로 적혀 있는지를 분류한 것이며, 이 페이지가 ctest 를 실행하지는 않습니다.",
   "ci_default": "ctest --test-dir build --output-on-failure -LE soak_ci",
   "note": "pass = YAML registered in CMake and included in default mock CI. skip = soak_ci / nightly / lab (opt-in). gap = matrix DUT-not-implemented or not-yet. out_of_scope = CC-C/IRT, official cert labs, EtherCAT, etc. Internal bundle-grade gate != PI / ODVA certification. PROFINET catalog: docs/ctt_pn_bundle.md (PN-B-* ids). EtherNet/IP catalog: docs/ctt_eip_bundle.md (EIP-A-* ids). Modbus TCP catalog: docs/ctt_mb_bundle.md (MB-T-* ids). SLMP Binary 3E catalog: docs/ctt_slmp_bundle.md (SLMP-3E-* ids).",
   "counts": {
     "pass": 72,
-    "skip": 4,
+    "skip": 7,
     "gap": 9,
     "out_of_scope": 13,
-    "total": 98,
-    "scenarios": 74
+    "total": 101,
+    "scenarios": 77
   },
   "by_protocol": {
     "profinet": {
@@ -301,24 +301,24 @@
     },
     "ethernetip": {
       "pass": 18,
-      "skip": 0,
+      "skip": 1,
       "gap": 4,
       "out_of_scope": 1,
-      "total": 23
+      "total": 24
     },
     "modbus_tcp": {
       "pass": 13,
-      "skip": 0,
+      "skip": 1,
       "gap": 2,
       "out_of_scope": 3,
-      "total": 18
+      "total": 19
     },
     "slmp": {
       "pass": 10,
-      "skip": 0,
+      "skip": 1,
       "gap": 1,
       "out_of_scope": 4,
-      "total": 15
+      "total": 16
     },
     "other": {
       "pass": 0,
@@ -2142,6 +2142,37 @@
       "cover": null
     },
     {
+      "id": "soak_nightly",
+      "bundle_id": "EIP-A-CYC-012",
+      "suite": "EIP-A-v1",
+      "protocol": "ethernetip",
+      "filename": "soak_nightly.yaml",
+      "path": "tests/scenarios/ethernetip/nightly/soak_nightly.yaml",
+      "title": "Class 1 soak 1h",
+      "title_ko": "Class 1 soak 1h",
+      "description": "EIP-A-CYC-012. ctest 미등록. --seconds 로 덮어씀",
+      "status": "skip",
+      "reason": "not globbed by CMake (subdirectory / nightly). Run ./build/ctt --scenario <path> manually.",
+      "ctest_name": null,
+      "ctest_registered": false,
+      "ci_default": false,
+      "labels": [
+        "nightly"
+      ],
+      "tags": [
+        "soak",
+        "nightly",
+        "class1"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_odva_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "EtherNet/IP",
+      "status_label_ko": "건너뜀",
+      "cover": null
+    },
+    {
       "id": "matrix_ethernetip_cip_security_tls_class_2_port_2221",
       "protocol": "ethernetip",
       "filename": null,
@@ -2674,6 +2705,36 @@
       "cover": null
     },
     {
+      "id": "soak_nightly",
+      "bundle_id": "MB-T-CYC-012",
+      "suite": "MB-T-v1",
+      "protocol": "modbus_tcp",
+      "filename": "soak_nightly.yaml",
+      "path": "tests/scenarios/modbus/nightly/soak_nightly.yaml",
+      "title": "FC03 soak 1h",
+      "title_ko": "FC03 soak 1h",
+      "description": "MB-T-CYC-012. ctest 미등록. --seconds 로 덮어씀",
+      "status": "skip",
+      "reason": "not globbed by CMake (subdirectory / nightly). Run ./build/ctt --scenario <path> manually.",
+      "ctest_name": null,
+      "ctest_registered": false,
+      "ci_default": false,
+      "labels": [
+        "nightly"
+      ],
+      "tags": [
+        "soak",
+        "nightly"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_modbus_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "Modbus TCP",
+      "status_label_ko": "건너뜀",
+      "cover": null
+    },
+    {
       "id": "matrix_modbus_tcp_fc08_diagnostics_fc11_12_mei_fc43",
       "protocol": "modbus_tcp",
       "filename": null,
@@ -3112,6 +3173,36 @@
       "golden": false,
       "protocol_label": "SLMP",
       "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "soak_nightly",
+      "bundle_id": "SLMP-3E-CYC-012",
+      "suite": "SLMP-3E-v1",
+      "protocol": "slmp",
+      "filename": "soak_nightly.yaml",
+      "path": "tests/scenarios/slmp/nightly/soak_nightly.yaml",
+      "title": "batch read soak 1h",
+      "title_ko": "batch read soak 1h",
+      "description": "SLMP-3E-CYC-012. ctest 미등록. --seconds 로 덮어씀",
+      "status": "skip",
+      "reason": "not globbed by CMake (subdirectory / nightly). Run ./build/ctt --scenario <path> manually.",
+      "ctest_name": null,
+      "ctest_registered": false,
+      "ci_default": false,
+      "labels": [
+        "nightly"
+      ],
+      "tags": [
+        "soak",
+        "nightly"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_slmp_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "SLMP",
+      "status_label_ko": "건너뜀",
       "cover": null
     },
     {

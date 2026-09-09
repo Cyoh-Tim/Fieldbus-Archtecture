@@ -102,13 +102,16 @@ PROFINET actions (CC-B / RTC1):
 
 Modbus TCP (`protocol: modbus_tcp`): `seed`, `request` (FC 01–06, 0F, 10, 16, 17),
 `map_check`, `adu_inject` (`pdu_hex` — truncated / bad MBAP fail closed),
-`soak` (late/missed/jitter vs `cycle_us`). Inject via `mb_stack_handle_adu`
+`soak` (late/missed/jitter vs `cycle_us`). `duration_s` or `iterations`.
+CLI `--seconds N` / env `CTT_SOAK_DURATION_S` override YAML `duration_s`.
+Inject via `mb_stack_handle_adu`
 (no :502).
 
 SLMP (`protocol: slmp`, Binary 3E only): `device_lookup`, `encode_batch_read` /
 `encode_batch_write`, `batch_read` / `batch_write`, `seed_words` / `seed_bits`,
-`map_check_*`, `inject` (`pdu_hex` or subheader/cmd), `soak` (late/missed/jitter
-vs `cycle_us`), `create_stack` (ASCII/4E reject).
+`map_check_*`, `inject` (`pdu_hex` or subheader/cmd), `soak` (`duration_s` or
+`iterations`; `--seconds` / `CTT_SOAK_DURATION_S` override),
+`create_stack` (ASCII/4E reject).
 4E/ASCII are out of scope.
 
 EtherNet/IP actions (mock `eip_cfg_t.mock`; no NIC):
@@ -121,7 +124,7 @@ EtherNet/IP actions (mock `eip_cfg_t.mock`; no NIC):
 | `forward_open` | `integrity: true` adds CPF `0x00C1` HMAC; `integrity: bad` flips MAC; `large: true` is CIP `0x5B` |
 | `forward_close` | CM Forward Close (serial/vendor/orig from last FO) |
 | `encap_inject` | raw `pdu_hex` or `cmd` — truncated / unknown Encaps (fail closed) |
-| `class1_io` / `io_cycle` | O→T inject; produce via transport ops. `io_cycle` records late/missed/jitter vs `rpi_us`/`cycle_us`. `require_class1: false` for NEG |
+| `class1_io` / `io_cycle` / `soak` | O→T inject; produce via transport ops. `io_cycle` records late/missed/jitter vs `rpi_us`/`cycle_us`. `soak` is the same loop with `duration_s` (or `--seconds` / `CTT_SOAK_DURATION_S`). `require_class1: false` for NEG |
 | `acd_conflict` / `lldp` / `watchdog` / `poll` | ACD, LLDP TX, Class 1 timeout |
 
 ## Soak / metrics
@@ -151,6 +154,6 @@ YAML top-level `id:` / `bundle_id:` / `suite:` are copied into the report
 | `batch_cyclic_metrics.yaml` | yes (48 SLMP batch cycles + late/missed/jitter) | `ctest -R batch_cyclic_metrics` |
 | `soak_short.yaml` | yes (32 iterations, sub-second; PN/MB/SLMP) | `ctest -R soak_short` |
 | Identify / Sec1 Set `golden:` | yes (mock PCAP replay, no NIC) | `ctest -L golden` |
-| `soak_ci.yaml` | no (`-LE soak_ci`) | `ctest -L soak_ci` or workflow_dispatch `soak=true` (~30s) |
-| `nightly/soak_nightly.yaml` | no (not globbed) | `./build/ctt --scenario tests/scenarios/profinet/nightly/soak_nightly.yaml` (1h; edit `duration_s: 7200` for 2h) |
+| `soak_ci.yaml` | no (`-LE soak_ci`) | `ctest -L soak_ci` or workflow_dispatch `soak=true` (~30s PN) |
+| `nightly/soak_nightly.yaml` | no (not globbed) | `tests/run_mock_soak.sh --seconds 1800` (all four; YAML default 1h; `--seconds 7200` for 2h) |
 | lab veth | no (needs CAP_NET_RAW) | `tests/run_ctt_lab.sh` or workflow_dispatch `lab=true` |

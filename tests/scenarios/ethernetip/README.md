@@ -10,6 +10,7 @@ Internal bundle-grade catalog: `docs/ctt_eip_bundle.md` (`EIP-A-*`).
 ./build/ctt --scenario tests/scenarios/ethernetip/register_session.yaml
 ./build/ctt --scenario tests/scenarios/ethernetip/class1_cyclic_metrics.yaml \
     --report /tmp/eip-a-cyc-002.json
+tests/run_mock_soak.sh --protocol ethernetip --seconds 30
 ctest --test-dir build --output-on-failure -L ethernetip
 ```
 

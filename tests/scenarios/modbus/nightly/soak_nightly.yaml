@@ -1,0 +1,32 @@
+# Internal TC MB-T-CYC-012 — timed FC03 soak. Not Modbus.org.
+# Not globbed by CMake (subdirectory). Override wall time:
+#   ./build/ctt --scenario tests/scenarios/modbus/nightly/soak_nightly.yaml --seconds 1800
+#   CTT_SOAK_DURATION_S=7200 ./build/ctt --scenario ...
+name: soak_nightly
+id: MB-T-CYC-012
+suite: MB-T-v1
+protocol: modbus_tcp
+tags: [soak, nightly]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 16
+  n_input: 8
+  n_coil: 8
+  n_discrete: 8
+  iface: mock
+  cycle_us: 8000
+steps:
+  - action: seed
+    type: holding
+    address: 0
+    values: [0x1111, 0x2222]
+  - action: soak
+    fc: 0x03
+    address: 0
+    quantity: 2
+    duration_s: 3600            # 1 h; not a PR gate. Use 7200 for 2 h.
+    cycle_ms: 8
+    expect:
+      min_ok: 1
+      unexpected_frames: 0

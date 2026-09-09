@@ -12,11 +12,17 @@
 
 - EtherNet/IP Encaps ListServices YAML (`EIP-A-ENC-003`) — DUT 핸들러 고정
 - Large Forward Open YAML (`EIP-A-CM-004`, CIP `0x5B`) — 기존 DUT 경로 + Class1 IO
+- Timed mock soak: MB/SLMP/EIP `duration_s` + EIP `soak` action, `--seconds` /
+  `CTT_SOAK_DURATION_S`, `*/nightly/soak_nightly.yaml`, `tests/run_mock_soak.sh`
+  (내부 게이트, 인증 아님)
+- 장비 없는 soak 실행 기록 [`docs/soak_report_20260909.md`](docs/soak_report_20260909.md)
+  (실제 duration = 5 min × 4 sequential; 2h×4 / 30min×4 는 이 세션에서 미완료)
 
 ### Notes
 
 - PROFINET Alarm Ack / Modbus FC08·MEI 는 DUT 미구현 → gap 유지
 - 라이브 TCP `:502` / `:5000` 은 기본 CI 에 넣지 않음 (`docs/ctt_lab.md`)
+- 2h×4 연속 soak 는 클라우드 세션 한 번에 넣기 어려움. 리포트는 실제 duration 을 명시
 
 ## [0.1.0] — 2026-09-09
 

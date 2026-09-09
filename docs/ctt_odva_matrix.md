@@ -42,6 +42,7 @@ lab profile). `adapters/ethernetip/` 데몬 어댑터는 DUT 가 아니다.
 | `acd_identity_state.yaml` | ACD + Identity state | mock | MinorRF / TCP/IP ACD Status. `EIP-A-ACD-001` |
 | `lldp_mgmt.yaml` | LLDP Management (0x109) TX | mock | ethertype 0x88CC. `EIP-A-NBR-001` |
 | `class1_watchdog.yaml` | Class 1 watchdog + RT stats | mock | timeout after first IO. `EIP-A-CYC-001` |
+| `nightly/soak_nightly.yaml` | Class 1 soak 1h | 수동 mock | `EIP-A-CYC-012`. ctest 미등록. `--seconds` 로 덮어씀 |
 
 ## CT-style categories without a scenario yet
 

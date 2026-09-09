@@ -939,12 +939,19 @@ static int step_class1_io(ctt_run_t *run, eip_priv_t *priv,
     return out;
 }
 
-static int step_io_cycle(ctt_run_t *run, eip_priv_t *priv,
-                         const yaml_node_t *step, int idx)
+static int step_class1_cyclic(ctt_run_t *run, eip_priv_t *priv,
+                              const yaml_node_t *step, int idx,
+                              const char *action)
 {
-    const char *action = "io_cycle";
     const yaml_node_t *expect = yaml_map_get(step, "expect");
-    unsigned count = (unsigned)yaml_ulong(step, "count", 8);
+    unsigned duration_s = 0;
+    if (strcmp(action, "soak") == 0 || yaml_has(step, "duration_s")) {
+        duration_s = ctt_step_duration_s(run, step);
+    }
+    unsigned count = (unsigned)yaml_ulong(step, "count", 0);
+    if (!duration_s && !count) {
+        count = 8;
+    }
     unsigned cycle_ms;
     if (yaml_has(step, "cycle_ms")) {
         cycle_ms = (unsigned)yaml_ulong(step, "cycle_ms", 8);
@@ -973,20 +980,40 @@ static int step_io_cycle(ctt_run_t *run, eip_priv_t *priv,
         min_frames = (unsigned)yaml_ulong(expect, "min_frames", 0);
     } else if (!require_c1) {
         min_frames = 0;
+    } else if (duration_s) {
+        min_frames = 1;
     } else {
         min_frames = count;
     }
     long period_max_ms =
         expect ? yaml_long(expect, "period_max_ms", 20) : 20;
     int has_period_max = expect && yaml_has(expect, "period_max_ms");
+    unsigned want_unexp =
+        expect && yaml_has(expect, "unexpected_frames")
+            ? (unsigned)yaml_ulong(expect, "unexpected_frames", 0)
+            : 0;
+    int has_unexp = expect && yaml_has(expect, "unexpected_frames");
 
     ctt_metrics_t before = run->metrics;
+    unsigned unexp_before = run->metrics.unexpected_frames;
     ctt_ring_clear(&run->mock.to_ctl);
     unsigned produced = 0;
     uint64_t prev_ns = 0;
-    for (unsigned i = 0; i < count; i++) {
+    uint64_t start = ctt_now_ns();
+    uint64_t deadline =
+        duration_s ? start + (uint64_t)duration_s * 1000000000ull : 0;
+    uint32_t seq = 0;
+    while (1) {
+        if (duration_s) {
+            if (ctt_now_ns() >= deadline) {
+                break;
+            }
+        } else if (seq >= count) {
+            break;
+        }
+        seq++;
         uint8_t io[16 + EIP_ASSEMBLY_SIZE_MAX];
-        size_t ioff = build_class1_io(io, o2t, i + 1, payload, plen);
+        size_t ioff = build_class1_io(io, o2t, seq, payload, plen);
         int iorc = eip_stack_handle_io(priv->stack, io, ioff);
         if (iorc != 0 && require_c1) {
             run->metrics.unexpected_frames++;
@@ -1012,8 +1039,8 @@ static int step_io_cycle(ctt_run_t *run, eip_priv_t *priv,
     }
     int out = 0;
     out |= ctt_check(run, idx, action, produced >= min_frames,
-                     "produced Class1 frames %u < min_frames %u", produced,
-                     min_frames);
+                     "produced Class1 frames %u < min_frames %u duration_s=%u",
+                     produced, min_frames, duration_s);
     unsigned samples = run->metrics.period_samples - before.period_samples;
     if (has_period_max && samples > 0) {
         long max_ms = (long)(run->metrics.period_max_ns / 1000000ull);
@@ -1032,8 +1059,26 @@ static int step_io_cycle(ctt_run_t *run, eip_priv_t *priv,
     if (require_c1 && !eip_stack_class1_up(priv->stack)) {
         run->metrics.ar_drops++;
     }
+    if (has_unexp) {
+        unsigned unexp = run->metrics.unexpected_frames - unexp_before;
+        out |= ctt_check(run, idx, action, unexp <= want_unexp,
+                         "unexpected_frames expect<=%u actual=%u", want_unexp,
+                         unexp);
+    }
     out |= check_cyclic_expect(run, &before, expect, idx, action, produced);
     return out;
+}
+
+static int step_io_cycle(ctt_run_t *run, eip_priv_t *priv,
+                         const yaml_node_t *step, int idx)
+{
+    return step_class1_cyclic(run, priv, step, idx, "io_cycle");
+}
+
+static int step_soak(ctt_run_t *run, eip_priv_t *priv, const yaml_node_t *step,
+                     int idx)
+{
+    return step_class1_cyclic(run, priv, step, idx, "soak");
 }
 
 static int step_acd_conflict(ctt_run_t *run, eip_priv_t *priv,
@@ -1277,6 +1322,9 @@ static int eip_step(ctt_run_t *run, const yaml_node_t *step, int index)
     if (strcmp(action, "io_cycle") == 0) {
         return step_io_cycle(run, priv, step, index);
     }
+    if (strcmp(action, "soak") == 0) {
+        return step_soak(run, priv, step, index);
+    }
     if (strcmp(action, "acd_conflict") == 0) {
         return step_acd_conflict(run, priv, step, index);
     }
@@ -1293,7 +1341,7 @@ static int eip_step(ctt_run_t *run, const yaml_node_t *step, int index)
               "unknown action (ethernetip: register_session, list_identity, "
               "list_services, get_attr, write_input, read_input, read_output, "
               "forward_open, forward_close, encap_inject, class1_io, io_cycle, "
-              "acd_conflict, lldp, watchdog, poll)");
+              "soak, acd_conflict, lldp, watchdog, poll)");
     return -1;
 }
 

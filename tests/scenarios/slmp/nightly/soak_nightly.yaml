@@ -1,0 +1,30 @@
+# Internal TC SLMP-3E-CYC-012 — timed Binary 3E batch-read soak. Not Mitsubishi.
+# Not globbed by CMake (subdirectory). Override wall time:
+#   ./build/ctt --scenario tests/scenarios/slmp/nightly/soak_nightly.yaml --seconds 1800
+name: soak_nightly
+id: SLMP-3E-CYC-012
+suite: SLMP-3E-v1
+protocol: slmp
+tags: [soak, nightly]
+device:
+  role: server
+  frame: 3e_binary
+  pc_no: 0xFF
+  dest_module_io: 0x03FF
+  iface: mock
+  cycle_us: 8000
+steps:
+  - action: seed_words
+    device: D
+    head: 0
+    values: [0x0001]
+  - action: soak
+    device: D
+    head: 0
+    unit: word
+    quantity: 1
+    duration_s: 3600            # 1 h; not a PR gate. Use 7200 for 2 h.
+    cycle_ms: 8
+    expect:
+      min_ok: 1
+      unexpected_frames: 0

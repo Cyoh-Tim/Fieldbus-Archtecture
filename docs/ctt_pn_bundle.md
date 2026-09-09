@@ -194,7 +194,7 @@ EIP/Modbus/SLMP 도 같은 runner 플래그를 쓴다. 메트릭 키 이름은 �
 |----------|------|------|
 | mock | 기본 PR CI | (없음) / `golden` |
 | soak_ci | 30s, workflow_dispatch `soak=true` | `soak_ci` (`ctest -LE soak_ci` 로 제외) |
-| nightly | 1h, 수동 | CMake GLOB 밖 |
+| nightly | 1h (또는 `--seconds`), 수동 | CMake GLOB 밖. `tests/run_mock_soak.sh` |
 | lab | veth AF_PACKET | `tests/run_ctt_lab.sh`, CAP_NET_RAW |
 
 보드(`docs/ctt_board.html`) 배지는 이 분류를 따른다. **bundle-grade 게이트가

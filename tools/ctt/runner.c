@@ -3,9 +3,25 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "logger.h"
+
+unsigned ctt_step_duration_s(const ctt_run_t *run, const yaml_node_t *step)
+{
+    unsigned yaml_s = 0;
+    if (step && yaml_has(step, "duration_s")) {
+        yaml_s = (unsigned)yaml_ulong(step, "duration_s", 0);
+    }
+    /* CLI --seconds / CTT_SOAK_DURATION_S only override a timed soak.
+     * Iteration/count steps (soak_short, io_cycle) stay count-based so a
+     * leftover env var cannot stretch the default ctest gate. */
+    if (run && run->opts.soak_seconds > 0 && yaml_s > 0) {
+        return run->opts.soak_seconds;
+    }
+    return yaml_s;
+}
 
 void ctt_failf(ctt_run_t *run, int step, const char *action, const char *fmt,
                ...)

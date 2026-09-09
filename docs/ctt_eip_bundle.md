@@ -30,7 +30,7 @@ Modbus [`docs/ctt_mb_bundle.md`](ctt_mb_bundle.md) · SLMP
 | 2 | **Cyclic IO / jitter / drop 하네스** | Class1 produce 주기를 공통 `ctt_metrics_*` 에 넣는다. `EIP-A-CYC-002` 가 기본 CI 에서 48 사이클 |
 | 3 | **Connection lifetime** | Forward Open → IO → Forward Close → 재-Open → IO (`EIP-A-CM-002`) |
 | 4 | **Negative / boundary** | HMAC 불량, truncated Encaps, unknown cmd, FO 없이 IO |
-| 5 | **mock / golden / lab 프로파일** | 기본 CI = mock inject. EIP AF_PACKET/CIP TCP 는 미연결. soak 라벨 없음 (PN 과 달리 30s soak YAML 없음) |
+| 5 | **mock / golden / lab 프로파일** | 기본 CI = mock inject. EIP AF_PACKET/CIP TCP 는 미연결. nightly soak YAML 은 GLOB 밖 (`tests/run_mock_soak.sh`) |
 | 6 | **리포트 스키마** | `ctt --report` → `ctt-report/v1`. EIP `tc_id` / `metrics.rtc1_frames`(Class1 produce 카운트) |
 
 ## 2. ID 스킴
@@ -80,6 +80,7 @@ protocol: ethernetip
 | EIP-A-CYC-001 | `class1_watchdog.yaml` | cyclic | pass | Class 1 watchdog + RT stats | ID only |
 | EIP-A-CYC-002 | `class1_cyclic_metrics.yaml` | **cyclic** | pass | Class1 metrics | wave 1 48 cycles, late/missed/jitter vs `rpi_us`/`cycle_us` |
 | EIP-A-CYC-003 | `class1_cycle_4ms.yaml` | **cyclic** | pass | Class1 4 ms metrics | **wave 2** `rpi_us: 4000` |
+| EIP-A-CYC-012 | `nightly/soak_nightly.yaml` | cyclic | skip (GLOB 밖) | 1h Class1 soak | `duration_s` / `--seconds` |
 | EIP-A-SEC-001 | `sec_integrity_fo.yaml` | SEC | pass | Sec1 unsigned reject + HMAC accept | ID only |
 | EIP-A-NEG-001 | `fo_bad_hmac.yaml` | **NEG** | pass | FO reject (bad HMAC) | **new** |
 | EIP-A-NEG-002 | `encap_malformed.yaml` | **NEG** | pass | truncated Encaps / unknown cmd | **new** |
@@ -169,7 +170,7 @@ PN 과 같은 필드. `suite_id` = `EIP-A-v1`, `tc_id` = `EIP-A-CYC-002`.
 | 프로파일 | 언제 | 라벨 |
 |----------|------|------|
 | mock | 기본 PR CI | `ethernetip` (`ctest -L ethernetip`) |
-| soak_ci / nightly | (없음) | EIP wave 1 에 30s/1h soak YAML 없음. PN 라벨만 |
+| soak_ci / nightly | nightly YAML | `tests/scenarios/ethernetip/nightly/soak_nightly.yaml` (GLOB 밖). `tests/run_mock_soak.sh` |
 | lab | CIP TCP AF_PACKET | **미연결**. `eip_cfg_t.mock` inject 만 |
 
 보드(`docs/ctt_board.html`) 배지는 이 분류를 따른다. **bundle-grade 게이트가

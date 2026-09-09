@@ -1,0 +1,32 @@
+# Internal TC EIP-A-CYC-012 — timed Class 1 soak. Not ODVA CT.
+# Not globbed by CMake (subdirectory). Override wall time:
+#   ./build/ctt --scenario tests/scenarios/ethernetip/nightly/soak_nightly.yaml --seconds 1800
+name: soak_nightly
+id: EIP-A-CYC-012
+suite: EIP-A-v1
+protocol: ethernetip
+tags: [soak, nightly, class1]
+device:
+  iface: mock
+  product_name: SoakSensor
+  input_size: 8
+  output_size: 8
+  rpi_us: 8000
+  cycle_us: 8000
+steps:
+  - action: forward_open
+    serial: 0xD012
+    orig_serial: 0xD2
+    rpi_us: 8000
+    o2t_size: 8
+    t2o_size: 8
+    expect:
+      cip_status: 0
+      class1: up
+  - action: soak
+    duration_s: 3600            # 1 h; not a PR gate. Use 7200 for 2 h.
+    cycle_ms: 8
+    expect:
+      min_frames: 1
+      unexpected_frames: 0
+      class1: up

@@ -1,0 +1,27 @@
+=== mock soak (internal gate, not certification) ===
+utc_start=2026-09-09T15:09:56Z
+tz_note=timestamps UTC; Asia/Seoul = UTC+9
+commit=0f721ac
+seconds_override=300
+protocols=modbus slmp ethernetip profinet
+note=2h x4 and 30min x4 truncated to 5min x4 for in-session report
+
+=== Modbus TCP ===
+utc=2026-09-09T15:09:56Z -- 2026-09-09T15:14:56Z PASS
+metrics rtc1=37016 unexpected=0 ar_drops=0 late=0 missed=0 jitter_max_ms=2 period_ms min=8 max=10 avg=8
+
+=== SLMP Binary 3E ===
+utc=2026-09-09T15:14:56Z -- 2026-09-09T15:19:56Z PASS
+metrics rtc1=37017 unexpected=0 ar_drops=0 late=0 missed=0 jitter_max_ms=1 period_ms min=8 max=9 avg=8
+
+=== EtherNet/IP ===
+utc=2026-09-09T15:19:56Z -- 2026-09-09T15:24:56Z PASS
+metrics rtc1=36999 unexpected=0 ar_drops=0 late=0 missed=0 jitter_max_ms=2 period_ms min=8 max=10 avg=8
+
+=== PROFINET CC-B RT1 ===
+utc=2026-09-09T15:24:56Z -- 2026-09-09T15:29:56Z PASS
+metrics rtc1=34602 unexpected=0 ar_drops=0 late=0 missed=0 jitter_max_ms=1 period_ms min=8 max=9 avg=8
+
+utc_end=2026-09-09T15:29:56Z
+mock soak PASS (internal; not PI/ODVA/Modbus.org/Mitsubishi/CODESYS)
+EXIT:0

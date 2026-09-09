@@ -1,0 +1,28 @@
+{
+  "schema": "ctt-report/v1",
+  "disclaimer": "internal bundle-grade gate != PI / ODVA / Modbus.org / Mitsubishi certification",
+  "suite_id": "SLMP-3E-v1",
+  "tc_id": "SLMP-3E-CYC-012",
+  "name": "soak_nightly",
+  "protocol": "slmp",
+  "scenario": "/workspace/tests/scenarios/slmp/nightly/soak_nightly.yaml",
+  "transport": "mock",
+  "verdict": "pass",
+  "failures": 0,
+  "duration_ms": 300006,
+  "metrics": {
+    "rtc1_frames": 37017,
+    "late_cycles": 0,
+    "missed_cycles": 0,
+    "unexpected_frames": 0,
+    "ar_drops": 0,
+    "period_min_ns": 8024498,
+    "period_max_ns": 9937563,
+    "period_sum_ns": 299998736189,
+    "period_samples": 37016,
+    "jitter_max_ns": 1937563,
+    "cycle_ns": 8000000,
+    "late_threshold_ns": 12000000,
+    "jitter_hist_ms": [0, 0, 37016, 0, 0, 0]
+  }
+}

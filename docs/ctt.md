@@ -429,8 +429,8 @@ PROFINET (Phase 1 플러그인 위, **CC-B / RTC1만**). 구현 상태 (이 트�
 | SNMP GET sysName | `snmp_get_sysname.yaml` | mock `handle_snmp`; lab UDP 161 when `device.ip` |
 | Sec1 Connect success | `rpc_connect_sec1_integrity.yaml` | integrity block `0x0E01`, AR up + short IO |
 | Soak (short) | `soak_short.yaml` | iterations; default `ctest` |
-| Soak (30s) | `soak_ci.yaml` | `ctest -L soak_ci`; PR 기본 게이트에서 제외 |
-| Soak (1–2h) | `nightly/soak_nightly.yaml` | ctest 미등록. workflow comment / 수동 |
+| Soak (30s) | `soak_ci.yaml` | `ctest -L soak_ci`; PR 기본 게이트에서 제외 (PN only) |
+| Soak (1–2h) | `*/nightly/soak_nightly.yaml` | ctest 미등록. `tests/run_mock_soak.sh --seconds N` (MB/SLMP/EIP/PN). `--seconds` / `CTT_SOAK_DURATION_S` 가 YAML `duration_s` 를 덮어씀 |
 
 메트릭: unexpected frame, AR drop, cycle period histogram (`LOG_INFO`).
 
@@ -438,7 +438,7 @@ IRT 동기, PTCP, RT Class 3, CC-C 전용 시나리오는 추가하지 않는다
 
 EtherNet/IP (이 트리, mock):
 
-- register / identity / assembly / ForwardOpen / security / QoS / ACD / LLDP / watchdog / ListIdentity 시나리오 (`tests/scenarios/ethernetip/`)
+- register / identity / assembly / ForwardOpen / security / QoS / ACD / LLDP / watchdog / ListIdentity / Class1 soak (`tests/scenarios/ethernetip/`, nightly GLOB 밖)
 
 Modbus TCP / SLMP Binary 3E (이 트리, mock inject):
 

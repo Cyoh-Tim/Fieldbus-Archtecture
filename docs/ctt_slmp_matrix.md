@@ -31,6 +31,7 @@ DUT: `stacks/slmp/` 자체 스택. Binary **3E** 일괄 읽기(`0x0401`) /
 | `batch_cyclic_metrics.yaml` | Batch cyclic metrics | mock | 48 cycles, late/missed/jitter. `SLMP-3E-CYC-002` |
 | `batch_cycle_4ms.yaml` | Batch 4 ms metrics | mock | 48×4ms. `SLMP-3E-CYC-003` |
 | `soak_short.yaml` | batch read soak (내부) | mock | 32 iterations + metrics. `SLMP-3E-CYC-001` |
+| `nightly/soak_nightly.yaml` | batch read soak 1h | 수동 mock | `SLMP-3E-CYC-012`. ctest 미등록. `--seconds` 로 덮어씀 |
 | `reject_non_3e.yaml` | ASCII/4E/unknown cmd 거절 | mock | `SLMP-3E-NEG-001` |
 | `frame_malformed.yaml` | Truncated 3E / short write | mock | fail closed. `SLMP-3E-NEG-002` |
 | `oob_batch_read.yaml` | OOB batch read/write | mock | end `0xC056`, map 유지. `SLMP-3E-NEG-003` |
