@@ -127,8 +127,8 @@ int ctt_run_file(const char *path, const ctt_opts_t *opts)
     const ctt_plugin_t *plugin = ctt_plugin_lookup(run.protocol);
     if (!plugin) {
         LOG_ERROR("ctt",
-                  "FAIL protocol=%s scenario=%s: plugin not implemented "
-                  "(Phase 1 is profinet only; ethernetip/ is a reserved slot)",
+                  "FAIL protocol=%s scenario=%s: unknown plugin "
+                  "(implemented: profinet, ethernetip)",
                   run.protocol, run.name);
         yaml_free(root);
         return 1;

@@ -1,12 +1,15 @@
 # Controller Test Tool (CTT)
 
 In-repo fieldbus scenario harness: **one runner**, protocol plugins.
-DUT is `stacks/profinet/` (**CC-B + RT Class 1** only). CC-C / IRT are
-out of scope permanently. EtherNet/IP plugin remains a reserved slot.
+DUT is `stacks/profinet/` (**CC-B + RT Class 1** only) and
+`stacks/ethernetip/` (Adapter Class 1, mock). CC-C / IRT are
+out of scope permanently. Purchased EIP stub is not a CTT DUT.
 
 ```
 ./build/ctt --scenario tests/scenarios/profinet/dcp_identify_name_of_station.yaml
+./build/ctt --scenario tests/scenarios/ethernetip/register_session.yaml
 ctest --test-dir build --output-on-failure -LE soak_ci
+ctest --test-dir build --output-on-failure -L ethernetip
 ```
 
 CI uses mock Ethernet (`iface: mock`). No AF_PACKET / sudo.
@@ -54,11 +57,12 @@ by the plugin. The common runner does not parse DCP/CIP frames.
 |------|------|
 | `tools/ctt/` | runner, report, mock eth ring, **AF_PACKET lab transport**, PCAP golden |
 | `tools/ctt/proto/profinet/` | Controller stub + PN steps |
-| `tools/ctt/proto/ethernetip/` | reserved until `stacks/ethernetip/` lands |
+| `tools/ctt/proto/ethernetip/` | Scanner stub + EIP steps (`stacks/ethernetip/` DUT) |
 | `tests/scenarios/<protocol>/` | YAML; directory matches `protocol:` |
 | `tests/golden/profinet/` | mock PCAPs for `golden:` replay |
 | `docs/ctt_lab.md` | veth / CODESYS / `pn_device_run` |
 | `docs/ctt_pi_matrix.md` | CC-A/B internal mapping (not certification) |
+| `docs/ctt_odva_matrix.md` | EIP internal CT-style mapping (not official CT) |
 
 PROFINET actions (CC-B / RTC1):
 
@@ -73,6 +77,17 @@ PROFINET actions (CC-B / RTC1):
 | `lldp` | 2 | ethertype `0x88CC`, NameOfStation |
 | `snmp_get` | 2 | sysName via `pn_stack_handle_snmp` (no UDP :161) |
 | `soak` | 2 | `duration_s` and/or `iterations`; unexpected frames / AR drops |
+
+EtherNet/IP actions (mock `eip_cfg_t.mock`; no NIC):
+
+| action | notes |
+|--------|--------|
+| `register_session` / `list_identity` | Encapsulation |
+| `get_attr` | UCMM Get_Attribute_Single (`class_id`, `instance`, `attribute`) |
+| `write_input` / `read_input` / `read_output` | Assembly image |
+| `forward_open` | `integrity: true` adds CPF `0x00C1` HMAC |
+| `class1_io` / `io_cycle` | O→T inject; produce via transport ops |
+| `acd_conflict` / `lldp` / `watchdog` / `poll` | ACD, LLDP TX, Class 1 timeout |
 
 ## Soak / metrics
 

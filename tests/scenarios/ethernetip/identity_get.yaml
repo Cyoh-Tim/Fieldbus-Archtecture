@@ -1,0 +1,25 @@
+name: identity_get
+protocol: ethernetip
+tags: [cip, identity, migrate]
+device:
+  iface: mock
+  vendor_id: 0xABCD
+  device_type: 12
+  product_code: 7
+  major_rev: 1
+  minor_rev: 2
+  serial_number: 0x11223344
+  product_name: TestSensor
+  input_size: 64
+  output_size: 16
+  input_assembly: 150
+  output_assembly: 101
+  config_assembly: 100
+steps:
+  - action: get_attr
+    class_id: 0x01
+    instance: 1
+    attribute: 1
+    expect:
+      cip_status: 0
+      vendor_id: 0xABCD

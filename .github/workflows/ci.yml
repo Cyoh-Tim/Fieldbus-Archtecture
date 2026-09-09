@@ -23,19 +23,22 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake
+          sudo apt-get install -y build-essential cmake libssl-dev
 
-      - name: Configure (pn_stack + ctt, no libmodbus)
-        run: cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON
+      - name: Configure (pn_stack + eip_stack + ctt, no libmodbus)
+        run: cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON -DENABLE_EIP_TESTS=ON
 
       - name: Build
         run: cmake --build build
 
-      - name: Test (Phase 1–3 mock; short soak by iterations; golden replay; exclude 30s soak_ci)
+      - name: Test (PN+EIP mock; short soak by iterations; golden replay; exclude 30s soak_ci)
         run: ctest --test-dir build --output-on-failure -LE soak_ci
 
       - name: Golden replay (mock Identify / Sec1 Set; no NIC)
         run: ctest --test-dir build --output-on-failure -L golden
+
+      - name: EtherNet/IP mock scenarios (no NIC)
+        run: ctest --test-dir build --output-on-failure -L ethernetip
 
 
   soak-ci:
@@ -46,7 +49,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake
+          sudo apt-get install -y build-essential cmake libssl-dev
       - name: Configure
         run: cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON
       - name: Build
@@ -62,7 +65,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake iproute2
+          sudo apt-get install -y build-essential cmake libssl-dev iproute2
       - name: Configure
         run: cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON -DENABLE_CTT_AF_PACKET=ON
       - name: Build

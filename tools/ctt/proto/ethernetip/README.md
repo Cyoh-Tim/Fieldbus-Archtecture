@@ -1,13 +1,19 @@
-# EtherNet/IP CTT plugin (reserved)
+# EtherNet/IP CTT plugin
 
-Phase 1–2 do **not** implement this plugin.
+Scanner/Originator stub for the self-hosted Adapter DUT in
+`stacks/ethernetip/`. Selected by `protocol: ethernetip` on the same
+`./build/ctt` binary.
 
-DUT will be the self-hosted Adapter stack in `stacks/ethernetip/` after that
-tree merges (draft PR #4). `adapters/ethernetip/` (purchased-stack stub) is
-not a CTT DUT.
+**DUT is not** `adapters/ethernetip/` purchased-stack stub.
 
-When implemented: Scanner/Originator stub + `tests/scenarios/ethernetip/*.yaml`,
-selected by `protocol: ethernetip` on the same `./build/ctt` binary.
+```
+cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON
+cmake --build build
+./build/ctt --scenario tests/scenarios/ethernetip/register_session.yaml
+ctest --test-dir build --output-on-failure -L ethernetip
+```
 
-ODVA CT category mapping is a stub in `docs/ctt_pi_matrix.md` until this plugin
-exists. Phase 3 does not implement the EIP plugin.
+Mock only (`eip_cfg_t.mock=1`, `eip_stack_handle_encap` / `handle_io`).
+No NIC / AF_PACKET for CIP TCP in this plugin.
+
+Internal ODVA CT-style mapping: `docs/ctt_odva_matrix.md` (not official CT).

@@ -56,11 +56,12 @@ Security Class 1 HMAC 은 이 저장소 프로파일이다 (`docs/profinet_stack
 PI 할당 option/block 코드를 사칭하지 않는다. 매트릭스의 “security lab
 profile” 은 DCP Set `0xF0/0x01` 과 Connect block `0x0E01` 회귀를 뜻한다.
 
-## EtherNet/IP / ODVA CT (stub)
+## EtherNet/IP / ODVA CT
 
-EIP 플러그인은 **예약**이다 (`tools/ctt/proto/ethernetip/`, PR #4 merge 후).
-ODVA CT 카테고리 매핑은 플러그인이 생긴 뒤에 이 문서에 짧은 표를 추가한다.
-지금은 행을 만들지 않는다. Modbus / SLMP 플러그인도 이 페이즈에 없다.
+EIP 플러그인은 구현됨 (`tools/ctt/proto/ethernetip/`, DUT `stacks/ethernetip/`).
+내부 카테고리 표는 [`docs/ctt_odva_matrix.md`](ctt_odva_matrix.md).
+공식 ODVA CT 는 멤버십+공인 랩. CTT green 이 인증을 대체하지 않는다.
+Modbus / SLMP 플러그인은 이 페이즈에 없다.
 
 ## 이 표가 말해 주지 않는 것
 

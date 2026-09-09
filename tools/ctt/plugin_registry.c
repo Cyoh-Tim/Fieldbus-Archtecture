@@ -6,6 +6,7 @@ const ctt_plugin_t *ctt_plugin_lookup(const char *protocol)
 {
     static const ctt_plugin_t *plugins[] = {
         &ctt_plugin_profinet,
+        &ctt_plugin_ethernetip,
         NULL,
     };
     if (!protocol) {

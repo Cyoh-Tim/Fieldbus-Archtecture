@@ -5,14 +5,15 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 add_definitions(-D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE)
 
-option(ENABLE_ETHERNETIP "EtherNet/IP 어댑터 빌드 (구매 스택 필요)" OFF)
+option(ENABLE_EIP_TESTS "EtherNet/IP HMAC + residual stack tests" ON)
 option(ENABLE_PN_TESTS "PROFINET HMAC 단위 테스트" ON)
 option(BUILD_DAEMON "multiproto_daemon + 어댑터 (libmodbus, cJSON 필요)" ON)
-option(BUILD_CTT "Controller Test Tool (pn_stack + YAML 시나리오)" ON)
+option(BUILD_CTT "Controller Test Tool (pn_stack + eip_stack + YAML 시나리오)" ON)
 option(ENABLE_CTT_AF_PACKET "Compile CTT AF_PACKET lab transport (not used by default ctest)" ON)
 option(BUILD_PN_LAB_TOOLS "Build dcp_probe / pn_device_run (manual lab; not ctest)" ON)
 
 find_package(Threads REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 # ---- PROFINET IO Device 스택 (자체 구현, CC-B / RT Class 1 / Sec Class 1) ----
 # 데몬과 CTT가 공유. BUILD_DAEMON=OFF 이면 libmodbus 없이 pn_stack+ctt 만 빌드.
@@ -31,6 +32,24 @@ add_library(pn_stack STATIC
 target_include_directories(pn_stack PUBLIC stacks/profinet/include)
 target_include_directories(pn_stack PRIVATE include core)
 target_link_libraries(pn_stack PUBLIC Threads::Threads)
+
+# ---- EtherNet/IP Adapter(+Originator) 스택 (자체 구현, 벤더 SDK 불필요) ----
+# 데몬과 CTT가 공유. BUILD_DAEMON=OFF 이면 libmodbus 없이 eip_stack+ctt.
+add_library(eip_stack STATIC
+    stacks/ethernetip/src/eip_path_asm.c
+    stacks/ethernetip/src/eip_cip.c
+    stacks/ethernetip/src/eip_cm.c
+    stacks/ethernetip/src/eip_encap.c
+    stacks/ethernetip/src/eip_io.c
+    stacks/ethernetip/src/eip_client.c
+    stacks/ethernetip/src/eip_crypto.c
+    stacks/ethernetip/src/eip_sec.c
+    stacks/ethernetip/src/eip_lldp.c
+    stacks/ethernetip/src/eip_stack.c
+)
+target_include_directories(eip_stack PUBLIC stacks/ethernetip/include)
+target_include_directories(eip_stack PRIVATE include core)
+target_link_libraries(eip_stack PUBLIC Threads::Threads OpenSSL::SSL OpenSSL::Crypto)
 
 if(BUILD_DAEMON)
     find_package(PkgConfig REQUIRED)
@@ -94,17 +113,11 @@ if(BUILD_DAEMON)
     target_include_directories(adapter_cclink PUBLIC adapters/cclink)
     target_include_directories(adapter_cclink PRIVATE include core)
 
-    # ---- 어댑터: EtherNet/IP (구매 스택 필요 - ENABLE_ETHERNETIP=ON 일 때만) ----
+    # ---- 어댑터: EtherNet/IP (자체 스택 stacks/ethernetip/) ----
     add_library(adapter_ethernetip STATIC adapters/ethernetip/ethernetip_adapter.c)
     target_include_directories(adapter_ethernetip PUBLIC adapters/ethernetip)
-    target_include_directories(adapter_ethernetip PRIVATE include core)
-    target_link_libraries(adapter_ethernetip PUBLIC ${CJSON_TARGET})
-    if(ENABLE_ETHERNETIP)
-        # TODO: third_party/ethernetip_stack/ 배치 후 아래 활성화
-        # target_include_directories(adapter_ethernetip PRIVATE third_party/ethernetip_stack/include)
-        # target_link_libraries(adapter_ethernetip PUBLIC <벤더 라이브러리>)
-        message(STATUS "ENABLE_ETHERNETIP=ON: third_party/ethernetip_stack 연동은 아직 TODO")
-    endif()
+    target_include_directories(adapter_ethernetip PRIVATE include core stacks/ethernetip/include)
+    target_link_libraries(adapter_ethernetip PUBLIC ${CJSON_TARGET} eip_stack)
 
     add_library(adapter_profinet STATIC adapters/profinet/profinet_adapter.c)
     target_include_directories(adapter_profinet PUBLIC adapters/profinet)
@@ -134,14 +147,16 @@ if(BUILD_CTT)
         tools/ctt/pcap.c
         tools/ctt/plugin_registry.c
         tools/ctt/proto/profinet/pn_plugin.c
+        tools/ctt/proto/ethernetip/eip_plugin.c
     )
     target_include_directories(ctt PRIVATE
         tools/ctt
         stacks/profinet/include
+        stacks/ethernetip/include
         include
         core
     )
-    target_link_libraries(ctt PRIVATE pn_stack)
+    target_link_libraries(ctt PRIVATE pn_stack eip_stack)
     if(ENABLE_CTT_AF_PACKET)
         target_compile_definitions(ctt PRIVATE CTT_ENABLE_AF_PACKET=1)
     endif()
@@ -161,10 +176,24 @@ if(ENABLE_PN_TESTS)
     target_link_libraries(test_pn_crypto PRIVATE pn_stack)
 endif()
 
+if(ENABLE_EIP_TESTS)
+    add_executable(test_eip_crypto tests/test_eip_crypto.c)
+    target_include_directories(test_eip_crypto PRIVATE stacks/ethernetip/include include core)
+    target_link_libraries(test_eip_crypto PRIVATE eip_stack)
+    add_executable(test_eip_stack tests/test_eip_stack.c)
+    target_include_directories(test_eip_stack PRIVATE stacks/ethernetip/include include core)
+    target_link_libraries(test_eip_stack PRIVATE eip_stack)
+endif()
+
 enable_testing()
 
 if(ENABLE_PN_TESTS)
     add_test(NAME test_pn_crypto COMMAND test_pn_crypto)
+endif()
+
+if(ENABLE_EIP_TESTS)
+    add_test(NAME test_eip_crypto COMMAND test_eip_crypto)
+    add_test(NAME test_eip_stack COMMAND test_eip_stack)
 endif()
 
 if(BUILD_CTT)
@@ -186,6 +215,15 @@ if(BUILD_CTT)
            sc_name STREQUAL "dcp_set_sec_class1")
             set_tests_properties(ctt_pn_${sc_name} PROPERTIES LABELS "golden")
         endif()
+    endforeach()
+    file(GLOB CTT_EIP_SCENARIOS CONFIGURE_DEPENDS
+         "${CMAKE_SOURCE_DIR}/tests/scenarios/ethernetip/*.yaml")
+    foreach(sc ${CTT_EIP_SCENARIOS})
+        get_filename_component(sc_name ${sc} NAME_WE)
+        add_test(NAME ctt_eip_${sc_name} COMMAND ctt --scenario ${sc})
+        set_tests_properties(ctt_eip_${sc_name} PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            LABELS "ethernetip")
     endforeach()
     # Lab AF_PACKET is tests/run_ctt_lab.sh — not registered (needs CAP_NET_RAW).
 endif()

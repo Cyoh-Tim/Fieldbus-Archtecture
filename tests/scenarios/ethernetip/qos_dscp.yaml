@@ -1,0 +1,22 @@
+name: qos_dscp
+protocol: ethernetip
+tags: [qos, dscp, migrate]
+device:
+  iface: mock
+  input_size: 8
+  output_size: 8
+steps:
+  - action: get_attr
+    class_id: 0x48
+    instance: 1
+    attribute: 5
+    expect:
+      cip_status: 0
+      u8: 0x1B
+  - action: get_attr
+    class_id: 0x48
+    instance: 1
+    attribute: 2
+    expect:
+      cip_status: 0
+      u8: 0x2F
