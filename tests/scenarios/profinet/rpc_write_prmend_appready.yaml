@@ -1,0 +1,39 @@
+name: rpc_write_prmend_appready
+protocol: profinet
+tags: [rpc, write, control, codesys]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  ip: 192.168.200.2
+  netmask: 255.255.255.0
+steps:
+  - action: rpc_connect
+    integrity: false
+    expect:
+      rpc_response: true
+      ar: up
+  - action: rpc_write
+    index: 0xAFF1
+    slot: 0
+    subslot: 1
+    data: line-A
+    expect:
+      rpc_response: true
+  - action: record_read
+    index: 0xAFF1
+    slot: 0
+    subslot: 1
+    expect:
+      contains: line-A
+      min_len: 54
+  - action: rpc_control
+    command: parameter_end
+    expect:
+      rpc_response: true
+      ar: up
+      app_ready: true
+  - action: rpc_application_ready
+    expect:
+      rpc_request: true
+      app_ready: true

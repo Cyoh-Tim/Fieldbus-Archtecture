@@ -1,0 +1,16 @@
+name: dcp_get
+protocol: profinet
+tags: [dcp, get]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+steps:
+  - action: dcp_get
+    xid: 0x55667788
+    expect:
+      frame_id: 0xFEFD
+      service: get
+      status: success
+      name_of_station: sensor-line1
+    golden: tests/golden/profinet/dcp_get_res.pcap

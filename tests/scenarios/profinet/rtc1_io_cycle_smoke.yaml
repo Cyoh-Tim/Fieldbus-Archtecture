@@ -5,6 +5,8 @@ device:
   station_name: sensor-line1
   security_class: 0
   iface: mock
+  ip: 192.168.200.2
+  netmask: 255.255.255.0
   cycle_us: 8000
   input_len: 32
   output_len: 8

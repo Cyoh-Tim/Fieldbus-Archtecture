@@ -348,8 +348,12 @@ PROFINET (Phase 1 플러그인 위, **CC-B / RTC1만**). 구현 상태 (이 트�
 | Release | `rpc_release.yaml` | `pn_stack_handle_rpc` OP_RELEASE → AR down |
 | Alarm TX | `alarm_tx.yaml` | DUT `pn_stack_send_alarm` FrameID `0xFC01` |
 | Record I&M0 | `record_read_im0.yaml` | RPC Read, index `0xAFF0` |
+| Record I&M1–4 | `record_read_im1_4.yaml` | `0xAFF1`–`0xAFF4` |
+| CM Write / PrmEnd / AppReady | `rpc_write_prmend_appready.yaml` | CODESYS-like Control |
+| DCP Get / Hello / Signal / Set IP | `dcp_get.yaml` 등 | golden replay |
+| Alarm Low | `alarm_low.yaml` | FrameID `0xFE01` |
 | LLDP | `lldp.yaml` | `pn_stack_send_lldp`, ethertype `0x88CC` |
-| SNMP GET sysName | `snmp_get_sysname.yaml` | `pn_stack_handle_snmp` (mock, no UDP 161) |
+| SNMP GET sysName | `snmp_get_sysname.yaml` | mock `handle_snmp`; lab UDP 161 when `device.ip` |
 | Sec1 Connect success | `rpc_connect_sec1_integrity.yaml` | integrity block `0x0E01`, AR up + short IO |
 | Soak (short) | `soak_short.yaml` | iterations; default `ctest` |
 | Soak (30s) | `soak_ci.yaml` | `ctest -L soak_ci`; PR 기본 게이트에서 제외 |
@@ -378,21 +382,20 @@ Modbus / SLMP / CC-Link 플러그인은 이 페이즈에 넣지 않는다.
 | 항목 | 상태 |
 |------|------|
 | Lab transport | `--transport=mock\|af_packet --iface --dut-iface`. 같은 YAML. 기본은 mock |
-| veth 스크립트 | `tests/run_ctt_lab.sh` (Identify 필수; RTC1 은 in-process Connect + 와이어) |
-| CODESYS | CI 없음. `docs/ctt_lab.md` 수동 bring-up. `pn_device_run` / `dcp_probe` 래퍼 |
+| veth 스크립트 | `tests/run_ctt_lab.sh` (DCP/LLDP/Alarm/RTC1 on wire; CM/SNMP UDP when `device.ip`) |
+| CODESYS | CI 없음. `tests/codesys_manual_lab.sh` + `docs/ctt_lab.md`. `pn_device_run` / `dcp_probe` |
 | Golden capture | `--capture <dir>` + `tests/regen_ctt_goldens.sh` |
 | Golden replay | YAML `golden: tests/golden/profinet/…` mock `ctest` (`-L golden`) |
 | PI 매핑 | `docs/ctt_pi_matrix.md` CC-A/B only. 내부 준비도. Bundle 접근 없음 |
 | ODVA | stub 절: EIP 플러그인 이후 |
 | default CI | mock `ctest` (Phase 1+2 + golden replay). lab 은 workflow_dispatch |
 
-남은 갭 (하네스 100% 쪽, 인증 아님):
+남은 갭 (인증·멤버십·DUT 부재 — 하네스가 메우지 않음):
 
-- 실 UDP CM (34964) / SNMP :161 을 CTT stub 에 연결
-- DCP Get/Hello/Set IP, CM Write, I&M1–4, MRP, FSU
-- CODESYS 상호운용은 수동
-- 공식 PI Test Bundle 실행·evidence — 공인 랩. 이 페이즈의 목표가 아님
-- EIP 플러그인 / ODVA 매핑 — 플러그인 이후
+- 공식 PI Test Bundle 실행·evidence — 공인 랩 / PI membership
+- CODESYS Windows Development System 은 CI 에 없음 (`tests/codesys_manual_lab.sh`)
+- MRP / Fast Start-Up — **DUT not implemented** (풀 스택을 이 페이즈에서 만들지 않음)
+- EIP 플러그인 / ODVA CT 매핑 — 플러그인 이후
 
 ## 5. 디렉터리 레이아웃
 
