@@ -6,8 +6,9 @@
 **결정: 도구는 하나, 프로토콜은 플러그인.**
 프로토콜마다 별도 툴을 두지 않고, PN+EIP 프레임 로직을 하나의 stub에 섞지도 않는다.
 
-Phase 1 DUT: `stacks/profinet/` (CC-B + RT Class 1 + Security Class 1 HMAC).
-PN 플러그인 역할: **Controller stub + DCP station**. Device 스택을 대체하지 않는다.
+Phase 1 DUT: `stacks/profinet/` — **CC-B + RT Class 1** + Security Class 1 HMAC.
+**CC-C (IRT / RT Class 3) 는 이 제품·CTT에서 영구 제외**다. 후속 페이즈로 올리지 않는다.
+PN 플러그인 역할: **Controller stub + DCP station** (RT Class 1). Device 스택을 대체하지 않는다.
 
 EtherNet/IP 플러그인 DUT는 자체 스택 `stacks/ethernetip/` (draft PR #4)가 main에 들어온 뒤다.
 그 전까지 슬롯만 예약한다. main의 `adapters/ethernetip/` 구매 스택 스텁은 CTT DUT가 아니다.
@@ -17,6 +18,9 @@ EtherNet/IP 플러그인 DUT는 자체 스택 `stacks/ethernetip/` (draft PR #4)
 자체 구현 스택(지금 PROFINET, 곧 EtherNet/IP)은 상용 벤더가 사내에 두는 것과 같은 **자동 시나리오 하네스**가 필요하다.
 랩(CODESYS / EIP Scanner)과, 이후 PI·ODVA 공인 랩 접근 이전에 회귀를 잡는다.
 
+PROFINET DUT 목표는 **Conformance Class B (CC-B) + RT Class 1** 뿐이다.
+**CC-C / IRT / RT Class 3 는 제품·도구 범위에서 영원히 빠진다.** CC-C 시나리오, 랩 매핑, PI Test Bundle CC-C 카테고리를 계획하지 않는다. Phase 3로도 키우지 않는다.
+
 목표:
 
 - 선언적 시나리오(`tests/scenarios/<protocol>/*.yaml`)로 프로토콜 행동을 고정한다
@@ -25,10 +29,13 @@ EtherNet/IP 플러그인 DUT는 자체 스택 `stacks/ethernetip/` (draft PR #4)
 - PR마다 CI가 기존 행동을 잃지 않았는지 확인한다
 - 새 프로토콜 동작은 랩 메모만이 아니라 시나리오와 함께 들어온다
 
+영구 비목표 (페이즈와 무관):
+
+- **PROFINET CC-C** 및 그에 묶인 **IRT / RT Class 3** (시나리오·랩·PI Bundle CC-C 매핑 전부)
+- 전체 PI / ODVA conformance를 CTT green만으로 대체하는 것, 인증 evidence
+
 비목표 (Phase 1–2):
 
-- 전체 PI / ODVA conformance, 인증 evidence
-- IRT / RT Class 3
 - EtherCAT, 그리고 Modbus / SLMP / CC-Link 플러그인 구현
 - 상용 테스트 시스템 구매·연동
 - **프로토콜별 완전 분리 툴** (`tools/ctt_pn` 제품 + `tools/ctt_eip` 제품처럼 CI·YAML 스키마·리포트를 복제)
@@ -37,7 +44,7 @@ EtherNet/IP 플러그인 DUT는 자체 스택 `stacks/ethernetip/` (draft PR #4)
 범위:
 
 - CTT = 공통 runner + 프로토콜 플러그인. CI 엔트리는 `./build/ctt` 하나
-- Phase 1 DUT = PROFINET IO Device. CTT PN 플러그인 = in-process Controller + DCP
+- Phase 1 DUT = PROFINET IO Device (**CC-B + RT Class 1**). CTT PN 플러그인 = in-process Controller + DCP. IRT Controller가 아니다
 - Phase 1–2에 넣을 다음 플러그인은 EtherNet/IP (PR #4 merge 후). Scanner/Originator stub
 - 플러그인 슬롯 패턴은 이후 프로토콜에도 열 수 있다. **지금 구현 범위는 PN 다음 EIP까지**
 - 단위 CI 경로에는 실제 NIC가 없다
@@ -80,6 +87,7 @@ EtherNet/IP 플러그인 DUT는 자체 스택 `stacks/ethernetip/` (draft PR #4)
 
 ### 1.1 PROFINET 플러그인 — 기존 DUT 훅
 
+DUT·stub 모두 **CC-B + RT Class 1**. IRT 동기·RT Class 3 프레임을 다루지 않는다.
 새 DUT API를 만들지 않는다. 훅은 `stacks/profinet/include/pn_stack.h`.
 
 | 훅 | CTT에서의 역할 |
@@ -114,7 +122,7 @@ merge 전에는 `tools/ctt/proto/ethernetip/` 와 `tests/scenarios/ethernetip/` 
 구성 요소 (구현 위치는 후속 PR):
 
 - `tools/ctt/` — 공통 runner, report, soak, mock-transport, CI 엔트리
-- `tools/ctt/proto/profinet/` — Controller stub + PN step actions
+- `tools/ctt/proto/profinet/` — Controller stub + PN step actions (CC-B / RTC1 only)
 - `tools/ctt/proto/ethernetip/` — 예약. PR #4 이후 Scanner stub + EIP steps
 - `tests/scenarios/profinet/` · `tests/scenarios/ethernetip/`
 - `tests/golden/` — 선택적 binary/hex. 프로토콜별 서브디리 권장
@@ -180,7 +188,7 @@ steps:
 | `dcp_identify` | FrameID `0xFEFE` Identify.Req (멀티캐스트 `01:0E:CF:00:00:00`) | Identify.Res FrameID `0xFEFF`, NameOfStation |
 | `dcp_set` | FrameID `0xFEFD` Set.Req. `signed: true` 이면 option `0xF0` / sub `0x01` HMAC | `accept` 또는 `reject`, 변경된 `station_name` |
 | `rpc_connect` | CM Connect. `integrity: true` 이면 block type `0x0E01` | `ar: up` 또는 `rejected` |
-| `io_cycle` | AR 이후 RTC1. `count`, `cycle_ms` | 프레임 개수, 주기 상한 (ms, soft) |
+| `io_cycle` | AR 이후 RTC1 (비동기 cyclic). `count`, `cycle_ms`. IRT/CC-C 스텝 없음 | 프레임 개수, 주기 상한 (ms, soft) |
 | `soak` | `duration_s` 또는 `iterations` | unexpected frame = 0, AR drop = 0 |
 | `rpc_release` | Phase 2 | AR down |
 | `alarm` / `record_read` / `lldp` / `snmp_get` | Phase 2 | 해당 PDU |
@@ -296,7 +304,7 @@ FrameID·NameOfStation 같은 필드 assert가 기본이다.
 
 ## 4. Phase 계획
 
-### Phase 1 — 공통 runner + PROFINET 플러그인
+### Phase 1 — 공통 runner + PROFINET 플러그인 (CC-B / RTC1)
 
 main에 있는 DUT는 `stacks/profinet/` 뿐이다. 구현 후속 PR에서:
 
@@ -331,10 +339,11 @@ ctest --output-on-failure
 
 ### Phase 2 — 시나리오 라이브러리 + soak
 
-PROFINET (Phase 1 플러그인 위):
+PROFINET (Phase 1 플러그인 위, **CC-B / RTC1만**):
 
 - Release, Alarm TX, Record Data (I&M0 `0xAFF0`), LLDP, SNMP GET(sysName)
 - Security Class 1 Connect + integrity block `0x0E01`
+- IRT 동기, PTCP, RT Class 3, CC-C 전용 시나리오는 추가하지 않는다
 
 EtherNet/IP (플러그인이 생긴 뒤):
 
@@ -349,9 +358,9 @@ Modbus / SLMP / CC-Link 플러그인은 이 페이즈에 넣지 않는다.
 
 ### Phase 3 — 랩 / golden / 인증 매핑
 
-- lab runner profile: veth, CODESYS, EIP Scanner. 가능하면 같은 YAML
+- lab runner profile: veth, CODESYS, EIP Scanner. 가능하면 같은 YAML. IRT 랩·CC-C 컨트롤러는 대상이 아니다
 - PCAP capture/replay → `tests/golden/<protocol>/`
-- PN 시나리오 ↔ PI Test Bundle 카테고리 문서 매트릭스. Bundle 접근 전까지 문서만
+- PN 시나리오 ↔ PI Test Bundle 문서 매트릭스는 **CC-A / CC-B 해당 카테고리만**. Bundle 접근 전까지 문서만. **CC-C 카테고리는 매핑하지 않고, 이후 페이즈로 확장하지 않는다**
 - EIP는 ODVA CT 카테고리 매핑도 문서만 (공인 랩 전)
 
 ## 5. 디렉터리 레이아웃 (제안)
@@ -360,7 +369,7 @@ Modbus / SLMP / CC-Link 플러그인은 이 페이즈에 넣지 않는다.
 
 ```
 tools/ctt/                       # 공통 runner, report, soak, mock-transport, CI
-  proto/profinet/                # Controller stub + PN step actions
+  proto/profinet/                # Controller stub + PN steps (CC-B / RTC1, no IRT)
   proto/ethernetip/              # 예약. PR #4 이후 Scanner stub + EIP steps
 tests/scenarios/
   profinet/                      # protocol: profinet
@@ -386,7 +395,7 @@ Phase 1:
 
 - 매 PR에서 `ctest` (또는 `./build/ctt --scenario tests/scenarios/profinet/…`) 가 CI에서 green
 - 기존 네 행동 중 HMAC·Identify.Res FrameID·Sec1 DCP Set·Connect without integrity 가 빠지지 않음
-- RTC1 smoke 시나리오가 새로 통과
+- RTC1 smoke 시나리오가 새로 통과 (CC-B cyclic. IRT/CC-C 시나리오 없음)
 - mock 경로에 AF_PACKET / sudo 가 없음
 - runner는 `protocol:` 으로 플러그인을 고른다. Phase 1에서 구현된 플러그인은 profinet 하나
 
@@ -413,7 +422,8 @@ CMake `ENABLE_PN_TESTS=ON` (기본) 일 때 `./build/test_pn_stack`. `ctest` 등
 | `test_dcp_set_sec` | Sec Class 1: unsigned Set 거부, signed Set 로 NameOfStation 갱신 | YAML 3.3 |
 | `test_connect_sec` | Sec Class 1: integrity 없는 Connect → RPC 응답은 있으나 `pn_stack_ar_up()==0` | YAML 3.4 |
 
-없는 것: RTC1 사이클, Release, Alarm, Record, LLDP, SNMP, Sec1 Connect 성공 경로.
+없는 것 (CC-B 갭, Phase 1–2에서 채움): RTC1 사이클, Release, Alarm, Record, LLDP, SNMP, Sec1 Connect 성공 경로.
+의도적으로 없는 것: IRT / PTCP / RT Class 3 / CC-C. 갭이 아니라 제품 범위 밖이다.
 
 ### EtherNet/IP (main vs PR #4)
 
@@ -442,9 +452,10 @@ Phase 1 workflow가 첫 PR 게이트가 된다. job은 공통 `ctt` (또는 `tes
 
 ## 8. 리스크 / 제약
 
-- 타깃은 A-core, IRT ASIC 없음. CTT timing assert 는 mock에서 **ms 스케일 soft bound** 다. 하드 리얼타임은 랩 soak에서만 본다
-- 8ms 사이클 에이징(코어 스케줄러, PREEMPT_RT 없이 최대 편차 0.1ms)은 데몬 스케줄러 수치다. mock eth jitter와 혼동하지 말 것
-- CTT green ≠ PI / ODVA 인증. 내부 신뢰도일 뿐 인증 증거로 제출하지 않는다. CRA/CE 도 제품 프로세스다
+- 타깃은 A-core이며 IRT 전용 ASIC(하드웨어 타임스탬프·동기 스위치)이 없다. **CC-C / IRT / RT Class 3 는 이 하드웨어에서 불가하고, 제품·CTT 범위 밖이다.** 시나리오·랩 매핑·PI Bundle CC-C를 후속 페이즈로 넣지 않는다
+- CTT timing assert 는 mock에서 **ms 스케일 soft bound** 다. 하드 리얼타임(µs IRT)을 mock이나 A-core 랩 soak로 주장하지 않는다
+- 8ms 사이클 에이징(코어 스케줄러, PREEMPT_RT 없이 최대 편차 0.1ms)은 데몬 스케줄러 수치다. mock eth jitter·IRT 동기 정밀도와 혼동하지 말 것
+- CTT green ≠ PI / ODVA 인증. 내부 신뢰도일 뿐 인증 증거로 제출하지 않는다. 장래에 PI 랩을 가더라도 대상은 CC-B(및 해당 CC-A)이지 CC-C가 아니다. CRA/CE 도 제품 프로세스다
 - Security Class 1 의 DCP option `0xF0` / Connect block `0x0E01` 은 이 저장소 프로파일이다. PI 할당 코드를 사칭하지 않는다 (`docs/profinet_stack.md`)
 - mock은 큐 깊이·단일 스레드 가정이다. 실제 스위치/멀티캐스트/VLAN 태깅 이상은 Phase 3
 - 플러그인 stub이 너무 두꺼워지면 DUT 버그를 stub이 가린다. stub은 프레임 조립/파싱만, 상태 머신은 시나리오 step에 둔다
