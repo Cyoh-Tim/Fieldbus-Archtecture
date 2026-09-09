@@ -14,14 +14,16 @@ CTT 설계(공통 runner + 프로토콜 플러그인)는 [`docs/ctt.md`](docs/ct
 ```
 include/               ProtocolAdapter 공통 인터페이스
 core/                   코어(설정 로더, 스케줄러, 어댑터 레지스트리, main)
-adapters/modbus/        Modbus TCP 어댑터 (libmodbus) - 벤더 의존성 없음
-adapters/slmp/          SLMP 어댑터 (자체 구현, 3E 프레임은 TODO)
+adapters/modbus/        Modbus TCP 어댑터 (daemon: libmodbus; CTT DUT 는 stacks/modbus)
+adapters/slmp/          SLMP 어댑터 (daemon stub on this tree; CTT DUT 는 stacks/slmp)
 adapters/cclink/        CC-Link 어댑터 (미확정, 스텁)
 adapters/ethernetip/    EtherNet/IP 어댑터 (구매 스택 래핑, 연동부 TODO)
 adapters/profinet/      PROFINET 어댑터 — 자체 스택 연결 (RT Class 1, IRT 없음)
 stacks/profinet/        PROFINET IO Device 스택 (DCP/LLDP/RPC/RTC1/SNMP/Sec1)
-tools/ctt/              Controller Test Tool (공통 runner + proto/profinet)
-tests/scenarios/        CTT YAML (profinet/; ethernetip/ 예약)
+stacks/modbus/          Modbus TCP 자체 스택 (CTT DUT, libmodbus 아님)
+stacks/slmp/            SLMP Binary 3E 자체 스택 (CTT DUT, ASCII/4E 없음)
+tools/ctt/              Controller Test Tool (공통 runner + proto plugins)
+tests/scenarios/        CTT YAML (profinet/, modbus/, slmp/; ethernetip/ 예약)
 third_party/            EtherNet/IP 구매 벤더 스택 배치 위치 (git 커밋 안 함)
 config/                 config.schema.json + 예제 설정 파일
 docs/design.md          설계 배경 전체 문서
@@ -56,6 +58,8 @@ ctest --test-dir build --output-on-failure
 ```
 CTT 설계·시나리오 스키마는 [`docs/ctt.md`](docs/ctt.md), 사용법은 [`tools/ctt/README.md`](tools/ctt/README.md).
 랩/golden/PI 매핑은 [`docs/ctt_lab.md`](docs/ctt_lab.md), [`docs/ctt_pi_matrix.md`](docs/ctt_pi_matrix.md).
+Modbus/SLMP 내부 매트릭스: [`docs/ctt_modbus_matrix.md`](docs/ctt_modbus_matrix.md),
+[`docs/ctt_slmp_matrix.md`](docs/ctt_slmp_matrix.md).
 
 ## 새 프로토콜(예: EtherCAT) 추가하는 법
 1. `adapters/<name>/` 에 `include/protocol_adapter.h` 구현
