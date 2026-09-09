@@ -1,4 +1,6 @@
 name: rpc_write_prmend_appready
+id: PN-B-CM-004
+suite: PN-B-v1
 protocol: profinet
 tags: [rpc, write, control, codesys]
 device:

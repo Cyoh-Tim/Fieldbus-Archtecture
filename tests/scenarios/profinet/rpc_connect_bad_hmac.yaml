@@ -1,0 +1,18 @@
+# Internal TC PN-B-NEG-002 — Sec1 Connect with wrong HMAC must reject AR.
+name: rpc_connect_bad_hmac
+id: PN-B-NEG-002
+suite: PN-B-v1
+protocol: profinet
+tags: [rpc, connect, security, negative, bundle]
+device:
+  security_class: 1
+  psk_hex: "2222222222222222222222222222222222222222222222222222222222222222"
+  iface: mock
+  ip: 192.168.200.2
+  netmask: 255.255.255.0
+steps:
+  - action: rpc_connect
+    integrity: bad              # block 0x0E01 present, HMAC flipped
+    expect:
+      rpc_response: true        # DUT still answers
+      ar: rejected              # fail closed: pn_stack_ar_up() == 0

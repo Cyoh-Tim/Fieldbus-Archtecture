@@ -1,24 +1,24 @@
 {
-  "generated_at": "2026-09-09T04:46:41Z",
+  "generated_at": "2026-09-09T06:36:21Z",
   "generator": "tools/ctt/gen_board_data.py",
-  "disclaimer": "내부 CTT 보드입니다. PI Test Bundle / ODVA CT / Modbus.org / Mitsubishi 공식 인증 증거가 아닙니다. 배지는 시나리오가 기본 mock CI(`ctest -LE soak_ci`)에 등록되는지·매트릭스에 갭/범위 밖으로 적혀 있는지를 분류한 것이며, 이 페이지가 ctest 를 실행하지는 않습니다.",
+  "disclaimer": "내부 CTT 보드입니다. 내부 bundle-grade 게이트 ≠ PI / ODVA / Modbus.org / Mitsubishi 공식 인증. 배지는 시나리오가 기본 mock CI(`ctest -LE soak_ci`)에 등록되는지·매트릭스에 갭/범위 밖으로 적혀 있는지를 분류한 것이며, 이 페이지가 ctest 를 실행하지는 않습니다.",
   "ci_default": "ctest --test-dir build --output-on-failure -LE soak_ci",
-  "note": "pass = YAML registered in CMake and included in default mock CI. skip = soak_ci / nightly / lab (opt-in). gap = matrix DUT-not-implemented or not-yet. out_of_scope = CC-C/IRT, official cert labs, EtherCAT, etc.",
+  "note": "pass = YAML registered in CMake and included in default mock CI. skip = soak_ci / nightly / lab (opt-in). gap = matrix DUT-not-implemented or not-yet. out_of_scope = CC-C/IRT, official cert labs, EtherCAT, etc. Internal bundle-grade gate != PI certification. PROFINET catalog: docs/ctt_pn_bundle.md (PN-B-* ids).",
   "counts": {
-    "pass": 39,
+    "pass": 45,
     "skip": 4,
     "gap": 9,
     "out_of_scope": 13,
-    "total": 65,
-    "scenarios": 41
+    "total": 71,
+    "scenarios": 47
   },
   "by_protocol": {
     "profinet": {
-      "pass": 18,
+      "pass": 24,
       "skip": 4,
       "gap": 2,
       "out_of_scope": 3,
-      "total": 27
+      "total": 33
     },
     "ethernetip": {
       "pass": 9,
@@ -52,12 +52,14 @@
   "tests": [
     {
       "id": "alarm_low",
+      "bundle_id": "PN-B-ALM-002",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "alarm_low.yaml",
       "path": "tests/scenarios/profinet/alarm_low.yaml",
       "title": "Alarm Low TX",
       "title_ko": "Alarm Low TX",
-      "description": "FrameID 0xFE01",
+      "description": "PN-B-ALM-002. FrameID 0xFE01",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_alarm_low",
@@ -80,12 +82,14 @@
     },
     {
       "id": "alarm_tx",
+      "bundle_id": "PN-B-ALM-001",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "alarm_tx.yaml",
       "path": "tests/scenarios/profinet/alarm_tx.yaml",
       "title": "Alarm High TX",
       "title_ko": "Alarm High TX",
-      "description": "dummy TX, 풀 상태머신 아님",
+      "description": "PN-B-ALM-001. dummy TX",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_alarm_tx",
@@ -106,12 +110,14 @@
     },
     {
       "id": "dcp_get",
+      "bundle_id": "PN-B-DCP-002",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "dcp_get.yaml",
       "path": "tests/scenarios/profinet/dcp_get.yaml",
       "title": "DCP Get",
       "title_ko": "DCP Get",
-      "description": "FrameID 0xFEFD, unicast",
+      "description": "PN-B-DCP-002",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_dcp_get",
@@ -134,12 +140,14 @@
     },
     {
       "id": "dcp_hello",
+      "bundle_id": "PN-B-DCP-003",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "dcp_hello.yaml",
       "path": "tests/scenarios/profinet/dcp_hello.yaml",
       "title": "DCP Hello TX",
       "title_ko": "DCP Hello TX",
-      "description": "FrameID 0xFEFC, DUT TX helper",
+      "description": "PN-B-DCP-003",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_dcp_hello",
@@ -162,12 +170,14 @@
     },
     {
       "id": "dcp_identify_name_of_station",
+      "bundle_id": "PN-B-DCP-001",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "dcp_identify_name_of_station.yaml",
       "path": "tests/scenarios/profinet/dcp_identify_name_of_station.yaml",
       "title": "DCP Identify",
       "title_ko": "DCP Identify",
-      "description": "FrameID 0xFEFF, NameOfStation",
+      "description": "PN-B-DCP-001. FrameID 0xFEFF",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_dcp_identify_name_of_station",
@@ -191,12 +201,14 @@
     },
     {
       "id": "dcp_set_ip",
+      "bundle_id": "PN-B-DCP-005",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "dcp_set_ip.yaml",
       "path": "tests/scenarios/profinet/dcp_set_ip.yaml",
       "title": "DCP Set IP + Hello",
       "title_ko": "DCP Set IP + Hello",
-      "description": "IP apply 후 Hello.Req",
+      "description": "PN-B-DCP-005",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_dcp_set_ip",
@@ -221,12 +233,14 @@
     },
     {
       "id": "dcp_set_sec_class1",
+      "bundle_id": "PN-B-SEC-001",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "dcp_set_sec_class1.yaml",
       "path": "tests/scenarios/profinet/dcp_set_sec_class1.yaml",
       "title": "DCP Set + Security lab profile",
       "title_ko": "DCP Set + Security lab profile",
-      "description": "option 0xF0 은 이 저장소 프로파일",
+      "description": "PN-B-SEC-001. option 0xF0 은 이 저장소 프로파일",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_dcp_set_sec_class1",
@@ -251,12 +265,14 @@
     },
     {
       "id": "dcp_signal",
+      "bundle_id": "PN-B-DCP-004",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "dcp_signal.yaml",
       "path": "tests/scenarios/profinet/dcp_signal.yaml",
       "title": "DCP Signal",
       "title_ko": "DCP Signal",
-      "description": "Control/Signal, LED stub",
+      "description": "PN-B-DCP-004",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_dcp_signal",
@@ -278,13 +294,44 @@
       "cover": null
     },
     {
+      "id": "io_without_ar",
+      "bundle_id": "PN-B-NEG-004",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "io_without_ar.yaml",
+      "path": "tests/scenarios/profinet/io_without_ar.yaml",
+      "title": "RTC1 without AR",
+      "title_ko": "RTC1 without AR",
+      "description": "PN-B-NEG-004. no cyclic if AR down",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_io_without_ar",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [],
+      "tags": [
+        "rtc1",
+        "negative",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
       "id": "lldp",
+      "bundle_id": "PN-B-NBR-001",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "lldp.yaml",
       "path": "tests/scenarios/profinet/lldp.yaml",
       "title": "LLDP (CC-B)",
       "title_ko": "LLDP (CC-B)",
-      "description": "ethertype 0x88CC",
+      "description": "PN-B-NBR-001. ethertype 0x88CC",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_lldp",
@@ -305,12 +352,14 @@
     },
     {
       "id": "record_read_im0",
+      "bundle_id": "PN-B-REC-001",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "record_read_im0.yaml",
       "path": "tests/scenarios/profinet/record_read_im0.yaml",
       "title": "Record / I&M0",
       "title_ko": "Record / I&M0",
-      "description": "index 0xAFF0",
+      "description": "PN-B-REC-001. index 0xAFF0",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_record_read_im0",
@@ -332,12 +381,14 @@
     },
     {
       "id": "record_read_im1_4",
+      "bundle_id": "PN-B-REC-002",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "record_read_im1_4.yaml",
       "path": "tests/scenarios/profinet/record_read_im1_4.yaml",
       "title": "Record / I&M1–4",
       "title_ko": "Record / I&M1–4",
-      "description": "0xAFF1–0xAFF4",
+      "description": "PN-B-REC-002. 0xAFF1–0xAFF4",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_record_read_im1_4",
@@ -360,13 +411,107 @@
       "cover": null
     },
     {
+      "id": "record_unknown_index",
+      "bundle_id": "PN-B-NEG-005",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "record_unknown_index.yaml",
+      "path": "tests/scenarios/profinet/record_unknown_index.yaml",
+      "title": "Record unknown index",
+      "title_ko": "Record unknown index",
+      "description": "PN-B-NEG-005. empty, not I&M0 leak",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_record_unknown_index",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [],
+      "tags": [
+        "record",
+        "negative",
+        "boundary",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "rpc_ar_lifetime",
+      "bundle_id": "PN-B-CM-003",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "rpc_ar_lifetime.yaml",
+      "path": "tests/scenarios/profinet/rpc_ar_lifetime.yaml",
+      "title": "CM lifetime + reconnect",
+      "title_ko": "CM lifetime + reconnect",
+      "description": "PN-B-CM-003. Connect→IO→Release→Connect",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_rpc_ar_lifetime",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [],
+      "tags": [
+        "rpc",
+        "connect",
+        "release",
+        "lifetime",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "rpc_connect_bad_hmac",
+      "bundle_id": "PN-B-NEG-002",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "rpc_connect_bad_hmac.yaml",
+      "path": "tests/scenarios/profinet/rpc_connect_bad_hmac.yaml",
+      "title": "CM Connect reject (bad HMAC)",
+      "title_ko": "CM Connect reject (bad HMAC)",
+      "description": "PN-B-NEG-002. block 있음, MAC 불량",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_rpc_connect_bad_hmac",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [],
+      "tags": [
+        "rpc",
+        "connect",
+        "security",
+        "negative",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
       "id": "rpc_connect_sec1_integrity",
+      "bundle_id": "PN-B-CM-001",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "rpc_connect_sec1_integrity.yaml",
       "path": "tests/scenarios/profinet/rpc_connect_sec1_integrity.yaml",
       "title": "CM Connect + Sec1 integrity",
       "title_ko": "CM Connect + Sec1 integrity",
-      "description": "block 0x0E01",
+      "description": "PN-B-CM-001. block 0x0E01",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_rpc_connect_sec1_integrity",
@@ -389,12 +534,14 @@
     },
     {
       "id": "rpc_connect_without_integrity",
+      "bundle_id": "PN-B-NEG-001",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "rpc_connect_without_integrity.yaml",
       "path": "tests/scenarios/profinet/rpc_connect_without_integrity.yaml",
       "title": "CM Connect reject (Sec1)",
       "title_ko": "CM Connect reject (Sec1)",
-      "description": "mock",
+      "description": "PN-B-NEG-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_rpc_connect_without_integrity",
@@ -416,13 +563,45 @@
       "cover": null
     },
     {
+      "id": "rpc_malformed",
+      "bundle_id": "PN-B-NEG-003",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "rpc_malformed.yaml",
+      "path": "tests/scenarios/profinet/rpc_malformed.yaml",
+      "title": "CM truncated / unknown op",
+      "title_ko": "CM truncated / unknown op",
+      "description": "PN-B-NEG-003. fail closed",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_rpc_malformed",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [],
+      "tags": [
+        "rpc",
+        "negative",
+        "boundary",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
       "id": "rpc_release",
+      "bundle_id": "PN-B-CM-002",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "rpc_release.yaml",
       "path": "tests/scenarios/profinet/rpc_release.yaml",
       "title": "CM Release",
       "title_ko": "CM Release",
-      "description": "mock",
+      "description": "PN-B-CM-002",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_rpc_release",
@@ -444,12 +623,14 @@
     },
     {
       "id": "rpc_write_prmend_appready",
+      "bundle_id": "PN-B-CM-004",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "rpc_write_prmend_appready.yaml",
       "path": "tests/scenarios/profinet/rpc_write_prmend_appready.yaml",
       "title": "CM Write / ParameterEnd / ApplicationReady",
       "title_ko": "CM Write / ParameterEnd / ApplicationReady",
-      "description": "I&M1 write + PrmEnd + DUT AppReady",
+      "description": "PN-B-CM-004",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_rpc_write_prmend_appready",
@@ -471,13 +652,45 @@
       "cover": null
     },
     {
+      "id": "rtc1_cyclic_metrics",
+      "bundle_id": "PN-B-CYC-002",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "rtc1_cyclic_metrics.yaml",
+      "path": "tests/scenarios/profinet/rtc1_cyclic_metrics.yaml",
+      "title": "RTC1 cyclic metrics",
+      "title_ko": "RTC1 cyclic metrics",
+      "description": "PN-B-CYC-002. late/missed/jitter vs cycle_us",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_rtc1_cyclic_metrics",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [],
+      "tags": [
+        "rtc1",
+        "cyclic",
+        "metrics",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
       "id": "rtc1_io_cycle_smoke",
+      "bundle_id": "PN-B-CYC-001",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "rtc1_io_cycle_smoke.yaml",
       "path": "tests/scenarios/profinet/rtc1_io_cycle_smoke.yaml",
       "title": "RTC1 cyclic IO (CC-A/B)",
       "title_ko": "RTC1 cyclic IO (CC-A/B)",
-      "description": "IRT 아님. soft ms bound",
+      "description": "PN-B-CYC-001. IRT 아님. soft ms bound",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_rtc1_io_cycle_smoke",
@@ -498,12 +711,14 @@
     },
     {
       "id": "snmp_get_sysname",
+      "bundle_id": "PN-B-NBR-002",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "snmp_get_sysname.yaml",
       "path": "tests/scenarios/profinet/snmp_get_sysname.yaml",
       "title": "SNMP (CC-B)",
       "title_ko": "SNMP (CC-B)",
-      "description": "sysName; mock 경로 유지",
+      "description": "PN-B-NBR-002",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_snmp_get_sysname",
@@ -524,12 +739,14 @@
     },
     {
       "id": "soak_short",
+      "bundle_id": "PN-B-CYC-010",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "soak_short.yaml",
       "path": "tests/scenarios/profinet/soak_short.yaml",
       "title": "RTC1 soak (내부)",
       "title_ko": "RTC1 soak (내부)",
-      "description": "회귀 길이",
+      "description": "PN-B-CYC-010. 회귀 길이 + metrics",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_pn_soak_short",
@@ -575,7 +792,9 @@
       "status_label_ko": "건너뜀",
       "ctest_name": null,
       "golden": false,
-      "cover": null
+      "cover": null,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "run_ctt_lab",
@@ -603,16 +822,20 @@
       "status_label_ko": "건너뜀",
       "ctest_name": null,
       "golden": false,
-      "cover": null
+      "cover": null,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "soak_nightly",
+      "bundle_id": "PN-B-CYC-012",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "soak_nightly.yaml",
       "path": "tests/scenarios/profinet/nightly/soak_nightly.yaml",
       "title": "soak 1h",
       "title_ko": "soak 1h",
-      "description": "ctest 미등록",
+      "description": "PN-B-CYC-012. ctest 미등록",
       "status": "skip",
       "reason": "not globbed by CMake (subdirectory / nightly). Run ./build/ctt --scenario <path> manually.",
       "ctest_name": null,
@@ -636,12 +859,14 @@
     },
     {
       "id": "soak_ci",
+      "bundle_id": "PN-B-CYC-011",
+      "suite": "PN-B-v1",
       "protocol": "profinet",
       "filename": "soak_ci.yaml",
       "path": "tests/scenarios/profinet/soak_ci.yaml",
       "title": "RTC1 soak 30s",
       "title_ko": "RTC1 soak 30s",
-      "description": "PR 기본 게이트 제외",
+      "description": "PN-B-CYC-011. PR 기본 게이트 제외",
       "status": "skip",
       "reason": "opt-in 30s soak; default PR gate is ctest -LE soak_ci (LABELS soak_ci). workflow_dispatch soak=true.",
       "ctest_name": "ctt_pn_soak_ci",
@@ -685,7 +910,9 @@
       "cover": "DUT not implemented",
       "protocol_label": "PROFINET",
       "status_label_ko": "갭",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_profinet_mrp_cc_b",
@@ -708,7 +935,9 @@
       "cover": "DUT not implemented",
       "protocol_label": "PROFINET",
       "status_label_ko": "갭",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_profinet_irt_ptcp_rt_class_3_cc_c",
@@ -731,7 +960,9 @@
       "cover": "N/A (CC-C)",
       "protocol_label": "PROFINET",
       "status_label_ko": "범위 밖",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_profinet_pi_bundle",
@@ -754,7 +985,9 @@
       "cover": "N/A",
       "protocol_label": "PROFINET",
       "status_label_ko": "범위 밖",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_profinet_vlan",
@@ -777,10 +1010,14 @@
       "cover": "N/A (harness)",
       "protocol_label": "PROFINET",
       "status_label_ko": "범위 밖",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "acd_identity_state",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "ethernetip",
       "filename": "acd_identity_state.yaml",
       "path": "tests/scenarios/ethernetip/acd_identity_state.yaml",
@@ -810,6 +1047,8 @@
     },
     {
       "id": "assembly_fo_io",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "ethernetip",
       "filename": "assembly_fo_io.yaml",
       "path": "tests/scenarios/ethernetip/assembly_fo_io.yaml",
@@ -840,6 +1079,8 @@
     },
     {
       "id": "class1_watchdog",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "ethernetip",
       "filename": "class1_watchdog.yaml",
       "path": "tests/scenarios/ethernetip/class1_watchdog.yaml",
@@ -870,6 +1111,8 @@
     },
     {
       "id": "identity_get",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "ethernetip",
       "filename": "identity_get.yaml",
       "path": "tests/scenarios/ethernetip/identity_get.yaml",
@@ -899,6 +1142,8 @@
     },
     {
       "id": "list_identity",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "ethernetip",
       "filename": "list_identity.yaml",
       "path": "tests/scenarios/ethernetip/list_identity.yaml",
@@ -929,6 +1174,8 @@
     },
     {
       "id": "lldp_mgmt",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "ethernetip",
       "filename": "lldp_mgmt.yaml",
       "path": "tests/scenarios/ethernetip/lldp_mgmt.yaml",
@@ -957,6 +1204,8 @@
     },
     {
       "id": "qos_dscp",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "ethernetip",
       "filename": "qos_dscp.yaml",
       "path": "tests/scenarios/ethernetip/qos_dscp.yaml",
@@ -986,6 +1235,8 @@
     },
     {
       "id": "register_session",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "ethernetip",
       "filename": "register_session.yaml",
       "path": "tests/scenarios/ethernetip/register_session.yaml",
@@ -1015,6 +1266,8 @@
     },
     {
       "id": "sec_integrity_fo",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "ethernetip",
       "filename": "sec_integrity_fo.yaml",
       "path": "tests/scenarios/ethernetip/sec_integrity_fo.yaml",
@@ -1063,7 +1316,9 @@
       "cover": "not yet",
       "protocol_label": "EtherNet/IP",
       "status_label_ko": "갭",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_ethernetip_encapsulation_listservices_listinterfaces",
@@ -1086,7 +1341,9 @@
       "cover": "not yet",
       "protocol_label": "EtherNet/IP",
       "status_label_ko": "갭",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_ethernetip_ethernet_link_port_objects",
@@ -1109,7 +1366,9 @@
       "cover": "not yet",
       "protocol_label": "EtherNet/IP",
       "status_label_ko": "갭",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_ethernetip_large_forward_open_forward_close",
@@ -1132,7 +1391,9 @@
       "cover": "not yet",
       "protocol_label": "EtherNet/IP",
       "status_label_ko": "갭",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_ethernetip_originator_ucmm_tag_r_w",
@@ -1155,7 +1416,9 @@
       "cover": "not yet",
       "protocol_label": "EtherNet/IP",
       "status_label_ko": "갭",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_ethernetip_official_odva_ct_lab_execution_doc",
@@ -1178,10 +1441,14 @@
       "cover": "N/A",
       "protocol_label": "EtherNet/IP",
       "status_label_ko": "범위 밖",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "exception_illegal_address",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "modbus_tcp",
       "filename": "exception_illegal_address.yaml",
       "path": "tests/scenarios/modbus/exception_illegal_address.yaml",
@@ -1210,6 +1477,8 @@
     },
     {
       "id": "fc03_read_holding",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "modbus_tcp",
       "filename": "fc03_read_holding.yaml",
       "path": "tests/scenarios/modbus/fc03_read_holding.yaml",
@@ -1238,6 +1507,8 @@
     },
     {
       "id": "fc05_write_single_coil",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "modbus_tcp",
       "filename": "fc05_write_single_coil.yaml",
       "path": "tests/scenarios/modbus/fc05_write_single_coil.yaml",
@@ -1266,6 +1537,8 @@
     },
     {
       "id": "fc22_mask_write",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "modbus_tcp",
       "filename": "fc22_mask_write.yaml",
       "path": "tests/scenarios/modbus/fc22_mask_write.yaml",
@@ -1294,6 +1567,8 @@
     },
     {
       "id": "fc_server_matrix",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "modbus_tcp",
       "filename": "fc_server_matrix.yaml",
       "path": "tests/scenarios/modbus/fc_server_matrix.yaml",
@@ -1323,6 +1598,8 @@
     },
     {
       "id": "soak_short",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "modbus_tcp",
       "filename": "soak_short.yaml",
       "path": "tests/scenarios/modbus/soak_short.yaml",
@@ -1350,6 +1627,8 @@
     },
     {
       "id": "string_bytes",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "modbus_tcp",
       "filename": "string_bytes.yaml",
       "path": "tests/scenarios/modbus/string_bytes.yaml",
@@ -1397,7 +1676,9 @@
       "cover": "not yet",
       "protocol_label": "Modbus TCP",
       "status_label_ko": "갭",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_modbus_tcp_encapsulated_rtu_udp",
@@ -1420,7 +1701,9 @@
       "cover": "N/A",
       "protocol_label": "Modbus TCP",
       "status_label_ko": "범위 밖",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_modbus_tcp_modbus_rtu_serial",
@@ -1443,7 +1726,9 @@
       "cover": "N/A",
       "protocol_label": "Modbus TCP",
       "status_label_ko": "범위 밖",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_modbus_tcp_official_modbus_org_conformance_lab",
@@ -1466,10 +1751,14 @@
       "cover": "N/A",
       "protocol_label": "Modbus TCP",
       "status_label_ko": "범위 밖",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "batch_read_write_loopback",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "slmp",
       "filename": "batch_read_write_loopback.yaml",
       "path": "tests/scenarios/slmp/batch_read_write_loopback.yaml",
@@ -1499,6 +1788,8 @@
     },
     {
       "id": "device_table",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "slmp",
       "filename": "device_table.yaml",
       "path": "tests/scenarios/slmp/device_table.yaml",
@@ -1527,6 +1818,8 @@
     },
     {
       "id": "encode_batch_read",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "slmp",
       "filename": "encode_batch_read.yaml",
       "path": "tests/scenarios/slmp/encode_batch_read.yaml",
@@ -1556,6 +1849,8 @@
     },
     {
       "id": "reject_non_3e",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "slmp",
       "filename": "reject_non_3e.yaml",
       "path": "tests/scenarios/slmp/reject_non_3e.yaml",
@@ -1584,6 +1879,8 @@
     },
     {
       "id": "soak_short",
+      "bundle_id": null,
+      "suite": null,
       "protocol": "slmp",
       "filename": "soak_short.yaml",
       "path": "tests/scenarios/slmp/soak_short.yaml",
@@ -1630,7 +1927,9 @@
       "cover": "not yet",
       "protocol_label": "SLMP",
       "status_label_ko": "갭",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_slmp_3e_ascii",
@@ -1653,7 +1952,9 @@
       "cover": "N/A",
       "protocol_label": "SLMP",
       "status_label_ko": "범위 밖",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_slmp_4e_binary_ascii",
@@ -1676,7 +1977,9 @@
       "cover": "N/A",
       "protocol_label": "SLMP",
       "status_label_ko": "범위 밖",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_slmp_mitsubishi",
@@ -1699,7 +2002,9 @@
       "cover": "N/A",
       "protocol_label": "SLMP",
       "status_label_ko": "범위 밖",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "matrix_slmp_random_r_w_0x0403_0x1402",
@@ -1722,7 +2027,9 @@
       "cover": "N/A",
       "protocol_label": "SLMP",
       "status_label_ko": "범위 밖",
-      "golden": false
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "cclink",
@@ -1747,7 +2054,9 @@
       "status_label_ko": "범위 밖",
       "ctest_name": null,
       "golden": false,
-      "cover": null
+      "cover": null,
+      "bundle_id": null,
+      "suite": null
     },
     {
       "id": "ethercat",
@@ -1772,7 +2081,9 @@
       "status_label_ko": "범위 밖",
       "ctest_name": null,
       "golden": false,
-      "cover": null
+      "cover": null,
+      "bundle_id": null,
+      "suite": null
     }
   ]
 }

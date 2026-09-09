@@ -1,4 +1,6 @@
 name: record_read_im1_4
+id: PN-B-REC-002
+suite: PN-B-v1
 protocol: profinet
 tags: [record, im1, im2, im3, im4]
 device:

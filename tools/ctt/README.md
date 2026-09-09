@@ -10,7 +10,8 @@ are out of scope permanently. Purchased EIP stub is not a CTT DUT.
 ./build/ctt --scenario tests/scenarios/profinet/dcp_identify_name_of_station.yaml
 ./build/ctt --scenario tests/scenarios/ethernetip/register_session.yaml
 ./build/ctt --scenario tests/scenarios/modbus/fc03_read_holding.yaml
-./build/ctt --scenario tests/scenarios/slmp/encode_batch_read.yaml
+./build/ctt --scenario tests/scenarios/profinet/rtc1_cyclic_metrics.yaml \
+    --report /tmp/pn-b-cyc-002.json
 ctest --test-dir build --output-on-failure -LE soak_ci
 ctest --test-dir build --output-on-failure -L ethernetip
 ```
@@ -69,6 +70,7 @@ by the plugin. The common runner does not parse DCP/CIP frames.
 | `tests/golden/profinet/` | mock PCAPs for `golden:` replay |
 | `docs/ctt_lab.md` | veth / CODESYS / `pn_device_run` |
 | `docs/ctt_pi_matrix.md` | CC-A/B internal mapping (not certification) |
+| `docs/ctt_pn_bundle.md` | PN internal bundle-grade roadmap + TC IDs (**≠ PI cert**) |
 | `docs/ctt_odva_matrix.md` | EIP internal CT-style mapping (not official CT) |
 | `docs/ctt_board.html` | scenario status board (pass / skip / gap / out of scope; not cert) |
 
@@ -83,12 +85,8 @@ PROFINET actions (CC-B / RTC1):
 | `rpc_connect` | mock: `handle_rpc`. lab + `device.ip`: UDP 34964 |
 | `rpc_write` / `rpc_control` / `rpc_application_ready` | Write, ParameterEnd, Device AppReady indication |
 | `rpc_release` | AR down |
-| `io_cycle` | RTC1 cyclic smoke + period stats |
-| `alarm` | High (`0xFC01`) or `priority: low` (`0xFE01`) |
-| `record_read` | I&M0 `0xAFF0` … I&M4 `0xAFF4` |
-| `lldp` | ethertype `0x88CC`, NameOfStation |
-| `snmp_get` | mock `handle_snmp`; lab UDP 161 when `device.ip` |
-| `soak` | `duration_s` and/or `iterations`; unexpected frames / AR drops |
+| `rpc_inject` | raw `pdu_hex` or `opcode` — malformed / unknown CM (fail closed) |
+| `io_cycle` | RTC1 cyclic + period / late / missed / jitter vs `cycle_us` |
 
 Modbus TCP (`protocol: modbus_tcp`): `seed`, `request` (FC 01–06, 0F, 10, 16, 17),
 `map_check`, `soak`. Inject via `mb_stack_handle_adu` (no :502).
@@ -115,12 +113,20 @@ EtherNet/IP actions (mock `eip_cfg_t.mock`; no NIC):
 
 - unexpected frame count (non-RTC1, non-LLDP during soak)
 - AR drop count
-- cycle period min/max/avg and a coarse ms histogram (`<4,<8,<12,<16,<20,>=20`)
+- cycle count (`rtc1_frames`), late / missed vs `device.cycle_us` (1.5x / 2.5x)
+- `jitter_max_ns` = max `|dt - cycle_ns|`
+- coarse ms histogram (`<4,<8,<12,<16,<20,>=20`)
 
-Logged as `LOG_INFO` `ctt` metrics at the end of the run.
+Logged as `LOG_INFO` `ctt` metrics at the end of the run. Machine-readable
+summary: `./build/ctt --scenario <yaml> --report out.json` (`ctt-report/v1`).
+Internal gate, not PI certification. See `docs/ctt_pn_bundle.md`.
+
+YAML top-level `id:` / `bundle_id:` / `suite:` are copied into the report
+(`tc_id`, `suite_id`).
 
 | scenario | default PR `ctest` | how to run |
 |----------|--------------------|------------|
+| `rtc1_cyclic_metrics.yaml` | yes (48 RTC1 cycles + late/missed/jitter) | `ctest -R rtc1_cyclic_metrics` |
 | `soak_short.yaml` | yes (32 RTC1 iterations, sub-second) | `ctest -R soak_short` |
 | Identify / Sec1 Set `golden:` | yes (mock PCAP replay, no NIC) | `ctest -L golden` |
 | `soak_ci.yaml` | no (`-LE soak_ci`) | `ctest -L soak_ci` or workflow_dispatch `soak=true` (~30s) |

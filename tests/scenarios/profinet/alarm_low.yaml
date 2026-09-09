@@ -1,4 +1,6 @@
 name: alarm_low
+id: PN-B-ALM-002
+suite: PN-B-v1
 protocol: profinet
 tags: [alarm, low]
 device:

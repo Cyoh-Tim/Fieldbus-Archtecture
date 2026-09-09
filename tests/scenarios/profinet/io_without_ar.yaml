@@ -1,0 +1,22 @@
+# Internal TC PN-B-NEG-004 — no AR ⇒ no RTC1 cyclic IO.
+name: io_without_ar
+id: PN-B-NEG-004
+suite: PN-B-v1
+protocol: profinet
+tags: [rtc1, negative, bundle]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  cycle_us: 8000
+  input_len: 32
+  output_len: 8
+steps:
+  - action: io_cycle
+    require_ar: false
+    count: 8
+    cycle_ms: 8
+    expect:
+      ar: down
+      min_frames: 0
+      max_frames: 0

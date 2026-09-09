@@ -1,4 +1,6 @@
 name: soak_short
+id: PN-B-CYC-010
+suite: PN-B-v1
 protocol: profinet
 tags: [soak, rtc1, phase2]
 device:
@@ -21,3 +23,7 @@ steps:
       unexpected_frames: 0
       ar_drops: 0
       period_max_ms: 20
+      max_late: 8
+      max_missed: 0
+      jitter_max_ms: 16
+      min_period_samples: 16
