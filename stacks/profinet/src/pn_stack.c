@@ -168,6 +168,23 @@ int pn_stack_handle_rpc(pn_stack_t *s, const uint8_t *udp_payload, size_t len,
     return pn_rpc_handle(s, udp_payload, len, resp, resp_cap, resp_len);
 }
 
+int pn_stack_handle_snmp(pn_stack_t *s, const uint8_t *req, size_t len,
+                         uint8_t *resp, size_t resp_cap, size_t *resp_len)
+{
+    return pn_snmp_handle(s, req, len, resp, resp_cap, resp_len);
+}
+
+int pn_stack_send_alarm(pn_stack_t *s)
+{
+    return pn_alarm_send_dummy(s);
+}
+
+void pn_stack_send_lldp(pn_stack_t *s)
+{
+    pn_lldp_send(s);
+    s->last_lldp_ns = pn_now_ns();
+}
+
 void pn_stack_poll(pn_stack_t *s)
 {
     if (!s->running) {

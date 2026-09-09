@@ -339,11 +339,24 @@ ctest --output-on-failure
 
 ### Phase 2 — 시나리오 라이브러리 + soak
 
-PROFINET (Phase 1 플러그인 위, **CC-B / RTC1만**):
+PROFINET (Phase 1 플러그인 위, **CC-B / RTC1만**). 구현 상태 (이 트리):
 
-- Release, Alarm TX, Record Data (I&M0 `0xAFF0`), LLDP, SNMP GET(sysName)
-- Security Class 1 Connect + integrity block `0x0E01`
-- IRT 동기, PTCP, RT Class 3, CC-C 전용 시나리오는 추가하지 않는다
+| 시나리오 | YAML | 비고 |
+|----------|------|------|
+| Release | `rpc_release.yaml` | `pn_stack_handle_rpc` OP_RELEASE → AR down |
+| Alarm TX | `alarm_tx.yaml` | DUT `pn_stack_send_alarm` FrameID `0xFC01` |
+| Record I&M0 | `record_read_im0.yaml` | RPC Read, index `0xAFF0` |
+| LLDP | `lldp.yaml` | `pn_stack_send_lldp`, ethertype `0x88CC` |
+| SNMP GET sysName | `snmp_get_sysname.yaml` | `pn_stack_handle_snmp` (mock, no UDP 161) |
+| Sec1 Connect success | `rpc_connect_sec1_integrity.yaml` | integrity block `0x0E01`, AR up + short IO |
+| Soak (short) | `soak_short.yaml` | iterations; default `ctest` |
+| Soak (30s) | `soak_ci.yaml` | `ctest -L soak_ci`; PR 기본 게이트에서 제외 |
+| Soak (1–2h) | `nightly/soak_nightly.yaml` | ctest 미등록. workflow comment / 수동 |
+
+메트릭: unexpected frame, AR drop, cycle period histogram (`LOG_INFO`).
+
+IRT 동기, PTCP, RT Class 3, CC-C 전용 시나리오는 추가하지 않는다.
+EtherNet/IP / Modbus / SLMP 플러그인은 이 페이즈에 넣지 않는다.
 
 EtherNet/IP (플러그인이 생긴 뒤):
 
@@ -399,6 +412,13 @@ Phase 1:
 - mock 경로에 AF_PACKET / sudo 가 없음
 - runner는 `protocol:` 으로 플러그인을 고른다. Phase 1에서 구현된 플러그인은 profinet 하나
 
+Phase 2 (PROFINET, 이 트리):
+
+- Release, Alarm TX, I&M0 record, LLDP, SNMP sysName, Sec1 Connect **success** (`integrity: true`) 시나리오가 mock에서 green
+- `soak_short` 가 기본 `ctest`에 포함. `soak_ci` (30s) 는 `-LE soak_ci` 로 PR 게이트에서 제외
+- 메트릭(unexpected / AR drop / period histogram)을 `LOG_INFO` 로 남김
+- EIP / Modbus / SLMP 플러그인 없음. CC-C / IRT 시나리오 없음
+
 EIP 플러그인 (PR #4 merge 후):
 
 - `protocol: ethernetip` 시나리오가 같은 ctt 엔트리에서 green
@@ -422,7 +442,7 @@ CMake `ENABLE_PN_TESTS=ON` (기본) 일 때 `./build/test_pn_stack`. `ctest` 등
 | `test_dcp_set_sec` | Sec Class 1: unsigned Set 거부, signed Set 로 NameOfStation 갱신 | YAML 3.3 |
 | `test_connect_sec` | Sec Class 1: integrity 없는 Connect → RPC 응답은 있으나 `pn_stack_ar_up()==0` | YAML 3.4 |
 
-없는 것 (CC-B 갭, Phase 1–2에서 채움): RTC1 사이클, Release, Alarm, Record, LLDP, SNMP, Sec1 Connect 성공 경로.
+없는 것 (CC-B, Phase 3 랩): 실 NIC / AF_PACKET, PI Test Bundle 매핑.
 의도적으로 없는 것: IRT / PTCP / RT Class 3 / CC-C. 갭이 아니라 제품 범위 밖이다.
 
 ### EtherNet/IP (main vs PR #4)

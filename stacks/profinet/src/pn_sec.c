@@ -1,5 +1,9 @@
 #include "pn_internal.h"
 
+#include <errno.h>
+#include <string.h>
+
+#include "logger.h"
 #include "pn_crypto.h"
 #include "pn_endian.h"
 
@@ -25,6 +29,34 @@ int pn_sec_ok(const pn_stack_t *s, const uint8_t *data, size_t len,
 
 int pn_alarm_send_dummy(pn_stack_t *s)
 {
-    (void)s;
-    return 0;
+    if (!s || !s->ar.established) {
+        return -ENOTCONN;
+    }
+
+    /* Minimal RTA AlarmNotification (high). Not a full PI alarm state machine. */
+    uint8_t pay[32];
+    memset(pay, 0, sizeof(pay));
+    pn_wr_be16(pay, PN_FRAMEID_ALARM_HIGH);
+    pn_wr_be16(pay + 2, 1); /* dst endpoint */
+    pn_wr_be16(pay + 4, 1); /* src endpoint */
+    pay[6] = 0x01;          /* Data-RTA */
+    pn_wr_be16(pay + 8, 1); /* send seq */
+    pn_wr_be16(pay + 12, 12);
+    pn_wr_be16(pay + 14, 0x0001); /* diagnosis appeared */
+    pn_wr_be16(pay + 16, 0);      /* slot */
+    pn_wr_be16(pay + 18, 1);      /* subslot */
+    pn_wr_be16(pay + 20, 0x8000); /* manufacturer-specific USI */
+
+    uint8_t frame[PN_FRAME_MAX];
+    size_t flen = pn_eth_build(frame, sizeof(frame), s->ar.initiator_mac,
+                               s->cfg.mac, PN_ETHTYPE_PN, pay, sizeof(pay));
+    if (!flen) {
+        return -EMSGSIZE;
+    }
+    int rc = pn_eth_send(s, frame, flen);
+    if (rc == 0) {
+        LOG_INFO("pn_alarm", "TX dummy Alarm High FrameID=0x%04x",
+                 PN_FRAMEID_ALARM_HIGH);
+    }
+    return rc;
 }

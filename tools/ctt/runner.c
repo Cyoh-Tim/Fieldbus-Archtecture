@@ -21,6 +21,60 @@ void ctt_failf(ctt_run_t *run, int step, const char *action, const char *fmt,
     run->failures++;
 }
 
+void ctt_metrics_note_period(ctt_metrics_t *m, uint64_t dt_ns)
+{
+    if (!m || dt_ns == 0) {
+        return;
+    }
+    m->period_samples++;
+    m->period_sum_ns += dt_ns;
+    if (m->period_min_ns == 0 || dt_ns < m->period_min_ns) {
+        m->period_min_ns = dt_ns;
+    }
+    if (dt_ns > m->period_max_ns) {
+        m->period_max_ns = dt_ns;
+    }
+    unsigned ms = (unsigned)(dt_ns / 1000000ull);
+    int b = 5;
+    if (ms < 4) {
+        b = 0;
+    } else if (ms < 8) {
+        b = 1;
+    } else if (ms < 12) {
+        b = 2;
+    } else if (ms < 16) {
+        b = 3;
+    } else if (ms < 20) {
+        b = 4;
+    }
+    m->jitter_hist[b]++;
+}
+
+void ctt_metrics_log(const ctt_run_t *run)
+{
+    const ctt_metrics_t *m = &run->metrics;
+    if (m->rtc1_frames == 0 && m->unexpected_frames == 0 && m->ar_drops == 0 &&
+        m->period_samples == 0) {
+        return;
+    }
+    unsigned long long avg_ms = 0;
+    if (m->period_samples) {
+        avg_ms = (unsigned long long)((m->period_sum_ns / m->period_samples) /
+                                      1000000ull);
+    }
+    LOG_INFO("ctt",
+             "metrics protocol=%s scenario=%s unexpected=%u ar_drops=%u "
+             "rtc1=%u period_ms min=%llu max=%llu avg=%llu "
+             "hist_ms[<4,<8,<12,<16,<20,>=20]=%u,%u,%u,%u,%u,%u",
+             run->protocol ? run->protocol : "?",
+             run->name ? run->name : run->path, m->unexpected_frames,
+             m->ar_drops, m->rtc1_frames,
+             (unsigned long long)(m->period_min_ns / 1000000ull),
+             (unsigned long long)(m->period_max_ns / 1000000ull), avg_ms,
+             m->jitter_hist[0], m->jitter_hist[1], m->jitter_hist[2],
+             m->jitter_hist[3], m->jitter_hist[4], m->jitter_hist[5]);
+}
+
 int ctt_check(ctt_run_t *run, int step, const char *action, int cond,
               const char *fmt, ...)
 {
@@ -110,6 +164,8 @@ int ctt_run_file(const char *path)
                   "ring overflow (unexpected drop) to_dut=%d to_ctl=%d",
                   run.mock.to_dut.overflow, run.mock.to_ctl.overflow);
     }
+
+    ctt_metrics_log(&run);
 
     if (plugin->teardown) {
         plugin->teardown(&run);

@@ -20,6 +20,11 @@ typedef struct {
 
 static const uint8_t k_dcp_mc[6] = {0x01, 0x0E, 0xCF, 0x00, 0x00, 0x00};
 static const uint8_t k_ctl_mac[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+static const uint8_t k_lldp_mc[6] = {0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E};
+
+#define RPC_OP_CONNECT 0
+#define RPC_OP_RELEASE 1
+#define RPC_OP_READ    2
 
 static void sleep_ms(unsigned ms)
 {
@@ -457,6 +462,38 @@ static int step_rpc_connect(ctt_run_t *run, pn_priv_t *priv,
     return out;
 }
 
+#define CTT_PN_OTHER  0
+#define CTT_PN_RTC1   1
+#define CTT_PN_LLDP   2
+#define CTT_PN_ALARM  3
+#define CTT_PN_DCP    4
+
+static int classify_pn_frame(const uint8_t *frame, int n)
+{
+    if (n < 14) {
+        return CTT_PN_OTHER;
+    }
+    uint16_t et = pn_rd_be16(frame + 12);
+    if (et == PN_ETHTYPE_LLDP) {
+        return CTT_PN_LLDP;
+    }
+    if (et != PN_ETHTYPE_PN || n < 16) {
+        return CTT_PN_OTHER;
+    }
+    uint16_t fid = pn_rd_be16(frame + 14);
+    if (fid >= 0x8000u && fid <= 0xBBFFu) {
+        return CTT_PN_RTC1;
+    }
+    if (fid == PN_FRAMEID_ALARM_HIGH || fid == PN_FRAMEID_ALARM_LOW) {
+        return CTT_PN_ALARM;
+    }
+    if (fid == PN_FRAMEID_DCP_HELLO || fid == PN_FRAMEID_DCP_GETSET ||
+        fid == PN_FRAMEID_DCP_ID_REQ || fid == PN_FRAMEID_DCP_ID_RES) {
+        return CTT_PN_DCP;
+    }
+    return CTT_PN_OTHER;
+}
+
 static int is_rtc1(const uint8_t *frame, int n, uint16_t want_et)
 {
     if (n < 16) {
@@ -465,6 +502,31 @@ static int is_rtc1(const uint8_t *frame, int n, uint16_t want_et)
     uint16_t et = pn_rd_be16(frame + 12);
     uint16_t fid = pn_rd_be16(frame + 14);
     return et == want_et && fid >= 0x8000u && fid <= 0xBBFFu;
+}
+
+static void drain_io_frames(ctt_run_t *run, int *got_rtc1, uint64_t *last_ts,
+                            uint16_t want_et, int count_unexpected)
+{
+    uint8_t buf[CTT_FRAME_MAX];
+    uint64_t ts = 0;
+    int n;
+    while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), &ts)) > 0) {
+        int kind = classify_pn_frame(buf, n);
+        if (is_rtc1(buf, n, want_et) || kind == CTT_PN_RTC1) {
+            if (*last_ts != 0 && ts >= *last_ts) {
+                ctt_metrics_note_period(&run->metrics, ts - *last_ts);
+            }
+            *last_ts = ts;
+            run->metrics.rtc1_frames++;
+            if (got_rtc1) {
+                (*got_rtc1)++;
+            }
+        } else if (kind == CTT_PN_LLDP) {
+            /* periodic CC-B neighbor; expected during soak */
+        } else if (count_unexpected) {
+            run->metrics.unexpected_frames++;
+        }
+    }
 }
 
 static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
@@ -489,8 +551,8 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
 
     ctt_ring_clear(&run->mock.to_ctl);
 
-    uint64_t times[64];
     int got = 0;
+    uint64_t last_ts = 0;
     uint64_t budget_ns =
         (uint64_t)count * (uint64_t)cycle_ms * 1000000ull * 4ull;
     if (budget_ns < 250000000ull) {
@@ -500,18 +562,7 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
 
     while (got < min_frames && ctt_now_ns() < deadline) {
         pn_stack_poll(priv->stack);
-        uint8_t buf[CTT_FRAME_MAX];
-        uint64_t ts = 0;
-        int n;
-        while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), &ts)) >
-               0) {
-            if (is_rtc1(buf, n, want_et)) {
-                if (got < 64) {
-                    times[got] = ts;
-                }
-                got++;
-            }
-        }
+        drain_io_frames(run, &got, &last_ts, want_et, 0);
         if (got < min_frames) {
             sleep_ms(1);
         }
@@ -521,21 +572,332 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
                        "min_frames expect>=%d actual=%d cycle_ms=%u "
                        "ethertype=0x%04x (RTC1 CC-B, not IRT)",
                        min_frames, got, cycle_ms, want_et);
-    if (got >= 2) {
-        uint64_t max_dt = 0;
-        int lim = got < 64 ? got : 64;
-        for (int i = 1; i < lim; i++) {
-            uint64_t dt = times[i] - times[i - 1];
-            if (dt > max_dt) {
-                max_dt = dt;
-            }
-        }
-        long max_ms = (long)(max_dt / 1000000ull);
+    if (run->metrics.period_samples > 0) {
+        long max_ms = (long)(run->metrics.period_max_ns / 1000000ull);
         rc |= ctt_check(run, idx, action, max_ms <= period_max_ms,
                         "period_max_ms expect<=%ld actual=%ld (mock soft bound)",
                         period_max_ms, max_ms);
     }
     return rc;
+}
+
+static int step_rpc_release(ctt_run_t *run, pn_priv_t *priv,
+                            const yaml_node_t *step, int idx)
+{
+    const char *action = "rpc_release";
+    const yaml_node_t *expect = yaml_map_get(step, "expect");
+
+    uint8_t pdu[128];
+    memset(pdu, 0, sizeof(pdu));
+    pdu[0] = 1;
+    pn_wr_le16(pdu + 68, RPC_OP_RELEASE);
+    uint8_t z[4] = {0};
+    size_t stub = ndr_wrap(pdu + 80, z, 4);
+    pn_wr_le16(pdu + 74, (uint16_t)stub);
+
+    uint8_t resp[512];
+    size_t rlen = 0;
+    int rc = pn_stack_handle_rpc(priv->stack, pdu, 80 + stub, resp, sizeof(resp),
+                                 &rlen);
+    int rpc_ok = (rc == 0 && rlen > 0);
+    int ar_up = pn_stack_ar_up(priv->stack);
+
+    int out = 0;
+    if (expect && yaml_has(expect, "rpc_response")) {
+        int want = yaml_bool(expect, "rpc_response", 1);
+        out |= ctt_check(run, idx, action, rpc_ok == want,
+                         "rpc_response expect=%s actual=%s rlen=%zu rc=%d",
+                         want ? "true" : "false", rpc_ok ? "true" : "false",
+                         rlen, rc);
+    }
+    const char *ar = expect ? yaml_cstr(expect, "ar", "down") : "down";
+    int want_down = (strcmp(ar, "down") == 0 || strcmp(ar, "rejected") == 0);
+    if (want_down) {
+        out |= ctt_check(run, idx, action, !ar_up,
+                         "ar expect=down actual=%s (after Release)",
+                         ar_up ? "up" : "down");
+    } else if (strcmp(ar, "up") == 0) {
+        out |= ctt_check(run, idx, action, ar_up, "ar expect=up actual=%s",
+                         ar_up ? "up" : "down");
+    }
+    return out;
+}
+
+static int step_alarm(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
+                      int idx)
+{
+    const char *action = "alarm";
+    const yaml_node_t *expect = yaml_map_get(step, "expect");
+    unsigned long want_fid =
+        expect ? yaml_ulong(expect, "frame_id", PN_FRAMEID_ALARM_HIGH)
+               : PN_FRAMEID_ALARM_HIGH;
+    unsigned long want_et =
+        expect ? yaml_ulong(expect, "ethertype", PN_ETHTYPE_PN) : PN_ETHTYPE_PN;
+
+    if (!pn_stack_ar_up(priv->stack)) {
+        ctt_failf(run, idx, action, "AR not up; Connect first");
+        return -1;
+    }
+
+    ctt_ring_clear(&run->mock.to_ctl);
+    int src = pn_stack_send_alarm(priv->stack);
+    if (src != 0) {
+        ctt_failf(run, idx, action, "pn_stack_send_alarm rc=%d", src);
+        return -1;
+    }
+    pn_stack_poll(priv->stack);
+
+    int found = 0;
+    uint8_t buf[CTT_FRAME_MAX];
+    int n;
+    while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), NULL)) > 0) {
+        if (n < 16) {
+            continue;
+        }
+        uint16_t et = pn_rd_be16(buf + 12);
+        uint16_t fid = pn_rd_be16(buf + 14);
+        if (et == (uint16_t)want_et && fid == (uint16_t)want_fid) {
+            found = 1;
+            break;
+        }
+    }
+    return ctt_check(run, idx, action, found,
+                     "expect Alarm TX et=0x%04lx fid=0x%04lx (CC-B RTA, not IRT)",
+                     want_et, want_fid);
+}
+
+static int step_record_read(ctt_run_t *run, pn_priv_t *priv,
+                            const yaml_node_t *step, int idx)
+{
+    const char *action = "record_read";
+    uint16_t index = (uint16_t)yaml_ulong(step, "index", 0xAFF0);
+    uint16_t slot = (uint16_t)yaml_ulong(step, "slot", 0);
+    uint16_t subslot = (uint16_t)yaml_ulong(step, "subslot", 1);
+    const yaml_node_t *expect = yaml_map_get(step, "expect");
+    const char *want_order =
+        expect ? yaml_cstr(expect, "order_id", "FB-ARCH-PN-DEV") : "FB-ARCH-PN-DEV";
+    unsigned long want_vendor =
+        expect ? yaml_ulong(expect, "vendor_id", 0xABCD) : 0xABCD;
+
+    uint8_t body[34];
+    memset(body, 0, sizeof(body));
+    pn_wr_be16(body, 1); /* seqNumber */
+    pn_wr_be16(body + 22, slot);
+    pn_wr_be16(body + 24, subslot);
+    pn_wr_be16(body + 28, index);
+    pn_wr_be32(body + 30, 256);
+
+    uint8_t blocks[64];
+    size_t bn = wr_pn_block(blocks, PN_BLOCK_IOD_READ_REQ, body, sizeof(body));
+
+    uint8_t pdu[256];
+    memset(pdu, 0, sizeof(pdu));
+    pdu[0] = 1;
+    pn_wr_le16(pdu + 68, RPC_OP_READ);
+    size_t stub = ndr_wrap(pdu + 80, blocks, bn);
+    pn_wr_le16(pdu + 74, (uint16_t)stub);
+
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    int rc = pn_stack_handle_rpc(priv->stack, pdu, 80 + stub, resp, sizeof(resp),
+                                 &rlen);
+    int rpc_ok = (rc == 0 && rlen > 80 + 20);
+
+    const uint8_t *im = NULL;
+    size_t imlen = 0;
+    if (rpc_ok) {
+        uint32_t actual = pn_rd_le32(resp + 80 + 16);
+        im = resp + 100;
+        imlen = actual;
+        if (100 + imlen > rlen) {
+            imlen = rlen - 100;
+        }
+    }
+
+    int out = 0;
+    out |= ctt_check(run, idx, action, rpc_ok,
+                     "rpc Read rlen=%zu rc=%d index=0x%04x", rlen, rc, index);
+    if (index == 0xAFF0 && im && imlen >= 2) {
+        uint16_t vendor = pn_rd_be16(im);
+        out |= ctt_check(run, idx, action, vendor == (uint16_t)want_vendor,
+                         "I&M0 vendor_id expect=0x%04lx actual=0x%04x",
+                         want_vendor, vendor);
+        int has_order = contains(im, imlen, want_order);
+        out |= ctt_check(run, idx, action, has_order,
+                         "I&M0 order_id expect contains '%s' (index 0xAFF0)",
+                         want_order);
+    }
+    return out;
+}
+
+static int step_lldp(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
+                     int idx)
+{
+    const char *action = "lldp";
+    const yaml_node_t *expect = yaml_map_get(step, "expect");
+    unsigned long want_et =
+        expect ? yaml_ulong(expect, "ethertype", PN_ETHTYPE_LLDP)
+               : PN_ETHTYPE_LLDP;
+    const char *want_name = expect ? yaml_cstr(expect, "name_of_station",
+                                               pn_stack_cfg(priv->stack)
+                                                   ->station_name)
+                                   : pn_stack_cfg(priv->stack)->station_name;
+
+    ctt_ring_clear(&run->mock.to_ctl);
+    pn_stack_send_lldp(priv->stack);
+    pn_stack_poll(priv->stack);
+
+    int found = 0;
+    uint8_t buf[CTT_FRAME_MAX];
+    int n;
+    while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), NULL)) > 0) {
+        if (n < 14) {
+            continue;
+        }
+        uint16_t et = pn_rd_be16(buf + 12);
+        int mc = memcmp(buf, k_lldp_mc, 6) == 0;
+        if (et == (uint16_t)want_et && mc &&
+            (!want_name || contains(buf, (size_t)n, want_name))) {
+            found = 1;
+            break;
+        }
+    }
+    return ctt_check(run, idx, action, found,
+                     "expect LLDP et=0x%04lx dst=01:80:C2:00:00:0E name=%s",
+                     want_et, want_name ? want_name : "(any)");
+}
+
+static int step_snmp_get(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
+                         int idx)
+{
+    const char *action = "snmp_get";
+    const yaml_node_t *expect = yaml_map_get(step, "expect");
+    const char *want_name =
+        expect ? yaml_cstr(expect, "sysName",
+                           pn_stack_cfg(priv->stack)->station_name)
+               : pn_stack_cfg(priv->stack)->station_name;
+
+    /* SNMPv1 GET sysName (1.3.6.1.2.1.1.5.0). DUT ignores the PDU body. */
+    static const uint8_t k_get[] = {
+        0x30, 0x27, 0x02, 0x01, 0x00, 0x04, 0x06, 0x70, 0x75, 0x62, 0x6c,
+        0x69, 0x63, 0xa0, 0x1a, 0x02, 0x02, 0x00, 0x01, 0x02, 0x01, 0x00,
+        0x02, 0x01, 0x00, 0x30, 0x0e, 0x30, 0x0c, 0x06, 0x08, 0x2b, 0x06,
+        0x01, 0x02, 0x01, 0x01, 0x05, 0x00, 0x05, 0x00};
+
+    uint8_t resp[512];
+    size_t rlen = 0;
+    int rc = pn_stack_handle_snmp(priv->stack, k_get, sizeof(k_get), resp,
+                                  sizeof(resp), &rlen);
+    int ok = (rc == 0 && rlen > 0);
+    static const uint8_t k_oid[] = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x05,
+                                    0x00};
+    int has_oid = 0;
+    if (ok && rlen >= sizeof(k_oid)) {
+        for (size_t i = 0; i + sizeof(k_oid) <= rlen; i++) {
+            if (memcmp(resp + i, k_oid, sizeof(k_oid)) == 0) {
+                has_oid = 1;
+                break;
+            }
+        }
+    }
+    int has_name = ok && want_name && contains(resp, rlen, want_name);
+    int out = 0;
+    out |= ctt_check(run, idx, action, ok, "snmp handle rc=%d rlen=%zu", rc,
+                     rlen);
+    out |= ctt_check(run, idx, action, has_oid,
+                     "expect sysName OID 1.3.6.1.2.1.1.5.0 in GetResponse");
+    out |= ctt_check(run, idx, action, has_name, "expect sysName=%s",
+                     want_name ? want_name : "(any)");
+    return out;
+}
+
+static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
+                     int idx)
+{
+    const char *action = "soak";
+    const yaml_node_t *expect = yaml_map_get(step, "expect");
+    unsigned duration_s =
+        yaml_has(step, "duration_s") ? (unsigned)yaml_ulong(step, "duration_s", 0)
+                                     : 0;
+    int iterations =
+        yaml_has(step, "iterations") ? (int)yaml_long(step, "iterations", 0) : 0;
+    unsigned cycle_ms = (unsigned)yaml_long(step, "cycle_ms", 8);
+    int min_frames = expect && yaml_has(expect, "min_frames")
+                         ? (int)yaml_long(expect, "min_frames", 0)
+                         : 0;
+    unsigned want_unexp =
+        expect ? (unsigned)yaml_ulong(expect, "unexpected_frames", 0) : 0;
+    unsigned want_drops =
+        expect ? (unsigned)yaml_ulong(expect, "ar_drops", 0) : 0;
+    long period_max_ms =
+        expect && yaml_has(expect, "period_max_ms")
+            ? yaml_long(expect, "period_max_ms", 20)
+            : -1;
+
+    if (!duration_s && !iterations) {
+        iterations = 32;
+    }
+    if (!pn_stack_ar_up(priv->stack)) {
+        ctt_failf(run, idx, action, "AR not up; Connect first (RTC1 soak)");
+        return -1;
+    }
+
+    ctt_ring_clear(&run->mock.to_ctl);
+    unsigned unexp_before = run->metrics.unexpected_frames;
+    unsigned drops_before = run->metrics.ar_drops;
+    unsigned rtc1_before = run->metrics.rtc1_frames;
+
+    int got = 0;
+    uint64_t last_ts = 0;
+    uint64_t start = ctt_now_ns();
+    uint64_t deadline =
+        duration_s ? start + (uint64_t)duration_s * 1000000000ull
+                   : start + (uint64_t)iterations * (uint64_t)cycle_ms *
+                                 1000000ull * 8ull;
+    if (!duration_s && deadline - start < 250000000ull) {
+        deadline = start + 250000000ull;
+    }
+
+    while (ctt_now_ns() < deadline) {
+        if (!duration_s && iterations > 0 && got >= iterations) {
+            break;
+        }
+        pn_stack_poll(priv->stack);
+        drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1);
+        if (!pn_stack_ar_up(priv->stack)) {
+            run->metrics.ar_drops++;
+            break;
+        }
+        sleep_ms(1);
+    }
+    /* catch frames that arrived on the last poll */
+    pn_stack_poll(priv->stack);
+    drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1);
+
+    unsigned unexp = run->metrics.unexpected_frames - unexp_before;
+    unsigned drops = run->metrics.ar_drops - drops_before;
+    unsigned rtc1 = run->metrics.rtc1_frames - rtc1_before;
+    if (min_frames <= 0) {
+        min_frames = iterations > 0 ? iterations : 1;
+    }
+
+    int out = 0;
+    out |= ctt_check(run, idx, action, rtc1 >= (unsigned)min_frames,
+                     "soak rtc1 expect>=%d actual=%u duration_s=%u iterations=%d",
+                     min_frames, rtc1, duration_s, iterations);
+    out |= ctt_check(run, idx, action, unexp <= want_unexp,
+                     "unexpected_frames expect<=%u actual=%u", want_unexp,
+                     unexp);
+    out |= ctt_check(run, idx, action, drops <= want_drops,
+                     "ar_drops expect<=%u actual=%u", want_drops, drops);
+    if (period_max_ms >= 0 && run->metrics.period_samples > 0) {
+        long max_ms = (long)(run->metrics.period_max_ns / 1000000ull);
+        out |= ctt_check(run, idx, action, max_ms <= period_max_ms,
+                         "period_max_ms expect<=%ld actual=%ld (mock soft)",
+                         period_max_ms, max_ms);
+    }
+    (void)cycle_ms;
+    return out;
 }
 
 static int pn_setup(ctt_run_t *run)
@@ -546,7 +908,7 @@ static int pn_setup(ctt_run_t *run)
 
     const char *iface = dev ? yaml_cstr(dev, "iface", "mock") : "mock";
     if (strcmp(iface, "mock") != 0) {
-        LOG_ERROR("ctt_pn", "Phase 1 CI path only supports iface=mock (got %s)",
+        LOG_ERROR("ctt_pn", "CTT CI path only supports iface=mock (got %s)",
                   iface);
         return -EINVAL;
     }
@@ -635,9 +997,28 @@ static int pn_step(ctt_run_t *run, const yaml_node_t *step, int index)
     if (strcmp(action, "io_cycle") == 0) {
         return step_io_cycle(run, priv, step, index);
     }
+    if (strcmp(action, "rpc_release") == 0) {
+        return step_rpc_release(run, priv, step, index);
+    }
+    if (strcmp(action, "alarm") == 0) {
+        return step_alarm(run, priv, step, index);
+    }
+    if (strcmp(action, "record_read") == 0) {
+        return step_record_read(run, priv, step, index);
+    }
+    if (strcmp(action, "lldp") == 0) {
+        return step_lldp(run, priv, step, index);
+    }
+    if (strcmp(action, "snmp_get") == 0) {
+        return step_snmp_get(run, priv, step, index);
+    }
+    if (strcmp(action, "soak") == 0) {
+        return step_soak(run, priv, step, index);
+    }
     ctt_failf(run, index, action,
-              "unknown or Phase-2 action (Phase 1: dcp_identify, dcp_set, "
-              "rpc_connect, io_cycle; CC-C/IRT never in scope)");
+              "unknown action (profinet CC-B: dcp_identify, dcp_set, "
+              "rpc_connect, rpc_release, io_cycle, alarm, record_read, lldp, "
+              "snmp_get, soak; CC-C/IRT never in scope)");
     return -1;
 }
 

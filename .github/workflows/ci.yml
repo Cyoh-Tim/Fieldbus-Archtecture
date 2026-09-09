@@ -3,6 +3,12 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      soak:
+        description: "Also run 30s CI soak (not in the default PR gate)"
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -21,5 +27,33 @@ jobs:
       - name: Build
         run: cmake --build build
 
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
+      - name: Test (Phase 1 + Phase 2; short soak by iterations; exclude 30s soak_ci)
+        run: ctest --test-dir build --output-on-failure -LE soak_ci
+
+  soak-ci:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.soak == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON
+      - name: Build
+        run: cmake --build build
+      - name: 30s soak
+        run: ctest --test-dir build --output-on-failure -L soak_ci
+
+  # Nightly soak (1–2 h). Not a PR gate. Uncomment and/or trigger via workflow_dispatch.
+  # soak-nightly:
+  #   if: github.event_name == 'workflow_dispatch'
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 150
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: sudo apt-get update && sudo apt-get install -y build-essential cmake
+  #     - run: cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON
+  #     - run: cmake --build build
+  #     - run: ./build/ctt --scenario tests/scenarios/profinet/nightly/soak_nightly.yaml

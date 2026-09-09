@@ -1,0 +1,22 @@
+name: soak_nightly
+protocol: profinet
+tags: [soak, rtc1, nightly]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  cycle_us: 8000
+  input_len: 32
+  output_len: 8
+steps:
+  - action: rpc_connect
+    integrity: false
+    expect:
+      ar: up
+  - action: soak
+    duration_s: 3600            # 1 h; not a PR gate. Use 7200 for 2 h.
+    cycle_ms: 8
+    expect:
+      min_frames: 1
+      unexpected_frames: 0
+      ar_drops: 0

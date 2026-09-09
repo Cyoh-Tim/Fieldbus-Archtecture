@@ -44,6 +44,7 @@
 #define PN_RPC_PORT           34964
 #define PN_SNMP_PORT          161
 
+#define PN_BLOCK_IOD_READ_REQ 0x0009u
 #define PN_BLOCK_AR_REQ       0x0101u
 #define PN_BLOCK_IOCR_REQ     0x0102u
 #define PN_BLOCK_ALARMCR_REQ  0x0103u

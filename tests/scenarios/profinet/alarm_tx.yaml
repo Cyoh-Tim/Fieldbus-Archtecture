@@ -1,0 +1,16 @@
+name: alarm_tx
+protocol: profinet
+tags: [alarm, phase2]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+steps:
+  - action: rpc_connect
+    integrity: false
+    expect:
+      ar: up
+  - action: alarm
+    expect:
+      ethertype: 0x8892
+      frame_id: 0xFC01          # PN_FRAMEID_ALARM_HIGH
