@@ -425,3 +425,85 @@ unsigned long yaml_ulong(const yaml_node_t *map, const char *key,
     unsigned long v = parse_num(s, &ok);
     return ok ? v : def;
 }
+
+static int parse_num_token(const char *s, size_t n, long *out)
+{
+    char buf[64];
+    if (!s || n == 0 || n >= sizeof(buf)) {
+        return -1;
+    }
+    memcpy(buf, s, n);
+    buf[n] = '\0';
+    int ok = 0;
+    unsigned long v = parse_num(buf, &ok);
+    if (!ok) {
+        return -1;
+    }
+    *out = (long)v;
+    return 0;
+}
+
+static int fill_longs_scalar(const char *s, long *out, int cap)
+{
+    if (!s) {
+        return 0;
+    }
+    while (*s && isspace((unsigned char)*s)) {
+        s++;
+    }
+    if (*s == '[') {
+        s++;
+    }
+    int n = 0;
+    while (*s && n < cap) {
+        while (*s && (isspace((unsigned char)*s) || *s == ',' || *s == ']')) {
+            if (*s == ']') {
+                return n;
+            }
+            s++;
+        }
+        if (*s == '\0') {
+            break;
+        }
+        const char *start = s;
+        while (*s && *s != ',' && *s != ']' && !isspace((unsigned char)*s)) {
+            s++;
+        }
+        if (parse_num_token(start, (size_t)(s - start), &out[n]) != 0) {
+            return -1;
+        }
+        n++;
+    }
+    return n;
+}
+
+int yaml_longs(const yaml_node_t *map, const char *key, long *out, int cap)
+{
+    const yaml_node_t *n = yaml_map_get(map, key);
+    if (!n || cap <= 0 || !out) {
+        return 0;
+    }
+    if (n->kind == YAML_KIND_SCALAR) {
+        return fill_longs_scalar(n->scalar, out, cap);
+    }
+    if (n->kind != YAML_KIND_SEQ) {
+        return 0;
+    }
+    int nfill = 0;
+    for (const yaml_node_t *c = n->child; c && nfill < cap; c = c->next) {
+        const char *s = NULL;
+        if (c->kind == YAML_KIND_SCALAR) {
+            s = c->scalar;
+        }
+        if (!s) {
+            return -1;
+        }
+        int ok = 0;
+        unsigned long v = parse_num(s, &ok);
+        if (!ok) {
+            return -1;
+        }
+        out[nfill++] = (long)v;
+    }
+    return nfill;
+}

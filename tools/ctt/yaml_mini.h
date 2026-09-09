@@ -37,4 +37,8 @@ int yaml_bool(const yaml_node_t *map, const char *key, int def);
 long yaml_long(const yaml_node_t *map, const char *key, long def);
 unsigned long yaml_ulong(const yaml_node_t *map, const char *key, unsigned long def);
 
+/* Fill out[] from a block sequence of scalars or a flow scalar like
+ * `[0x1234, 0xABCD]`. Returns count, or -1 on parse error. Missing key → 0. */
+int yaml_longs(const yaml_node_t *map, const char *key, long *out, int cap);
+
 #endif /* YAML_MINI_H */

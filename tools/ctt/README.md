@@ -2,7 +2,9 @@
 
 In-repo fieldbus scenario harness: **one runner**, protocol plugins.
 DUT is `stacks/profinet/` (**CC-B + RT Class 1** only). CC-C / IRT are
-out of scope permanently. EtherNet/IP plugin remains a reserved slot.
+out of scope permanently. EtherNet/IP plugin remains a reserved slot until
+`stacks/ethernetip/` lands. **Modbus TCP** (`stacks/modbus/`) and **SLMP
+Binary 3E** (`stacks/slmp/`) plugins share the same `./build/ctt` entry.
 
 ```
 ./build/ctt --scenario tests/scenarios/profinet/dcp_identify_name_of_station.yaml
@@ -54,8 +56,12 @@ by the plugin. The common runner does not parse DCP/CIP frames.
 |------|------|
 | `tools/ctt/` | runner, report, mock eth ring, **AF_PACKET lab transport**, PCAP golden |
 | `tools/ctt/proto/profinet/` | Controller stub + PN steps |
+| `tools/ctt/proto/modbus/` | Modbus TCP client stub (`mb_stack_handle_adu`) |
+| `tools/ctt/proto/slmp/` | SLMP Binary 3E stub (`slmp_stack_handle_request`) |
 | `tools/ctt/proto/ethernetip/` | reserved until `stacks/ethernetip/` lands |
-| `tests/scenarios/<protocol>/` | YAML; directory matches `protocol:` |
+| `tests/scenarios/<protocol>/` | YAML; `protocol:` is `profinet` / `modbus_tcp` / `slmp` |
+| `docs/ctt_modbus_matrix.md` | Modbus FC coverage (not Modbus.org cert) |
+| `docs/ctt_slmp_matrix.md` | SLMP 3E coverage (not Mitsubishi cert) |
 | `tests/golden/profinet/` | mock PCAPs for `golden:` replay |
 | `docs/ctt_lab.md` | veth / CODESYS / `pn_device_run` |
 | `docs/ctt_pi_matrix.md` | CC-A/B internal mapping (not certification) |
@@ -73,6 +79,14 @@ PROFINET actions (CC-B / RTC1):
 | `lldp` | 2 | ethertype `0x88CC`, NameOfStation |
 | `snmp_get` | 2 | sysName via `pn_stack_handle_snmp` (no UDP :161) |
 | `soak` | 2 | `duration_s` and/or `iterations`; unexpected frames / AR drops |
+
+Modbus TCP (`protocol: modbus_tcp`): `seed`, `request` (FC 01–06, 0F, 10, 16, 17),
+`map_check`, `soak`. Inject via `mb_stack_handle_adu` (no :502).
+
+SLMP (`protocol: slmp`, Binary 3E only): `device_lookup`, `encode_batch_read` /
+`encode_batch_write`, `batch_read` / `batch_write`, `seed_words` / `seed_bits`,
+`map_check_*`, `inject`, `soak`, `create_stack` (ASCII/4E reject).
+4E/ASCII are out of scope.
 
 ## Soak / metrics
 

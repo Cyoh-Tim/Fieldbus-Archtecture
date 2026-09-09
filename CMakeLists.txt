@@ -32,6 +32,17 @@ target_include_directories(pn_stack PUBLIC stacks/profinet/include)
 target_include_directories(pn_stack PRIVATE include core)
 target_link_libraries(pn_stack PUBLIC Threads::Threads)
 
+# ---- Modbus TCP stack (self-hosted; CTT DUT via mb_stack_handle_adu) ----
+add_library(mb_stack STATIC stacks/modbus/src/mb_stack.c)
+target_include_directories(mb_stack PUBLIC stacks/modbus/include)
+target_include_directories(mb_stack PRIVATE include core)
+
+# ---- SLMP Binary 3E stack (self-hosted; CTT DUT via slmp_stack_handle_request) ----
+add_library(slmp_stack STATIC stacks/slmp/src/slmp_stack.c)
+target_include_directories(slmp_stack PUBLIC stacks/slmp/include)
+target_include_directories(slmp_stack PRIVATE include core)
+target_link_libraries(slmp_stack PUBLIC Threads::Threads)
+
 if(BUILD_DAEMON)
     find_package(PkgConfig REQUIRED)
 
@@ -134,14 +145,18 @@ if(BUILD_CTT)
         tools/ctt/pcap.c
         tools/ctt/plugin_registry.c
         tools/ctt/proto/profinet/pn_plugin.c
+        tools/ctt/proto/modbus/mb_plugin.c
+        tools/ctt/proto/slmp/slmp_plugin.c
     )
     target_include_directories(ctt PRIVATE
         tools/ctt
         stacks/profinet/include
+        stacks/modbus/include
+        stacks/slmp/include
         include
         core
     )
-    target_link_libraries(ctt PRIVATE pn_stack)
+    target_link_libraries(ctt PRIVATE pn_stack mb_stack slmp_stack)
     if(ENABLE_CTT_AF_PACKET)
         target_compile_definitions(ctt PRIVATE CTT_ENABLE_AF_PACKET=1)
     endif()
@@ -186,6 +201,22 @@ if(BUILD_CTT)
            sc_name STREQUAL "dcp_set_sec_class1")
             set_tests_properties(ctt_pn_${sc_name} PROPERTIES LABELS "golden")
         endif()
+    endforeach()
+    file(GLOB CTT_MB_SCENARIOS CONFIGURE_DEPENDS
+         "${CMAKE_SOURCE_DIR}/tests/scenarios/modbus/*.yaml")
+    foreach(sc ${CTT_MB_SCENARIOS})
+        get_filename_component(sc_name ${sc} NAME_WE)
+        add_test(NAME ctt_mb_${sc_name} COMMAND ctt --scenario ${sc})
+        set_tests_properties(ctt_mb_${sc_name} PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    endforeach()
+    file(GLOB CTT_SLMP_SCENARIOS CONFIGURE_DEPENDS
+         "${CMAKE_SOURCE_DIR}/tests/scenarios/slmp/*.yaml")
+    foreach(sc ${CTT_SLMP_SCENARIOS})
+        get_filename_component(sc_name ${sc} NAME_WE)
+        add_test(NAME ctt_slmp_${sc_name} COMMAND ctt --scenario ${sc})
+        set_tests_properties(ctt_slmp_${sc_name} PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endforeach()
     # Lab AF_PACKET is tests/run_ctt_lab.sh — not registered (needs CAP_NET_RAW).
 endif()
