@@ -317,6 +317,21 @@ if(BUILD_DAEMON AND BUILD_API)
         RESOURCE_LOCK "modbus_15560")
     set_tests_properties(example_fake_sensor_once PROPERTIES
         RESOURCE_LOCK "modbus_15560")
+    # In-repo software masters vs live loopback DUT (not CODESYS, not cert).
+    add_test(NAME sw_master_soak_short
+        COMMAND bash "${CMAKE_SOURCE_DIR}/examples/run_sw_master_soak.sh"
+                all --seconds 2 --period-ms 50
+                --skip-configure --skip-build
+                --build-dir "${CMAKE_BINARY_DIR}")
+    set_tests_properties(sw_master_soak_short PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        LABELS "example;sw_master"
+        TIMEOUT 90
+        RESOURCE_LOCK "modbus_15560" "slmp_15561" "eip_15562")
+    set_tests_properties(example_fake_sensor_once_slmp PROPERTIES
+        RESOURCE_LOCK "slmp_15561")
+    set_tests_properties(example_fake_sensor_once_ethernetip PROPERTIES
+        RESOURCE_LOCK "eip_15562")
 endif()
 
 if(BUILD_CTT)
@@ -430,6 +445,15 @@ if(BUILD_DAEMON AND BUILD_API)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         DEPENDS fake_sensor_app
         COMMENT "Modbus DUT + CODESYS-shaped stand-in (not SoftPLC, not certification)"
+        USES_TERMINAL
+    )
+    add_custom_target(run_sw_master_soak
+        COMMAND "${CMAKE_COMMAND}" -E env "BUILD_DIR=${CMAKE_BINARY_DIR}"
+                bash "${CMAKE_SOURCE_DIR}/examples/run_sw_master_soak.sh"
+                --skip-configure all --seconds 3
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        DEPENDS fake_sensor_app
+        COMMENT "Software masters vs live loopback DUT (not CODESYS, not certification)"
         USES_TERMINAL
     )
 endif()

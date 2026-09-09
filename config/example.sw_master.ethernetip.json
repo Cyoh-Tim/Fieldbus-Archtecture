@@ -1,0 +1,61 @@
+{
+  "protocol": "ethernetip",
+  "device": {
+    "name": "sw_master_eip_dut",
+    "role": "server"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "_comment": "Live Adapter sockets for the in-repo software master (not CODESYS, not ODVA CT). mock=false binds TCP/UDP on loopback test ports — no CAP_NET_RAW, not privileged 44818. security_class 0 so Forward Open needs no HMAC. LLDP/ACD off.",
+    "role": "server",
+    "bind_ip": "127.0.0.1",
+    "port": 15562,
+    "udp_io_port": 15563,
+    "vendor_id": 43981,
+    "device_type": 12,
+    "product_code": 1,
+    "serial_number": 305419896,
+    "product_name": "FieldbusSensor",
+    "input_assembly": 150,
+    "output_assembly": 101,
+    "config_assembly": 100,
+    "input_size": 64,
+    "output_size": 16,
+    "rpi_us": 20000,
+    "security_class": 0,
+    "protection_mode": 0,
+    "lldp_enable": false,
+    "acd_enable": false,
+    "iface": "lo",
+    "mock": false
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "read",
+      "data_type": "string",
+      "length": 32,
+      "address": {
+        "ethernetip": {
+          "tag": "Sensor1.Barcode",
+          "assembly": 150,
+          "byte_offset": 0,
+          "length": 32
+        }
+      }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "float",
+      "length": 4,
+      "address": {
+        "ethernetip": {
+          "assembly": 150,
+          "byte_offset": 32,
+          "length": 4
+        }
+      }
+    }
+  ]
+}

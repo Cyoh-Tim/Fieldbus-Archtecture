@@ -88,8 +88,13 @@
         <pre>./examples/run_mock_flow.sh
 ./examples/run_mock_flow.sh modbus</pre>
       </div>
+      <a class="card" href="sw_master_io.md">
+        <h2><span class="n">2b</span> 소프트웨어 마스터 soak</h2>
+        <p>CODESYS 없이 Modbus / SLMP / EIP 라이브 루프백. PROFINET 은 mock 만. 인증 아님.</p>
+        <pre>./examples/run_sw_master_soak.sh</pre>
+      </a>
       <a class="card" href="codesys_master_io.md">
-        <h2><span class="n">2b</span> CODESYS SoftPLC 마스터</h2>
+        <h2><span class="n">2c</span> CODESYS SoftPLC 마스터</h2>
         <p>우리 DUT 는 Modbus TCP 서버. SoftPLC/IDE 앱은 수동. 스탠드인 ≠ CODESYS.</p>
         <pre>./examples/run_codesys_dut.sh --stand-in</pre>
       </a>

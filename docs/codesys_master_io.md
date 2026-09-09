@@ -7,6 +7,10 @@ Modbus TCP 서버 · (패키지가 있으면) EtherNet/IP Adapter · PROFINET De
 이 클라우드 에이전트 VM 과 GitHub Actions 에서는 SoftPLC 부트 애플리케이션을
 다운로드하지 않았다. SoftPLC 가 IO 를 돌렸다고 주장하지 말 것.
 
+CODESYS **없이** 우리 스택에 실제 IO 를 돌리는 경로(Modbus/SLMP/EIP 라이브 루프백,
+PROFINET 제외): [`sw_master_io.md`](sw_master_io.md)
+(`./examples/run_sw_master_soak.sh`). 이 문서는 SoftPLC 쪽이다.
+
 한 줄 DUT:
 
 ```
