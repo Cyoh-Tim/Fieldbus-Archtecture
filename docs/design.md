@@ -4,8 +4,8 @@
 - 대상: Modbus, SLMP, CC-Link, EtherNet/IP, PROFINET (추후 EtherCAT 등 추가 예정)
 - 런타임에는 **한 번에 하나의 프로토콜만** 활성화되어 통신을 수행한다. 프로토콜 선택은 배포 시점의 설정(config)으로 결정된다.
 - 이 다섯(추후 확장 포함) 프로토콜을 위한 **개별 프로그램을 따로 만들지 않고, 하나의 프로젝트/하나의 바이너리(데몬)**로 통합한다.
-- Profinet, EtherNet/IP는 **상용 스택을 이미 구매**한 상태이므로, 자체 구현이 아니라 해당 SDK를 래핑하는 어댑터를 만든다. Modbus(libmodbus), SLMP(자체 디코더)는 오픈소스/자체 구현으로 처리한다. CC-Link, EtherCAT은 아직 미정 — 인터페이스만 비워두고 후속 어댑터로 추가할 수 있는 구조를 지금 만들어야 한다.
-- **PROFINET 성능 등급 제약**: 타깃이 A-core(Cortex-A급 애플리케이션 프로세서)이고 IRT 전용 ASIC(하드웨어 타임스탬핑/동기 스위칭을 지원하는 칩)이 없으므로, **IRT(Isochronous Real-Time)급은 애초에 목표 범위 밖**이다. PROFINET 어댑터는 **RT(Real-Time) 등급**까지만 보장하는 것으로 설계·문서화하고, 구매한 스택의 스펙도 RT 등급 지원 여부 기준으로 확인해야 한다. 동기 정밀도가 필요한 응용에는 이 데몬을 쓸 수 없다는 점을 config/README에 명시할 것.
+- Profinet, EtherNet/IP, Modbus, SLMP는 **자체 스택** (`stacks/profinet/`, `stacks/ethernetip/`, `stacks/modbus/`, `stacks/slmp/`). 벤더 SDK는 쓰지 않는다(선택적 교체만 `third_party/`). CC-Link, EtherCAT은 아직 미정 — 인터페이스만 비워두고 후속 어댑터로 추가할 수 있는 구조를 지금 만들어야 한다.
+- **PROFINET 성능 등급 제약**: 타깃이 A-core(Cortex-A급 애플리케이션 프로세서)이고 IRT 전용 ASIC(하드웨어 타임스탬핑/동기 스위칭을 지원하는 칩)이 없으므로, **IRT(Isochronous Real-Time) / CC-C 는 애초에 목표 범위 밖**이다. PROFINET 어댑터는 **CC-B + RT Class 1**까지만 보장한다. 동기 정밀도가 필요한 응용에는 이 데몬을 쓸 수 없다는 점을 config/README에 명시할 것.
 - **핵심 요구사항**: 담당자가 Modbus/SLMP/CC-Link/EtherNet-IP/PROFINET에 대한 사전 지식이 전혀 없어도, 대상 PLC/상위 시스템의 "통신 가이드 문서"(레지스터 맵, 디바이스 코드 표 등)만 보고 JSON 설정 파일을 채우면 데몬이 그대로 동작해야 한다. 즉 **프로토콜 지식은 어댑터 코드 안에 캡슐화되고, 사용자는 데이터 매핑만 기술**한다.
 
 ## 1. 아키텍처 원칙
@@ -33,7 +33,7 @@
         ┌───────────┬───────┼───────┬─────────────┬───────────┐
    ┌────▼───┐  ┌────▼───┐ ┌─▼────┐ ┌▼──────────┐ ┌▼─────────┐
    │ Modbus │  │  SLMP  │ │CClink│ │EtherNet/IP │ │ PROFINET │  ...(EtherCAT 등 추후)
-   │libmodbus│ │ 자체구현│ │(TBD) │ │(구매 스택) │ │(구매 스택)│
+   │자체스택 │ │자체3E  │ │(TBD) │ │ 자체스택   │ │자체스택  │
    └────────┘  └────────┘ └──────┘ └───────────┘ └──────────┘
 ```
 
@@ -49,7 +49,7 @@ interface ProtocolAdapter {
     health() -> {connected: bool, last_error: string|null}
 }
 ```
-- 각 어댑터는 위 인터페이스만 만족하면 되고, 내부적으로 PROFINET/EtherNet-IP는 구매 스택의 콜백/폴링 모델을 이 인터페이스 뒤로 감춘다(어댑터가 "번역기" 역할).
+- 각 어댑터는 위 인터페이스만 만족하면 되고, 내부적으로 자체 스택의 콜백/폴링 모델을 이 인터페이스 뒤로 감춘다(어댑터가 "번역기" 역할).
 - CC-Link, EtherCAT은 지금은 `NotImplementedAdapter`(스텁)로 등록해 두고, 레지스트리 구조상 자리만 확보한다.
 
 ## 3. Config(JSON) 설계
@@ -105,20 +105,20 @@ interface ProtocolAdapter {
 // cclink (추후 확정 시 이 자리만 채우면 됨)
 { "station_no": 1 }
 
-// ethernetip (구매 스택 파라미터에 맞춰 조정)
-{ "ip": "192.168.0.30", "assembly_instance": 100 }
+// ethernetip (자체 스택 stacks/ethernetip/)
+{ "role": "adapter", "bind_ip": "0.0.0.0", "input_assembly": 150, "output_assembly": 100 }
 
-// profinet (구매 스택 파라미터에 맞춰 조정)
+// profinet (자체 스택 stacks/profinet/)
 { "device_name": "sensor1.profinet-device", "gsdml": "GSDML-Vxx-Sensor1.xml" }
 ```
 
 ## 4. 프로토콜별 구현 메모
 | 프로토콜 | 구현 방식 | 역할 | 비고 |
 |---|---|---|---|
-| Modbus | libmodbus 래핑 | 서버(슬레이브) | holding/input register, coil, discrete input 매핑 지원 |
-| SLMP | 자체 디코더/인코더 | 클라이언트 | 3E 프레임 기준, 디바이스 코드(D/M/X/Y 등) 파싱 |
+| Modbus | 자체 스택 `stacks/modbus/` | 서버(기본)/클라이언트 | libmodbus 없음. 센서 표기 범용 매핑. 상세 `docs/modbus_stack.md` |
+| SLMP | 자체 스택 `stacks/slmp/` | 클라이언트(기본)/서버(시뮬) | Binary 3E batch only. ASCII/4E 제품 목표 아님. 상세 `docs/slmp_stack.md` |
 | CC-Link | 스텁 → 추후 구현 | TBD | 인터페이스 자리만 확보, `NotImplementedAdapter` |
-| EtherNet/IP | 구매 스택(Pyramid 등) 래핑 | 서버/클라이언트 (스택 지원 범위에 따름) | 어댑터가 스택의 콜백 모델을 poll_cycle로 흡수 |
+| EtherNet/IP | 자체 스택 `stacks/ethernetip/` | Adapter Class 1 + Originator explicit | Sec Class 1/2. 공식 ODVA DoC는 멤버십+랩. 상세 `docs/ethernetip_stack.md` |
 | PROFINET | 자체 Device 스택 `stacks/profinet/` | 디바이스(슬레이브) | CC-B + RT Class 1 + Security Class 1(HMAC). IRT 없음. PI 인증 아님. 상세는 `docs/profinet_stack.md` |
 | EtherCAT(추후) | 미정 | TBD | 인터페이스만 남겨둠 |
 
@@ -131,10 +131,10 @@ interface ProtocolAdapter {
 
 ## 6. 구현 우선순위(제안)
 1. 코어(Config Loader, Point Registry, Scheduler, Logger) + `ProtocolAdapter` 인터페이스 정의
-2. Modbus 어댑터 (libmodbus, 서버) — 가장 단순하므로 코어 검증용으로 먼저
-3. SLMP 어댑터 (자체 디코더, 클라이언트)
-4. EtherNet/IP 어댑터 (구매 스택 래핑)
-5. PROFINET 어댑터 (구매 스택 래핑)
+2. Modbus 어댑터 (자체 TCP 스택, 서버) — 가장 단순하므로 코어 검증용으로 먼저
+3. SLMP 어댑터 (자체 Binary 3E 스택, 클라이언트)
+4. EtherNet/IP 어댑터 (자체 스택, Adapter Class 1)
+5. PROFINET 어댑터 (자체 Device 스택, CC-B / RT Class 1)
 6. CC-Link / EtherCAT 스텁 어댑터 등록 (레지스트리 확장성 검증용)
 
 ## 7. Claude Code 등 구현 에이전트에게 넘길 때의 지시문 예시

@@ -25,8 +25,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake libssl-dev
 
-      - name: Configure (pn/eip/mb/slmp stacks + ctt, no libmodbus)
-        run: cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON -DENABLE_EIP_TESTS=ON
+      - name: Configure (pn/eip/mb/slmp stacks + ctt, no daemon)
+        run: cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON -DENABLE_EIP_TESTS=ON -DENABLE_MB_TESTS=ON -DENABLE_SLMP_TESTS=ON
 
       - name: Build
         run: cmake --build build
@@ -40,6 +40,20 @@ jobs:
       - name: EtherNet/IP mock scenarios (no NIC)
         run: ctest --test-dir build --output-on-failure -L ethernetip
 
+  daemon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssl-dev libcjson-dev
+      - name: Configure (product daemon, no libmodbus)
+        run: cmake -S . -B build-daemon -DBUILD_DAEMON=ON -DBUILD_CTT=OFF -DENABLE_PN_TESTS=ON -DENABLE_EIP_TESTS=ON -DENABLE_MB_TESTS=ON -DENABLE_SLMP_TESTS=ON
+      - name: Build
+        run: cmake --build build-daemon
+      - name: Unit tests (stacks + adapters)
+        run: ctest --test-dir build-daemon --output-on-failure
 
   soak-ci:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.soak == 'true'

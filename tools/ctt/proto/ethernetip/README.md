@@ -4,7 +4,8 @@ Scanner/Originator stub for the self-hosted Adapter DUT in
 `stacks/ethernetip/`. Selected by `protocol: ethernetip` on the same
 `./build/ctt` binary.
 
-**DUT is not** `adapters/ethernetip/` purchased-stack stub.
+**DUT is not** `adapters/ethernetip/` (daemon adapter). CTT talks to the
+self-hosted stack directly.
 
 ```
 cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON

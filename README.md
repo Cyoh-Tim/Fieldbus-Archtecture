@@ -3,12 +3,18 @@
 Modbus / SLMP / CC-Link / EtherNet-IP / PROFINET 중 **한 번에 하나의 프로토콜**을
 config.json 설정만으로 선택해 동작시키는 필드버스 런타임.
 
-PROFINET 은 구매 스택 래핑이 아니라 `stacks/profinet/` 자체 Device 스택이다.
-범위는 **CC-B + RT Class 1 + Security Class 1(HMAC integrity)**. IRT 없음.
-자세한 내용은 [`docs/profinet_stack.md`](docs/profinet_stack.md).
+담당자가 각 프로토콜을 몰라도, 통신 가이드의 주소만 `points`에 채우면 되도록
+프로토콜 지식은 어댑터/스택 안에 캡슐화한다.
 
-EtherNet/IP 는 `stacks/ethernetip/` 자체 Adapter 스택이다 (구매 스텁 아님).
-CTT Scanner 플러그인: [`docs/ctt.md`](docs/ctt.md), [`docs/ctt_odva_matrix.md`](docs/ctt_odva_matrix.md).
+- **PROFINET**: `stacks/profinet/` 자체 Device 스택 (CC-B + RT Class 1 + Sec Class 1).
+  **IRT / CC-C 는 목표 아님.** 상세: [`docs/profinet_stack.md`](docs/profinet_stack.md)
+- **Modbus TCP**: `stacks/modbus/` 자체 스택 (기본 서버/슬레이브, **libmodbus 없음**).
+  가이드: [`docs/modbus_stack.md`](docs/modbus_stack.md)
+- **SLMP**: `stacks/slmp/` 자체 Binary 3E 스택 (제품 범위는 3E batch only; ASCII/4E 예약만).
+  가이드: [`docs/slmp_stack.md`](docs/slmp_stack.md)
+- **EtherNet/IP**: `stacks/ethernetip/` 자체 Adapter 스택 (구매 스텁 아님).
+  가이드: [`docs/ethernetip_stack.md`](docs/ethernetip_stack.md),
+  [`docs/ethernetip_guide.md`](docs/ethernetip_guide.md)
 
 전체 설계 배경은 [`docs/design.md`](docs/design.md).
 CTT 설계(공통 runner + 프로토콜 플러그인)는 [`docs/ctt.md`](docs/ctt.md).
@@ -17,15 +23,15 @@ CTT 설계(공통 runner + 프로토콜 플러그인)는 [`docs/ctt.md`](docs/ct
 ```
 include/               ProtocolAdapter 공통 인터페이스
 core/                   코어(설정 로더, 스케줄러, 어댑터 레지스트리, main)
-adapters/modbus/        Modbus TCP 어댑터 (daemon: libmodbus; CTT DUT 는 stacks/modbus)
-adapters/slmp/          SLMP 어댑터 (daemon stub on this tree; CTT DUT 는 stacks/slmp)
+adapters/modbus/        Modbus TCP 어댑터 — 자체 스택 연결
+adapters/slmp/          SLMP 어댑터 — 자체 Binary 3E 스택 연결
 adapters/cclink/        CC-Link 어댑터 (미확정, 스텁)
 adapters/ethernetip/    EtherNet/IP 어댑터 — 자체 스택 연결
 adapters/profinet/      PROFINET 어댑터 — 자체 스택 연결 (RT Class 1, IRT 없음)
+stacks/modbus/          Modbus TCP 서버/클라이언트 스택 (데몬 + CTT DUT)
+stacks/slmp/            SLMP Binary 3E 스택 (데몬 + CTT DUT, ASCII/4E 없음)
 stacks/ethernetip/      EtherNet/IP Adapter(+Originator) 스택
 stacks/profinet/        PROFINET IO Device 스택 (DCP/LLDP/RPC/RTC1/SNMP/Sec1)
-stacks/modbus/          Modbus TCP 자체 스택 (CTT DUT, libmodbus 아님)
-stacks/slmp/            SLMP Binary 3E 자체 스택 (CTT DUT, ASCII/4E 없음)
 tools/ctt/              Controller Test Tool (공통 runner + proto plugins)
 tests/scenarios/        CTT YAML (profinet/, ethernetip/, modbus/, slmp/)
 third_party/            (선택) 향후 벤더 EIP 스택 교체 위치 — git 커밋 안 함
@@ -35,16 +41,18 @@ docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)
 ```
 
 ## 빌드
+데몬(어댑터) + 스택 + CTT:
 ```
-sudo apt install libmodbus-dev libssl-dev   # 데몬: libmodbus; EIP 스택: OpenSSL
+sudo apt install libssl-dev libcjson-dev   # EIP: OpenSSL; 데몬: cJSON (없으면 FetchContent)
 mkdir build && cd build
 cmake ..
 make
 ```
+외부 Modbus 라이브러리(libmodbus)는 **필요 없다**.
 
-PN + EIP 스택 + Controller Test Tool 만 (libmodbus 불필요):
+스택 + Controller Test Tool 만 (cJSON/어댑터 불필요):
 ```
-cmake -S . -B build -DBUILD_DAEMON=OFF
+cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON -DENABLE_EIP_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure -LE soak_ci
 ```
@@ -52,12 +60,16 @@ ctest --test-dir build --output-on-failure -LE soak_ci
 ## 실행
 ```
 ./build/multiproto_daemon config/example.modbus.json
+./build/multiproto_daemon config/example.slmp.json
+./build/multiproto_daemon config/example.ethernetip.json
 ./build/multiproto_daemon config/example.profinet.json
+./build/test_mb_stack
+./build/test_slmp_stack
+./build/test_eip_stack
 ./build/ctt --scenario tests/scenarios/profinet/dcp_identify_name_of_station.yaml
 ./build/ctt --scenario tests/scenarios/ethernetip/register_session.yaml
-./build/test_pn_crypto
-./build/test_eip_crypto
-./build/test_eip_stack
+./build/ctt --scenario tests/scenarios/modbus/fc03_read_holding.yaml
+./build/ctt --scenario tests/scenarios/slmp/encode_batch_read.yaml
 ```
 CTT 설계·시나리오 스키마는 [`docs/ctt.md`](docs/ctt.md), 사용법은 [`tools/ctt/README.md`](tools/ctt/README.md).
 랩/golden/PI 매핑은 [`docs/ctt_lab.md`](docs/ctt_lab.md), [`docs/ctt_pi_matrix.md`](docs/ctt_pi_matrix.md).

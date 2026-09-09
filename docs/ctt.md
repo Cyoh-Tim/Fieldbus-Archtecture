@@ -11,10 +11,10 @@ Phase 1 DUT: `stacks/profinet/` — **CC-B + RT Class 1** + Security Class 1 HMA
 PN 플러그인 역할: **Controller stub + DCP station** (RT Class 1). Device 스택을 대체하지 않는다.
 
 EtherNet/IP 플러그인 DUT는 자체 스택 `stacks/ethernetip/` 이다.
-`adapters/ethernetip/` 구매 스택 스텁은 CTT DUT가 아니다.
+`adapters/ethernetip/` 데몬 어댑터는 CTT DUT가 아니다.
 
 Modbus TCP DUT는 `stacks/modbus/` (`protocol: modbus_tcp`). SLMP DUT는
-`stacks/slmp/` Binary 3E (`protocol: slmp`). libmodbus / ASCII·4E 는 CTT DUT가 아니다.
+`stacks/slmp/` Binary 3E (`protocol: slmp`). ASCII·4E 는 CTT DUT가 아니다.
 
 ## 0. 배경 / 목표
 
@@ -110,8 +110,8 @@ Ethernet 링과 RPC 주입은 같은 시나리오에서 섞는다 (Identify → 
 
 ### 1.2 EtherNet/IP 플러그인 — DUT 훅
 
-DUT = `stacks/ethernetip/` 자체 Adapter 스택. `adapters/ethernetip/` 구매 스택
-스텁은 CTT DUT가 아니다. 훅은 `stacks/ethernetip/include/eip_stack.h`.
+DUT = `stacks/ethernetip/` 자체 Adapter 스택. `adapters/ethernetip/` 데몬 어댑터는
+CTT DUT가 아니다. 훅은 `stacks/ethernetip/include/eip_stack.h`.
 
 | 훅 | CTT에서의 역할 |
 |----|----------------|
@@ -355,7 +355,8 @@ main에 있는 DUT는 `stacks/profinet/` 뿐이다. 구현 후속 PR에서:
 - `test_pn_stack.c` 의 DCP Identify / Sec1 DCP Set / Connect without integrity 를 `tests/scenarios/profinet/` 로 이전
 - HMAC RFC4231 단위 테스트는 `tests/test_*.c` 에 유지
 - RTC1 IO cycle smoke 시나리오 1개
-- `ctest` + GitHub Actions (ubuntu). 전체 데몬 빌드면 `libmodbus-dev` / cJSON. pn_stack + ctt 타깃이 더 단순하면 그걸 PR job으로 써도 된다
+- `ctest` + GitHub Actions (ubuntu). CTT PR job 은 `BUILD_DAEMON=OFF`.
+  데몬 빌드는 libmodbus 없이 cJSON(+FetchContent) + OpenSSL.
 - EtherNet/IP 플러그인은 **아직 구현하지 않는다** (슬롯만 문서/디렉터리 예약)
 
 현재 CMake는 `ENABLE_PN_TESTS` 로 `test_pn_stack` 실행파일만 만든다. `enable_testing()` / `add_test()` 가 없고 `.github/` 도 없다.
@@ -559,10 +560,9 @@ CMake `ENABLE_PN_TESTS=ON` (기본) 일 때 `./build/test_pn_stack`. `ctest` 등
 
 ### CI
 
-`.github/workflows/ci.yml` 이 mock `ctest` 게이트다. job 은 공통 `./build/ctt` 하나
+`.github/workflows/ci.yml` 이 mock `ctest` 게이트다. CTT job 은 공통 `./build/ctt`
 (`BUILD_DAEMON=OFF`). 프로토콜별 workflow 를 복제하지 않는다.
-`libssl-dev` 는 EIP 스택용. 전체 `multiproto_daemon` 링크는 `libmodbus` 가
-`REQUIRED` 이므로 기본 PR job 은 데몬을 켜지 않는다.
+`libssl-dev` 는 EIP 스택용. 데몬(`BUILD_DAEMON=ON`)은 libmodbus 없이 cJSON 만 필요하다.
 
 ## 8. 리스크 / 제약
 

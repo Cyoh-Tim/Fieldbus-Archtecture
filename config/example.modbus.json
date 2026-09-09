@@ -6,9 +6,13 @@
   },
   "cycle_ms": 8,
   "protocol_params": {
-    "ip": "192.168.0.10",
-    "port": 502,
-    "unit_id": 1
+    "role": "server",
+    "ip": "0.0.0.0",
+    "port": 1502,
+    "unit_id": 1,
+    "unit_id_any": false,
+    "max_clients": 4,
+    "client_timeout_ms": 200
   },
   "points": [
     {
@@ -16,8 +20,44 @@
       "access": "read",
       "data_type": "string",
       "length": 32,
+      "chars_per_register": 2,
+      "trim_null": true,
       "address": {
-        "modbus": { "register_type": "holding", "start": 40001 }
+        "modbus": {
+          "type": "holding",
+          "start": 40001,
+          "offset": 0,
+          "byte_offset": 0
+        }
+      }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 0.1,
+      "offset": 0.0,
+      "endian": "ABCD",
+      "address": {
+        "modbus": {
+          "type": "4x",
+          "address": "40001",
+          "offset": 16,
+          "quantity": 1
+        }
+      }
+    },
+    {
+      "name": "pressure",
+      "access": "read",
+      "data_type": "float",
+      "endian": "CDAB",
+      "address": {
+        "modbus": {
+          "register_type": "input",
+          "start": 30001,
+          "quantity": 2
+        }
       }
     },
     {
@@ -25,7 +65,36 @@
       "access": "write",
       "data_type": "bool",
       "address": {
-        "modbus": { "register_type": "coil", "start": 1 }
+        "modbus": {
+          "type": "coil",
+          "start": 1
+        }
+      }
+    },
+    {
+      "name": "alarm_bit",
+      "access": "write",
+      "data_type": "bool",
+      "address": {
+        "modbus": {
+          "type": "hr",
+          "start": 40100,
+          "bit": 3,
+          "bit_count": 1
+        }
+      }
+    },
+    {
+      "name": "status_nibble",
+      "access": "write",
+      "data_type": "uint16",
+      "address": {
+        "modbus": {
+          "type": "holding",
+          "start": 40101,
+          "bit": 0,
+          "bit_count": 4
+        }
       }
     }
   ]
