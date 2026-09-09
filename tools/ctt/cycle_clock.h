@@ -18,8 +18,9 @@ typedef struct ctt_cycle_clock {
 void ctt_cycle_clock_init(ctt_cycle_clock_t *c, uint64_t period_ns);
 
 /* Advance one period and sleep until that absolute deadline.
- * If already late, skip whole periods (no burst) then sleep to the next
- * future slot. period_ns == 0 is a no-op. */
+ * If this iteration started well after the previous deadline, resync
+ * (full period from now) instead of a short catch-up slot.
+ * period_ns == 0 is a no-op. */
 void ctt_cycle_clock_wait(ctt_cycle_clock_t *c);
 
 #endif /* CTT_CYCLE_CLOCK_H */
