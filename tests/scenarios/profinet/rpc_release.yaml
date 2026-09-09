@@ -1,4 +1,6 @@
 name: rpc_release
+id: PN-B-CM-002
+suite: PN-B-v1
 protocol: profinet
 tags: [rpc, release, phase2]
 device:

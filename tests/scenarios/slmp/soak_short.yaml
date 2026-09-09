@@ -1,12 +1,16 @@
+# Internal TC SLMP-3E-CYC-001 — batch read soak with late/missed/jitter.
 name: soak_short
+id: SLMP-3E-CYC-001
+suite: SLMP-3E-v1
 protocol: slmp
-tags: [soak]
+tags: [soak, bundle]
 device:
   role: server
   frame: 3e_binary
   pc_no: 0xFF
   dest_module_io: 0x03FF
   iface: mock
+  cycle_us: 8000
 steps:
   - action: seed_words
     device: D
@@ -18,5 +22,12 @@ steps:
     unit: word
     quantity: 1
     iterations: 32
+    cycle_ms: 8
     expect:
       min_ok: 32
+      unexpected_frames: 0
+      min_period_samples: 16
+      period_max_ms: 20
+      max_late: 8
+      max_missed: 0
+      jitter_max_ms: 16

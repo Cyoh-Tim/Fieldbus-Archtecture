@@ -1,0 +1,72 @@
+# Internal TC MB-T-CM-001 — write → read → overwrite → re-write. Not Modbus.org text.
+name: holding_lifetime
+id: MB-T-CM-001
+suite: MB-T-v1
+protocol: modbus_tcp
+tags: [fc03, fc16, lifetime, bundle]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 16
+  n_input: 8
+  n_coil: 8
+  n_discrete: 8
+  iface: mock
+steps:
+  - action: request
+    fc: 0x10
+    address: 0
+    values: [0x1111, 0x2222]
+    expect:
+      fc: 0x10
+  - action: request
+    fc: 0x03
+    address: 0
+    quantity: 2
+    expect:
+      values: [0x1111, 0x2222]
+  - action: map_check
+    type: holding
+    address: 0
+    values: [0x1111, 0x2222]
+  - action: request
+    unit_id: 9
+    fc: 0x03
+    address: 0
+    quantity: 2
+    expect:
+      no_response: true
+  - action: map_check
+    type: holding
+    address: 0
+    values: [0x1111, 0x2222]
+  - action: request
+    fc: 0x10
+    address: 0
+    values: [0xAAAA, 0xBBBB]
+    expect:
+      fc: 0x10
+  - action: request
+    fc: 0x03
+    address: 0
+    quantity: 2
+    expect:
+      values: [0xAAAA, 0xBBBB]
+  - action: request
+    fc: 0x06
+    address: 0
+    value: 0x1111
+    expect:
+      fc: 0x06
+  - action: request
+    fc: 0x10
+    address: 1
+    values: [0x2222]
+    expect:
+      fc: 0x10
+  - action: request
+    fc: 0x03
+    address: 0
+    quantity: 2
+    expect:
+      values: [0x1111, 0x2222]

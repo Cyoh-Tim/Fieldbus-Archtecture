@@ -17,6 +17,9 @@ typedef struct {
     uint32_t session;
     uint32_t o2t_conn_id;
     uint32_t t2o_conn_id;
+    uint16_t conn_serial;
+    uint16_t orig_vendor;
+    uint32_t orig_serial;
     uint8_t psk[EIP_PSK_LEN];
     int psk_set;
     uint8_t last_resp[2048];
@@ -47,6 +50,52 @@ static int parse_hex_bytes(const char *s, uint8_t *out, size_t out_len)
             return -1;
         }
         out[i] = (uint8_t)v;
+    }
+    return 0;
+}
+
+static int parse_hex_buf(const char *s, uint8_t *out, size_t cap, size_t *n)
+{
+    if (!s || !out || !n) {
+        return -1;
+    }
+    size_t sl = strlen(s);
+    if (sl == 0 || (sl % 2u) != 0) {
+        return -1;
+    }
+    size_t bytes = sl / 2u;
+    if (bytes > cap) {
+        return -1;
+    }
+    for (size_t i = 0; i < bytes; i++) {
+        unsigned v = 0;
+        if (sscanf(s + i * 2, "%2x", &v) != 1) {
+            return -1;
+        }
+        out[i] = (uint8_t)v;
+    }
+    *n = bytes;
+    return 0;
+}
+
+static int parse_integrity(const yaml_node_t *step, int *integrity,
+                           int *integrity_bad)
+{
+    const char *s = yaml_cstr(step, "integrity", "false");
+    *integrity = 0;
+    *integrity_bad = 0;
+    if (!s) {
+        return 0;
+    }
+    if (strcmp(s, "true") == 0 || strcmp(s, "True") == 0 ||
+        strcmp(s, "yes") == 0 || strcmp(s, "1") == 0) {
+        *integrity = 1;
+        return 0;
+    }
+    if (strcmp(s, "bad") == 0 || strcmp(s, "invalid") == 0) {
+        *integrity = 1;
+        *integrity_bad = 1;
+        return 0;
     }
     return 0;
 }
@@ -180,7 +229,7 @@ static const uint8_t *cip_data(const uint8_t *cip, size_t cip_len, size_t *n)
 }
 
 static int sendrr_cip(ctt_run_t *run, eip_priv_t *priv, const uint8_t *cip,
-                      size_t cip_len, int integrity)
+                      size_t cip_len, int integrity, int integrity_bad)
 {
     uint8_t mac[EIP_HMAC_LEN];
     int mac_set = 0;
@@ -193,6 +242,9 @@ static int sendrr_cip(ctt_run_t *run, eip_priv_t *priv, const uint8_t *cip,
         eip_wr_le32(material, priv->session);
         memcpy(material + 4, cip, cip_len);
         eip_hmac_sha256(priv->psk, EIP_PSK_LEN, material, 4 + cip_len, mac);
+        if (integrity_bad) {
+            mac[0] ^= 0xFF;
+        }
         mac_set = 1;
     }
 
@@ -270,6 +322,18 @@ static int check_encap_expect(ctt_run_t *run, eip_priv_t *priv, int idx,
                          "handle_encap failed rc=%d", encap_rc);
     }
     if (encap_rc != 0) {
+        if (expect && yaml_has(expect, "class1")) {
+            const char *c1 = yaml_cstr(expect, "class1", "");
+            int up = eip_stack_class1_up(priv->stack);
+            if (strcmp(c1, "up") == 0) {
+                out |= ctt_check(run, idx, action, up,
+                                 "class1 expect=up actual=down");
+            } else if (strcmp(c1, "down") == 0 ||
+                       strcmp(c1, "rejected") == 0) {
+                out |= ctt_check(run, idx, action, !up,
+                                 "class1 expect=down actual=up");
+            }
+        }
         return out;
     }
 
@@ -280,6 +344,14 @@ static int check_encap_expect(ctt_run_t *run, eip_priv_t *priv, int idx,
                            : 0;
         out |= ctt_check(run, idx, action, got == (uint16_t)want,
                          "cmd expect=0x%04lx actual=0x%04x", want, got);
+    }
+    if (expect && yaml_has(expect, "encap_status")) {
+        unsigned long want = yaml_ulong(expect, "encap_status", 0);
+        uint32_t got = (priv->last_resp_len >= 12)
+                           ? eip_rd_le32(priv->last_resp + 8)
+                           : 0xFFFFFFFFu;
+        out |= ctt_check(run, idx, action, got == (uint32_t)want,
+                         "encap_status expect=%lu actual=%u", want, got);
     }
     if (expect && yaml_has(expect, "session_handle")) {
         const char *s = yaml_cstr(expect, "session_handle", "");
@@ -430,7 +502,7 @@ static int step_get_attr(ctt_run_t *run, eip_priv_t *priv,
     cip[0] = CIP_SVC_GET_ATTR_SINGLE;
     cip[1] = (uint8_t)((pu + 1) / 2);
     memcpy(cip + 2, path, pu);
-    int rc = sendrr_cip(run, priv, cip, 2 + pu, 0);
+    int rc = sendrr_cip(run, priv, cip, 2 + pu, 0, 0);
     return check_encap_expect(run, priv, idx, action,
                               yaml_map_get(step, "expect"), rc);
 }
@@ -514,7 +586,8 @@ static int step_read_input(ctt_run_t *run, eip_priv_t *priv,
 }
 
 static size_t build_forward_open_body(uint8_t *fo, uint16_t serial,
-                                      uint32_t orig_serial, uint32_t o2t_rpi,
+                                      uint16_t orig_vendor, uint32_t orig_serial,
+                                      uint32_t o2t_rpi,
                                       uint32_t t2o_rpi, uint16_t o2t_size,
                                       uint16_t t2o_size, uint8_t timeout_mult)
 {
@@ -527,7 +600,7 @@ static size_t build_forward_open_body(uint8_t *fo, uint16_t serial,
     off += 4;
     eip_wr_le16(fo + off, serial);
     off += 2;
-    eip_wr_le16(fo + off, 1);
+    eip_wr_le16(fo + off, orig_vendor);
     off += 2;
     eip_wr_le32(fo + off, orig_serial);
     off += 4;
@@ -574,8 +647,11 @@ static int step_forward_open(ctt_run_t *run, eip_priv_t *priv,
                              const yaml_node_t *step, int idx)
 {
     const char *action = "forward_open";
-    int integrity = yaml_bool(step, "integrity", 0);
+    int integrity = 0;
+    int integrity_bad = 0;
+    parse_integrity(step, &integrity, &integrity_bad);
     uint16_t serial = (uint16_t)yaml_ulong(step, "serial", 0x1234);
+    uint16_t orig_vendor = (uint16_t)yaml_ulong(step, "orig_vendor", 1);
     uint32_t orig_serial = (uint32_t)yaml_ulong(step, "orig_serial", 0x99);
     uint32_t rpi = (uint32_t)yaml_ulong(step, "rpi_us", 8000);
     uint16_t o2t_size =
@@ -588,8 +664,8 @@ static int step_forward_open(ctt_run_t *run, eip_priv_t *priv,
 
     uint8_t fo[64];
     size_t off =
-        build_forward_open_body(fo, serial, orig_serial, rpi, rpi, o2t_size,
-                                t2o_size, tmo);
+        build_forward_open_body(fo, serial, orig_vendor, orig_serial, rpi, rpi,
+                                o2t_size, t2o_size, tmo);
     uint8_t cip[2 + 8 + 64];
     cip[0] = CIP_SVC_FORWARD_OPEN;
     cip[1] = 2;
@@ -598,17 +674,90 @@ static int step_forward_open(ctt_run_t *run, eip_priv_t *priv,
     cip[4] = 0x24;
     cip[5] = 1;
     memcpy(cip + 6, fo, off);
-    int rc = sendrr_cip(run, priv, cip, 6 + off, integrity);
+    int rc = sendrr_cip(run, priv, cip, 6 + off, integrity, integrity_bad);
     if (rc == 0) {
         uint32_t o2t = parse_fo_o2t(priv->last_resp, priv->last_resp_len);
         uint32_t t2o = parse_fo_t2o(priv->last_resp, priv->last_resp_len);
         if (o2t) {
             priv->o2t_conn_id = o2t;
+            priv->conn_serial = serial;
+            priv->orig_vendor = orig_vendor;
+            priv->orig_serial = orig_serial;
         }
         if (t2o) {
             priv->t2o_conn_id = t2o;
         }
     }
+    return check_encap_expect(run, priv, idx, action,
+                              yaml_map_get(step, "expect"), rc);
+}
+
+static int step_forward_close(ctt_run_t *run, eip_priv_t *priv,
+                              const yaml_node_t *step, int idx)
+{
+    const char *action = "forward_close";
+    int integrity = 0;
+    int integrity_bad = 0;
+    parse_integrity(step, &integrity, &integrity_bad);
+    uint16_t serial =
+        (uint16_t)yaml_ulong(step, "serial", priv->conn_serial);
+    uint16_t orig_vendor =
+        (uint16_t)yaml_ulong(step, "orig_vendor",
+                             priv->orig_vendor ? priv->orig_vendor : 1);
+    uint32_t orig_serial =
+        (uint32_t)yaml_ulong(step, "orig_serial", priv->orig_serial);
+
+    uint8_t fc[16];
+    memset(fc, 0, sizeof(fc));
+    fc[0] = 0x0A;
+    fc[1] = 0x05;
+    eip_wr_le16(fc + 2, serial);
+    eip_wr_le16(fc + 4, orig_vendor);
+    eip_wr_le32(fc + 6, orig_serial);
+    fc[10] = 0;
+    fc[11] = 0;
+
+    uint8_t cip[2 + 8 + 16];
+    cip[0] = CIP_SVC_FORWARD_CLOSE;
+    cip[1] = 2;
+    cip[2] = 0x20;
+    cip[3] = CIP_CLASS_CONN_MANAGER;
+    cip[4] = 0x24;
+    cip[5] = 1;
+    memcpy(cip + 6, fc, 12);
+    int rc = sendrr_cip(run, priv, cip, 6 + 12, integrity, integrity_bad);
+    int out = check_encap_expect(run, priv, idx, action,
+                                 yaml_map_get(step, "expect"), rc);
+    if (rc == 0) {
+        priv->o2t_conn_id = 0;
+        priv->t2o_conn_id = 0;
+    }
+    return out;
+}
+
+static int step_encap_inject(ctt_run_t *run, eip_priv_t *priv,
+                             const yaml_node_t *step, int idx)
+{
+    const char *action = "encap_inject";
+    uint8_t req[512];
+    size_t req_len = 0;
+    const char *hex = yaml_cstr(step, "pdu_hex", NULL);
+    if (hex && hex[0]) {
+        if (parse_hex_buf(hex, req, sizeof(req), &req_len) != 0) {
+            ctt_failf(run, idx, action, "bad pdu_hex");
+            return -1;
+        }
+    } else if (yaml_has(step, "cmd")) {
+        uint16_t cmd = (uint16_t)yaml_ulong(step, "cmd", 0);
+        memset(req, 0, EIP_ENCAP_HDR_SIZE);
+        eip_wr_le16(req, cmd);
+        eip_wr_le32(req + 4, priv->session);
+        req_len = EIP_ENCAP_HDR_SIZE;
+    } else {
+        ctt_failf(run, idx, action, "need pdu_hex or cmd");
+        return -1;
+    }
+    int rc = inject_encap(run, priv, req, req_len);
     return check_encap_expect(run, priv, idx, action,
                               yaml_map_get(step, "expect"), rc);
 }
@@ -638,6 +787,62 @@ static size_t build_class1_io(uint8_t *io, uint32_t o2t, uint32_t seq,
     return ioff;
 }
 
+static int step_require_class1(const yaml_node_t *step)
+{
+    if (yaml_has(step, "require_class1")) {
+        return yaml_bool(step, "require_class1", 1);
+    }
+    if (yaml_has(step, "require_ar")) {
+        return yaml_bool(step, "require_ar", 1);
+    }
+    return 1;
+}
+
+static int check_cyclic_expect(ctt_run_t *run, const ctt_metrics_t *before,
+                               const yaml_node_t *expect, int idx,
+                               const char *action, unsigned got)
+{
+    if (!expect) {
+        return 0;
+    }
+    int rc = 0;
+    unsigned late = run->metrics.late_cycles - before->late_cycles;
+    unsigned missed = run->metrics.missed_cycles - before->missed_cycles;
+    unsigned samples = run->metrics.period_samples - before->period_samples;
+
+    if (yaml_has(expect, "max_frames")) {
+        unsigned maxf = (unsigned)yaml_ulong(expect, "max_frames", got);
+        rc |= ctt_check(run, idx, action, got <= maxf,
+                        "max_frames expect<=%u actual=%u", maxf, got);
+    }
+    if (yaml_has(expect, "max_late")) {
+        unsigned want = (unsigned)yaml_ulong(expect, "max_late", 0);
+        rc |= ctt_check(run, idx, action, late <= want,
+                        "max_late expect<=%u actual=%u (dt > 1.5 * rpi/cycle_us)",
+                        want, late);
+    }
+    if (yaml_has(expect, "max_missed")) {
+        unsigned want = (unsigned)yaml_ulong(expect, "max_missed", 0);
+        rc |= ctt_check(run, idx, action, missed <= want,
+                        "max_missed expect<=%u actual=%u (dt > 2.5 * rpi/cycle_us)",
+                        want, missed);
+    }
+    if (yaml_has(expect, "jitter_max_ms")) {
+        long want = yaml_long(expect, "jitter_max_ms", 0);
+        long actual = (long)(run->metrics.jitter_max_ns / 1000000ull);
+        rc |= ctt_check(run, idx, action, actual <= want,
+                        "jitter_max_ms expect<=%ld actual=%ld (max |dt - cycle|)",
+                        want, actual);
+    }
+    if (yaml_has(expect, "min_period_samples")) {
+        unsigned want = (unsigned)yaml_ulong(expect, "min_period_samples", 0);
+        rc |= ctt_check(run, idx, action, samples >= want,
+                        "min_period_samples expect>=%u actual=%u", want,
+                        samples);
+    }
+    return rc;
+}
+
 static int step_class1_io(ctt_run_t *run, eip_priv_t *priv,
                           const yaml_node_t *step, int idx)
 {
@@ -646,18 +851,31 @@ static int step_class1_io(ctt_run_t *run, eip_priv_t *priv,
     uint16_t plen = (uint16_t)yaml_ulong(step, "length", cfg->output_size);
     uint8_t fill = (uint8_t)yaml_ulong(step, "fill", 0x5A);
     uint32_t seq = (uint32_t)yaml_ulong(step, "seq", 1);
+    int require_c1 = step_require_class1(step);
     uint8_t payload[EIP_ASSEMBLY_SIZE_MAX];
     memset(payload, fill, plen);
-    if (priv->o2t_conn_id == 0) {
-        ctt_failf(run, idx, action, "no O->T conn id (forward_open first)");
-        return -1;
+    uint32_t o2t = priv->o2t_conn_id;
+    if (o2t == 0) {
+        if (require_c1) {
+            ctt_failf(run, idx, action, "no O->T conn id (forward_open first)");
+            return -1;
+        }
+        o2t = 0xDEADBEEFu;
     }
     uint8_t io[16 + EIP_ASSEMBLY_SIZE_MAX];
-    size_t ioff = build_class1_io(io, priv->o2t_conn_id, seq, payload, plen);
+    size_t ioff = build_class1_io(io, o2t, seq, payload, plen);
     int rc = eip_stack_handle_io(priv->stack, io, ioff);
     pump(priv);
-    int out = ctt_check(run, idx, action, rc == 0, "handle_io rc=%d", rc);
     const yaml_node_t *expect = yaml_map_get(step, "expect");
+    int out = 0;
+    if (expect && yaml_has(expect, "io_ok")) {
+        int want = yaml_bool(expect, "io_ok", 1);
+        out |= ctt_check(run, idx, action, (rc == 0) == want,
+                         "io_ok expect=%s actual rc=%d",
+                         want ? "true" : "false", rc);
+    } else if (require_c1) {
+        out |= ctt_check(run, idx, action, rc == 0, "handle_io rc=%d", rc);
+    }
     if (expect && yaml_has(expect, "u8")) {
         uint8_t buf[EIP_ASSEMBLY_SIZE_MAX];
         int rd = eip_stack_read_output(priv->stack, 0, buf, plen);
@@ -683,25 +901,50 @@ static int step_io_cycle(ctt_run_t *run, eip_priv_t *priv,
     const char *action = "io_cycle";
     const yaml_node_t *expect = yaml_map_get(step, "expect");
     unsigned count = (unsigned)yaml_ulong(step, "count", 8);
-    unsigned cycle_ms = (unsigned)yaml_ulong(step, "cycle_ms", 1);
+    unsigned cycle_ms;
+    if (yaml_has(step, "cycle_ms")) {
+        cycle_ms = (unsigned)yaml_ulong(step, "cycle_ms", 8);
+    } else if (run->metrics.cycle_ns >= 1000000ull) {
+        cycle_ms = (unsigned)(run->metrics.cycle_ns / 1000000ull);
+    } else {
+        cycle_ms = 8;
+    }
+    int require_c1 = step_require_class1(step);
     const eip_cfg_t *cfg = eip_stack_cfg(priv->stack);
     uint16_t plen = cfg->output_size;
     uint8_t payload[EIP_ASSEMBLY_SIZE_MAX];
     memset(payload, 0x5A, plen);
 
-    if (priv->o2t_conn_id == 0) {
-        ctt_failf(run, idx, action, "no O->T conn id");
-        return -1;
+    uint32_t o2t = priv->o2t_conn_id;
+    if (o2t == 0) {
+        if (require_c1) {
+            ctt_failf(run, idx, action, "no O->T conn id");
+            return -1;
+        }
+        o2t = 0xDEADBEEFu;
     }
 
+    unsigned min_frames;
+    if (expect && yaml_has(expect, "min_frames")) {
+        min_frames = (unsigned)yaml_ulong(expect, "min_frames", 0);
+    } else if (!require_c1) {
+        min_frames = 0;
+    } else {
+        min_frames = count;
+    }
+    long period_max_ms =
+        expect ? yaml_long(expect, "period_max_ms", 20) : 20;
+    int has_period_max = expect && yaml_has(expect, "period_max_ms");
+
+    ctt_metrics_t before = run->metrics;
     ctt_ring_clear(&run->mock.to_ctl);
     unsigned produced = 0;
     uint64_t prev_ns = 0;
     for (unsigned i = 0; i < count; i++) {
         uint8_t io[16 + EIP_ASSEMBLY_SIZE_MAX];
-        size_t ioff =
-            build_class1_io(io, priv->o2t_conn_id, i + 1, payload, plen);
-        if (eip_stack_handle_io(priv->stack, io, ioff) != 0) {
+        size_t ioff = build_class1_io(io, o2t, i + 1, payload, plen);
+        int iorc = eip_stack_handle_io(priv->stack, io, ioff);
+        if (iorc != 0 && require_c1) {
             run->metrics.unexpected_frames++;
         }
         pump(priv);
@@ -723,13 +966,16 @@ static int step_io_cycle(ctt_run_t *run, eip_priv_t *priv,
             sleep_ms(cycle_ms);
         }
     }
-    unsigned min_frames =
-        expect ? (unsigned)yaml_ulong(expect, "min_frames", 0) : 0;
     int out = 0;
-    if (min_frames) {
-        out |= ctt_check(run, idx, action, produced >= min_frames,
-                         "produced Class1 frames %u < min_frames %u",
-                         produced, min_frames);
+    out |= ctt_check(run, idx, action, produced >= min_frames,
+                     "produced Class1 frames %u < min_frames %u", produced,
+                     min_frames);
+    unsigned samples = run->metrics.period_samples - before.period_samples;
+    if (has_period_max && samples > 0) {
+        long max_ms = (long)(run->metrics.period_max_ns / 1000000ull);
+        out |= ctt_check(run, idx, action, max_ms <= period_max_ms,
+                         "period_max_ms expect<=%ld actual=%ld (mock soft bound)",
+                         period_max_ms, max_ms);
     }
     if (expect && yaml_has(expect, "class1")) {
         int up = eip_stack_class1_up(priv->stack);
@@ -739,9 +985,10 @@ static int step_io_cycle(ctt_run_t *run, eip_priv_t *priv,
                          "class1 expect=%s actual=%s", c1,
                          up ? "up" : "down");
     }
-    if (!eip_stack_class1_up(priv->stack)) {
+    if (require_c1 && !eip_stack_class1_up(priv->stack)) {
         run->metrics.ar_drops++;
     }
+    out |= check_cyclic_expect(run, &before, expect, idx, action, produced);
     return out;
 }
 
@@ -866,6 +1113,9 @@ static int eip_setup(ctt_run_t *run)
         (uint32_t)(dev ? yaml_ulong(dev, "serial_number", 0x12345678)
                        : 0x12345678);
     cfg.rpi_us = (uint32_t)(dev ? yaml_ulong(dev, "rpi_us", 8000) : 8000);
+    if (dev && yaml_has(dev, "cycle_us")) {
+        cfg.rpi_us = (uint32_t)yaml_ulong(dev, "cycle_us", cfg.rpi_us);
+    }
     cfg.security_class =
         (int)(dev ? yaml_long(dev, "security_class", 0) : 0);
     cfg.protection_mode =
@@ -925,6 +1175,9 @@ static int eip_setup(ctt_run_t *run)
              "DUT=stacks/ethernetip (self stack) mock=1 product=%s "
              "sec_class=%d",
              cfg.product_name, cfg.security_class);
+    if (cfg.rpi_us) {
+        ctt_metrics_set_cycle_ns(&run->metrics, (uint64_t)cfg.rpi_us * 1000ull);
+    }
     return 0;
 }
 
@@ -965,6 +1218,12 @@ static int eip_step(ctt_run_t *run, const yaml_node_t *step, int index)
     if (strcmp(action, "forward_open") == 0) {
         return step_forward_open(run, priv, step, index);
     }
+    if (strcmp(action, "forward_close") == 0) {
+        return step_forward_close(run, priv, step, index);
+    }
+    if (strcmp(action, "encap_inject") == 0) {
+        return step_encap_inject(run, priv, step, index);
+    }
     if (strcmp(action, "class1_io") == 0) {
         return step_class1_io(run, priv, step, index);
     }
@@ -986,7 +1245,8 @@ static int eip_step(ctt_run_t *run, const yaml_node_t *step, int index)
     ctt_failf(run, index, action,
               "unknown action (ethernetip: register_session, list_identity, "
               "get_attr, write_input, read_input, read_output, forward_open, "
-              "class1_io, io_cycle, acd_conflict, lldp, watchdog, poll)");
+              "forward_close, encap_inject, class1_io, io_cycle, acd_conflict, "
+              "lldp, watchdog, poll)");
     return -1;
 }
 

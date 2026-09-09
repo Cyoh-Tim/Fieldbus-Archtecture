@@ -1,6 +1,9 @@
+# Internal TC EIP-A-ACD-001 — not an ODVA CT case.
 name: acd_identity_state
+id: EIP-A-ACD-001
+suite: EIP-A-v1
 protocol: ethernetip
-tags: [acd, identity, migrate]
+tags: [acd, identity, migrate, bundle]
 device:
   iface: mock
   acd_enable: true

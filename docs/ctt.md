@@ -140,6 +140,8 @@ DUT 는 자체 스택이다. 공통 runner 는 `protocol:` 만 고른다.
 
 시나리오 디렉터리는 `tests/scenarios/modbus/` · `tests/scenarios/slmp/`.
 내부 매트릭스: `docs/ctt_modbus_matrix.md`, `docs/ctt_slmp_matrix.md`.
+내부 bundle-grade 카탈로그: `docs/ctt_mb_bundle.md` (`MB-T-*`, ≠ Modbus.org),
+`docs/ctt_slmp_bundle.md` (`SLMP-3E-*`, ≠ Mitsubishi 인증).
 
 구성 요소:
 
@@ -375,15 +377,39 @@ ctest --output-on-failure
 - DUT = `stacks/ethernetip/` 자체 스택. 구매 스택 스텁은 대상 아님
 - `tools/ctt/proto/ethernetip/` Scanner/Originator stub
 - `tests/scenarios/ethernetip/*.yaml` — register / identity / assembly+FO+IO /
-  Sec1 FO reject/accept / QoS / ACD / LLDP / watchdog / ListIdentity
+  lifetime Close / Sec1 FO reject/accept / bad HMAC / truncated Encaps /
+  QoS / ACD / LLDP / watchdog / Class1 cyclic metrics / ListIdentity
 - HMAC 단위 테스트 `tests/test_eip_crypto.c`. 잔여 `tests/test_eip_stack.c`
 - 같은 `./build/ctt` 엔트리. `protocol: ethernetip`
 - CI: `ctest -L ethernetip` (mock, no NIC). `libssl-dev` 필요
 - 내부 매핑: `docs/ctt_odva_matrix.md` (공식 CT 아님)
+- 내부 bundle-grade 카탈로그: `docs/ctt_eip_bundle.md` (`EIP-A-*`, ≠ ODVA 인증)
 
 ```
 ./build/ctt --scenario tests/scenarios/ethernetip/register_session.yaml
 ctest --test-dir build --output-on-failure -L ethernetip
+```
+
+### Modbus TCP / SLMP 플러그인 (이 트리)
+
+- DUT = `stacks/modbus/` · `stacks/slmp/` 자체 스택. libmodbus / ASCII·4E 아님
+- `tools/ctt/proto/modbus/` TCP client stub (`mb_stack_handle_adu`)
+- `tools/ctt/proto/slmp/` Binary 3E stub (`slmp_stack_handle_request`)
+- `tests/scenarios/modbus/*.yaml` — FC 매트릭스 / holding+coil lifetime /
+  FC03 cyclic metrics / truncated MBAP / exception 0x01–0x03
+- `tests/scenarios/slmp/*.yaml` — device 표 / 3E encode / batch loopback /
+  D+M lifetime / cyclic metrics / ASCII·4E 거절 / truncated 3E / OOB `0xC056`
+- 같은 `./build/ctt` 엔트리. `protocol: modbus_tcp` / `protocol: slmp`
+- CI: `ctest -L modbus` · `ctest -L slmp` (mock, no NIC)
+- 내부 매핑: `docs/ctt_modbus_matrix.md`, `docs/ctt_slmp_matrix.md`
+- 내부 bundle-grade 카탈로그: `docs/ctt_mb_bundle.md` (`MB-T-*`),
+  `docs/ctt_slmp_bundle.md` (`SLMP-3E-*`)
+
+```
+./build/ctt --scenario tests/scenarios/modbus/fc03_read_holding.yaml
+./build/ctt --scenario tests/scenarios/slmp/encode_batch_read.yaml
+ctest --test-dir build --output-on-failure -L modbus
+ctest --test-dir build --output-on-failure -L slmp
 ```
 
 ### Phase 2 — 시나리오 라이브러리 + soak
@@ -409,18 +435,22 @@ PROFINET (Phase 1 플러그인 위, **CC-B / RTC1만**). 구현 상태 (이 트�
 메트릭: unexpected frame, AR drop, cycle period histogram (`LOG_INFO`).
 
 IRT 동기, PTCP, RT Class 3, CC-C 전용 시나리오는 추가하지 않는다.
-EtherNet/IP / Modbus / SLMP 플러그인은 이 페이즈에 넣지 않는다.
 
 EtherNet/IP (이 트리, mock):
 
 - register / identity / assembly / ForwardOpen / security / QoS / ACD / LLDP / watchdog / ListIdentity 시나리오 (`tests/scenarios/ethernetip/`)
+
+Modbus TCP / SLMP Binary 3E (이 트리, mock inject):
+
+- FC 매트릭스 / lifetime / cyclic metrics / fail-closed ADU (`tests/scenarios/modbus/`)
+- 3E batch loopback / lifetime / cyclic metrics / ASCII·4E 거절 / OOB (`tests/scenarios/slmp/`)
 
 공통:
 
 - 메트릭: cycle jitter histogram, unexpected frame count, AR/session drop
 - Nightly soak 1–2시간. CI에는 짧은 soak(수분)를 optional job으로
 
-Modbus / SLMP / CC-Link 플러그인은 이 페이즈에 넣지 않는다.
+CC-Link 플러그인은 사양 확정 전 이 페이즈에 넣지 않는다.
 
 ### Phase 3 — 랩 / golden / 인증 매핑
 
@@ -470,8 +500,13 @@ tests/pn_device_run.c            # 수동 랩. BUILD_PN_LAB_TOOLS
 tests/run_ctt_lab.sh             # Phase 3 veth AF_PACKET (not default ctest)
 .github/workflows/ci.yml         # Phase 1–3 mock ctest; lab via workflow_dispatch
 docs/ctt.md                      # 이 문서
+docs/ctt_board.html              # 시나리오 현황 보드 (인증 아님). 재생성: tools/ctt/gen_board_data.py
 docs/ctt_lab.md                  # Phase 3 lab / veth / CODESYS
 docs/ctt_pi_matrix.md            # CC-A/B 내부 매핑 (인증 evidence 아님)
+docs/ctt_pn_bundle.md            # PN 내부 bundle-grade 로드맵 + TC ID (≠ PI 인증)
+docs/ctt_eip_bundle.md           # EIP 내부 bundle-grade 로드맵 + TC ID (≠ ODVA 인증)
+docs/ctt_mb_bundle.md            # Modbus TCP 내부 bundle-grade + TC ID (≠ Modbus.org)
+docs/ctt_slmp_bundle.md          # SLMP 3E 내부 bundle-grade + TC ID (≠ Mitsubishi)
 docs/ctt_odva_matrix.md          # EIP 내부 CT-style 매핑 (공식 CT 아님)
 docs/ctt_modbus_matrix.md        # Modbus TCP FC (공식 Modbus.org 아님)
 docs/ctt_slmp_matrix.md          # SLMP Binary 3E (Mitsubishi 공식 인증 아님)
@@ -517,6 +552,7 @@ Modbus TCP / SLMP 플러그인 (이 트리):
 
 - `protocol: modbus_tcp` / `protocol: slmp` 시나리오가 같은 `./build/ctt` 에서 green
 - DUT 는 `stacks/modbus/` · `stacks/slmp/` (libmodbus / ASCII·4E 아님)
+- 내부 bundle: `docs/ctt_mb_bundle.md` (`MB-T-*`), `docs/ctt_slmp_bundle.md` (`SLMP-3E-*`)
 
 신뢰성 문화:
 
@@ -569,7 +605,7 @@ CMake `ENABLE_PN_TESTS=ON` (기본) 일 때 `./build/test_pn_stack`. `ctest` 등
 - 타깃은 A-core이며 IRT 전용 ASIC(하드웨어 타임스탬프·동기 스위치)이 없다. **CC-C / IRT / RT Class 3 는 이 하드웨어에서 불가하고, 제품·CTT 범위 밖이다.** 시나리오·랩 매핑·PI Bundle CC-C를 후속 페이즈로 넣지 않는다
 - CTT timing assert 는 mock에서 **ms 스케일 soft bound** 다. 하드 리얼타임(µs IRT)을 mock이나 A-core 랩 soak로 주장하지 않는다
 - 8ms 사이클 에이징(코어 스케줄러, PREEMPT_RT 없이 최대 편차 0.1ms)은 데몬 스케줄러 수치다. mock eth jitter·IRT 동기 정밀도와 혼동하지 말 것
-- CTT green ≠ PI / ODVA 인증. 내부 신뢰도일 뿐 인증 증거로 제출하지 않는다. 장래에 PI 랩을 가더라도 대상은 CC-B(및 해당 CC-A)이지 CC-C가 아니다. CRA/CE 도 제품 프로세스다
+- CTT green ≠ PI / ODVA / Modbus.org / Mitsubishi 인증. 내부 신뢰도일 뿐 인증 증거로 제출하지 않는다. 장래에 PI 랩을 가더라도 대상은 CC-B(및 해당 CC-A)이지 CC-C가 아니다. CRA/CE 도 제품 프로세스다
 - Security Class 1 의 DCP option `0xF0` / Connect block `0x0E01` 은 이 저장소 프로파일이다. PI 할당 코드를 사칭하지 않는다 (`docs/profinet_stack.md`)
 - mock은 큐 깊이·단일 스레드 가정이다. 실제 스위치/멀티캐스트/VLAN 태깅 이상은 Phase 3
 - 플러그인 stub이 너무 두꺼워지면 DUT 버그를 stub이 가린다. stub은 프레임 조립/파싱만, 상태 머신은 시나리오 step에 둔다

@@ -1,0 +1,43 @@
+# Internal TC SLMP-3E-NEG-003 — OOB batch read/write must return end 0xC056.
+name: oob_batch_read
+id: SLMP-3E-NEG-003
+suite: SLMP-3E-v1
+protocol: slmp
+tags: [negative, range, 3e, bundle]
+device:
+  role: server
+  frame: 3e_binary
+  pc_no: 0xFF
+  dest_module_io: 0x03FF
+  iface: mock
+steps:
+  - action: seed_words
+    device: D
+    head: 0
+    values: [0x0001]
+  - action: batch_read
+    device: D
+    head: 5000
+    unit: word
+    quantity: 1
+    expect:
+      end_code: 0xC056
+  - action: batch_write
+    device: D
+    head: 5000
+    unit: word
+    values: [0xDEAD]
+    expect:
+      end_code: 0xC056
+  - action: batch_read
+    device: D
+    head: 0
+    unit: word
+    quantity: 1
+    expect:
+      end_code: 0
+      values: [0x0001]
+  - action: map_check_words
+    device: D
+    head: 0
+    values: [0x0001]

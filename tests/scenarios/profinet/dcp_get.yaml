@@ -1,4 +1,6 @@
 name: dcp_get
+id: PN-B-DCP-002
+suite: PN-B-v1
 protocol: profinet
 tags: [dcp, get]
 device:

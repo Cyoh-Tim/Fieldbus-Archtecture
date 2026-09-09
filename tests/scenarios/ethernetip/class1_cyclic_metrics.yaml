@@ -1,0 +1,34 @@
+# Internal TC EIP-A-CYC-002 — not an ODVA CT case.
+name: class1_cyclic_metrics
+id: EIP-A-CYC-002
+suite: EIP-A-v1
+protocol: ethernetip
+tags: [class1, cyclic, metrics, bundle]
+device:
+  iface: mock
+  product_name: CycSensor
+  input_size: 8
+  output_size: 8
+  rpi_us: 8000
+  cycle_us: 8000
+steps:
+  - action: forward_open
+    serial: 0xC002
+    orig_serial: 0xC2
+    rpi_us: 8000
+    o2t_size: 8
+    t2o_size: 8
+    expect:
+      cip_status: 0
+      class1: up
+  - action: io_cycle
+    count: 48
+    cycle_ms: 8
+    expect:
+      min_frames: 48
+      min_period_samples: 24
+      period_max_ms: 20         # mock soft bound. not ODVA CT timing
+      max_late: 16              # dt > 1.5 * cycle_us
+      max_missed: 0             # dt > 2.5 * cycle_us
+      jitter_max_ms: 16         # max |dt - cycle_us|
+      class1: up

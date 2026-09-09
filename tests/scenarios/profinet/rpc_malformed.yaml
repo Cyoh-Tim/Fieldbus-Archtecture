@@ -1,0 +1,35 @@
+# Internal TC PN-B-NEG-003 — truncated / unknown CM must fail closed.
+name: rpc_malformed
+id: PN-B-NEG-003
+suite: PN-B-v1
+protocol: profinet
+tags: [rpc, negative, boundary, bundle]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  ip: 192.168.200.2
+  netmask: 255.255.255.0
+steps:
+  - action: rpc_release
+    expect:
+      rpc_response: true
+      ar: down
+  - action: rpc_inject
+    pdu_hex: "0100000000000000"   # shorter than RPC header (80)
+    expect:
+      rpc_response: false
+      ar: down
+  - action: rpc_inject
+    opcode: 0x0099                # unknown CM op
+    expect:
+      rpc_response: false
+      ar: down
+  - action: io_cycle
+    require_ar: false
+    count: 8
+    cycle_ms: 8
+    expect:
+      ar: down
+      min_frames: 0
+      max_frames: 0

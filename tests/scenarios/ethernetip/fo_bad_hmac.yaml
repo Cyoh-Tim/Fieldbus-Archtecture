@@ -1,0 +1,26 @@
+# Internal TC EIP-A-NEG-001 — Sec1 FO with wrong HMAC must reject Class1.
+name: fo_bad_hmac
+id: EIP-A-NEG-001
+suite: EIP-A-v1
+protocol: ethernetip
+tags: [security, forward_open, negative, bundle]
+device:
+  iface: mock
+  security_class: 1
+  psk_hex: "1111111111111111111111111111111111111111111111111111111111111111"
+  input_size: 8
+  output_size: 8
+steps:
+  - action: register_session
+    expect:
+      session_handle: nonzero
+  - action: forward_open
+    integrity: bad              # CPF 0x00C1 present, HMAC flipped
+    serial: 0x55
+    orig_serial: 1
+    rpi_us: 8000
+    o2t_size: 8
+    t2o_size: 8
+    expect:
+      privilege: true
+      class1: down

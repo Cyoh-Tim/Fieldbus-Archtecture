@@ -764,8 +764,8 @@ static size_t ndr_wrap(uint8_t *out, const uint8_t *blocks, size_t n)
 }
 
 static size_t build_connect_pdu(uint8_t *pdu, size_t cap, int integrity,
-                                const uint8_t *psk, int psk_set,
-                                const uint8_t initiator_mac[6])
+                                int integrity_bad, const uint8_t *psk,
+                                int psk_set, const uint8_t initiator_mac[6])
 {
     if (cap < 80 + 20 + 64) {
         return 0;
@@ -793,6 +793,9 @@ static size_t build_connect_pdu(uint8_t *pdu, size_t cap, int integrity,
         }
         uint8_t mac[PN_HMAC_LEN];
         pn_hmac_sha256(psk, PN_PSK_LEN, blocks, bn, mac);
+        if (integrity_bad) {
+            mac[0] ^= 0xFFu;
+        }
         uint8_t sec[2 + PN_HMAC_LEN];
         pn_wr_be16(sec, 0x0001); /* alg id */
         memcpy(sec + 2, mac, PN_HMAC_LEN);
@@ -845,18 +848,41 @@ static int parse_connect_frame_ids(const uint8_t *resp, size_t rlen,
     return 0;
 }
 
+static int parse_integrity(const yaml_node_t *step, int *integrity,
+                           int *integrity_bad)
+{
+    const char *s = yaml_cstr(step, "integrity", "false");
+    *integrity = 0;
+    *integrity_bad = 0;
+    if (!s) {
+        return 0;
+    }
+    if (strcmp(s, "true") == 0 || strcmp(s, "True") == 0 ||
+        strcmp(s, "yes") == 0 || strcmp(s, "1") == 0) {
+        *integrity = 1;
+        return 0;
+    }
+    if (strcmp(s, "bad") == 0 || strcmp(s, "invalid") == 0) {
+        *integrity = 1;
+        *integrity_bad = 1;
+        return 0;
+    }
+    return 0;
+}
+
 static int step_rpc_connect(ctt_run_t *run, pn_priv_t *priv,
                             const yaml_node_t *step, int idx)
 {
     const char *action = "rpc_connect";
-    int integrity = yaml_bool(step, "integrity", 0);
+    int integrity = 0;
+    int integrity_bad = 0;
+    parse_integrity(step, &integrity, &integrity_bad);
     const yaml_node_t *expect = yaml_map_get(step, "expect");
     const pn_cfg_t *cfg = pn_stack_cfg(priv->stack);
 
     uint8_t pdu[512];
-    size_t plen =
-        build_connect_pdu(pdu, sizeof(pdu), integrity, cfg->psk, cfg->psk_set,
-                          priv->ctl_mac);
+    size_t plen = build_connect_pdu(pdu, sizeof(pdu), integrity, integrity_bad,
+                                    cfg->psk, cfg->psk_set, priv->ctl_mac);
     if (plen == 0) {
         ctt_failf(run, idx, action, "failed to build Connect PDU");
         return -1;
@@ -980,26 +1006,84 @@ static void drain_io_frames(ctt_run_t *run, int *got_rtc1, uint64_t *last_ts,
     }
 }
 
+static int check_cyclic_expect(ctt_run_t *run, const ctt_metrics_t *before,
+                               const yaml_node_t *expect, int idx,
+                               const char *action, int got)
+{
+    if (!expect) {
+        return 0;
+    }
+    int rc = 0;
+    unsigned late = run->metrics.late_cycles - before->late_cycles;
+    unsigned missed = run->metrics.missed_cycles - before->missed_cycles;
+    unsigned samples = run->metrics.period_samples - before->period_samples;
+
+    if (yaml_has(expect, "max_frames")) {
+        int maxf = (int)yaml_long(expect, "max_frames", got);
+        rc |= ctt_check(run, idx, action, got <= maxf,
+                        "max_frames expect<=%d actual=%d", maxf, got);
+    }
+    if (yaml_has(expect, "max_late")) {
+        unsigned want = (unsigned)yaml_ulong(expect, "max_late", 0);
+        rc |= ctt_check(run, idx, action, late <= want,
+                        "max_late expect<=%u actual=%u (dt > 1.5 * cycle_us)",
+                        want, late);
+    }
+    if (yaml_has(expect, "max_missed")) {
+        unsigned want = (unsigned)yaml_ulong(expect, "max_missed", 0);
+        rc |= ctt_check(run, idx, action, missed <= want,
+                        "max_missed expect<=%u actual=%u (dt > 2.5 * cycle_us)",
+                        want, missed);
+    }
+    if (yaml_has(expect, "jitter_max_ms")) {
+        long want = yaml_long(expect, "jitter_max_ms", 0);
+        long actual = (long)(run->metrics.jitter_max_ns / 1000000ull);
+        rc |= ctt_check(run, idx, action, actual <= want,
+                        "jitter_max_ms expect<=%ld actual=%ld (max |dt - "
+                        "cycle_us|)",
+                        want, actual);
+    }
+    if (yaml_has(expect, "min_period_samples")) {
+        unsigned want = (unsigned)yaml_ulong(expect, "min_period_samples", 0);
+        rc |= ctt_check(run, idx, action, samples >= want,
+                        "min_period_samples expect>=%u actual=%u", want,
+                        samples);
+    }
+    return rc;
+}
+
 static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
                          int idx)
 {
     const char *action = "io_cycle";
     int count = (int)yaml_long(step, "count", 16);
     unsigned cycle_ms = (unsigned)yaml_long(step, "cycle_ms", 8);
+    int require_ar = yaml_bool(step, "require_ar", 1);
     const yaml_node_t *expect = yaml_map_get(step, "expect");
-    int min_frames =
-        expect ? (int)yaml_long(expect, "min_frames", count) : count;
-    long period_max_ms =
-        expect ? yaml_long(expect, "period_max_ms", 20) : 20;
-    uint16_t want_et = (uint16_t)(expect ? yaml_ulong(expect, "ethertype",
-                                                      PN_ETHTYPE_PN)
-                                         : PN_ETHTYPE_PN);
+    int ar_up = pn_stack_ar_up(priv->stack);
 
-    if (!pn_stack_ar_up(priv->stack)) {
+    if (require_ar && !ar_up) {
         ctt_failf(run, idx, action, "AR not up; Connect first (RTC1 / CC-B)");
         return -1;
     }
 
+    int min_frames;
+    if (expect && yaml_has(expect, "min_frames")) {
+        min_frames = (int)yaml_long(expect, "min_frames", 0);
+    } else if (!require_ar) {
+        min_frames = 0;
+    } else {
+        min_frames = count;
+    }
+    long period_max_ms =
+        expect ? yaml_long(expect, "period_max_ms", 20) : 20;
+    int has_period_max = !expect || yaml_has(expect, "period_max_ms") ||
+                         require_ar;
+    uint16_t want_et = (uint16_t)(expect ? yaml_ulong(expect, "ethertype",
+                                                      PN_ETHTYPE_PN)
+                                         : PN_ETHTYPE_PN);
+
+    ctt_metrics_t before = run->metrics;
     ctt_ctl_clear_rx(run);
 
     int got = 0;
@@ -1009,26 +1093,42 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
     if (budget_ns < 250000000ull) {
         budget_ns = 250000000ull;
     }
+    int prove_none = (min_frames <= 0);
+    int hold_for_max = expect && yaml_has(expect, "max_frames");
+    if (prove_none && budget_ns > 120000000ull) {
+        budget_ns = 120000000ull;
+    }
     uint64_t deadline = ctt_now_ns() + budget_ns;
 
-    while (got < min_frames && ctt_now_ns() < deadline) {
+    while (ctt_now_ns() < deadline) {
         pump(run, priv);
         drain_io_frames(run, &got, &last_ts, want_et, 0);
-        if (got < min_frames) {
-            sleep_ms(1);
+        if (!prove_none && !hold_for_max && got >= min_frames) {
+            break;
         }
+        sleep_ms(1);
     }
 
-    int rc = ctt_check(run, idx, action, got >= min_frames,
-                       "min_frames expect>=%d actual=%d cycle_ms=%u "
-                       "ethertype=0x%04x (RTC1 CC-B, not IRT)",
-                       min_frames, got, cycle_ms, want_et);
-    if (run->metrics.period_samples > 0) {
+    int rc = 0;
+    if (expect && yaml_has(expect, "ar")) {
+        const char *ar = yaml_cstr(expect, "ar", "");
+        int want_up = (strcmp(ar, "up") == 0);
+        int now_up = pn_stack_ar_up(priv->stack);
+        rc |= ctt_check(run, idx, action, want_up ? now_up : !now_up,
+                        "ar expect=%s actual=%s", ar, now_up ? "up" : "down");
+    }
+    rc |= ctt_check(run, idx, action, got >= min_frames,
+                    "min_frames expect>=%d actual=%d cycle_ms=%u "
+                    "ethertype=0x%04x (RTC1 CC-B, not IRT)",
+                    min_frames, got, cycle_ms, want_et);
+    unsigned samples = run->metrics.period_samples - before.period_samples;
+    if (has_period_max && samples > 0) {
         long max_ms = (long)(run->metrics.period_max_ns / 1000000ull);
         rc |= ctt_check(run, idx, action, max_ms <= period_max_ms,
                         "period_max_ms expect<=%ld actual=%ld (mock soft bound)",
                         period_max_ms, max_ms);
     }
+    rc |= check_cyclic_expect(run, &before, expect, idx, action, got);
     return rc;
 }
 
@@ -1065,6 +1165,64 @@ static int step_rpc_release(ctt_run_t *run, pn_priv_t *priv,
     if (want_down) {
         out |= ctt_check(run, idx, action, !ar_up,
                          "ar expect=down actual=%s (after Release)",
+                         ar_up ? "up" : "down");
+    } else if (strcmp(ar, "up") == 0) {
+        out |= ctt_check(run, idx, action, ar_up, "ar expect=up actual=%s",
+                         ar_up ? "up" : "down");
+    }
+    return out;
+}
+
+static int step_rpc_inject(ctt_run_t *run, pn_priv_t *priv,
+                           const yaml_node_t *step, int idx)
+{
+    const char *action = "rpc_inject";
+    const yaml_node_t *expect = yaml_map_get(step, "expect");
+    uint8_t pdu[512];
+    size_t plen = 0;
+    const char *hex = yaml_cstr(step, "pdu_hex", NULL);
+
+    if (hex && hex[0]) {
+        if (parse_hex_buf(hex, pdu, sizeof(pdu), &plen) != 0) {
+            ctt_failf(run, idx, action, "bad pdu_hex");
+            return -1;
+        }
+    } else if (yaml_has(step, "opcode")) {
+        uint16_t op = (uint16_t)yaml_ulong(step, "opcode", 0xFFFF);
+        memset(pdu, 0, 80);
+        pdu[0] = 1;
+        pdu[1] = 0; /* request */
+        pn_wr_le16(pdu + 68, op);
+        plen = 80;
+    } else {
+        ctt_failf(run, idx, action, "need pdu_hex or opcode");
+        return -1;
+    }
+
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    int rc = rpc_transact(run, priv, pdu, plen, resp, sizeof(resp), &rlen);
+    int rpc_ok = (rc == 0 && rlen > 0);
+    int ar_up = pn_stack_ar_up(priv->stack);
+
+    int out = 0;
+    if (expect && yaml_has(expect, "rpc_response")) {
+        int want = yaml_bool(expect, "rpc_response", 1);
+        out |= ctt_check(run, idx, action, rpc_ok == want,
+                         "rpc_response expect=%s actual=%s rlen=%zu rc=%d "
+                         "plen=%zu (fail-closed)",
+                         want ? "true" : "false", rpc_ok ? "true" : "false",
+                         rlen, rc, plen);
+    } else {
+        out |= ctt_check(run, idx, action, !rpc_ok,
+                         "malformed/unknown RPC must fail closed rc=%d rlen=%zu",
+                         rc, rlen);
+    }
+    const char *ar = expect ? yaml_cstr(expect, "ar", "down") : "down";
+    int want_down = (strcmp(ar, "down") == 0 || strcmp(ar, "rejected") == 0);
+    if (want_down) {
+        out |= ctt_check(run, idx, action, !ar_up,
+                         "ar expect=down actual=%s (inject must not establish AR)",
                          ar_up ? "up" : "down");
     } else if (strcmp(ar, "up") == 0) {
         out |= ctt_check(run, idx, action, ar_up, "ar expect=up actual=%s",
@@ -1423,6 +1581,18 @@ static int step_record_read(ctt_run_t *run, pn_priv_t *priv,
                          "record min_len expect>=%lu actual=%zu index=0x%04x",
                          minl, imlen, index);
     }
+    if (expect && yaml_has(expect, "max_len")) {
+        unsigned long maxl = yaml_ulong(expect, "max_len", 0);
+        out |= ctt_check(run, idx, action, imlen <= maxl,
+                         "record max_len expect<=%lu actual=%zu index=0x%04x",
+                         maxl, imlen, index);
+    }
+    if (expect && yaml_has(expect, "absent") && im) {
+        const char *need = yaml_cstr(expect, "absent", "");
+        out |= ctt_check(run, idx, action, !contains(im, imlen, need),
+                         "record must not contain '%s' index=0x%04x", need,
+                         index);
+    }
     return out;
 }
 
@@ -1544,6 +1714,7 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
     }
 
     ctt_ctl_clear_rx(run);
+    ctt_metrics_t before = run->metrics;
     unsigned unexp_before = run->metrics.unexpected_frames;
     unsigned drops_before = run->metrics.ar_drops;
     unsigned rtc1_before = run->metrics.rtc1_frames;
@@ -1591,12 +1762,13 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
                      unexp);
     out |= ctt_check(run, idx, action, drops <= want_drops,
                      "ar_drops expect<=%u actual=%u", want_drops, drops);
-    if (period_max_ms >= 0 && run->metrics.period_samples > 0) {
+    if (period_max_ms >= 0 && run->metrics.period_samples > before.period_samples) {
         long max_ms = (long)(run->metrics.period_max_ns / 1000000ull);
         out |= ctt_check(run, idx, action, max_ms <= period_max_ms,
                          "period_max_ms expect<=%ld actual=%ld (mock soft)",
                          period_max_ms, max_ms);
     }
+    out |= check_cyclic_expect(run, &before, expect, idx, action, (int)rtc1);
     (void)cycle_ms;
     return out;
 }
@@ -1691,6 +1863,15 @@ static int pn_setup(ctt_run_t *run)
     priv->stack = s;
     run->priv = priv;
 
+    {
+        const pn_cfg_t *got = pn_stack_cfg(s);
+        uint64_t cycle_ns = (uint64_t)got->cycle_us * 1000ull;
+        if (cycle_ns == 0) {
+            cycle_ns = 8000000ull;
+        }
+        ctt_metrics_set_cycle_ns(&run->metrics, cycle_ns);
+    }
+
     if (run->opts.transport == CTT_TRANSPORT_MOCK) {
         pn_eth_ops_t ops = {.send = ctt_mock_run_send,
                             .recv = ctt_mock_run_recv,
@@ -1778,6 +1959,9 @@ static int pn_step(ctt_run_t *run, const yaml_node_t *step, int index)
     if (strcmp(action, "rpc_release") == 0) {
         return step_rpc_release(run, priv, step, index);
     }
+    if (strcmp(action, "rpc_inject") == 0) {
+        return step_rpc_inject(run, priv, step, index);
+    }
     if (strcmp(action, "rpc_write") == 0) {
         return step_rpc_write(run, priv, step, index);
     }
@@ -1805,9 +1989,9 @@ static int pn_step(ctt_run_t *run, const yaml_node_t *step, int index)
     ctt_failf(run, index, action,
               "unknown action (profinet CC-B: dcp_identify, dcp_get, dcp_set, "
               "dcp_set_ip, dcp_signal, dcp_hello, rpc_connect, rpc_write, "
-              "rpc_control, rpc_application_ready, rpc_release, io_cycle, "
-              "alarm, record_read, lldp, snmp_get, soak; CC-C/IRT never in "
-              "scope)");
+              "rpc_control, rpc_application_ready, rpc_release, rpc_inject, "
+              "io_cycle, alarm, record_read, lldp, snmp_get, soak; CC-C/IRT "
+              "never in scope)");
     return -1;
 }
 

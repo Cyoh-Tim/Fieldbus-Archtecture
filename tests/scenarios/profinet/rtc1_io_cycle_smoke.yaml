@@ -1,4 +1,6 @@
 name: rtc1_io_cycle_smoke
+id: PN-B-CYC-001
+suite: PN-B-v1
 protocol: profinet
 tags: [rtc1, smoke]
 device:

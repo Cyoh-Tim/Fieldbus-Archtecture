@@ -1,6 +1,9 @@
+# Internal TC EIP-A-ENC-001 — not an ODVA CT case.
 name: register_session
+id: EIP-A-ENC-001
+suite: EIP-A-v1
 protocol: ethernetip
-tags: [encap, session, migrate]
+tags: [encap, session, migrate, bundle]
 device:
   iface: mock
   input_size: 8

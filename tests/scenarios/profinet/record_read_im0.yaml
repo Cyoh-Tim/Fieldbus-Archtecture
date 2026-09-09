@@ -1,4 +1,6 @@
 name: record_read_im0
+id: PN-B-REC-001
+suite: PN-B-v1
 protocol: profinet
 tags: [record, im0, phase2]
 device:

@@ -1,6 +1,7 @@
 #include "ctt.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -12,6 +13,85 @@ typedef struct {
     slmp_stack_t *stack;
     slmp_cfg_t cfg;
 } slmp_priv_t;
+
+static void sleep_ms(unsigned ms)
+{
+    if (!ms) {
+        return;
+    }
+    struct timespec ts;
+    ts.tv_sec = (time_t)(ms / 1000u);
+    ts.tv_nsec = (long)(ms % 1000u) * 1000000L;
+    nanosleep(&ts, NULL);
+}
+
+static int parse_hex_buf(const char *s, uint8_t *out, size_t cap, size_t *n)
+{
+    if (!s || !out || !n) {
+        return -1;
+    }
+    size_t sl = strlen(s);
+    if (sl == 0 || (sl % 2u) != 0) {
+        return -1;
+    }
+    size_t bytes = sl / 2u;
+    if (bytes > cap) {
+        return -1;
+    }
+    for (size_t i = 0; i < bytes; i++) {
+        unsigned v = 0;
+        if (sscanf(s + i * 2, "%2x", &v) != 1) {
+            return -1;
+        }
+        out[i] = (uint8_t)v;
+    }
+    *n = bytes;
+    return 0;
+}
+
+static int check_cyclic_expect(ctt_run_t *run, const ctt_metrics_t *before,
+                               const yaml_node_t *expect, int idx,
+                               const char *action, unsigned got)
+{
+    if (!expect) {
+        return 0;
+    }
+    int rc = 0;
+    unsigned late = run->metrics.late_cycles - before->late_cycles;
+    unsigned missed = run->metrics.missed_cycles - before->missed_cycles;
+    unsigned samples = run->metrics.period_samples - before->period_samples;
+
+    if (yaml_has(expect, "max_late")) {
+        unsigned want = (unsigned)yaml_ulong(expect, "max_late", 0);
+        rc |= ctt_check(run, idx, action, late <= want,
+                        "max_late expect<=%u actual=%u", want, late);
+    }
+    if (yaml_has(expect, "max_missed")) {
+        unsigned want = (unsigned)yaml_ulong(expect, "max_missed", 0);
+        rc |= ctt_check(run, idx, action, missed <= want,
+                        "max_missed expect<=%u actual=%u", want, missed);
+    }
+    if (yaml_has(expect, "jitter_max_ms")) {
+        long want = yaml_long(expect, "jitter_max_ms", 0);
+        long actual = (long)(run->metrics.jitter_max_ns / 1000000ull);
+        rc |= ctt_check(run, idx, action, actual <= want,
+                        "jitter_max_ms expect<=%ld actual=%ld", want, actual);
+    }
+    if (yaml_has(expect, "min_period_samples")) {
+        unsigned want = (unsigned)yaml_ulong(expect, "min_period_samples", 0);
+        rc |= ctt_check(run, idx, action, samples >= want,
+                        "min_period_samples expect>=%u actual=%u", want,
+                        samples);
+    }
+    if (yaml_has(expect, "period_max_ms") && samples > 0) {
+        long want = yaml_long(expect, "period_max_ms", 20);
+        long actual = (long)(run->metrics.period_max_ns / 1000000ull);
+        rc |= ctt_check(run, idx, action, actual <= want,
+                        "period_max_ms expect<=%ld actual=%ld", want, actual);
+    }
+    (void)got;
+    return rc;
+}
 
 static void wr_le16(uint8_t *p, uint16_t v)
 {
@@ -564,37 +644,60 @@ static int step_map_check_bits(ctt_run_t *run, slmp_priv_t *priv,
 static int step_inject(ctt_run_t *run, slmp_priv_t *priv, const yaml_node_t *step,
                        int idx)
 {
-    uint8_t req[32];
-    memset(req, 0, sizeof(req));
-    uint16_t sub = (uint16_t)yaml_ulong(step, "subheader", SLMP_SUBHEADER_REQ_3E);
-    wr_le16(req, sub);
-    req[3] = 0xFF;
-    wr_le16(req + 4, 0x03FF);
-    wr_le16(req + 7, 12);
-    wr_le16(req + 9, 0x0010);
-    wr_le16(req + 11, (uint16_t)yaml_ulong(step, "cmd", SLMP_CMD_RANDOM_READ));
-    wr_le16(req + 13, 0);
-    req[18] = SLMP_DEV_D;
-    wr_le16(req + 19, 1);
-    uint8_t resp[64];
+    const char *action = "inject";
+    uint8_t req[SLMP_FRAME_MAX];
+    size_t req_len = 0;
+    const char *hex = yaml_cstr(step, "pdu_hex", NULL);
+    if (hex && hex[0]) {
+        if (parse_hex_buf(hex, req, sizeof(req), &req_len) != 0) {
+            ctt_failf(run, idx, action, "bad pdu_hex");
+            return -1;
+        }
+    } else {
+        memset(req, 0, 32);
+        uint16_t sub =
+            (uint16_t)yaml_ulong(step, "subheader", SLMP_SUBHEADER_REQ_3E);
+        wr_le16(req, sub);
+        req[3] = 0xFF;
+        wr_le16(req + 4, 0x03FF);
+        wr_le16(req + 7, 12);
+        wr_le16(req + 9, 0x0010);
+        wr_le16(req + 11, (uint16_t)yaml_ulong(step, "cmd", SLMP_CMD_RANDOM_READ));
+        wr_le16(req + 13, 0);
+        req[18] = SLMP_DEV_D;
+        wr_le16(req + 19, 1);
+        req_len = 21;
+    }
+    uint8_t resp[SLMP_FRAME_MAX];
     size_t resp_len = 0;
-    int rc = slmp_stack_handle_request(priv->stack, req, 21, resp, sizeof(resp),
-                                     &resp_len);
+    int rc = slmp_stack_handle_request(priv->stack, req, req_len, resp,
+                                       sizeof(resp), &resp_len);
     const yaml_node_t *expect = yaml_map_get(step, "expect");
     const char *result = expect ? yaml_cstr(expect, "result", "ok") : "ok";
     if (strcmp(result, "reject") == 0) {
-        return ctt_check(run, idx, "inject", rc != 0,
-                          "expected reject rc=%d", rc);
+        return ctt_check(run, idx, action, rc != 0, "expected reject rc=%d",
+                         rc);
     }
-    if (ctt_check(run, idx, "inject", rc == 0, "handle rc=%d", rc) != 0) {
+    if (expect && yaml_has(expect, "handle_ok")) {
+        int want = yaml_bool(expect, "handle_ok", 1);
+        if (ctt_check(run, idx, action, (rc == 0) == want,
+                      "handle_ok expect=%s actual rc=%d",
+                      want ? "true" : "false", rc) != 0) {
+            return -1;
+        }
+        if (rc != 0) {
+            return 0;
+        }
+    } else if (ctt_check(run, idx, action, rc == 0, "handle rc=%d", rc) != 0) {
         return -1;
     }
-    return check_end_and_values(run, idx, "inject", expect, resp, resp_len);
+    return check_end_and_values(run, idx, action, expect, resp, resp_len);
 }
 
 static int step_soak(ctt_run_t *run, slmp_priv_t *priv, const yaml_node_t *step,
                      int idx)
 {
+    const char *action = "soak";
     slmp_range_t range;
     if (fill_range(step, &range) != 0) {
         range.addr.device_code = SLMP_DEV_D;
@@ -603,6 +706,7 @@ static int step_soak(ctt_run_t *run, slmp_priv_t *priv, const yaml_node_t *step,
         range.quantity = 1;
     }
     int iterations = (int)yaml_long(step, "iterations", 32);
+    unsigned cycle_ms = (unsigned)yaml_ulong(step, "cycle_ms", 0);
     const yaml_node_t *expect = yaml_map_get(step, "expect");
     int min_ok = expect && yaml_has(expect, "min_ok")
                      ? (int)yaml_long(expect, "min_ok", iterations)
@@ -610,6 +714,7 @@ static int step_soak(ctt_run_t *run, slmp_priv_t *priv, const yaml_node_t *step,
     unsigned ok = 0;
     unsigned unexpected = 0;
     uint64_t last_ns = 0;
+    ctt_metrics_t before = run->metrics;
     for (int i = 0; i < iterations; i++) {
         uint8_t req[64];
         size_t req_len = 0;
@@ -630,20 +735,28 @@ static int step_soak(ctt_run_t *run, slmp_priv_t *priv, const yaml_node_t *step,
             unexpected++;
             continue;
         }
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        uint64_t now = (uint64_t)ts.tv_sec * 1000000000ull +
-                       (uint64_t)ts.tv_nsec;
+        uint64_t now = ctt_now_ns();
         if (last_ns) {
             ctt_metrics_note_period(&run->metrics, now - last_ns);
         }
         last_ns = now;
         ok++;
         run->metrics.rtc1_frames++;
+        if (cycle_ms) {
+            sleep_ms(cycle_ms);
+        }
     }
     run->metrics.unexpected_frames += unexpected;
-    return ctt_check(run, idx, "soak", (int)ok >= min_ok,
-                     "ok=%u min_ok=%d unexpected=%u", ok, min_ok, unexpected);
+    int out = ctt_check(run, idx, action, (int)ok >= min_ok,
+                        "ok=%u min_ok=%d unexpected=%u", ok, min_ok,
+                        unexpected);
+    if (expect && yaml_has(expect, "unexpected_frames")) {
+        unsigned want = (unsigned)yaml_ulong(expect, "unexpected_frames", 0);
+        out |= ctt_check(run, idx, action, unexpected == want,
+                         "unexpected want=%u got=%u", want, unexpected);
+    }
+    out |= check_cyclic_expect(run, &before, expect, idx, action, ok);
+    return out;
 }
 
 static int slmp_setup(ctt_run_t *run)
@@ -680,6 +793,11 @@ static int slmp_setup(ctt_run_t *run)
         return -1;
     }
     run->priv = priv;
+    uint32_t cycle_us =
+        (uint32_t)(dev ? yaml_ulong(dev, "cycle_us", 0) : 0);
+    if (cycle_us) {
+        ctt_metrics_set_cycle_ns(&run->metrics, (uint64_t)cycle_us * 1000ull);
+    }
     LOG_INFO("ctt", "slmp DUT Binary 3E server pc_no=0x%02X io=0x%04X",
              priv->cfg.pc_no, priv->cfg.dest_module_io);
     return 0;

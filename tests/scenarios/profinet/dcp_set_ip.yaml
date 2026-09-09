@@ -1,4 +1,6 @@
 name: dcp_set_ip
+id: PN-B-DCP-005
+suite: PN-B-v1
 protocol: profinet
 tags: [dcp, set, ip, hello]
 device:

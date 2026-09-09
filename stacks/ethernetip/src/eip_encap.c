@@ -179,6 +179,9 @@ static int handle_sendrr(eip_stack_t *s, uint32_t session, const uint8_t *body,
 int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
                       uint8_t *resp, size_t resp_cap, size_t *resp_len)
 {
+    if (resp_len) {
+        *resp_len = 0;
+    }
     if (!req || req_len < EIP_ENCAP_HDR_SIZE || !resp || !resp_len) {
         return -EINVAL;
     }
@@ -191,8 +194,10 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
     uint32_t session = eip_rd_le32(req + 4);
     const uint8_t *ctx = req + 12;
     const uint8_t *body = req + EIP_ENCAP_HDR_SIZE;
-    if (EIP_ENCAP_HDR_SIZE + length > req_len) {
-        length = (uint16_t)(req_len - EIP_ENCAP_HDR_SIZE);
+    /* Fail closed: claimed Encaps length must fit the received buffer.
+     * Do not clamp and process a truncated PDU. */
+    if ((size_t)EIP_ENCAP_HDR_SIZE + (size_t)length > req_len) {
+        return -EINVAL;
     }
 
     uint8_t body_resp[EIP_TCP_BUF_MAX];

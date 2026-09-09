@@ -1,6 +1,9 @@
+# Internal TC MB-T-CYC-001 — FC03 soak with late/missed/jitter. Not Modbus.org.
 name: soak_short
+id: MB-T-CYC-001
+suite: MB-T-v1
 protocol: modbus_tcp
-tags: [soak]
+tags: [soak, bundle]
 device:
   role: server
   unit_id: 1
@@ -9,6 +12,7 @@ device:
   n_coil: 8
   n_discrete: 8
   iface: mock
+  cycle_us: 8000
 steps:
   - action: seed
     type: holding
@@ -19,6 +23,12 @@ steps:
     address: 0
     quantity: 2
     iterations: 32
+    cycle_ms: 8
     expect:
       min_ok: 32
       unexpected_frames: 0
+      min_period_samples: 16
+      period_max_ms: 20
+      max_late: 8
+      max_missed: 0
+      jitter_max_ms: 16

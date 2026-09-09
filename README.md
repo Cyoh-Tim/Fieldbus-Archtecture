@@ -17,12 +17,16 @@ config.json 설정만으로 선택해 동작시키는 필드버스 런타임.
   [`docs/ethernetip_guide.md`](docs/ethernetip_guide.md)
 
 전체 설계 배경은 [`docs/design.md`](docs/design.md).
+앱은 프로토콜 헤더 없이 [`docs/app_api.md`](docs/app_api.md) 의 포인트 API
+(`include/fb_api.h`) 만 사용한다.
 CTT 설계(공통 runner + 프로토콜 플러그인)는 [`docs/ctt.md`](docs/ctt.md).
+CTT 시나리오 현황 보드: [docs/ctt_board.html](docs/ctt_board.html) (브라우저에서 열기, 인증 아님).
+비전문가용 JSON→데몬 동작 애니메이션 데모: [docs/json-config-flow.html](docs/json-config-flow.html) (브라우저에서 열기).
 
 ## 디렉토리 구조
 ```
-include/               ProtocolAdapter 공통 인터페이스
-core/                   코어(설정 로더, 스케줄러, 어댑터 레지스트리, main)
+include/               ProtocolAdapter 공통 인터페이스 + 앱 API (`fb_api.h`)
+core/                   코어(설정 로더, 스케줄러, 레지스트리, fb_api, main)
 adapters/modbus/        Modbus TCP 어댑터 — 자체 스택 연결
 adapters/slmp/          SLMP 어댑터 — 자체 Binary 3E 스택 연결
 adapters/cclink/        CC-Link 어댑터 (미확정, 스텁)
@@ -37,7 +41,10 @@ tests/scenarios/        CTT YAML (profinet/, ethernetip/, modbus/, slmp/)
 third_party/            (선택) 향후 벤더 EIP 스택 교체 위치 — git 커밋 안 함
 config/                 config.schema.json + 예제 설정 파일
 docs/design.md          설계 배경 전체 문서
+docs/app_api.md         애플리케이션 C API (포인트 읽기/쓰기, 스레드, reload)
 docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)
+docs/ctt_board.html     CTT 시나리오 현황 보드 (통과/건너뜀/갭/범위 밖)
+docs/json-config-flow.html  비전문가 JSON 설정 → 데몬 동작 애니메이션 데모
 ```
 
 ## 빌드
@@ -45,7 +52,7 @@ docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)
 ```
 sudo apt install libssl-dev libcjson-dev   # EIP: OpenSSL; 데몬: cJSON (없으면 FetchContent)
 mkdir build && cd build
-cmake ..
+cmake ..   # BUILD_DAEMON=ON, BUILD_API=ON (기본) → 데몬 + fb_api + CTT
 make
 ```
 외부 Modbus 라이브러리(libmodbus)는 **필요 없다**.
@@ -65,6 +72,7 @@ ctest --test-dir build --output-on-failure -LE soak_ci
 
 ## 실행
 ```
+./build/fb_api_demo config/example.modbus.json
 ./build/multiproto_daemon config/example.modbus.json
 ./build/multiproto_daemon config/example.slmp.json
 ./build/multiproto_daemon config/example.ethernetip.json
@@ -78,8 +86,18 @@ ctest --test-dir build --output-on-failure -LE soak_ci
 ./build/ctt --scenario tests/scenarios/slmp/encode_batch_read.yaml
 ```
 CTT 설계·시나리오 스키마는 [`docs/ctt.md`](docs/ctt.md), 사용법은 [`tools/ctt/README.md`](tools/ctt/README.md).
-랩/golden/PI 매핑은 [`docs/ctt_lab.md`](docs/ctt_lab.md), [`docs/ctt_pi_matrix.md`](docs/ctt_pi_matrix.md).
+시나리오 통과/건너뜀/갭 보드는 [`docs/ctt_board.html`](docs/ctt_board.html).
+랩/golden 은 [`docs/ctt_lab.md`](docs/ctt_lab.md).
+PI 매핑은 [`docs/ctt_pi_matrix.md`](docs/ctt_pi_matrix.md).
+PN 내부 bundle-grade 로드맵·TC ID (`PN-B-*`, **≠ PI 인증**):
+[`docs/ctt_pn_bundle.md`](docs/ctt_pn_bundle.md).
+EIP 내부 bundle-grade 로드맵·TC ID (`EIP-A-*`, **≠ ODVA 인증**):
+[`docs/ctt_eip_bundle.md`](docs/ctt_eip_bundle.md).
 EIP 내부 ODVA 매핑은 [`docs/ctt_odva_matrix.md`](docs/ctt_odva_matrix.md).
+Modbus 내부 bundle-grade 카탈로그·TC ID (`MB-T-*`, **≠ Modbus.org 인증**):
+[`docs/ctt_mb_bundle.md`](docs/ctt_mb_bundle.md).
+SLMP 내부 bundle-grade 카탈로그·TC ID (`SLMP-3E-*`, **≠ Mitsubishi 인증**):
+[`docs/ctt_slmp_bundle.md`](docs/ctt_slmp_bundle.md).
 Modbus/SLMP 내부 매트릭스: [`docs/ctt_modbus_matrix.md`](docs/ctt_modbus_matrix.md),
 [`docs/ctt_slmp_matrix.md`](docs/ctt_slmp_matrix.md).
 

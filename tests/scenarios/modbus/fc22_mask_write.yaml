@@ -1,6 +1,9 @@
+# Internal TC MB-T-FC-003 — not a Modbus.org conformance case.
 name: fc22_mask_write
+id: MB-T-FC-003
+suite: MB-T-v1
 protocol: modbus_tcp
-tags: [fc22, migrate]
+tags: [fc22, migrate, bundle]
 device:
   role: server
   unit_id: 1
