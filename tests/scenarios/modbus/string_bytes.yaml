@@ -1,6 +1,9 @@
+# Internal TC MB-T-FC-005 — not a Modbus.org conformance case.
 name: string_bytes
+id: MB-T-FC-005
+suite: MB-T-v1
 protocol: modbus_tcp
-tags: [bytes, migrate]
+tags: [bytes, migrate, bundle]
 device:
   role: server
   unit_id: 1

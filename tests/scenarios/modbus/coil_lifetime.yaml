@@ -1,0 +1,62 @@
+# Internal TC MB-T-CM-002 — coil write → read → overwrite → restore.
+name: coil_lifetime
+id: MB-T-CM-002
+suite: MB-T-v1
+protocol: modbus_tcp
+tags: [fc05, fc01, lifetime, bundle]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 8
+  n_input: 8
+  n_coil: 16
+  n_discrete: 8
+  iface: mock
+steps:
+  - action: request
+    fc: 0x05
+    address: 3
+    value: 0xFF00
+    expect:
+      fc: 0x05
+  - action: request
+    fc: 0x01
+    address: 3
+    quantity: 1
+    expect:
+      bits: [1]
+  - action: request
+    unit_id: 9
+    fc: 0x05
+    address: 3
+    value: 0x0000
+    expect:
+      no_response: true
+  - action: map_check
+    type: coil
+    address: 3
+    bits: [1]
+  - action: request
+    fc: 0x05
+    address: 3
+    value: 0x0000
+    expect:
+      fc: 0x05
+  - action: request
+    fc: 0x01
+    address: 3
+    quantity: 1
+    expect:
+      bits: [0]
+  - action: request
+    fc: 0x05
+    address: 3
+    value: 0xFF00
+    expect:
+      fc: 0x05
+  - action: request
+    fc: 0x01
+    address: 3
+    quantity: 1
+    expect:
+      bits: [1]

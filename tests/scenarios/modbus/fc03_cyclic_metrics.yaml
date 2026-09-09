@@ -1,0 +1,34 @@
+# Internal TC MB-T-CYC-002 — not a Modbus.org conformance case.
+name: fc03_cyclic_metrics
+id: MB-T-CYC-002
+suite: MB-T-v1
+protocol: modbus_tcp
+tags: [fc03, cyclic, metrics, bundle]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 16
+  n_input: 8
+  n_coil: 8
+  n_discrete: 8
+  iface: mock
+  cycle_us: 8000
+steps:
+  - action: seed
+    type: holding
+    address: 0
+    values: [0x1111, 0x2222]
+  - action: soak
+    fc: 0x03
+    address: 0
+    quantity: 2
+    iterations: 48
+    cycle_ms: 8
+    expect:
+      min_ok: 48
+      unexpected_frames: 0
+      min_period_samples: 24
+      period_max_ms: 20
+      max_late: 16
+      max_missed: 0
+      jitter_max_ms: 16

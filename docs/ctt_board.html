@@ -179,8 +179,9 @@
         공식 PI Test Bundle, ODVA CT, Modbus.org, Mitsubishi 랩 리포트를 이 페이지의
         통과 배지로 대체하지 마세요. PROFINET CC-C / IRT 는 제품 범위 밖입니다.
         카탈로그: <a href="ctt_pn_bundle.md">docs/ctt_pn_bundle.md</a> (<code>PN-B-*</code>),
-        <a href="ctt_eip_bundle.md">docs/ctt_eip_bundle.md</a> (<code>EIP-A-*</code>).
-        Modbus / SLMP 기둥 이식은 EIP-A-v1 다음.
+        <a href="ctt_eip_bundle.md">docs/ctt_eip_bundle.md</a> (<code>EIP-A-*</code>),
+        <a href="ctt_mb_bundle.md">docs/ctt_mb_bundle.md</a> (<code>MB-T-*</code>),
+        <a href="ctt_slmp_bundle.md">docs/ctt_slmp_bundle.md</a> (<code>SLMP-3E-*</code>).
       </div>
     </div>
 
@@ -240,6 +241,8 @@
       · 설명: <a href="ctt_board.md">docs/ctt_board.md</a>
       · PN bundle: <a href="ctt_pn_bundle.md">ctt_pn_bundle.md</a>
       · EIP bundle: <a href="ctt_eip_bundle.md">ctt_eip_bundle.md</a>
+      · MB bundle: <a href="ctt_mb_bundle.md">ctt_mb_bundle.md</a>
+      · SLMP bundle: <a href="ctt_slmp_bundle.md">ctt_slmp_bundle.md</a>
       · 매트릭스:
       <a href="ctt_pi_matrix.md">PI</a> ·
       <a href="ctt_odva_matrix.md">ODVA</a> ·
@@ -252,18 +255,18 @@
 <!-- CTT_BOARD_DATA_BEGIN -->
 <script type="application/json" id="ctt-board-data">
 {
-  "generated_at": "2026-09-09T07:03:21Z",
+  "generated_at": "2026-09-09T07:25:45Z",
   "generator": "tools/ctt/gen_board_data.py",
   "disclaimer": "내부 CTT 보드입니다. 내부 bundle-grade 게이트 ≠ PI / ODVA / Modbus.org / Mitsubishi 공식 인증. 배지는 시나리오가 기본 mock CI(`ctest -LE soak_ci`)에 등록되는지·매트릭스에 갭/범위 밖으로 적혀 있는지를 분류한 것이며, 이 페이지가 ctest 를 실행하지는 않습니다.",
   "ci_default": "ctest --test-dir build --output-on-failure -LE soak_ci",
-  "note": "pass = YAML registered in CMake and included in default mock CI. skip = soak_ci / nightly / lab (opt-in). gap = matrix DUT-not-implemented or not-yet. out_of_scope = CC-C/IRT, official cert labs, EtherCAT, etc. Internal bundle-grade gate != PI / ODVA certification. PROFINET catalog: docs/ctt_pn_bundle.md (PN-B-* ids). EtherNet/IP catalog: docs/ctt_eip_bundle.md (EIP-A-* ids). Modbus/SLMP catalogs are next after EIP-A-v1.",
+  "note": "pass = YAML registered in CMake and included in default mock CI. skip = soak_ci / nightly / lab (opt-in). gap = matrix DUT-not-implemented or not-yet. out_of_scope = CC-C/IRT, official cert labs, EtherCAT, etc. Internal bundle-grade gate != PI / ODVA certification. PROFINET catalog: docs/ctt_pn_bundle.md (PN-B-* ids). EtherNet/IP catalog: docs/ctt_eip_bundle.md (EIP-A-* ids). Modbus TCP catalog: docs/ctt_mb_bundle.md (MB-T-* ids). SLMP Binary 3E catalog: docs/ctt_slmp_bundle.md (SLMP-3E-* ids).",
   "counts": {
-    "pass": 50,
+    "pass": 59,
     "skip": 4,
     "gap": 9,
     "out_of_scope": 13,
-    "total": 76,
-    "scenarios": 52
+    "total": 85,
+    "scenarios": 61
   },
   "by_protocol": {
     "profinet": {
@@ -281,18 +284,18 @@
       "total": 20
     },
     "modbus_tcp": {
-      "pass": 7,
+      "pass": 12,
       "skip": 0,
       "gap": 1,
       "out_of_scope": 3,
-      "total": 11
+      "total": 16
     },
     "slmp": {
-      "pass": 5,
+      "pass": 9,
       "skip": 0,
       "gap": 1,
       "out_of_scope": 4,
-      "total": 10
+      "total": 14
     },
     "other": {
       "pass": 0,
@@ -1868,15 +1871,78 @@
       "suite": null
     },
     {
+      "id": "adu_malformed",
+      "bundle_id": "MB-T-NEG-002",
+      "suite": "MB-T-v1",
+      "protocol": "modbus_tcp",
+      "filename": "adu_malformed.yaml",
+      "path": "tests/scenarios/modbus/adu_malformed.yaml",
+      "title": "Truncated / bad MBAP",
+      "title_ko": "Truncated / bad MBAP",
+      "description": "fail closed. MB-T-NEG-002",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_mb_adu_malformed",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "modbus"
+      ],
+      "tags": [
+        "negative",
+        "boundary",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_modbus_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "Modbus TCP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "coil_lifetime",
+      "bundle_id": "MB-T-CM-002",
+      "suite": "MB-T-v1",
+      "protocol": "modbus_tcp",
+      "filename": "coil_lifetime.yaml",
+      "path": "tests/scenarios/modbus/coil_lifetime.yaml",
+      "title": "Coil write/read lifetime",
+      "title_ko": "Coil write/read lifetime",
+      "description": "FC05→FC01→wrong unit→overwrite. MB-T-CM-002",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_mb_coil_lifetime",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "modbus"
+      ],
+      "tags": [
+        "fc05",
+        "fc01",
+        "lifetime",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_modbus_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "Modbus TCP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
       "id": "exception_illegal_address",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "MB-T-NEG-001",
+      "suite": "MB-T-v1",
       "protocol": "modbus_tcp",
       "filename": "exception_illegal_address.yaml",
       "path": "tests/scenarios/modbus/exception_illegal_address.yaml",
-      "title": "Exception 0x02",
-      "title_ko": "Exception 0x02",
-      "description": "OOB Holding",
+      "title": "Exception 0x02 / illegal FC",
+      "title_ko": "Exception 0x02 / illegal FC",
+      "description": "Holding/Coil OOB, qty=0. MB-T-NEG-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_mb_exception_illegal_address",
@@ -1887,7 +1953,71 @@
       ],
       "tags": [
         "exception",
-        "migrate"
+        "negative",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_modbus_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "Modbus TCP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "exception_illegal_value",
+      "bundle_id": "MB-T-NEG-003",
+      "suite": "MB-T-v1",
+      "protocol": "modbus_tcp",
+      "filename": "exception_illegal_value.yaml",
+      "path": "tests/scenarios/modbus/exception_illegal_value.yaml",
+      "title": "Exception 0x03",
+      "title_ko": "Exception 0x03",
+      "description": "bad coil value / short PDU. MB-T-NEG-003",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_mb_exception_illegal_value",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "modbus"
+      ],
+      "tags": [
+        "exception",
+        "negative",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_modbus_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "Modbus TCP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "fc03_cyclic_metrics",
+      "bundle_id": "MB-T-CYC-002",
+      "suite": "MB-T-v1",
+      "protocol": "modbus_tcp",
+      "filename": "fc03_cyclic_metrics.yaml",
+      "path": "tests/scenarios/modbus/fc03_cyclic_metrics.yaml",
+      "title": "FC03 cyclic metrics",
+      "title_ko": "FC03 cyclic metrics",
+      "description": "48 cycles, late/missed/jitter. MB-T-CYC-002",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_mb_fc03_cyclic_metrics",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "modbus"
+      ],
+      "tags": [
+        "fc03",
+        "cyclic",
+        "metrics",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_modbus_matrix.md",
@@ -1899,14 +2029,14 @@
     },
     {
       "id": "fc03_read_holding",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "MB-T-FC-001",
+      "suite": "MB-T-v1",
       "protocol": "modbus_tcp",
       "filename": "fc03_read_holding.yaml",
       "path": "tests/scenarios/modbus/fc03_read_holding.yaml",
       "title": "FC03 Holding",
       "title_ko": "FC03 Holding",
-      "description": "test_mb_stack migrate",
+      "description": "MB-T-FC-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_mb_fc03_read_holding",
@@ -1917,7 +2047,8 @@
       ],
       "tags": [
         "fc03",
-        "migrate"
+        "migrate",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_modbus_matrix.md",
@@ -1929,14 +2060,14 @@
     },
     {
       "id": "fc05_write_single_coil",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "MB-T-FC-002",
+      "suite": "MB-T-v1",
       "protocol": "modbus_tcp",
       "filename": "fc05_write_single_coil.yaml",
       "path": "tests/scenarios/modbus/fc05_write_single_coil.yaml",
       "title": "FC05 Coil",
       "title_ko": "FC05 Coil",
-      "description": "coil map_check",
+      "description": "MB-T-FC-002",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_mb_fc05_write_single_coil",
@@ -1947,7 +2078,8 @@
       ],
       "tags": [
         "fc05",
-        "migrate"
+        "migrate",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_modbus_matrix.md",
@@ -1959,14 +2091,14 @@
     },
     {
       "id": "fc22_mask_write",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "MB-T-FC-003",
+      "suite": "MB-T-v1",
       "protocol": "modbus_tcp",
       "filename": "fc22_mask_write.yaml",
       "path": "tests/scenarios/modbus/fc22_mask_write.yaml",
       "title": "FC22 Mask Write",
       "title_ko": "FC22 Mask Write",
-      "description": "(cur & and) | (or & ~and)",
+      "description": "(cur & and) then OR (or & ~and). MB-T-FC-003",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_mb_fc22_mask_write",
@@ -1977,7 +2109,8 @@
       ],
       "tags": [
         "fc22",
-        "migrate"
+        "migrate",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_modbus_matrix.md",
@@ -1989,14 +2122,14 @@
     },
     {
       "id": "fc_server_matrix",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "MB-T-FC-004",
+      "suite": "MB-T-v1",
       "protocol": "modbus_tcp",
       "filename": "fc_server_matrix.yaml",
       "path": "tests/scenarios/modbus/fc_server_matrix.yaml",
       "title": "FC01–04, 06, 0F, 10, 16, 17, bulk 125, illegal FC, wrong unit",
       "title_ko": "FC01–04, 06, 0F, 10, 16, 17, bulk 125, illegal FC, wrong unit",
-      "description": "reliability harness 핵심",
+      "description": "MB-T-FC-004",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_mb_fc_server_matrix",
@@ -2008,7 +2141,40 @@
       "tags": [
         "fc",
         "matrix",
-        "migrate"
+        "migrate",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_modbus_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "Modbus TCP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "holding_lifetime",
+      "bundle_id": "MB-T-CM-001",
+      "suite": "MB-T-v1",
+      "protocol": "modbus_tcp",
+      "filename": "holding_lifetime.yaml",
+      "path": "tests/scenarios/modbus/holding_lifetime.yaml",
+      "title": "Holding write/read lifetime",
+      "title_ko": "Holding write/read lifetime",
+      "description": "FC16→FC03→wrong unit→overwrite. MB-T-CM-001",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_mb_holding_lifetime",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "modbus"
+      ],
+      "tags": [
+        "fc03",
+        "fc16",
+        "lifetime",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_modbus_matrix.md",
@@ -2020,14 +2186,14 @@
     },
     {
       "id": "soak_short",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "MB-T-CYC-001",
+      "suite": "MB-T-v1",
       "protocol": "modbus_tcp",
       "filename": "soak_short.yaml",
       "path": "tests/scenarios/modbus/soak_short.yaml",
       "title": "FC03 soak (내부)",
       "title_ko": "FC03 soak (내부)",
-      "description": "32 iterations, no NIC",
+      "description": "32 iterations + metrics. MB-T-CYC-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_mb_soak_short",
@@ -2037,7 +2203,8 @@
         "modbus"
       ],
       "tags": [
-        "soak"
+        "soak",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_modbus_matrix.md",
@@ -2049,14 +2216,14 @@
     },
     {
       "id": "string_bytes",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "MB-T-FC-005",
+      "suite": "MB-T-v1",
       "protocol": "modbus_tcp",
       "filename": "string_bytes.yaml",
       "path": "tests/scenarios/modbus/string_bytes.yaml",
       "title": "Packed ASCII",
       "title_ko": "Packed ASCII",
-      "description": "2 chars / register BE",
+      "description": "MB-T-FC-005",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_mb_string_bytes",
@@ -2067,7 +2234,8 @@
       ],
       "tags": [
         "bytes",
-        "migrate"
+        "migrate",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_modbus_matrix.md",
@@ -2178,15 +2346,79 @@
       "suite": null
     },
     {
+      "id": "batch_cyclic_metrics",
+      "bundle_id": "SLMP-3E-CYC-002",
+      "suite": "SLMP-3E-v1",
+      "protocol": "slmp",
+      "filename": "batch_cyclic_metrics.yaml",
+      "path": "tests/scenarios/slmp/batch_cyclic_metrics.yaml",
+      "title": "Batch cyclic metrics",
+      "title_ko": "Batch cyclic metrics",
+      "description": "48 cycles, late/missed/jitter. SLMP-3E-CYC-002",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_slmp_batch_cyclic_metrics",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "slmp"
+      ],
+      "tags": [
+        "batch",
+        "cyclic",
+        "metrics",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_slmp_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "SLMP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "batch_lifetime",
+      "bundle_id": "SLMP-3E-CM-002",
+      "suite": "SLMP-3E-v1",
+      "protocol": "slmp",
+      "filename": "batch_lifetime.yaml",
+      "path": "tests/scenarios/slmp/batch_lifetime.yaml",
+      "title": "Batch write/read lifetime",
+      "title_ko": "Batch write/read lifetime",
+      "description": "D word + M bit overwrite. SLMP-3E-CM-002",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_slmp_batch_lifetime",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "slmp"
+      ],
+      "tags": [
+        "batch",
+        "lifetime",
+        "3e",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_slmp_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "SLMP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
       "id": "batch_read_write_loopback",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "SLMP-3E-CM-001",
+      "suite": "SLMP-3E-v1",
       "protocol": "slmp",
       "filename": "batch_read_write_loopback.yaml",
       "path": "tests/scenarios/slmp/batch_read_write_loopback.yaml",
       "title": "Batch R/W + bits + ASCII + X hex",
       "title_ko": "Batch R/W + bits + ASCII + X hex",
-      "description": "test_slmp_stack loopback 을 소켓 없이 이전",
+      "description": "SLMP-3E-CM-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_slmp_batch_read_write_loopback",
@@ -2198,7 +2430,8 @@
       "tags": [
         "loopback",
         "3e",
-        "migrate"
+        "migrate",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_slmp_matrix.md",
@@ -2210,14 +2443,14 @@
     },
     {
       "id": "device_table",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "SLMP-3E-DEV-001",
+      "suite": "SLMP-3E-v1",
       "protocol": "slmp",
       "filename": "device_table.yaml",
       "path": "tests/scenarios/slmp/device_table.yaml",
       "title": "Device code 표",
       "title_ko": "Device code 표",
-      "description": "D/M/ZR/X, raw 0xA8",
+      "description": "D/M/ZR/X/Y/W, raw 0xA8. SLMP-3E-DEV-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_slmp_device_table",
@@ -2228,7 +2461,8 @@
       ],
       "tags": [
         "device",
-        "migrate"
+        "migrate",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_slmp_matrix.md",
@@ -2240,14 +2474,14 @@
     },
     {
       "id": "encode_batch_read",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "SLMP-3E-ENC-001",
+      "suite": "SLMP-3E-v1",
       "protocol": "slmp",
       "filename": "encode_batch_read.yaml",
       "path": "tests/scenarios/slmp/encode_batch_read.yaml",
       "title": "3E encode",
       "title_ko": "3E encode",
-      "description": "subheader 0x0050, cmd 0x0401/0x1401",
+      "description": "subheader 0x0050, cmd 0x0401/0x1401. SLMP-3E-ENC-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_slmp_encode_batch_read",
@@ -2259,7 +2493,72 @@
       "tags": [
         "encode",
         "3e",
-        "migrate"
+        "migrate",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_slmp_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "SLMP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "frame_malformed",
+      "bundle_id": "SLMP-3E-NEG-002",
+      "suite": "SLMP-3E-v1",
+      "protocol": "slmp",
+      "filename": "frame_malformed.yaml",
+      "path": "tests/scenarios/slmp/frame_malformed.yaml",
+      "title": "Truncated 3E / short write",
+      "title_ko": "Truncated 3E / short write",
+      "description": "fail closed. SLMP-3E-NEG-002",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_slmp_frame_malformed",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "slmp"
+      ],
+      "tags": [
+        "negative",
+        "boundary",
+        "3e",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_slmp_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "SLMP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "oob_batch_read",
+      "bundle_id": "SLMP-3E-NEG-003",
+      "suite": "SLMP-3E-v1",
+      "protocol": "slmp",
+      "filename": "oob_batch_read.yaml",
+      "path": "tests/scenarios/slmp/oob_batch_read.yaml",
+      "title": "OOB batch read/write",
+      "title_ko": "OOB batch read/write",
+      "description": "end 0xC056, map 유지. SLMP-3E-NEG-003",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_slmp_oob_batch_read",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "slmp"
+      ],
+      "tags": [
+        "negative",
+        "range",
+        "3e",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_slmp_matrix.md",
@@ -2271,14 +2570,14 @@
     },
     {
       "id": "reject_non_3e",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "SLMP-3E-NEG-001",
+      "suite": "SLMP-3E-v1",
       "protocol": "slmp",
       "filename": "reject_non_3e.yaml",
       "path": "tests/scenarios/slmp/reject_non_3e.yaml",
       "title": "ASCII/4E/unknown cmd 거절",
       "title_ko": "ASCII/4E/unknown cmd 거절",
-      "description": "create 거절, subheader 0x0054, cmd 0x0403 → 0xC050",
+      "description": "SLMP-3E-NEG-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_slmp_reject_non_3e",
@@ -2289,7 +2588,8 @@
       ],
       "tags": [
         "scope",
-        "3e"
+        "3e",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_slmp_matrix.md",
@@ -2301,14 +2601,14 @@
     },
     {
       "id": "soak_short",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "SLMP-3E-CYC-001",
+      "suite": "SLMP-3E-v1",
       "protocol": "slmp",
       "filename": "soak_short.yaml",
       "path": "tests/scenarios/slmp/soak_short.yaml",
       "title": "batch read soak (내부)",
       "title_ko": "batch read soak (내부)",
-      "description": "32 iterations",
+      "description": "32 iterations + metrics. SLMP-3E-CYC-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_slmp_soak_short",
@@ -2318,7 +2618,8 @@
         "slmp"
       ],
       "tags": [
-        "soak"
+        "soak",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_slmp_matrix.md",

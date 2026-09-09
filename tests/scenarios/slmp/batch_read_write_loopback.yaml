@@ -1,6 +1,9 @@
+# Internal TC SLMP-3E-CM-001 — not a Mitsubishi certification case.
 name: batch_read_write_loopback
+id: SLMP-3E-CM-001
+suite: SLMP-3E-v1
 protocol: slmp
-tags: [loopback, 3e, migrate]
+tags: [loopback, 3e, migrate, bundle]
 device:
   role: server
   frame: 3e_binary

@@ -88,9 +88,12 @@ PN 내부 bundle-grade 로드맵·TC ID (`PN-B-*`, **≠ PI 인증**):
 EIP 내부 bundle-grade 로드맵·TC ID (`EIP-A-*`, **≠ ODVA 인증**):
 [`docs/ctt_eip_bundle.md`](docs/ctt_eip_bundle.md).
 EIP 내부 ODVA 매핑은 [`docs/ctt_odva_matrix.md`](docs/ctt_odva_matrix.md).
+Modbus 내부 bundle-grade 카탈로그·TC ID (`MB-T-*`, **≠ Modbus.org 인증**):
+[`docs/ctt_mb_bundle.md`](docs/ctt_mb_bundle.md).
+SLMP 내부 bundle-grade 카탈로그·TC ID (`SLMP-3E-*`, **≠ Mitsubishi 인증**):
+[`docs/ctt_slmp_bundle.md`](docs/ctt_slmp_bundle.md).
 Modbus/SLMP 내부 매트릭스: [`docs/ctt_modbus_matrix.md`](docs/ctt_modbus_matrix.md),
 [`docs/ctt_slmp_matrix.md`](docs/ctt_slmp_matrix.md).
-Modbus / SLMP 의 같은 여섯 기둥 이식은 EIP-A-v1 다음이다.
 
 ## 새 프로토콜(예: EtherCAT) 추가하는 법
 1. `adapters/<name>/` 에 `include/protocol_adapter.h` 구현

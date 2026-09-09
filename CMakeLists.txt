@@ -319,6 +319,22 @@ if(BUILD_CTT)
     set_tests_properties(ctt_report_schema_eip_v1 PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         LABELS "ethernetip")
+    add_test(NAME ctt_report_schema_mb_v1
+        COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/ctt/check_report_schema.py"
+                --ctt $<TARGET_FILE:ctt>
+                --scenario "${CMAKE_SOURCE_DIR}/tests/scenarios/modbus/fc03_cyclic_metrics.yaml"
+                --protocol modbus_tcp)
+    set_tests_properties(ctt_report_schema_mb_v1 PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        LABELS "modbus")
+    add_test(NAME ctt_report_schema_slmp_v1
+        COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/ctt/check_report_schema.py"
+                --ctt $<TARGET_FILE:ctt>
+                --scenario "${CMAKE_SOURCE_DIR}/tests/scenarios/slmp/batch_cyclic_metrics.yaml"
+                --protocol slmp)
+    set_tests_properties(ctt_report_schema_slmp_v1 PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        LABELS "slmp")
     file(GLOB CTT_MB_SCENARIOS CONFIGURE_DEPENDS
          "${CMAKE_SOURCE_DIR}/tests/scenarios/modbus/*.yaml")
     foreach(sc ${CTT_MB_SCENARIOS})

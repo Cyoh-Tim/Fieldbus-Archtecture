@@ -1,6 +1,9 @@
+# Internal TC SLMP-3E-ENC-001 — not a Mitsubishi certification case.
 name: encode_batch_read
+id: SLMP-3E-ENC-001
+suite: SLMP-3E-v1
 protocol: slmp
-tags: [encode, 3e, migrate]
+tags: [encode, 3e, migrate, bundle]
 device:
   role: server
   frame: 3e_binary

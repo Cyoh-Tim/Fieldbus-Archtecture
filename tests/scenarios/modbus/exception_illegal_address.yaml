@@ -1,6 +1,9 @@
+# Internal TC MB-T-NEG-001 — OOB / qty=0 / illegal FC. Not Modbus.org text.
 name: exception_illegal_address
+id: MB-T-NEG-001
+suite: MB-T-v1
 protocol: modbus_tcp
-tags: [exception, migrate]
+tags: [exception, negative, bundle]
 device:
   role: server
   unit_id: 1
@@ -10,6 +13,14 @@ device:
   n_discrete: 10
   iface: mock
 steps:
+  - action: seed
+    type: holding
+    address: 0
+    values: [0xCAFE]
+  - action: seed
+    type: coil
+    address: 0
+    bits: [1]
   - action: request
     fc: 0x03
     tid: 1
@@ -20,3 +31,37 @@ steps:
       fc: 0x83
       exception_code: 0x02
       length: 9
+  - action: request
+    fc: 0x01
+    address: 9
+    quantity: 2
+    expect:
+      exception: true
+      fc: 0x81
+      exception_code: 0x02
+  - action: request
+    fc: 0x03
+    address: 0
+    quantity: 0
+    expect:
+      exception: true
+      exception_code: 0x02
+  - action: request
+    fc: 0x2B
+    address: 0
+    quantity: 1
+    expect:
+      exception: true
+      fc: 0xAB
+      exception_code: 0x01
+  - action: request
+    fc: 0x03
+    address: 0
+    quantity: 1
+    expect:
+      fc: 0x03
+      values: [0xCAFE]
+  - action: map_check
+    type: coil
+    address: 0
+    bits: [1]

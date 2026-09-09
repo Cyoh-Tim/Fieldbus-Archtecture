@@ -1,0 +1,49 @@
+# Internal TC MB-T-NEG-003 — illegal value / short PDU. Not Modbus.org text.
+name: exception_illegal_value
+id: MB-T-NEG-003
+suite: MB-T-v1
+protocol: modbus_tcp
+tags: [exception, negative, bundle]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 16
+  n_input: 8
+  n_coil: 8
+  n_discrete: 8
+  iface: mock
+steps:
+  - action: seed
+    type: coil
+    address: 0
+    bits: [0]
+  - action: seed
+    type: holding
+    address: 0
+    values: [0x1111]
+  - action: request
+    fc: 0x05
+    address: 0
+    value: 0x0001
+    expect:
+      exception: true
+      fc: 0x85
+      exception_code: 0x03
+  - action: map_check
+    type: coil
+    address: 0
+    bits: [0]
+  - action: adu_inject
+    # MBAP+unit+FC03, length=2 (PDU is FC only → illegal value)
+    pdu_hex: "0001000000020103"
+    expect:
+      exception: true
+      fc: 0x83
+      exception_code: 0x03
+  - action: request
+    fc: 0x03
+    address: 0
+    quantity: 1
+    expect:
+      fc: 0x03
+      values: [0x1111]

@@ -73,7 +73,9 @@ EIP 플러그인은 구현됨 (`tools/ctt/proto/ethernetip/`, DUT `stacks/ethern
 내부 카테고리 표는 [`docs/ctt_odva_matrix.md`](ctt_odva_matrix.md).
 공식 ODVA CT 는 멤버십+공인 랩. CTT green 이 인증을 대체하지 않는다.
 
-Modbus / SLMP 내부 매트릭스는 별도 문서다 (이 PI 표에 섞지 않음):
+내부 bundle-grade 카탈로그: [`docs/ctt_mb_bundle.md`](ctt_mb_bundle.md)
+(`MB-T-*`), [`docs/ctt_slmp_bundle.md`](ctt_slmp_bundle.md) (`SLMP-3E-*`).
+공식 인증이 아니다.
 
 - `docs/ctt_modbus_matrix.md` — TCP FC, 공식 Modbus.org 인증 아님
 - `docs/ctt_slmp_matrix.md` — Binary 3E batch, Mitsubishi 공식 인증 아님

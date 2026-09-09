@@ -50,6 +50,8 @@ python3 tools/ctt/gen_board_data.py --check
 - [`docs/ctt.md`](ctt.md) — CTT 설계
 - [`docs/ctt_pn_bundle.md`](ctt_pn_bundle.md) — PN 내부 bundle v1 (≠ PI 인증)
 - [`docs/ctt_eip_bundle.md`](ctt_eip_bundle.md) — EIP 내부 bundle v1 (≠ ODVA 인증)
+- [`docs/ctt_mb_bundle.md`](ctt_mb_bundle.md) — Modbus TCP 내부 bundle v1 (≠ Modbus.org 인증)
+- [`docs/ctt_slmp_bundle.md`](ctt_slmp_bundle.md) — SLMP 3E 내부 bundle v1 (≠ Mitsubishi 인증)
 - [`docs/ctt_pi_matrix.md`](ctt_pi_matrix.md) · [`docs/ctt_odva_matrix.md`](ctt_odva_matrix.md)
 - [`docs/ctt_modbus_matrix.md`](ctt_modbus_matrix.md) · [`docs/ctt_slmp_matrix.md`](ctt_slmp_matrix.md)
 - [`docs/ctt_lab.md`](ctt_lab.md) — lab / AF_PACKET
