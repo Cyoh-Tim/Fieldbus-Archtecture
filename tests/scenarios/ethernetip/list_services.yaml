@@ -1,0 +1,16 @@
+# Internal TC EIP-A-ENC-003 — not an ODVA CT case.
+name: list_services
+id: EIP-A-ENC-003
+suite: EIP-A-v1
+protocol: ethernetip
+tags: [encap, list_services, bundle]
+device:
+  iface: mock
+  input_size: 8
+  output_size: 8
+steps:
+  - action: list_services
+    expect:
+      cmd: 0x0004
+      encap_status: 0
+      contains: Communications

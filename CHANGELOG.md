@@ -4,6 +4,20 @@
 버전은 `VERSION` 과 CMake `project(... VERSION ...)` 의 **제품 스냅샷**이다.
 앱 ABI (`FB_API_VERSION_*` in `include/fb_api.h`) 와는 별개다.
 
+## [Unreleased]
+
+내부 CTT. **인증이 아니다.**
+
+### Added
+
+- EtherNet/IP Encaps ListServices YAML (`EIP-A-ENC-003`) — DUT 핸들러 고정
+- Large Forward Open YAML (`EIP-A-CM-004`, CIP `0x5B`) — 기존 DUT 경로 + Class1 IO
+
+### Notes
+
+- PROFINET Alarm Ack / Modbus FC08·MEI 는 DUT 미구현 → gap 유지
+- 라이브 TCP `:502` / `:5000` 은 기본 CI 에 넣지 않음 (`docs/ctt_lab.md`)
+
 ## [0.1.0] — 2026-09-09
 
 내부 스냅샷. 장비 없는 데모·내부 CTT mock 게이트까지 제품 경로가 닫힌다.

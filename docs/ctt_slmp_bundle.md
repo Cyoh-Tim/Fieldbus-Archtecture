@@ -91,7 +91,7 @@ Wave 2: 4 ms batch 메트릭 (`SLMP-3E-CYC-003`). Map lifetime·NEG 는 wave 1 �
 
 | 주제 | 상태 |
 |------|------|
-| Live TCP :5000 in default CI | inject 훅. `test_slmp_stack` localhost TCP 는 단위 경로. **gap** |
+| Live TCP :5000 in default CI | inject 훅. `test_slmp_stack` localhost TCP 는 단위 경로 (`:15557`). **기본 ctest 에 `:5000` 없음**. |
 | Random R/W `0x0403`/`0x1402` | DUT 는 end `0xC050`. 제품 비목표. NEG-001 에 고정 |
 | Remote RUN/STOP / type name | **DUT not implemented**. 가짜 pass 금지 |
 | Lab 프로파일 3E jitter | mock soft ms. AF_PACKET SLMP 미연결 |
@@ -100,7 +100,7 @@ Wave 2: 4 ms batch 메트릭 (`SLMP-3E-CYC-003`). Map lifetime·NEG 는 wave 1 �
 
 | ID / 라벨 | 커버 | 이유 |
 |-----------|------|------|
-| Live TCP :5000 default CI | **gap** | `slmp_stack_handle_request` inject |
+| Live TCP :5000 default CI | **gap** | `slmp_stack_handle_request` inject. 라이브 프로파일은 [`docs/ctt_lab.md`](ctt_lab.md) (opt-in) |
 | Random R/W / remote control | **oos** / gap | 제품 범위 밖. unknown cmd 는 `0xC050` |
 | **3E ASCII / 4E** | **oos** | `slmp_stack_create` 거절만 |
 | **Mitsubishi 공식 인증** | **oos** | 공인 랩. 이 하네스가 대체하지 않음 |

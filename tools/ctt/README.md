@@ -115,10 +115,10 @@ EtherNet/IP actions (mock `eip_cfg_t.mock`; no NIC):
 
 | action | notes |
 |--------|--------|
-| `register_session` / `list_identity` | Encapsulation |
+| `register_session` / `list_identity` / `list_services` | Encapsulation. ListServices expects Communications item |
 | `get_attr` | UCMM Get_Attribute_Single (`class_id`, `instance`, `attribute`) |
 | `write_input` / `read_input` / `read_output` | Assembly image |
-| `forward_open` | `integrity: true` adds CPF `0x00C1` HMAC; `integrity: bad` flips MAC |
+| `forward_open` | `integrity: true` adds CPF `0x00C1` HMAC; `integrity: bad` flips MAC; `large: true` is CIP `0x5B` |
 | `forward_close` | CM Forward Close (serial/vendor/orig from last FO) |
 | `encap_inject` | raw `pdu_hex` or `cmd` — truncated / unknown Encaps (fail closed) |
 | `class1_io` / `io_cycle` | O→T inject; produce via transport ops. `io_cycle` records late/missed/jitter vs `rpi_us`/`cycle_us`. `require_class1: false` for NEG |

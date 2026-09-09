@@ -71,10 +71,12 @@ protocol: ethernetip
 |-------|------|------|---------|-------------------|--------|
 | EIP-A-ENC-001 | `register_session.yaml` | catalog | pass | Encapsulation RegisterSession | ID only |
 | EIP-A-ENC-002 | `list_identity.yaml` | catalog | pass | ListIdentity + Protection Mode | ID only |
+| EIP-A-ENC-003 | `list_services.yaml` | catalog | pass | Encapsulation ListServices | **wave 3** Communications item |
 | EIP-A-ID-001 | `identity_get.yaml` | catalog | pass | Identity Get_Attribute_Single | ID only |
 | EIP-A-CM-001 | `assembly_fo_io.yaml` | CM | pass | Assembly + FO + Class 1 IO | ID only (단축) |
 | EIP-A-CM-002 | `class1_lifetime.yaml` | **lifetime** | pass | FO lifetime + Close | wave 1 FO→IO→Close→re-Open |
 | EIP-A-CM-003 | `class1_lifetime_dual.yaml` | **lifetime** | pass | two Class1 conns | **wave 2** FO A+B, Close A, B stays |
+| EIP-A-CM-004 | `large_forward_open.yaml` | CM | pass | Large Forward Open (`0x5B`) | **wave 3** DUT 경로 고정 |
 | EIP-A-CYC-001 | `class1_watchdog.yaml` | cyclic | pass | Class 1 watchdog + RT stats | ID only |
 | EIP-A-CYC-002 | `class1_cyclic_metrics.yaml` | **cyclic** | pass | Class1 metrics | wave 1 48 cycles, late/missed/jitter vs `rpi_us`/`cycle_us` |
 | EIP-A-CYC-003 | `class1_cycle_4ms.yaml` | **cyclic** | pass | Class1 4 ms metrics | **wave 2** `rpi_us: 4000` |
@@ -101,13 +103,16 @@ Wave 2 (PN fill 과 같은 기둥, cheap YAML):
 - 두 Class1 연결 lifetime (`EIP-A-CM-003`)
 - 4 ms Class1 메트릭 (`EIP-A-CYC-003`)
 
+Wave 3 (DUT 가 이미 하던 경로를 YAML 로 잠금):
+
+- Encapsulation ListServices (`EIP-A-ENC-003`) — Communications item
+- Large Forward Open (`EIP-A-CM-004`) — CIP `0x5B` + Class1 IO + Close
+
 아직 얇음 (다음 wave, 이 PR 에서 가짜 pass 하지 않음):
 
 | 주제 | 상태 |
 |------|------|
-| Encapsulation ListServices | DUT 핸들러는 있음. CTT YAML 없음 = **gap** |
 | Encapsulation ListInterfaces | **DUT not implemented** (default 은 unsupported status). gap |
-| Large Forward Open | DUT `0x5B` 경로 있음. CTT 는 standard FO 만. gap |
 | Originator UCMM tag R/W | Adapter DUT 경로. 시나리오 없음 = 미커버 |
 | Ethernet Link / Port objects | DUT 객체는 있음. CTT YAML 없음 = gap |
 | CIP Security TLS (Class 2) port 2221 | 스택은 있으나 CTT mock 미연결. gap |
@@ -117,8 +122,7 @@ Wave 2 (PN fill 과 같은 기둥, cheap YAML):
 
 | ID / 라벨 | 커버 | 이유 |
 |-----------|------|------|
-| ListServices / ListInterfaces YAML | **gap** | 시나리오 없음. ListInterfaces 는 DUT 미구현. 가짜 pass 금지 |
-| Large Forward Open CTT | **gap** | 표준 FO+Close 만 wave 1 |
+| ListInterfaces YAML | **gap** | DUT 미구현. ListServices 는 `EIP-A-ENC-003`. 가짜 pass 금지 |
 | Originator tag R/W | **gap** | Adapter DUT 가 아님 |
 | CIP Security TLS Class 2 mock | **gap** | DUT-not-wired-to-CTT |
 | Ethernet Link / Port CTT | **gap** | 객체만 있고 시나리오 없음 |

@@ -26,6 +26,8 @@ lab profile). `adapters/ethernetip/` 데몬 어댑터는 DUT 가 아니다.
 |--------------------------------------|---------------|------|------|
 | `register_session.yaml` | Encapsulation RegisterSession | mock | session handle ≠ 0. `EIP-A-ENC-001` |
 | `list_identity.yaml` | ListIdentity + Identity Protection Mode | mock | vendor / product name. `EIP-A-ENC-002` |
+| `list_services.yaml` | Encapsulation ListServices | mock | Communications item. `EIP-A-ENC-003` |
+| `large_forward_open.yaml` | Large Forward Open (`0x5B`) | mock | Class1 IO + Close. `EIP-A-CM-004` |
 | `identity_get.yaml` | Identity Get_Attribute_Single | mock | vendor_id. `EIP-A-ID-001` |
 | `assembly_fo_io.yaml` | Assembly + Forward Open + Class 1 IO | mock | consume O→T. `EIP-A-CM-001` |
 | `class1_lifetime.yaml` | Forward Open lifetime + Forward Close | mock | FO→IO→Close→re-Open. `EIP-A-CM-002` |
@@ -45,8 +47,7 @@ lab profile). `adapters/ethernetip/` 데몬 어댑터는 DUT 가 아니다.
 
 | 카테고리 | 커버 | 메모 |
 |----------|------|------|
-| Encapsulation ListServices / ListInterfaces | not yet | ListIdentity / RegisterSession 만. ListServices DUT 핸들러는 있으나 CTT YAML 없음. ListInterfaces **DUT not implemented** |
-| Large Forward Open | not yet | standard FO + Close + dual conn (`EIP-A-CM-002`/`003`) |
+| Encapsulation ListInterfaces | not yet | ListServices 는 `EIP-A-ENC-003`. ListInterfaces **DUT not implemented** |
 | Originator UCMM tag R/W | not yet | Adapter DUT 경로 |
 | CIP Security TLS (Class 2) port 2221 | not yet | 스택은 있으나 CTT mock 미연결 |
 | Ethernet Link / Port objects | not yet | DUT 객체는 있음 |

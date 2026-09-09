@@ -1,0 +1,38 @@
+# Internal TC EIP-A-CM-004 — Large Forward Open (CIP 0x5B). Not an ODVA CT case.
+name: large_forward_open
+id: EIP-A-CM-004
+suite: EIP-A-v1
+protocol: ethernetip
+tags: [cm, large_forward_open, class1, bundle]
+device:
+  iface: mock
+  product_name: LargeFo
+  input_size: 8
+  output_size: 8
+steps:
+  - action: register_session
+    expect:
+      session_handle: nonzero
+  - action: forward_open
+    large: true
+    serial: 0x2345
+    orig_serial: 0xAB
+    rpi_us: 8000
+    o2t_size: 8
+    t2o_size: 8
+    expect:
+      cip_status: 0
+      class1: up
+  - action: class1_io
+    fill: 0x3C
+    length: 8
+    seq: 1
+    expect:
+      u8: 0x3C
+      class1: up
+  - action: forward_close
+    serial: 0x2345
+    orig_serial: 0xAB
+    expect:
+      cip_status: 0
+      class1: down

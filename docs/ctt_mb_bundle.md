@@ -95,18 +95,18 @@ Wave 2: 4 ms FC03 메트릭 (`MB-T-CYC-003`). Holding/Coil lifetime·NEG 는 wav
 
 | 주제 | 상태 |
 |------|------|
-| Live TCP :502 in default CI | inject 훅만. 실 소켓은 데몬 경로. **gap** |
-| FC08 Diagnostics / FC11/12 comms event | DUT 미구현. YAML 없음 = gap |
+| Live TCP :502 in default CI | inject 훅만. 실 소켓은 데몬/`fake_sensor` 루프백(`:15560`). **기본 ctest 에 `:502` 없음** (docs). |
+| FC08 Diagnostics / FC11/12 comms event | **DUT not implemented**. YAML 없음 = gap |
 | FC20/21 file record | **DUT not implemented**. 가짜 pass 금지 |
-| Slave ID / MEI (FC43) | 미구현. illegal FC 로만 고정 |
+| Slave ID / MEI (FC43) | **DUT not implemented**. illegal FC 로만 고정 |
 | Lab 프로파일 TCP jitter | mock soft ms. AF_PACKET Modbus 미연결 |
 
 ## 4. 명시적 범위 밖 / 갭
 
 | ID / 라벨 | 커버 | 이유 |
 |-----------|------|------|
-| Live TCP :502 default CI | **gap** | `mb_stack_handle_adu` inject. 실 소켓 soak 는 데몬 경로 |
-| FC08 / FC20 / FC21 / MEI | **gap** | DUT 미구현 또는 illegal FC 만 |
+| Live TCP :502 default CI | **gap** | `mb_stack_handle_adu` inject. 라이브 프로파일은 [`docs/ctt_lab.md`](ctt_lab.md) (opt-in, 기본 CI 제외) |
+| FC08 / FC20 / FC21 / MEI | **gap** | DUT 미구현. illegal FC 만 (`MB-T-FC-004` / `MB-T-NEG-001`). 가짜 pass 금지 |
 | **Modbus RTU / serial / UDP** | **oos** | TCP only |
 | **공식 Modbus.org conformance lab** | **oos** | 유료/랩. 이 하네스가 대체하지 않음 |
 | 공식 TC 번호·공인 랩 판정 | **oos** | 라이선스 텍스트를 재구성하지 않음 |

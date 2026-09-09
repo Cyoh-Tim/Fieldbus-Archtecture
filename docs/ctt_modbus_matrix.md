@@ -41,7 +41,8 @@ DUT: `stacks/modbus/` 자체 TCP 서버 (`mb_stack_handle_adu`). 데몬도 동�
 |----------|------|------|
 | Modbus RTU / serial | N/A | TCP only |
 | Official Modbus.org conformance lab | N/A | 유료/랩 프로세스. 이 하네스가 대체하지 않음 |
-| Live TCP :502 in default CI | not yet | inject 훅. 실 소켓 soak 는 PR #2 harness |
+| Live TCP :502 in default CI | not yet | inject 훅. 라이브는 데몬/`fake_sensor` `:15560`. **기본 ctest 에 `:502` 없음** |
+| FC08 Diagnostics / FC11/12 / MEI (FC43) | **DUT not implemented** | illegal FC 로만 고정. 가짜 pass 금지 |
 | Encapsulated RTU / UDP | N/A | |
 
 ## 이 표가 말해 주지 않는 것

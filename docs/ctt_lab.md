@@ -136,3 +136,28 @@ PrmEnd/AppReady 가 fault 가 아님. IRT/PTCP/CC-C 를 켜지 말 것.
 랩 green ≠ PI 인증. 매핑은 [`docs/ctt_pi_matrix.md`](ctt_pi_matrix.md).
 공식 Test Bundle 접근을 가정하지 않는다. CC-C 카테고리는 매핑하지 않는다.
 MRP / Fast Start-Up 은 DUT 미구현이다 (하네스 공백으로 적지 않음).
+
+## Live TCP (기본 CI 밖)
+
+CTT YAML 은 `handle_adu` / `handle_request` / Encaps inject 다. **`:502` /
+`:5000` 를 기본 `ctest -LE soak_ci` 에 넣지 않는다.**
+
+이미 있는 localhost 경로 (CTT 시나리오 아님):
+
+| 경로 | 포트 | 언제 |
+|------|------|------|
+| `fake_sensor_app` Modbus | `127.0.0.1:15560` | `examples/run_mock_flow.sh modbus` |
+| `fake_sensor_app` SLMP lab 서버 | `127.0.0.1:15561` | `examples/run_mock_flow.sh slmp` |
+| `test_slmp_stack` client/server loopback | `127.0.0.1:15557` | `ctest -R test_slmp_stack` (daemon job) |
+| 데몬 `example.modbus.json` | 설정 포트 (예: 1502) | 수동 |
+
+수동 스모크 (CI 게이트 아님):
+
+```
+./build/fake_sensor_app --seconds 5 config/example.fake_sensor.json
+# 다른 터미널에서 Modbus TCP 클라이언트로 127.0.0.1:15560
+```
+
+제품 well-known 포트(`:502` / Mitsubishi `:5000`) 를 기본 게이트에 바인드하지
+않는다. 권한·포트 충돌을 PR CI 에 넣지 않기 위함이다.
+
