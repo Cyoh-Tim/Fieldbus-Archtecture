@@ -1,6 +1,9 @@
+# Internal TC EIP-A-CYC-001 — not an ODVA CT case.
 name: class1_watchdog
+id: EIP-A-CYC-001
+suite: EIP-A-v1
 protocol: ethernetip
-tags: [class1, watchdog, rt, migrate]
+tags: [class1, watchdog, rt, migrate, bundle]
 device:
   iface: mock
   input_size: 8

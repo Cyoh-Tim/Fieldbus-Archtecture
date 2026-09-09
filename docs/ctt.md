@@ -375,11 +375,13 @@ ctest --output-on-failure
 - DUT = `stacks/ethernetip/` 자체 스택. 구매 스택 스텁은 대상 아님
 - `tools/ctt/proto/ethernetip/` Scanner/Originator stub
 - `tests/scenarios/ethernetip/*.yaml` — register / identity / assembly+FO+IO /
-  Sec1 FO reject/accept / QoS / ACD / LLDP / watchdog / ListIdentity
+  lifetime Close / Sec1 FO reject/accept / bad HMAC / truncated Encaps /
+  QoS / ACD / LLDP / watchdog / Class1 cyclic metrics / ListIdentity
 - HMAC 단위 테스트 `tests/test_eip_crypto.c`. 잔여 `tests/test_eip_stack.c`
 - 같은 `./build/ctt` 엔트리. `protocol: ethernetip`
 - CI: `ctest -L ethernetip` (mock, no NIC). `libssl-dev` 필요
 - 내부 매핑: `docs/ctt_odva_matrix.md` (공식 CT 아님)
+- 내부 bundle-grade 카탈로그: `docs/ctt_eip_bundle.md` (`EIP-A-*`, ≠ ODVA 인증)
 
 ```
 ./build/ctt --scenario tests/scenarios/ethernetip/register_session.yaml
@@ -474,6 +476,7 @@ docs/ctt_board.html              # 시나리오 현황 보드 (인증 아님). �
 docs/ctt_lab.md                  # Phase 3 lab / veth / CODESYS
 docs/ctt_pi_matrix.md            # CC-A/B 내부 매핑 (인증 evidence 아님)
 docs/ctt_pn_bundle.md            # PN 내부 bundle-grade 로드맵 + TC ID (≠ PI 인증)
+docs/ctt_eip_bundle.md           # EIP 내부 bundle-grade 로드맵 + TC ID (≠ ODVA 인증)
 docs/ctt_odva_matrix.md          # EIP 내부 CT-style 매핑 (공식 CT 아님)
 docs/ctt_modbus_matrix.md        # Modbus TCP FC (공식 Modbus.org 아님)
 docs/ctt_slmp_matrix.md          # SLMP Binary 3E (Mitsubishi 공식 인증 아님)

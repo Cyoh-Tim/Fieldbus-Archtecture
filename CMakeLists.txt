@@ -307,9 +307,18 @@ if(BUILD_CTT)
     add_test(NAME ctt_report_schema_v1
         COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/ctt/check_report_schema.py"
                 --ctt $<TARGET_FILE:ctt>
-                --scenario "${CMAKE_SOURCE_DIR}/tests/scenarios/profinet/rtc1_cyclic_metrics.yaml")
+                --scenario "${CMAKE_SOURCE_DIR}/tests/scenarios/profinet/rtc1_cyclic_metrics.yaml"
+                --protocol profinet)
     set_tests_properties(ctt_report_schema_v1 PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    add_test(NAME ctt_report_schema_eip_v1
+        COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/ctt/check_report_schema.py"
+                --ctt $<TARGET_FILE:ctt>
+                --scenario "${CMAKE_SOURCE_DIR}/tests/scenarios/ethernetip/class1_cyclic_metrics.yaml"
+                --protocol ethernetip)
+    set_tests_properties(ctt_report_schema_eip_v1 PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        LABELS "ethernetip")
     file(GLOB CTT_MB_SCENARIOS CONFIGURE_DEPENDS
          "${CMAKE_SOURCE_DIR}/tests/scenarios/modbus/*.yaml")
     foreach(sc ${CTT_MB_SCENARIOS})

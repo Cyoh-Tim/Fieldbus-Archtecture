@@ -1,6 +1,9 @@
+# Internal TC EIP-A-ID-001 — not an ODVA CT case.
 name: identity_get
+id: EIP-A-ID-001
+suite: EIP-A-v1
 protocol: ethernetip
-tags: [cip, identity, migrate]
+tags: [cip, identity, migrate, bundle]
 device:
   iface: mock
   vendor_id: 0xABCD

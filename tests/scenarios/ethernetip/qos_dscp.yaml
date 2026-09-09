@@ -1,6 +1,9 @@
+# Internal TC EIP-A-QOS-001 — not an ODVA CT case.
 name: qos_dscp
+id: EIP-A-QOS-001
+suite: EIP-A-v1
 protocol: ethernetip
-tags: [qos, dscp, migrate]
+tags: [qos, dscp, migrate, bundle]
 device:
   iface: mock
   input_size: 8

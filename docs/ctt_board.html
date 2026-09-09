@@ -178,7 +178,9 @@
         <strong>내부 bundle-grade 게이트 ≠ PI 인증.</strong>
         공식 PI Test Bundle, ODVA CT, Modbus.org, Mitsubishi 랩 리포트를 이 페이지의
         통과 배지로 대체하지 마세요. PROFINET CC-C / IRT 는 제품 범위 밖입니다.
-        카탈로그: <a href="ctt_pn_bundle.md">docs/ctt_pn_bundle.md</a> (<code>PN-B-*</code>).
+        카탈로그: <a href="ctt_pn_bundle.md">docs/ctt_pn_bundle.md</a> (<code>PN-B-*</code>),
+        <a href="ctt_eip_bundle.md">docs/ctt_eip_bundle.md</a> (<code>EIP-A-*</code>).
+        Modbus / SLMP 기둥 이식은 EIP-A-v1 다음.
       </div>
     </div>
 
@@ -237,6 +239,7 @@
       · 재생성: <code>python3 tools/ctt/gen_board_data.py</code>
       · 설명: <a href="ctt_board.md">docs/ctt_board.md</a>
       · PN bundle: <a href="ctt_pn_bundle.md">ctt_pn_bundle.md</a>
+      · EIP bundle: <a href="ctt_eip_bundle.md">ctt_eip_bundle.md</a>
       · 매트릭스:
       <a href="ctt_pi_matrix.md">PI</a> ·
       <a href="ctt_odva_matrix.md">ODVA</a> ·
@@ -249,18 +252,18 @@
 <!-- CTT_BOARD_DATA_BEGIN -->
 <script type="application/json" id="ctt-board-data">
 {
-  "generated_at": "2026-09-09T06:36:21Z",
+  "generated_at": "2026-09-09T07:03:21Z",
   "generator": "tools/ctt/gen_board_data.py",
   "disclaimer": "내부 CTT 보드입니다. 내부 bundle-grade 게이트 ≠ PI / ODVA / Modbus.org / Mitsubishi 공식 인증. 배지는 시나리오가 기본 mock CI(`ctest -LE soak_ci`)에 등록되는지·매트릭스에 갭/범위 밖으로 적혀 있는지를 분류한 것이며, 이 페이지가 ctest 를 실행하지는 않습니다.",
   "ci_default": "ctest --test-dir build --output-on-failure -LE soak_ci",
-  "note": "pass = YAML registered in CMake and included in default mock CI. skip = soak_ci / nightly / lab (opt-in). gap = matrix DUT-not-implemented or not-yet. out_of_scope = CC-C/IRT, official cert labs, EtherCAT, etc. Internal bundle-grade gate != PI certification. PROFINET catalog: docs/ctt_pn_bundle.md (PN-B-* ids).",
+  "note": "pass = YAML registered in CMake and included in default mock CI. skip = soak_ci / nightly / lab (opt-in). gap = matrix DUT-not-implemented or not-yet. out_of_scope = CC-C/IRT, official cert labs, EtherCAT, etc. Internal bundle-grade gate != PI / ODVA certification. PROFINET catalog: docs/ctt_pn_bundle.md (PN-B-* ids). EtherNet/IP catalog: docs/ctt_eip_bundle.md (EIP-A-* ids). Modbus/SLMP catalogs are next after EIP-A-v1.",
   "counts": {
-    "pass": 45,
+    "pass": 50,
     "skip": 4,
     "gap": 9,
     "out_of_scope": 13,
-    "total": 71,
-    "scenarios": 47
+    "total": 76,
+    "scenarios": 52
   },
   "by_protocol": {
     "profinet": {
@@ -271,11 +274,11 @@
       "total": 33
     },
     "ethernetip": {
-      "pass": 9,
+      "pass": 14,
       "skip": 0,
       "gap": 5,
       "out_of_scope": 1,
-      "total": 15
+      "total": 20
     },
     "modbus_tcp": {
       "pass": 7,
@@ -1266,14 +1269,14 @@
     },
     {
       "id": "acd_identity_state",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "EIP-A-ACD-001",
+      "suite": "EIP-A-v1",
       "protocol": "ethernetip",
       "filename": "acd_identity_state.yaml",
       "path": "tests/scenarios/ethernetip/acd_identity_state.yaml",
       "title": "ACD + Identity state",
       "title_ko": "ACD + Identity state",
-      "description": "MinorRF / TCP/IP ACD Status",
+      "description": "MinorRF / TCP/IP ACD Status. EIP-A-ACD-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_eip_acd_identity_state",
@@ -1285,7 +1288,8 @@
       "tags": [
         "acd",
         "identity",
-        "migrate"
+        "migrate",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_odva_matrix.md",
@@ -1297,14 +1301,14 @@
     },
     {
       "id": "assembly_fo_io",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "EIP-A-CM-001",
+      "suite": "EIP-A-v1",
       "protocol": "ethernetip",
       "filename": "assembly_fo_io.yaml",
       "path": "tests/scenarios/ethernetip/assembly_fo_io.yaml",
       "title": "Assembly + Forward Open + Class 1 IO",
       "title_ko": "Assembly + Forward Open + Class 1 IO",
-      "description": "consume O→T",
+      "description": "consume O→T. EIP-A-CM-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_eip_assembly_fo_io",
@@ -1317,7 +1321,73 @@
         "assembly",
         "forward_open",
         "class1",
-        "migrate"
+        "migrate",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_odva_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "EtherNet/IP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "class1_cyclic_metrics",
+      "bundle_id": "EIP-A-CYC-002",
+      "suite": "EIP-A-v1",
+      "protocol": "ethernetip",
+      "filename": "class1_cyclic_metrics.yaml",
+      "path": "tests/scenarios/ethernetip/class1_cyclic_metrics.yaml",
+      "title": "Class 1 cyclic metrics",
+      "title_ko": "Class 1 cyclic metrics",
+      "description": "48 cycles, late/missed/jitter vs RPI. EIP-A-CYC-002",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_eip_class1_cyclic_metrics",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "ethernetip"
+      ],
+      "tags": [
+        "class1",
+        "cyclic",
+        "metrics",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_odva_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "EtherNet/IP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "class1_lifetime",
+      "bundle_id": "EIP-A-CM-002",
+      "suite": "EIP-A-v1",
+      "protocol": "ethernetip",
+      "filename": "class1_lifetime.yaml",
+      "path": "tests/scenarios/ethernetip/class1_lifetime.yaml",
+      "title": "Forward Open lifetime + Forward Close",
+      "title_ko": "Forward Open lifetime + Forward Close",
+      "description": "FO→IO→Close→re-Open. EIP-A-CM-002",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_eip_class1_lifetime",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "ethernetip"
+      ],
+      "tags": [
+        "forward_open",
+        "forward_close",
+        "lifetime",
+        "class1",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_odva_matrix.md",
@@ -1329,14 +1399,14 @@
     },
     {
       "id": "class1_watchdog",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "EIP-A-CYC-001",
+      "suite": "EIP-A-v1",
       "protocol": "ethernetip",
       "filename": "class1_watchdog.yaml",
       "path": "tests/scenarios/ethernetip/class1_watchdog.yaml",
       "title": "Class 1 watchdog + RT stats",
       "title_ko": "Class 1 watchdog + RT stats",
-      "description": "timeout after first IO",
+      "description": "timeout after first IO. EIP-A-CYC-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_eip_class1_watchdog",
@@ -1349,7 +1419,72 @@
         "class1",
         "watchdog",
         "rt",
-        "migrate"
+        "migrate",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_odva_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "EtherNet/IP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "encap_malformed",
+      "bundle_id": "EIP-A-NEG-002",
+      "suite": "EIP-A-v1",
+      "protocol": "ethernetip",
+      "filename": "encap_malformed.yaml",
+      "path": "tests/scenarios/ethernetip/encap_malformed.yaml",
+      "title": "Encapsulation truncated / unknown cmd",
+      "title_ko": "Encapsulation truncated / unknown cmd",
+      "description": "fail closed. EIP-A-NEG-002",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_eip_encap_malformed",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "ethernetip"
+      ],
+      "tags": [
+        "encap",
+        "negative",
+        "boundary",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_odva_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "EtherNet/IP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "fo_bad_hmac",
+      "bundle_id": "EIP-A-NEG-001",
+      "suite": "EIP-A-v1",
+      "protocol": "ethernetip",
+      "filename": "fo_bad_hmac.yaml",
+      "path": "tests/scenarios/ethernetip/fo_bad_hmac.yaml",
+      "title": "Security Class 1 reject (bad HMAC)",
+      "title_ko": "Security Class 1 reject (bad HMAC)",
+      "description": "item 있음, MAC 불량. EIP-A-NEG-001",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_eip_fo_bad_hmac",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "ethernetip"
+      ],
+      "tags": [
+        "security",
+        "forward_open",
+        "negative",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_odva_matrix.md",
@@ -1361,14 +1496,14 @@
     },
     {
       "id": "identity_get",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "EIP-A-ID-001",
+      "suite": "EIP-A-v1",
       "protocol": "ethernetip",
       "filename": "identity_get.yaml",
       "path": "tests/scenarios/ethernetip/identity_get.yaml",
       "title": "Identity Get_Attribute_Single",
       "title_ko": "Identity Get_Attribute_Single",
-      "description": "vendor_id",
+      "description": "vendor_id. EIP-A-ID-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_eip_identity_get",
@@ -1380,7 +1515,39 @@
       "tags": [
         "cip",
         "identity",
-        "migrate"
+        "migrate",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_odva_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "EtherNet/IP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "io_without_fo",
+      "bundle_id": "EIP-A-NEG-003",
+      "suite": "EIP-A-v1",
+      "protocol": "ethernetip",
+      "filename": "io_without_fo.yaml",
+      "path": "tests/scenarios/ethernetip/io_without_fo.yaml",
+      "title": "Class 1 reject (no FO)",
+      "title_ko": "Class 1 reject (no FO)",
+      "description": "produce 없음. EIP-A-NEG-003",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_eip_io_without_fo",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "ethernetip"
+      ],
+      "tags": [
+        "class1",
+        "negative",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_odva_matrix.md",
@@ -1392,14 +1559,14 @@
     },
     {
       "id": "list_identity",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "EIP-A-ENC-002",
+      "suite": "EIP-A-v1",
       "protocol": "ethernetip",
       "filename": "list_identity.yaml",
       "path": "tests/scenarios/ethernetip/list_identity.yaml",
       "title": "ListIdentity + Identity Protection Mode",
       "title_ko": "ListIdentity + Identity Protection Mode",
-      "description": "vendor / product name",
+      "description": "vendor / product name. EIP-A-ENC-002",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_eip_list_identity",
@@ -1412,7 +1579,8 @@
         "encap",
         "identity",
         "protection",
-        "migrate"
+        "migrate",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_odva_matrix.md",
@@ -1424,14 +1592,14 @@
     },
     {
       "id": "lldp_mgmt",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "EIP-A-NBR-001",
+      "suite": "EIP-A-v1",
       "protocol": "ethernetip",
       "filename": "lldp_mgmt.yaml",
       "path": "tests/scenarios/ethernetip/lldp_mgmt.yaml",
       "title": "LLDP Management (0x109) TX",
       "title_ko": "LLDP Management (0x109) TX",
-      "description": "ethertype 0x88CC",
+      "description": "ethertype 0x88CC. EIP-A-NBR-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_eip_lldp_mgmt",
@@ -1442,7 +1610,8 @@
       ],
       "tags": [
         "lldp",
-        "migrate"
+        "migrate",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_odva_matrix.md",
@@ -1454,14 +1623,14 @@
     },
     {
       "id": "qos_dscp",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "EIP-A-QOS-001",
+      "suite": "EIP-A-v1",
       "protocol": "ethernetip",
       "filename": "qos_dscp.yaml",
       "path": "tests/scenarios/ethernetip/qos_dscp.yaml",
       "title": "QoS Object DSCP defaults",
       "title_ko": "QoS Object DSCP defaults",
-      "description": "Explicit 0x1B / Scheduled 0x2F",
+      "description": "Explicit 0x1B / Scheduled 0x2F. EIP-A-QOS-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_eip_qos_dscp",
@@ -1473,7 +1642,8 @@
       "tags": [
         "qos",
         "dscp",
-        "migrate"
+        "migrate",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_odva_matrix.md",
@@ -1485,14 +1655,14 @@
     },
     {
       "id": "register_session",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "EIP-A-ENC-001",
+      "suite": "EIP-A-v1",
       "protocol": "ethernetip",
       "filename": "register_session.yaml",
       "path": "tests/scenarios/ethernetip/register_session.yaml",
       "title": "Encapsulation RegisterSession",
       "title_ko": "Encapsulation RegisterSession",
-      "description": "session handle ≠ 0",
+      "description": "session handle ≠ 0. EIP-A-ENC-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_eip_register_session",
@@ -1504,7 +1674,8 @@
       "tags": [
         "encap",
         "session",
-        "migrate"
+        "migrate",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_odva_matrix.md",
@@ -1516,14 +1687,14 @@
     },
     {
       "id": "sec_integrity_fo",
-      "bundle_id": null,
-      "suite": null,
+      "bundle_id": "EIP-A-SEC-001",
+      "suite": "EIP-A-v1",
       "protocol": "ethernetip",
       "filename": "sec_integrity_fo.yaml",
       "path": "tests/scenarios/ethernetip/sec_integrity_fo.yaml",
       "title": "Security Class 1 integrity (lab profile)",
       "title_ko": "Security Class 1 integrity (lab profile)",
-      "description": "unsigned FO 거부, HMAC 수락. CPF item 0x00C1 은 이 저장소 프로파일",
+      "description": "unsigned FO 거부, HMAC 수락. CPF item 0x00C1 은 이 저장소 프로파일. EIP-A-SEC-001",
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_eip_sec_integrity_fo",
@@ -1535,7 +1706,8 @@
       "tags": [
         "security",
         "forward_open",
-        "migrate"
+        "migrate",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_odva_matrix.md",
@@ -1577,7 +1749,7 @@
       "path": null,
       "title": "Encapsulation ListServices / ListInterfaces",
       "title_ko": "Encapsulation ListServices / ListInterfaces",
-      "description": "ListIdentity / RegisterSession 만",
+      "description": "ListIdentity / RegisterSession 만. ListServices DUT 핸들러는 있으나 CTT YAML 없음. ListInterfaces DUT not implemented",
       "status": "gap",
       "reason": "docs/ctt_odva_matrix.md: not yet",
       "ctest_name": null,
@@ -1621,13 +1793,13 @@
       "suite": null
     },
     {
-      "id": "matrix_ethernetip_large_forward_open_forward_close",
+      "id": "matrix_ethernetip_large_forward_open",
       "protocol": "ethernetip",
       "filename": null,
       "path": null,
-      "title": "Large Forward Open / Forward Close",
-      "title_ko": "Large Forward Open / Forward Close",
-      "description": "standard FO + IO 만",
+      "title": "Large Forward Open",
+      "title_ko": "Large Forward Open",
+      "description": "standard FO + Close + IO 만 (EIP-A-CM-002)",
       "status": "gap",
       "reason": "docs/ctt_odva_matrix.md: not yet",
       "ctest_name": null,

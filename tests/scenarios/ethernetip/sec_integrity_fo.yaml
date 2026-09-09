@@ -1,6 +1,9 @@
+# Internal TC EIP-A-SEC-001 — unsigned FO reject + HMAC accept. Not ODVA CT.
 name: sec_integrity_fo
+id: EIP-A-SEC-001
+suite: EIP-A-v1
 protocol: ethernetip
-tags: [security, forward_open, migrate]
+tags: [security, forward_open, migrate, bundle]
 device:
   iface: mock
   security_class: 1

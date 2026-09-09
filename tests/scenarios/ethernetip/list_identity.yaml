@@ -1,6 +1,9 @@
+# Internal TC EIP-A-ENC-002 — not an ODVA CT case.
 name: list_identity
+id: EIP-A-ENC-002
+suite: EIP-A-v1
 protocol: ethernetip
-tags: [encap, identity, protection, migrate]
+tags: [encap, identity, protection, migrate, bundle]
 device:
   iface: mock
   vendor_id: 0x1234

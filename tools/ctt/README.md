@@ -71,6 +71,7 @@ by the plugin. The common runner does not parse DCP/CIP frames.
 | `docs/ctt_lab.md` | veth / CODESYS / `pn_device_run` |
 | `docs/ctt_pi_matrix.md` | CC-A/B internal mapping (not certification) |
 | `docs/ctt_pn_bundle.md` | PN internal bundle-grade roadmap + TC IDs (**≠ PI cert**) |
+| `docs/ctt_eip_bundle.md` | EIP internal bundle-grade roadmap + TC IDs (**≠ ODVA CT**) |
 | `docs/ctt_odva_matrix.md` | EIP internal CT-style mapping (not official CT) |
 | `docs/ctt_board.html` | scenario status board (pass / skip / gap / out of scope; not cert) |
 
@@ -103,8 +104,10 @@ EtherNet/IP actions (mock `eip_cfg_t.mock`; no NIC):
 | `register_session` / `list_identity` | Encapsulation |
 | `get_attr` | UCMM Get_Attribute_Single (`class_id`, `instance`, `attribute`) |
 | `write_input` / `read_input` / `read_output` | Assembly image |
-| `forward_open` | `integrity: true` adds CPF `0x00C1` HMAC |
-| `class1_io` / `io_cycle` | O→T inject; produce via transport ops |
+| `forward_open` | `integrity: true` adds CPF `0x00C1` HMAC; `integrity: bad` flips MAC |
+| `forward_close` | CM Forward Close (serial/vendor/orig from last FO) |
+| `encap_inject` | raw `pdu_hex` or `cmd` — truncated / unknown Encaps (fail closed) |
+| `class1_io` / `io_cycle` | O→T inject; produce via transport ops. `io_cycle` records late/missed/jitter vs `rpi_us`/`cycle_us`. `require_class1: false` for NEG |
 | `acd_conflict` / `lldp` / `watchdog` / `poll` | ACD, LLDP TX, Class 1 timeout |
 
 ## Soak / metrics
@@ -119,7 +122,8 @@ EtherNet/IP actions (mock `eip_cfg_t.mock`; no NIC):
 
 Logged as `LOG_INFO` `ctt` metrics at the end of the run. Machine-readable
 summary: `./build/ctt --scenario <yaml> --report out.json` (`ctt-report/v1`).
-Internal gate, not PI certification. See `docs/ctt_pn_bundle.md`.
+Internal gate, not PI / ODVA certification. See `docs/ctt_pn_bundle.md`,
+`docs/ctt_eip_bundle.md`.
 
 YAML top-level `id:` / `bundle_id:` / `suite:` are copied into the report
 (`tc_id`, `suite_id`).
@@ -127,6 +131,7 @@ YAML top-level `id:` / `bundle_id:` / `suite:` are copied into the report
 | scenario | default PR `ctest` | how to run |
 |----------|--------------------|------------|
 | `rtc1_cyclic_metrics.yaml` | yes (48 RTC1 cycles + late/missed/jitter) | `ctest -R rtc1_cyclic_metrics` |
+| `class1_cyclic_metrics.yaml` | yes (48 Class1 cycles + late/missed/jitter) | `ctest -R class1_cyclic_metrics` |
 | `soak_short.yaml` | yes (32 RTC1 iterations, sub-second) | `ctest -R soak_short` |
 | Identify / Sec1 Set `golden:` | yes (mock PCAP replay, no NIC) | `ctest -L golden` |
 | `soak_ci.yaml` | no (`-LE soak_ci`) | `ctest -L soak_ci` or workflow_dispatch `soak=true` (~30s) |
