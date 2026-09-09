@@ -15,6 +15,8 @@
 - Timed mock soak: MB/SLMP/EIP `duration_s` + EIP `soak` action, `--seconds` /
   `CTT_SOAK_DURATION_S`, `*/nightly/soak_nightly.yaml`, `tests/run_mock_soak.sh`
   (내부 게이트, 인증 아님)
+- 장비 없는 soak 실행 기록 [`docs/soak_report_20260909.md`](docs/soak_report_20260909.md)
+  (실제 duration = 5 min × 4 sequential; 2h×4 / 30min×4 는 이 세션에서 미완료)
 
 ### Notes
 

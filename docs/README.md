@@ -35,3 +35,4 @@
 | [`ctt_pi_matrix.md`](ctt_pi_matrix.md) · [`ctt_odva_matrix.md`](ctt_odva_matrix.md) | 내부 매핑 |
 | [`ctt_modbus_matrix.md`](ctt_modbus_matrix.md) · [`ctt_slmp_matrix.md`](ctt_slmp_matrix.md) | FC / 3E 커버리지 |
 | [`ctt_lab.md`](ctt_lab.md) | 랩 / AF_PACKET (기본 데모 아님) |
+| [`soak_report_20260909.md`](soak_report_20260909.md) | 2026-09-09 장비 없는 mock soak (5min×4; **인증 아님**) |
