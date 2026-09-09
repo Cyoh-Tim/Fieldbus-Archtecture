@@ -20,6 +20,8 @@ adapters/cclink/        CC-Link 어댑터 (미확정, 스텁)
 adapters/ethernetip/    EtherNet/IP 어댑터 (구매 스택 래핑, 연동부 TODO)
 adapters/profinet/      PROFINET 어댑터 — 자체 스택 연결 (RT Class 1, IRT 없음)
 stacks/profinet/        PROFINET IO Device 스택 (DCP/LLDP/RPC/RTC1/SNMP/Sec1)
+tools/ctt/              Controller Test Tool (공통 runner + proto/profinet)
+tests/scenarios/        CTT YAML (profinet/; ethernetip/ 예약)
 third_party/            EtherNet/IP 구매 벤더 스택 배치 위치 (git 커밋 안 함)
 config/                 config.schema.json + 예제 설정 파일
 docs/design.md          설계 배경 전체 문서
@@ -28,7 +30,7 @@ docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)
 
 ## 빌드
 ```
-sudo apt install libmodbus-dev   # Modbus 어댑터용
+sudo apt install libmodbus-dev   # Modbus 어댑터 / 데몬용
 mkdir build && cd build
 cmake ..
 make
@@ -38,12 +40,21 @@ EtherNet/IP 구매 스택을 `third_party/`에 배치한 뒤에는:
 cmake -DENABLE_ETHERNETIP=ON ..
 ```
 
+PN 스택 + Controller Test Tool 만 (libmodbus 불필요):
+```
+cmake -S . -B build -DBUILD_DAEMON=OFF
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
 ## 실행
 ```
 ./build/multiproto_daemon config/example.modbus.json
-./build/test_pn_stack
 ./build/multiproto_daemon config/example.profinet.json
+./build/ctt --scenario tests/scenarios/profinet/dcp_identify_name_of_station.yaml
+./build/test_pn_crypto
 ```
+CTT 설계·시나리오 스키마는 [`docs/ctt.md`](docs/ctt.md), 사용법은 [`tools/ctt/README.md`](tools/ctt/README.md).
 
 ## 새 프로토콜(예: EtherCAT) 추가하는 법
 1. `adapters/<name>/` 에 `include/protocol_adapter.h` 구현

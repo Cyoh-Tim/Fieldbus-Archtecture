@@ -36,10 +36,12 @@ sudo setcap cap_net_raw,cap_net_bind_service=+ep ./build/multiproto_daemon
 
 `iface` 를 실제 인터페이스로 바꾸고, 그 NIC IP 를 DCP/config IP 와 맞출 것. 스택은 기본적으로 OS 주소를 바꾸지 않는다.
 
-단위 테스트는 raw 소켓 없이:
+단위 테스트 / CTT 는 raw 소켓 없이:
 
 ```
-./build/test_pn_stack
+./build/test_pn_crypto
+./build/ctt --scenario tests/scenarios/profinet/dcp_identify_name_of_station.yaml
+ctest --test-dir build --output-on-failure
 ```
 
 ## 점대점 매핑

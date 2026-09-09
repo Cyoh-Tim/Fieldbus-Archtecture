@@ -1,0 +1,24 @@
+name: rtc1_io_cycle_smoke
+protocol: profinet
+tags: [rtc1, smoke]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  cycle_us: 8000
+  input_len: 32
+  output_len: 8
+steps:
+  - action: rpc_connect
+    integrity: false
+    expect:
+      ar: up
+      in_frame_id: 0x8001       # 스택 기본값 (IOCR 미지정 시)
+      out_frame_id: 0x8002
+  - action: io_cycle
+    count: 16
+    cycle_ms: 8
+    expect:
+      min_frames: 16
+      period_max_ms: 20         # mock soft bound. IRT/µs 아님
+      ethertype: 0x8892
