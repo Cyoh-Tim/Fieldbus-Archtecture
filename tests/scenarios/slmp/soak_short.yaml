@@ -1,0 +1,22 @@
+name: soak_short
+protocol: slmp
+tags: [soak]
+device:
+  role: server
+  frame: 3e_binary
+  pc_no: 0xFF
+  dest_module_io: 0x03FF
+  iface: mock
+steps:
+  - action: seed_words
+    device: D
+    head: 0
+    values: [0x0001]
+  - action: soak
+    device: D
+    head: 0
+    unit: word
+    quantity: 1
+    iterations: 32
+    expect:
+      min_ok: 32

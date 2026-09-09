@@ -1,0 +1,24 @@
+name: dcp_set_sec_class1
+protocol: profinet
+tags: [dcp, set, security, migrate]
+device:
+  station_name: old-name
+  security_class: 1
+  psk_hex: "1111111111111111111111111111111111111111111111111111111111111111"
+  iface: mock
+steps:
+  - action: dcp_set
+    signed: false
+    name_of_station: new-name
+    xid: 0xAABBCCDD
+    expect:
+      result: reject
+      station_name: old-name    # DUT cfg 불변
+  - action: dcp_set
+    signed: true                # HMAC over unsigned DCP body, option 0xF0/0x01
+    name_of_station: new-name
+    xid: 0xAABBCCDD
+    expect:
+      result: accept
+      station_name: new-name
+    golden: tests/golden/profinet/dcp_set_sec_class1_accept.pcap

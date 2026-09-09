@@ -1,0 +1,39 @@
+name: device_table
+protocol: slmp
+tags: [device, migrate]
+device:
+  role: server
+  frame: 3e_binary
+  pc_no: 0xFF
+  dest_module_io: 0x03FF
+  iface: mock
+steps:
+  - action: device_lookup
+    name: D
+    expect:
+      code: 0xA8
+      is_bit: false
+      hex_addr: false
+  - action: device_lookup
+    name: m
+    expect:
+      code: 0x90
+      is_bit: true
+  - action: device_lookup
+    name: ZR
+    expect:
+      code: 0xB0
+  - action: device_lookup
+    name: 0xA8
+    expect:
+      code: 0xA8
+  - action: device_lookup
+    name: X
+    expect:
+      code: 0x9C
+      is_bit: true
+      hex_addr: true
+  - action: device_lookup
+    name: NOPE
+    expect:
+      unknown: true

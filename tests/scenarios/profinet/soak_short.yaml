@@ -1,0 +1,23 @@
+name: soak_short
+protocol: profinet
+tags: [soak, rtc1, phase2]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  cycle_us: 8000
+  input_len: 32
+  output_len: 8
+steps:
+  - action: rpc_connect
+    integrity: false
+    expect:
+      ar: up
+  - action: soak
+    iterations: 32
+    cycle_ms: 8
+    expect:
+      min_frames: 32
+      unexpected_frames: 0
+      ar_drops: 0
+      period_max_ms: 20

@@ -4,6 +4,7 @@
 #include "pn_stack.h"
 
 #include <pthread.h>
+#include <netinet/in.h>
 
 #define PN_TXQ_MAX 8
 
@@ -23,7 +24,15 @@ typedef struct {
     uint16_t reduction_ratio;
     uint8_t initiator_mac[6];
     int established;
+    int prm_end;
+    int app_ready;
 } pn_ar_t;
+
+#define PN_IM1_FUNC_LEN 32
+#define PN_IM1_LOC_LEN  22
+#define PN_IM2_DATE_LEN 16
+#define PN_IM3_DESC_LEN 54
+#define PN_IM4_SIG_LEN  54
 
 struct pn_stack {
     pn_cfg_t cfg;
@@ -46,6 +55,17 @@ struct pn_stack {
     uint8_t last_rpc_resp[PN_FRAME_MAX];
     size_t last_rpc_resp_len;
 
+    char im1_function[PN_IM1_FUNC_LEN];
+    char im1_location[PN_IM1_LOC_LEN];
+    char im2_date[PN_IM2_DATE_LEN];
+    char im3_desc[PN_IM3_DESC_LEN];
+    uint8_t im4_sig[PN_IM4_SIG_LEN];
+
+    struct sockaddr_in rpc_peer;
+    int rpc_peer_set;
+    uint8_t pending_rpc_tx[PN_FRAME_MAX];
+    size_t pending_rpc_tx_len;
+
     pthread_mutex_t io_lock;
 };
 
@@ -65,6 +85,7 @@ int pn_eth_parse(const uint8_t *frame, size_t len, const uint8_t **payload,
 void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
                      size_t plen);
 int pn_dcp_verify_set(const pn_stack_t *s, const uint8_t *payload, size_t plen);
+void pn_dcp_send_hello(pn_stack_t *s);
 
 void pn_lldp_send(pn_stack_t *s);
 
@@ -76,12 +97,16 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
 void pn_rpc_poll(pn_stack_t *s);
 
 void pn_snmp_poll(pn_stack_t *s);
+int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t len, uint8_t *resp,
+                   size_t cap, size_t *out_len);
 int pn_udp_open(uint16_t port);
 
 int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                    uint16_t index, uint8_t *out, size_t cap, size_t *out_len);
+int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
+                    uint16_t index, const uint8_t *data, size_t len);
 
-int pn_alarm_send_dummy(pn_stack_t *s);
+int pn_alarm_send_dummy(pn_stack_t *s, uint16_t frame_id);
 
 int pn_sec_hmac(const pn_stack_t *s, const uint8_t *data, size_t len,
                 uint8_t mac[PN_HMAC_LEN]);

@@ -1,0 +1,27 @@
+name: reject_non_3e
+protocol: slmp
+tags: [scope, 3e]
+device:
+  role: server
+  frame: 3e_binary
+  pc_no: 0xFF
+  dest_module_io: 0x03FF
+  iface: mock
+steps:
+  - action: create_stack
+    frame: 3e_ascii
+    expect:
+      result: reject
+  - action: create_stack
+    frame: 4e_binary
+    expect:
+      result: reject
+  - action: inject
+    subheader: 0x0054
+    expect:
+      result: reject
+  - action: inject
+    subheader: 0x0050
+    cmd: 0x0403
+    expect:
+      end_code: 0xC050

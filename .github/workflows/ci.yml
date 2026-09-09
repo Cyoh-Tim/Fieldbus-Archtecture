@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      soak:
+        description: "Also run 30s CI soak (not in the default PR gate)"
+        type: boolean
+        default: false
+      lab:
+        description: "Optional veth AF_PACKET lab (needs sudo; skipped without permissions)"
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssl-dev
+
+      - name: Configure (pn/eip/mb/slmp stacks + ctt, no libmodbus)
+        run: cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON -DENABLE_EIP_TESTS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test (PN+EIP+Modbus+SLMP mock; short soak; golden; exclude 30s soak_ci)
+        run: ctest --test-dir build --output-on-failure -LE soak_ci
+
+      - name: Golden replay (mock Identify / Sec1 Set; no NIC)
+        run: ctest --test-dir build --output-on-failure -L golden
+
+      - name: EtherNet/IP mock scenarios (no NIC)
+        run: ctest --test-dir build --output-on-failure -L ethernetip
+
+
+  soak-ci:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.soak == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssl-dev
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON
+      - name: Build
+        run: cmake --build build
+      - name: 30s soak
+        run: ctest --test-dir build --output-on-failure -L soak_ci
+
+  lab:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.lab == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssl-dev iproute2
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON -DENABLE_CTT_AF_PACKET=ON
+      - name: Build
+        run: cmake --build build
+      - name: veth AF_PACKET subset (skip if no permissions)
+        run: tests/run_ctt_lab.sh
+
+  # Nightly soak (1–2 h). Not a PR gate. Uncomment and/or trigger via workflow_dispatch.
+  # soak-nightly:
+  #   if: github.event_name == 'workflow_dispatch'
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 150
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: sudo apt-get update && sudo apt-get install -y build-essential cmake
+  #     - run: cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON -DENABLE_PN_TESTS=ON
+  #     - run: cmake --build build
+  #     - run: ./build/ctt --scenario tests/scenarios/profinet/nightly/soak_nightly.yaml

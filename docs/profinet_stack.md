@@ -6,7 +6,7 @@
 
 | 항목 | 상태 |
 |------|------|
-| Conformance Class B 기능 | DCP, RTC1 cyclic IO, record(I&M0), LLDP, SNMP Get(sysName) |
+| Conformance Class B 기능 | DCP (Identify/Get/Set/Hello/Signal), RTC1, I&M0–4, Alarm High/Low TX, LLDP, SNMP Get(sysName) |
 | RT Class 1 | 비동기 cyclic, `cycle_us` (기본 8ms) |
 | Security Class 1 | HMAC-SHA256 PSK. DCP Set / CM Connect 에 integrity 필수 |
 | RT Class 3 / IRT | 구현하지 않음 |
@@ -36,10 +36,12 @@ sudo setcap cap_net_raw,cap_net_bind_service=+ep ./build/multiproto_daemon
 
 `iface` 를 실제 인터페이스로 바꾸고, 그 NIC IP 를 DCP/config IP 와 맞출 것. 스택은 기본적으로 OS 주소를 바꾸지 않는다.
 
-단위 테스트는 raw 소켓 없이:
+단위 테스트 / CTT 는 raw 소켓 없이:
 
 ```
-./build/test_pn_stack
+./build/test_pn_crypto
+./build/ctt --scenario tests/scenarios/profinet/dcp_identify_name_of_station.yaml
+ctest --test-dir build --output-on-failure
 ```
 
 ## 점대점 매핑

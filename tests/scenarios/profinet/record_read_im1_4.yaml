@@ -1,0 +1,26 @@
+name: record_read_im1_4
+protocol: profinet
+tags: [record, im1, im2, im3, im4]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  ip: 192.168.200.2
+  netmask: 255.255.255.0
+steps:
+  - action: record_read
+    index: 0xAFF1
+    expect:
+      min_len: 54
+  - action: record_read
+    index: 0xAFF2
+    expect:
+      min_len: 16
+  - action: record_read
+    index: 0xAFF3
+    expect:
+      min_len: 54
+  - action: record_read
+    index: 0xAFF4
+    expect:
+      min_len: 54

@@ -10,8 +10,8 @@
  * PROFINET IO Device stack (Fieldbus Architecture profile)
  *
  * Scope:
- *   - Conformance Class B functions: DCP, cyclic RTC1, record, alarm TX,
- *     LLDP, minimal SNMP
+ *   - Conformance Class B functions: DCP (Identify/Get/Set/Hello/Signal),
+ *     cyclic RTC1, record (I&M0–4), alarm TX (High/Low), LLDP, minimal SNMP
  *   - RT Class 1 only (unsynchronized cyclic IO). IRT / RT Class 3: no.
  *   - Security Class 1 integrity: HMAC-SHA256 PSK on DCP Set and CM Connect.
  *
@@ -65,6 +65,18 @@ void pn_stack_set_eth_ops(pn_stack_t *s, pn_eth_ops_t ops);
 int pn_stack_handle_eth(pn_stack_t *s, const uint8_t *frame, size_t len);
 int pn_stack_handle_rpc(pn_stack_t *s, const uint8_t *udp_payload, size_t len,
                         uint8_t *resp, size_t resp_cap, size_t *resp_len);
+/* Mock SNMP (UDP 161). Same idea as handle_rpc: no bind, no sudo. */
+int pn_stack_handle_snmp(pn_stack_t *s, const uint8_t *req, size_t len,
+                         uint8_t *resp, size_t resp_cap, size_t *resp_len);
+
+/* Device TX helpers for CTT (CC-B). Alarm requires an established AR. */
+int pn_stack_send_alarm(pn_stack_t *s);
+int pn_stack_send_alarm_ex(pn_stack_t *s, uint16_t frame_id);
+void pn_stack_send_lldp(pn_stack_t *s);
+void pn_stack_send_hello(pn_stack_t *s);
+int pn_stack_app_ready(const pn_stack_t *s);
+/* Mock: pull Device-originated RPC (ApplicationReady after PrmEnd). */
+int pn_stack_take_rpc_tx(pn_stack_t *s, uint8_t *out, size_t cap, size_t *out_len);
 
 const pn_cfg_t *pn_stack_cfg(const pn_stack_t *s);
 

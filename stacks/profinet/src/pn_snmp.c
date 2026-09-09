@@ -50,19 +50,15 @@ static size_t ber_oid_sysname(uint8_t *p)
     return ber_tlv(p, 0x06, oid, sizeof(oid));
 }
 
-void pn_snmp_poll(pn_stack_t *s)
+int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t len, uint8_t *resp,
+                   size_t cap, size_t *out_len)
 {
-    if (s->fd_snmp < 0) {
-        return;
+    (void)req;
+    (void)len;
+    if (!s || !resp || !out_len) {
+        return -EINVAL;
     }
-    uint8_t buf[1500];
-    struct sockaddr_in src;
-    socklen_t sl = sizeof(src);
-    ssize_t n = recvfrom(s->fd_snmp, buf, sizeof(buf), MSG_DONTWAIT,
-                         (struct sockaddr *)&src, &sl);
-    if (n <= 0) {
-        return;
-    }
+
     uint8_t inner[256];
     size_t i = 0;
     inner[i++] = 0x30;
@@ -101,6 +97,31 @@ void pn_snmp_poll(pn_stack_t *s)
     m += p;
     msg[msg_len_at] = (uint8_t)(m - msg_len_at - 1);
 
-    sendto(s->fd_snmp, msg, m, 0, (struct sockaddr *)&src, sl);
+    if (m > cap) {
+        return -ENOSPC;
+    }
+    memcpy(resp, msg, m);
+    *out_len = m;
+    return 0;
+}
+
+void pn_snmp_poll(pn_stack_t *s)
+{
+    if (s->fd_snmp < 0) {
+        return;
+    }
+    uint8_t buf[1500];
+    struct sockaddr_in src;
+    socklen_t sl = sizeof(src);
+    ssize_t n = recvfrom(s->fd_snmp, buf, sizeof(buf), MSG_DONTWAIT,
+                         (struct sockaddr *)&src, &sl);
+    if (n <= 0) {
+        return;
+    }
+    uint8_t msg[500];
+    size_t m = 0;
+    if (pn_snmp_handle(s, buf, (size_t)n, msg, sizeof(msg), &m) == 0 && m > 0) {
+        sendto(s->fd_snmp, msg, m, 0, (struct sockaddr *)&src, sl);
+    }
     (void)errno;
 }

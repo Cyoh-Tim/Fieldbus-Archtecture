@@ -1,0 +1,12 @@
+name: register_session
+protocol: ethernetip
+tags: [encap, session, migrate]
+device:
+  iface: mock
+  input_size: 8
+  output_size: 8
+steps:
+  - action: register_session
+    expect:
+      cmd: 0x0065
+      session_handle: nonzero

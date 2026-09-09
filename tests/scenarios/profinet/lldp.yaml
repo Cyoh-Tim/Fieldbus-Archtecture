@@ -1,0 +1,14 @@
+name: lldp
+protocol: profinet
+tags: [lldp, phase2]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  ip: 192.168.200.2
+  netmask: 255.255.255.0
+steps:
+  - action: lldp
+    expect:
+      ethertype: 0x88CC
+      name_of_station: sensor-line1

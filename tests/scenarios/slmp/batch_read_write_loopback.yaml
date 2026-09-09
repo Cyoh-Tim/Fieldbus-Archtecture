@@ -1,0 +1,74 @@
+name: batch_read_write_loopback
+protocol: slmp
+tags: [loopback, 3e, migrate]
+device:
+  role: server
+  frame: 3e_binary
+  pc_no: 0xFF
+  dest_module_io: 0x03FF
+  monitoring_timer: 0x0010
+  iface: mock
+steps:
+  - action: seed_words
+    device: D
+    head: 100
+    values: [0x1234, 0xABCD]
+  - action: batch_read
+    device: D
+    head: 100
+    unit: word
+    quantity: 2
+    expect:
+      end_code: 0
+      subheader: 0x00D0
+      data_len: 4
+      values: [0x1234, 0xABCD]
+  - action: batch_write
+    device: M
+    head: 0
+    unit: bit
+    bits: [1, 0, 1, 1]
+    expect:
+      end_code: 0
+  - action: map_check_bits
+    device: M
+    head: 0
+    bits: [1, 0, 1, 1]
+  - action: seed_words
+    device: D
+    head: 200
+    ascii: "ABC123"
+  - action: map_check_words
+    device: D
+    head: 200
+    ascii: "ABC123"
+  - action: map_check_words
+    device: D
+    head: 200
+    values: [0x4142, 0x4331, 0x3233]
+  - action: batch_write
+    device: D
+    head: 10
+    unit: word
+    values: [0x1234, 0x5678]
+    expect:
+      end_code: 0
+  - action: batch_read
+    device: D
+    head: 10
+    unit: word
+    quantity: 2
+    expect:
+      end_code: 0
+      values: [0x1234, 0x5678]
+  - action: batch_write
+    device: X
+    head: 0x1A
+    unit: bit
+    bits: [1]
+    expect:
+      end_code: 0
+  - action: map_check_bits
+    device: X
+    head: 0x1A
+    bits: [1]

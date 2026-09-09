@@ -39,19 +39,35 @@
 #define PN_DCP_SUB_DEV_NAME   0x02u
 #define PN_DCP_SUB_DEV_ID     0x03u
 #define PN_DCP_SUB_DEV_ROLE   0x04u
-#define PN_DCP_SUB_DEV_OPTS   0x05u
+#define PN_DCP_SUB_DEV_OPTS      0x05u
+#define PN_DCP_SUB_CTRL_SIGNAL   0x03u
+#define PN_DCP_SUB_CTRL_RESPONSE 0x04u
 
 #define PN_RPC_PORT           34964
 #define PN_SNMP_PORT          161
 
-#define PN_BLOCK_AR_REQ       0x0101u
-#define PN_BLOCK_IOCR_REQ     0x0102u
-#define PN_BLOCK_ALARMCR_REQ  0x0103u
-#define PN_BLOCK_EXPSUB_REQ   0x0104u
-#define PN_BLOCK_AR_RES       0x8101u
-#define PN_BLOCK_IOCR_RES     0x8102u
-#define PN_BLOCK_ALARMCR_RES  0x8103u
-#define PN_BLOCK_SEC_INT      0x0E01u /* stack Security Class 1 integrity block */
+#define PN_BLOCK_IOD_WRITE_REQ 0x0008u
+#define PN_BLOCK_IOD_READ_REQ  0x0009u
+#define PN_BLOCK_IOD_WRITE_RES 0x8008u
+#define PN_BLOCK_AR_REQ        0x0101u
+#define PN_BLOCK_IOCR_REQ      0x0102u
+#define PN_BLOCK_ALARMCR_REQ   0x0103u
+#define PN_BLOCK_EXPSUB_REQ    0x0104u
+#define PN_BLOCK_CONTROL_REQ   0x0110u
+#define PN_BLOCK_CONTROL_RES   0x0111u
+#define PN_BLOCK_AR_RES        0x8101u
+#define PN_BLOCK_IOCR_RES      0x8102u
+#define PN_BLOCK_ALARMCR_RES   0x8103u
+#define PN_BLOCK_SEC_INT       0x0E01u /* stack Security Class 1 integrity block */
+
+#define PN_CONTROL_PRM_END    0x0001u
+#define PN_CONTROL_APP_READY  0x0002u
+
+#define PN_INDEX_IM0 0xAFF0u
+#define PN_INDEX_IM1 0xAFF1u
+#define PN_INDEX_IM2 0xAFF2u
+#define PN_INDEX_IM3 0xAFF3u
+#define PN_INDEX_IM4 0xAFF4u
 
 #define PN_IOCR_INPUT         0x0001u
 #define PN_IOCR_OUTPUT        0x0002u

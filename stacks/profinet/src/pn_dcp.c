@@ -183,9 +183,31 @@ static void apply_blocks(pn_stack_t *s, const uint8_t *blocks, uint16_t dlen)
             LOG_INFO("pn_dcp", "IP set %u.%u.%u.%u",
                      (s->cfg.ip >> 24) & 0xff, (s->cfg.ip >> 16) & 0xff,
                      (s->cfg.ip >> 8) & 0xff, s->cfg.ip & 0xff);
+        } else if (opt == PN_DCP_OPT_CTRL && sub == PN_DCP_SUB_CTRL_SIGNAL) {
+            LOG_INFO("pn_dcp", "DCP Signal accepted (LED flash stub)");
         }
         off += total;
     }
+}
+
+static int blocks_have(const uint8_t *blocks, uint16_t dlen, uint8_t opt,
+                       uint8_t sub)
+{
+    size_t off = 0;
+    while (off + 4 <= dlen) {
+        uint8_t o = blocks[off];
+        uint8_t su = blocks[off + 1];
+        uint16_t bl = pn_rd_be16(blocks + off + 2);
+        size_t total = 4u + bl + (bl & 1u);
+        if (off + total > dlen) {
+            break;
+        }
+        if (o == opt && su == sub) {
+            return 1;
+        }
+        off += total;
+    }
+    return 0;
 }
 
 static size_t build_identify_blocks(const pn_stack_t *s, uint8_t *out,
@@ -277,7 +299,7 @@ void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
             uint8_t err[8];
             wr_t w = {err, sizeof(err), 0};
             wr_u8(&w, PN_DCP_OPT_CTRL);
-            wr_u8(&w, 0x04); /* Response */
+            wr_u8(&w, PN_DCP_SUB_CTRL_RESPONSE);
             wr_be16(&w, 3);
             wr_u8(&w, PN_DCP_OPT_SEC);
             wr_u8(&w, PN_DCP_SUB_SEC_HMAC);
@@ -287,20 +309,48 @@ void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
                      PN_DCP_RESP_UNSUP, xid, 0, err, w.n);
             return;
         }
+        int set_ip = blocks_have(blocks, dlen, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM);
+        int set_sig = blocks_have(blocks, dlen, PN_DCP_OPT_CTRL,
+                                  PN_DCP_SUB_CTRL_SIGNAL);
         apply_blocks(s, blocks, dlen);
         uint8_t ok[8];
         wr_t w = {ok, sizeof(ok), 0};
         wr_u8(&w, PN_DCP_OPT_CTRL);
-        wr_u8(&w, 0x04);
+        wr_u8(&w, PN_DCP_SUB_CTRL_RESPONSE);
         wr_be16(&w, 3);
-        wr_u8(&w, PN_DCP_OPT_DEV);
-        wr_u8(&w, PN_DCP_SUB_DEV_NAME);
+        if (set_sig) {
+            wr_u8(&w, PN_DCP_OPT_CTRL);
+            wr_u8(&w, PN_DCP_SUB_CTRL_SIGNAL);
+        } else if (set_ip) {
+            wr_u8(&w, PN_DCP_OPT_IP);
+            wr_u8(&w, PN_DCP_SUB_IP_PARAM);
+        } else {
+            wr_u8(&w, PN_DCP_OPT_DEV);
+            wr_u8(&w, PN_DCP_SUB_DEV_NAME);
+        }
         wr_u8(&w, 0x00); /* OK */
         wr_u8(&w, 0);
         send_dcp(s, src, PN_FRAMEID_DCP_GETSET, PN_DCP_SET,
                  PN_DCP_RESP_SUCCESS, xid, 0, ok, w.n);
+        if (set_ip) {
+            /* Device announces new IP (DCP Hello.Req, FrameID 0xFEFC). */
+            pn_dcp_send_hello(s);
+        }
         return;
     }
 
-    (void)k_dcp_mc;
+    /* Hello.Req from a peer is ignored (Device originates Hello). */
+}
+
+void pn_dcp_send_hello(pn_stack_t *s)
+{
+    if (!s) {
+        return;
+    }
+    uint8_t b[512];
+    size_t n = build_identify_blocks(s, b, sizeof(b));
+    send_dcp(s, k_dcp_mc, PN_FRAMEID_DCP_HELLO, PN_DCP_HELLO, PN_DCP_REQ, 0, 0,
+             b, n);
+    LOG_INFO("pn_dcp", "TX Hello FrameID=0x%04x name=%s", PN_FRAMEID_DCP_HELLO,
+             s->cfg.station_name);
 }

@@ -59,6 +59,73 @@ typedef struct {
     size_t stub_len;
 } sec_walk_t;
 
+typedef struct {
+    uint16_t slot;
+    uint16_t subslot;
+    uint16_t index;
+    int saw;
+} read_walk_t;
+
+typedef struct {
+    uint16_t slot;
+    uint16_t subslot;
+    uint16_t index;
+    const uint8_t *data;
+    uint32_t dlen;
+    int saw;
+} write_walk_t;
+
+typedef struct {
+    uint16_t command;
+    int saw;
+} ctrl_walk_t;
+
+static int parse_read_req(uint16_t type, const uint8_t *body, uint16_t blen,
+                          void *u)
+{
+    read_walk_t *r = u;
+    /* IODReadReq: seq(2) ARUUID(16) API(4) slot(2) subslot(2) pad(2) index(2) */
+    if (type == PN_BLOCK_IOD_READ_REQ && blen >= 30) {
+        r->slot = pn_rd_be16(body + 22);
+        r->subslot = pn_rd_be16(body + 24);
+        r->index = pn_rd_be16(body + 28);
+        r->saw = 1;
+    }
+    return 0;
+}
+
+static int parse_write_req(uint16_t type, const uint8_t *body, uint16_t blen,
+                           void *u)
+{
+    write_walk_t *w = u;
+    if (type == PN_BLOCK_IOD_WRITE_REQ && blen >= 30) {
+        w->slot = pn_rd_be16(body + 22);
+        w->subslot = pn_rd_be16(body + 24);
+        w->index = pn_rd_be16(body + 28);
+        w->dlen = pn_rd_be32(body + 30);
+        w->data = (blen > 34) ? body + 34 : NULL;
+        uint32_t avail = (blen > 34) ? (uint32_t)(blen - 34) : 0;
+        if (w->dlen > avail) {
+            w->dlen = avail;
+        }
+        w->saw = 1;
+    }
+    return 0;
+}
+
+static int parse_ctrl_req(uint16_t type, const uint8_t *body, uint16_t blen,
+                          void *u)
+{
+    ctrl_walk_t *c = u;
+    if (type == PN_BLOCK_CONTROL_REQ && blen >= 24) {
+        /* pad(2) + ARUUID(16) + session(2) + reserved(2) + command(2) */
+        size_t cmd_off = (blen >= 26) ? 22u : 20u;
+        c->command = pn_rd_be16(body + cmd_off);
+        c->saw = 1;
+    }
+    return 0;
+}
+
 static int strip_sec_cb(uint16_t type, const uint8_t *body, uint16_t blen,
                         void *u)
 {
@@ -248,6 +315,49 @@ static size_t ndr_wrap(uint8_t *out, const uint8_t *blocks, size_t n)
     return 20 + n;
 }
 
+static size_t wrap_rpc_req(uint8_t *out, size_t cap, uint16_t op,
+                           const uint8_t *stub, size_t stub_len)
+{
+    if (cap < RPC_HDR + stub_len) {
+        return 0;
+    }
+    memset(out, 0, RPC_HDR);
+    out[0] = 1;
+    out[1] = RPC_PT_REQUEST;
+    pn_wr_le16(out + 68, op);
+    pn_wr_le16(out + 74, (uint16_t)stub_len);
+    memcpy(out + RPC_HDR, stub, stub_len);
+    return RPC_HDR + stub_len;
+}
+
+static void queue_app_ready(pn_stack_t *s)
+{
+    uint8_t body[26];
+    memset(body, 0, sizeof(body));
+    memcpy(body + 2, s->ar.uuid, 16);
+    pn_wr_be16(body + 18, s->ar.session_key);
+    pn_wr_be16(body + 22, PN_CONTROL_APP_READY);
+    uint8_t blocks[64];
+    size_t bn = wr_block(blocks, PN_BLOCK_CONTROL_REQ, body, sizeof(body));
+    uint8_t stub[128];
+    size_t sn = ndr_wrap(stub, blocks, bn);
+    s->pending_rpc_tx_len =
+        wrap_rpc_req(s->pending_rpc_tx, sizeof(s->pending_rpc_tx), OP_CONTROL,
+                     stub, sn);
+    s->ar.app_ready = 1;
+    LOG_INFO("pn_rpc", "queued ApplicationReady indication");
+}
+
+static void flush_pending_rpc(pn_stack_t *s)
+{
+    if (s->fd_rpc < 0 || !s->rpc_peer_set || s->pending_rpc_tx_len == 0) {
+        return;
+    }
+    sendto(s->fd_rpc, s->pending_rpc_tx, s->pending_rpc_tx_len, 0,
+           (struct sockaddr *)&s->rpc_peer, sizeof(s->rpc_peer));
+    s->pending_rpc_tx_len = 0;
+}
+
 int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
                   size_t cap, size_t *out_len)
 {
@@ -311,15 +421,59 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         so = ndr_wrap(stub_out, z, 4);
         LOG_INFO("pn_rpc", "AR released");
     } else if (op == OP_CONTROL) {
-        uint8_t z[4] = {0};
-        so = ndr_wrap(stub_out, z, 4);
+        ctrl_walk_t cw = {.command = PN_CONTROL_PRM_END, .saw = 0};
+        size_t blen = 0;
+        const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
+        if (blocks) {
+            walk_blocks(blocks, blen, parse_ctrl_req, &cw);
+        }
+        if (!cw.saw) {
+            cw.command = PN_CONTROL_PRM_END;
+        }
+        uint8_t cres[26];
+        memset(cres, 0, sizeof(cres));
+        memcpy(cres + 2, s->ar.uuid, 16);
+        pn_wr_be16(cres + 18, s->ar.session_key);
+        pn_wr_be16(cres + 22, cw.command);
+        uint8_t blocks_res[64];
+        size_t bn = wr_block(blocks_res, PN_BLOCK_CONTROL_RES, cres,
+                             sizeof(cres));
+        so = ndr_wrap(stub_out, blocks_res, bn);
         s->ar.established = 1;
+        if (cw.command == PN_CONTROL_PRM_END) {
+            s->ar.prm_end = 1;
+            queue_app_ready(s);
+            LOG_INFO("pn_rpc", "ParameterEnd accepted, ApplicationReady queued");
+        } else if (cw.command == PN_CONTROL_APP_READY) {
+            s->ar.app_ready = 1;
+            LOG_INFO("pn_rpc", "ApplicationReady control accepted");
+        }
     } else if (op == OP_READ) {
         uint8_t rec[256];
         size_t rlen = 0;
-        pn_record_read(s, 0, 1, 0xAFF0, rec, sizeof(rec), &rlen);
+        read_walk_t rw = {.slot = 0, .subslot = 1, .index = PN_INDEX_IM0,
+                          .saw = 0};
+        size_t blen = 0;
+        const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
+        if (blocks) {
+            walk_blocks(blocks, blen, parse_read_req, &rw);
+        }
+        pn_record_read(s, rw.slot, rw.subslot, rw.index, rec, sizeof(rec),
+                       &rlen);
         so = ndr_wrap(stub_out, rec, rlen);
     } else if (op == OP_WRITE) {
+        write_walk_t ww = {.slot = 0, .subslot = 1, .index = 0, .data = NULL,
+                           .dlen = 0, .saw = 0};
+        size_t blen = 0;
+        const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
+        if (blocks) {
+            walk_blocks(blocks, blen, parse_write_req, &ww);
+        }
+        if (ww.saw) {
+            pn_record_write(s, ww.slot, ww.subslot, ww.index, ww.data, ww.dlen);
+            LOG_INFO("pn_rpc", "Write index=0x%04x slot=%u sub=%u len=%u",
+                     ww.index, ww.slot, ww.subslot, ww.dlen);
+        }
         uint8_t z[4] = {0};
         so = ndr_wrap(stub_out, z, 4);
     } else {
@@ -341,12 +495,16 @@ void pn_rpc_poll(pn_stack_t *s)
     ssize_t n = recvfrom(s->fd_rpc, buf, sizeof(buf), MSG_DONTWAIT,
                          (struct sockaddr *)&src, &sl);
     if (n <= 0) {
+        flush_pending_rpc(s);
         return;
     }
+    s->rpc_peer = src;
+    s->rpc_peer_set = 1;
     uint8_t resp[2048];
     size_t rlen = 0;
     if (pn_rpc_handle(s, buf, (size_t)n, resp, sizeof(resp), &rlen) == 0 &&
         rlen > 0) {
         sendto(s->fd_rpc, resp, rlen, 0, (struct sockaddr *)&src, sl);
     }
+    flush_pending_rpc(s);
 }

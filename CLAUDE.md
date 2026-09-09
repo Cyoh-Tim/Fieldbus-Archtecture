@@ -11,8 +11,8 @@
   `if (protocol == ...)` 같은 분기를 추가하는 것은 설계 위반이다. 코어에서
   프로토콜별 처리가 필요해 보이면, 그건 어댑터 인터페이스가 부족하다는
   신호이므로 `protocol_adapter.h` 확장을 먼저 제안할 것.
-- **EtherNet/IP만 벤더 라이선스 코드가 `third_party/` 에 올 수 있다.**
-  PROFINET 은 `stacks/profinet/` 자체 구현을 쓴다.
+- **EtherNet/IP / PROFINET 은 자체 스택** (`stacks/ethernetip/`, `stacks/profinet/`).
+  벤더 라이선스 코드를 쓸 때만 `third_party/` 에 둔다(현재 EIP 런타임·CTT DUT는 자체 스택).
 - 새 프로토콜(CC-Link 확정, EtherCAT 등) 추가는 README의 "새 프로토콜 추가하는
   법" 절차를 그대로 따른다. `core/adapter_registry.c`에 한 줄 추가하는 것 외에
   코어 파일을 수정하지 않는다.
@@ -24,9 +24,11 @@
 3. SLMP 어댑터 — 3E 프레임 인코딩/디코딩이 TODO로 남아있음. 실제 대상 PLC의
    SLMP 통신 가이드 문서(사용자가 제공)를 근거로 구현할 것. 문서 없이 임의로
    프레임 포맷을 추측하지 말 것.
-4. EtherNet/IP 어댑터 — `third_party/ethernetip_stack/`에 벤더 스택이
-   배치된 후 진행. 스택 매뉴얼의 초기화/폴링/read-write API를
-   `ethernetip_adapter.c`의 TODO 지점에 연결.
+4. EtherNet/IP 어댑터 — 자체 스택 (`stacks/ethernetip/`). Adapter Class 1 +
+   Originator explicit + Security Class 1/2(HMAC/TLS-PSK). CTT 플러그인
+   `tools/ctt/proto/ethernetip/` (DUT=자체 스택, 구매 스텁 아님).
+   공식 ODVA DoC 는 멤버십+랩 제품 프로세스. 상세 `docs/ethernetip_stack.md`,
+   `docs/ctt_odva_matrix.md`.
 5. PROFINET 어댑터 — 자체 스택 (`stacks/profinet/`). RT Class 1 + Security Class 1.
    IRT 는 켜지 않는다. 인증/CRA 는 제품 프로세스.
 6. CC-Link 스텁은 사양이 확정되기 전까지 건드리지 않는다.

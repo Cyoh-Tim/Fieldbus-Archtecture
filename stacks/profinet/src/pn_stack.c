@@ -64,6 +64,11 @@ pn_stack_t *pn_stack_create(const pn_cfg_t *cfg)
     pthread_mutex_init(&s->io_lock, NULL);
     memset(s->input_image, 0, sizeof(s->input_image));
     memset(s->output_image, 0, sizeof(s->output_image));
+    memset(s->im1_function, ' ', sizeof(s->im1_function));
+    memset(s->im1_location, ' ', sizeof(s->im1_location));
+    memset(s->im2_date, ' ', sizeof(s->im2_date));
+    memset(s->im3_desc, ' ', sizeof(s->im3_desc));
+    memset(s->im4_sig, 0, sizeof(s->im4_sig));
     s->start_ns = pn_now_ns();
     return s;
 }
@@ -166,6 +171,56 @@ int pn_stack_handle_rpc(pn_stack_t *s, const uint8_t *udp_payload, size_t len,
                         uint8_t *resp, size_t resp_cap, size_t *resp_len)
 {
     return pn_rpc_handle(s, udp_payload, len, resp, resp_cap, resp_len);
+}
+
+int pn_stack_handle_snmp(pn_stack_t *s, const uint8_t *req, size_t len,
+                         uint8_t *resp, size_t resp_cap, size_t *resp_len)
+{
+    return pn_snmp_handle(s, req, len, resp, resp_cap, resp_len);
+}
+
+int pn_stack_send_alarm(pn_stack_t *s)
+{
+    return pn_alarm_send_dummy(s, PN_FRAMEID_ALARM_HIGH);
+}
+
+int pn_stack_send_alarm_ex(pn_stack_t *s, uint16_t frame_id)
+{
+    return pn_alarm_send_dummy(s, frame_id);
+}
+
+void pn_stack_send_lldp(pn_stack_t *s)
+{
+    pn_lldp_send(s);
+    s->last_lldp_ns = pn_now_ns();
+}
+
+void pn_stack_send_hello(pn_stack_t *s)
+{
+    pn_dcp_send_hello(s);
+}
+
+int pn_stack_app_ready(const pn_stack_t *s)
+{
+    return s && s->ar.app_ready;
+}
+
+int pn_stack_take_rpc_tx(pn_stack_t *s, uint8_t *out, size_t cap, size_t *out_len)
+{
+    if (!s || !out || !out_len) {
+        return -EINVAL;
+    }
+    if (s->pending_rpc_tx_len == 0) {
+        *out_len = 0;
+        return -EAGAIN;
+    }
+    if (s->pending_rpc_tx_len > cap) {
+        return -ENOSPC;
+    }
+    memcpy(out, s->pending_rpc_tx, s->pending_rpc_tx_len);
+    *out_len = s->pending_rpc_tx_len;
+    s->pending_rpc_tx_len = 0;
+    return 0;
 }
 
 void pn_stack_poll(pn_stack_t *s)

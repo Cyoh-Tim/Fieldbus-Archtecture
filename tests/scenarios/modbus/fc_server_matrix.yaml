@@ -1,0 +1,145 @@
+name: fc_server_matrix
+protocol: modbus_tcp
+tags: [fc, matrix, migrate]
+device:
+  role: server
+  unit_id: 1
+  n_holding: 256
+  n_input: 64
+  n_coil: 128
+  n_discrete: 16
+  iface: mock
+steps:
+  - action: seed
+    type: holding
+    address: 0
+    values: [0xA000]
+  - action: seed
+    type: input
+    address: 5
+    values: [0xB005]
+  - action: seed
+    type: coil
+    address: 2
+    bits: [0]
+  - action: seed
+    type: discrete
+    address: 2
+    bits: [1]
+  - action: request
+    fc: 0x03
+    address: 0
+    quantity: 1
+    expect:
+      fc: 0x03
+      values: [0xA000]
+  - action: request
+    fc: 0x04
+    address: 5
+    quantity: 1
+    expect:
+      fc: 0x04
+      values: [0xB005]
+  - action: request
+    fc: 0x01
+    address: 2
+    quantity: 1
+    expect:
+      fc: 0x01
+      bits: [0]
+  - action: request
+    fc: 0x02
+    address: 2
+    quantity: 1
+    expect:
+      fc: 0x02
+      bits: [1]
+  - action: request
+    fc: 0x06
+    address: 10
+    value: 0x1234
+    expect:
+      fc: 0x06
+  - action: request
+    fc: 0x03
+    address: 10
+    quantity: 1
+    expect:
+      values: [0x1234]
+  - action: request
+    fc: 0x10
+    address: 20
+    values: [0x1111, 0x2222, 0x3333]
+    expect:
+      fc: 0x10
+  - action: request
+    fc: 0x03
+    address: 20
+    quantity: 3
+    expect:
+      values: [0x1111, 0x2222, 0x3333]
+  - action: request
+    fc: 0x0F
+    address: 50
+    bits: [1, 0, 1, 0, 0, 1, 0, 1]
+    expect:
+      fc: 0x0F
+  - action: request
+    fc: 0x01
+    address: 50
+    quantity: 8
+    expect:
+      bits: [1, 0, 1, 0, 0, 1, 0, 1]
+  - action: request
+    fc: 0x16
+    address: 0
+    and_mask: 0xFF00
+    or_mask: 0x00EE
+    expect:
+      fc: 0x16
+  - action: request
+    fc: 0x03
+    address: 0
+    quantity: 1
+    expect:
+      values: [0xA0EE]
+  - action: request
+    fc: 0x17
+    read_address: 20
+    read_quantity: 2
+    write_address: 30
+    values: [0xABCD]
+    expect:
+      fc: 0x17
+      byte_count: 4
+  - action: request
+    fc: 0x03
+    address: 30
+    quantity: 1
+    expect:
+      values: [0xABCD]
+  - action: seed
+    type: holding
+    address: 100
+    values: [0x0001]
+  - action: request
+    fc: 0x03
+    address: 100
+    quantity: 125
+    expect:
+      fc: 0x03
+      byte_count: 250
+  - action: request
+    fc: 0x08
+    address: 0
+    quantity: 1
+    expect:
+      exception: true
+      exception_code: 0x01
+  - action: request
+    unit_id: 9
+    fc: 0x03
+    address: 0
+    quantity: 1
+    expect:
+      no_response: true
