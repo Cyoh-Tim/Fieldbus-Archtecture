@@ -67,10 +67,12 @@ ctest --test-dir build --output-on-failure -LE soak_ci
 
 ## 실행
 장비 없는 제품 스토리(가짜 센서 `fb_write_*` → 같은 세션 `fb_read_*` → CTT
-Modbus mock). PLC/NIC/`CAP_NET_RAW` 없음. **인증이 아니다.**
+mock). Modbus TCP / SLMP Binary 3E / EtherNet/IP / PROFINET CC-B.
+PLC/NIC/`CAP_NET_RAW` 없음. **인증이 아니다.**
 상세: [`examples/README.md`](examples/README.md).
 ```
 ./examples/run_mock_flow.sh
+./examples/run_mock_flow.sh modbus
 ./build/fake_sensor_app --once config/example.fake_sensor.json
 ./build/fb_api_demo config/example.modbus.json
 ./build/multiproto_daemon config/example.modbus.json

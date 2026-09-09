@@ -285,12 +285,23 @@ endif()
 
 if(BUILD_DAEMON AND BUILD_API)
     add_test(NAME test_fb_api COMMAND test_fb_api)
-    add_test(NAME example_fake_sensor_once
-        COMMAND fake_sensor_app --once
-                "${CMAKE_SOURCE_DIR}/config/example.fake_sensor.json")
-    set_tests_properties(example_fake_sensor_once PROPERTIES
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        LABELS "example")
+    # Keep example_fake_sensor_once as Modbus (existing path).
+    set(_fake_sensor_tests
+        example_fake_sensor_once|example.fake_sensor.json
+        example_fake_sensor_once_slmp|example.fake_sensor.slmp.json
+        example_fake_sensor_once_ethernetip|example.fake_sensor.ethernetip.json
+        example_fake_sensor_once_profinet|example.fake_sensor.profinet.json)
+    foreach(_entry ${_fake_sensor_tests})
+        string(REPLACE "|" ";" _parts "${_entry}")
+        list(GET _parts 0 _tname)
+        list(GET _parts 1 _cfg)
+        add_test(NAME ${_tname}
+            COMMAND fake_sensor_app --once
+                    "${CMAKE_SOURCE_DIR}/config/${_cfg}")
+        set_tests_properties(${_tname} PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            LABELS "example")
+    endforeach()
 endif()
 
 if(BUILD_CTT)
@@ -299,19 +310,20 @@ if(BUILD_CTT)
     foreach(sc ${CTT_PN_SCENARIOS})
         get_filename_component(sc_name ${sc} NAME_WE)
         add_test(NAME ctt_pn_${sc_name} COMMAND ctt --scenario ${sc})
-        set_tests_properties(ctt_pn_${sc_name} PROPERTIES
-            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        set(_pn_labels "profinet")
         # 30s duration soak: optional. Default CI uses -LE soak_ci.
         if(sc_name STREQUAL "soak_ci")
-            set_tests_properties(ctt_pn_${sc_name} PROPERTIES
-                LABELS "soak_ci"
-                TIMEOUT 90)
+            list(APPEND _pn_labels "soak_ci")
+            set_tests_properties(ctt_pn_${sc_name} PROPERTIES TIMEOUT 90)
         endif()
         # Golden replay is mock-only (no NIC). Any YAML with golden: is labeled.
         file(READ "${sc}" _sc_txt)
         if(_sc_txt MATCHES "golden:")
-            set_tests_properties(ctt_pn_${sc_name} PROPERTIES LABELS "golden")
+            list(APPEND _pn_labels "golden")
         endif()
+        set_tests_properties(ctt_pn_${sc_name} PROPERTIES
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            LABELS "${_pn_labels}")
     endforeach()
     add_test(NAME ctt_report_schema_v1
         COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/ctt/check_report_schema.py"
@@ -319,7 +331,8 @@ if(BUILD_CTT)
                 --scenario "${CMAKE_SOURCE_DIR}/tests/scenarios/profinet/rtc1_cyclic_metrics.yaml"
                 --protocol profinet)
     set_tests_properties(ctt_report_schema_v1 PROPERTIES
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        LABELS "profinet")
     add_test(NAME ctt_report_schema_eip_v1
         COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/ctt/check_report_schema.py"
                 --ctt $<TARGET_FILE:ctt>
@@ -374,8 +387,9 @@ if(BUILD_CTT)
     # Lab AF_PACKET is tests/run_ctt_lab.sh — not registered (needs CAP_NET_RAW).
 endif()
 
-# One-command product story: fake sensor → fb_api readback → CTT Modbus mock.
-# Target exists only when the daemon API demo and CTT are both enabled.
+# One-command product story: fake sensor → fb_api readback → CTT mock
+# (Modbus / SLMP / EtherNet/IP / PROFINET). Target exists only when the
+# daemon API demo and CTT are both enabled.
 if(BUILD_DAEMON AND BUILD_API AND BUILD_CTT)
     add_custom_target(run_mock_flow
         COMMAND "${CMAKE_COMMAND}" -E env "BUILD_DIR=${CMAKE_BINARY_DIR}"
@@ -383,7 +397,7 @@ if(BUILD_DAEMON AND BUILD_API AND BUILD_CTT)
                 --skip-configure
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         DEPENDS fake_sensor_app ctt
-        COMMENT "fake sensor → fb_api readback → CTT Modbus mock (not certification)"
+        COMMENT "fake sensor → fb_api readback → CTT mock, all protocols (not certification)"
         USES_TERMINAL
     )
 endif()

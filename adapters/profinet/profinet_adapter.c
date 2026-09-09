@@ -259,12 +259,18 @@ static int pn_read_point(protocol_adapter_t *self, const char *point_name,
     if (n > out->len) {
         n = out->len;
     }
+    int rc;
     if (strcmp(pt->access, "write") == 0) {
-        return pn_stack_read_output(ctx->stack, (size_t)pt->byte_offset,
-                                    out->data, n);
+        rc = pn_stack_read_output(ctx->stack, (size_t)pt->byte_offset,
+                                  out->data, n);
+    } else {
+        rc = pn_stack_read_input(ctx->stack, (size_t)pt->byte_offset, out->data,
+                                 n);
     }
-    return pn_stack_read_input(ctx->stack, (size_t)pt->byte_offset, out->data,
-                               n);
+    if (rc == 0) {
+        out->len = n;
+    }
+    return rc;
 }
 
 static int pn_write_point(protocol_adapter_t *self, const char *point_name,

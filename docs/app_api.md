@@ -131,9 +131,12 @@ cmake --build build-daemon
 ./build-daemon/test_fb_api
 ./build-daemon/fb_api_demo config/example.modbus.json
 ./build-daemon/fake_sensor_app --once config/example.fake_sensor.json
+./build-daemon/fake_sensor_app --once config/example.fake_sensor.slmp.json
+./build-daemon/fake_sensor_app --once config/example.fake_sensor.ethernetip.json
+./build-daemon/fake_sensor_app --once config/example.fake_sensor.profinet.json
 ```
 
-장비 없는 게시→readback→CTT Modbus mock 한 줄 실행:
+장비 없는 게시→readback→CTT mock (Modbus / SLMP / EIP / PROFINET) 한 줄:
 [`examples/README.md`](../examples/README.md) (`./examples/run_mock_flow.sh`).
 
 CTT (`BUILD_DAEMON=OFF -DBUILD_CTT=ON`) 는 이 라이브러리를 링크하지 않으며
