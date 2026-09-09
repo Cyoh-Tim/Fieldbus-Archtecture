@@ -18,6 +18,7 @@ config.json 설정만으로 선택해 동작시키는 필드버스 런타임.
 
 전체 설계 배경은 [`docs/design.md`](docs/design.md).
 CTT 설계(공통 runner + 프로토콜 플러그인)는 [`docs/ctt.md`](docs/ctt.md).
+비전문가용 JSON→데몬 동작 애니메이션 데모: [docs/json-config-flow.html](docs/json-config-flow.html) (브라우저에서 열기).
 
 ## 디렉토리 구조
 ```
@@ -38,6 +39,7 @@ third_party/            (선택) 향후 벤더 EIP 스택 교체 위치 — git 
 config/                 config.schema.json + 예제 설정 파일
 docs/design.md          설계 배경 전체 문서
 docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)
+docs/json-config-flow.html  비전문가 JSON 설정 → 데몬 동작 애니메이션 데모
 ```
 
 ## 빌드
