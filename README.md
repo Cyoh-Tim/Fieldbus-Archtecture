@@ -1,10 +1,18 @@
 # Fieldbus Architecture
 
+**v0.1.0** — 내부 스냅샷.
+
 Modbus / SLMP / CC-Link / EtherNet-IP / PROFINET 중 **한 번에 하나의 프로토콜**을
 config.json 설정만으로 선택해 동작시키는 필드버스 런타임.
 
 담당자가 각 프로토콜을 몰라도, 통신 가이드의 주소만 `points`에 채우면 되도록
 프로토콜 지식은 어댑터/스택 안에 캡슐화한다.
+
+## Status
+
+장비 없는 **데모 준비 완료** + 내부 CTT mock 게이트. 하드웨어 랩(PLC / 실 NIC)은 이후.
+**인증이 아니다** (CTT green ≠ PI / ODVA / Modbus.org / Mitsubishi).
+버전: [`VERSION`](VERSION) · CMake `project(... VERSION 0.1.0)` · [`CHANGELOG.md`](CHANGELOG.md).
 
 ## 10분 데모 (장비 없음)
 
@@ -75,8 +83,10 @@ config/                 config.schema.json + 예제 설정 파일
 examples/               fb_api_demo + 장비 없는 fake sensor → CTT mock 플로
 docs/demo.md            장비 없는 10분 데모 스크립트
 docs/index.html         데모 HTML 허브
-docs/json-config-flow.html  JSON → 런타임 애니메이션
+docs/json-config-flow.html  JSON → 런타임 애니메이션 (데모 정본 HTML)
+docs/config-viz.html    (선택) 필드 의미·메모리 맵 시각화
 docs/ctt_board.html     CTT 시나리오 현황 보드 (통과/건너뜀/갭/범위 밖, 인증 아님)
+CHANGELOG.md            내부 스냅샷 이력 (v0.1.0)
 docs/design.md          설계 배경 전체 문서
 docs/app_api.md         애플리케이션 C API (포인트 읽기/쓰기, 스레드, reload)
 docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)

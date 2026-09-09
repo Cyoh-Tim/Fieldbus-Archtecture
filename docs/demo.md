@@ -72,7 +72,7 @@ xdg-open docs/ctt_board.html
 
 랩(AF_PACKET)은 기본 데모가 아니다: [`ctt_lab.md`](ctt_lab.md), `tests/run_ctt_lab.sh`.
 
-JSON 시각화 보완본 [`docs/config-viz.html`](https://github.com/Cyoh-Tim/Fieldbus-Archtecture/pull/16) 은 PR #16 에 있다 (미머지).
+선택 시각화(정본 아님): 필드 의미·메모리 맵 [`config-viz.html`](config-viz.html).
 데모 경로의 HTML 은 **`json-config-flow.html`** 이다.
 
 ## 다음에 읽을 것
