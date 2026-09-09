@@ -1,0 +1,28 @@
+{
+  "schema": "ctt-report/v1",
+  "disclaimer": "internal bundle-grade gate != PI / ODVA / Modbus.org / Mitsubishi certification",
+  "suite_id": "EIP-A-v1",
+  "tc_id": "EIP-A-CYC-012",
+  "name": "soak_nightly",
+  "protocol": "ethernetip",
+  "scenario": "/workspace/tests/scenarios/ethernetip/nightly/soak_nightly.yaml",
+  "transport": "mock",
+  "verdict": "pass",
+  "failures": 0,
+  "duration_ms": 300002,
+  "metrics": {
+    "rtc1_frames": 37500,
+    "late_cycles": 0,
+    "missed_cycles": 0,
+    "unexpected_frames": 0,
+    "ar_drops": 0,
+    "period_min_ns": 7367366,
+    "period_max_ns": 10507546,
+    "period_sum_ns": 299994673117,
+    "period_samples": 37499,
+    "jitter_max_ns": 2507546,
+    "cycle_ns": 8000000,
+    "late_threshold_ns": 12000000,
+    "jitter_hist_ms": [0, 18911, 18588, 0, 0, 0]
+  }
+}

@@ -12,7 +12,9 @@
 
 - CTT timed soak: `clock_nanosleep(TIMER_ABSTIME)` 절대시각 대기
   (`tools/ctt/cycle_clock.c`). 상대 `sleep_ms(cycle)` 드리프트 제거.
-  PREEMPT_RT / isolcpus 없음. 소프트 예산: late@1.5×cycle = 0 (µs 인증 아님)
+  PREEMPT_RT / isolcpus 없음. 소프트 예산: late@1.5×cycle = 0 (µs 인증 아님).
+  5 min×4 비교: [`docs/soak_report_20260910_jitter.md`](docs/soak_report_20260910_jitter.md)
+  (avg 8.000 ms·37500 사이클; `jitter_max` 는 공유 VM 스파이크가 지배)
 - PN RTC1 / EIP Class1 produce 주기를 last=now 가 아니라 phase += period 로 유지
 - Soak 핫패스: YAML/encode 재파싱·SLMP handle_request heap alloc 제거 (루프 안만)
 
