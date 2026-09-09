@@ -1,12 +1,14 @@
 # docs
 
 장비 없는 데모(비전문가·내부용). **인증이 아니다.** PLC / NIC / `CAP_NET_RAW` 없음.
+버전: [`VERSION`](../VERSION) · [`CHANGELOG.md`](../CHANGELOG.md) (v0.1.0 내부 스냅샷).
 
 | 열기 | 역할 |
 |------|------|
 | [`demo.md`](demo.md) | **10분 스크립트** (이 저장소의 “보여 줘”) |
 | [`index.html`](index.html) | 브라우저 허브 (이 폴더를 파일로 열 때) |
-| [`json-config-flow.html`](json-config-flow.html) | JSON → 런타임 애니메이션 |
+| [`json-config-flow.html`](json-config-flow.html) | JSON → 런타임 애니메이션 (데모 정본 HTML) |
+| [`config-viz.html`](config-viz.html) | (선택) 필드 의미·메모리 맵 시각화 |
 | [`ctt_board.html`](ctt_board.html) | CTT 시나리오 현황 보드 (≠ 인증) |
 | [`app_api.md`](app_api.md) | 앱은 `fb_api.h` 만 |
 
