@@ -1,0 +1,51 @@
+{
+  "protocol": "modbus_tcp",
+  "device": {
+    "name": "fake_barcode_temp_1",
+    "role": "server"
+  },
+  "cycle_ms": 8,
+  "protocol_params": {
+    "role": "server",
+    "ip": "127.0.0.1",
+    "port": 15560,
+    "unit_id": 1,
+    "unit_id_any": false,
+    "max_clients": 2,
+    "client_timeout_ms": 200
+  },
+  "points": [
+    {
+      "name": "barcode_value",
+      "access": "read",
+      "data_type": "string",
+      "length": 32,
+      "chars_per_register": 2,
+      "trim_null": true,
+      "address": {
+        "modbus": {
+          "type": "holding",
+          "start": 40001,
+          "offset": 0,
+          "byte_offset": 0
+        }
+      }
+    },
+    {
+      "name": "temperature",
+      "access": "read",
+      "data_type": "uint16",
+      "scale": 0.1,
+      "offset": 0.0,
+      "endian": "ABCD",
+      "address": {
+        "modbus": {
+          "type": "4x",
+          "address": "40001",
+          "offset": 16,
+          "quantity": 1
+        }
+      }
+    }
+  ]
+}

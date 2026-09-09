@@ -40,6 +40,7 @@ tools/ctt/              Controller Test Tool (공통 runner + proto plugins)
 tests/scenarios/        CTT YAML (profinet/, ethernetip/, modbus/, slmp/)
 third_party/            (선택) 향후 벤더 EIP 스택 교체 위치 — git 커밋 안 함
 config/                 config.schema.json + 예제 설정 파일
+examples/               fb_api_demo + 장비 없는 fake sensor → CTT mock 플로
 docs/design.md          설계 배경 전체 문서
 docs/app_api.md         애플리케이션 C API (포인트 읽기/쓰기, 스레드, reload)
 docs/ctt.md             CTT 설계 (공통 runner + 프로토콜 플러그인)
@@ -65,7 +66,12 @@ ctest --test-dir build --output-on-failure -LE soak_ci
 ```
 
 ## 실행
+장비 없는 제품 스토리(가짜 센서 `fb_write_*` → 같은 세션 `fb_read_*` → CTT
+Modbus mock). PLC/NIC/`CAP_NET_RAW` 없음. **인증이 아니다.**
+상세: [`examples/README.md`](examples/README.md).
 ```
+./examples/run_mock_flow.sh
+./build/fake_sensor_app --once config/example.fake_sensor.json
 ./build/fb_api_demo config/example.modbus.json
 ./build/multiproto_daemon config/example.modbus.json
 ./build/multiproto_daemon config/example.slmp.json

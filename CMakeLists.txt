@@ -168,6 +168,9 @@ if(BUILD_DAEMON)
         add_executable(fb_api_demo examples/fb_api_demo.c)
         target_link_libraries(fb_api_demo PRIVATE fieldbus)
 
+        add_executable(fake_sensor_app examples/fake_sensor_app.c)
+        target_link_libraries(fake_sensor_app PRIVATE fieldbus m)
+
         add_executable(test_fb_api tests/test_fb_api.c)
         target_link_libraries(test_fb_api PRIVATE fieldbus m)
 
@@ -282,6 +285,12 @@ endif()
 
 if(BUILD_DAEMON AND BUILD_API)
     add_test(NAME test_fb_api COMMAND test_fb_api)
+    add_test(NAME example_fake_sensor_once
+        COMMAND fake_sensor_app --once
+                "${CMAKE_SOURCE_DIR}/config/example.fake_sensor.json")
+    set_tests_properties(example_fake_sensor_once PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        LABELS "example")
 endif()
 
 if(BUILD_CTT)
@@ -363,4 +372,18 @@ if(BUILD_CTT)
             LABELS "ethernetip")
     endforeach()
     # Lab AF_PACKET is tests/run_ctt_lab.sh — not registered (needs CAP_NET_RAW).
+endif()
+
+# One-command product story: fake sensor → fb_api readback → CTT Modbus mock.
+# Target exists only when the daemon API demo and CTT are both enabled.
+if(BUILD_DAEMON AND BUILD_API AND BUILD_CTT)
+    add_custom_target(run_mock_flow
+        COMMAND "${CMAKE_COMMAND}" -E env "BUILD_DIR=${CMAKE_BINARY_DIR}"
+                bash "${CMAKE_SOURCE_DIR}/examples/run_mock_flow.sh"
+                --skip-configure
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        DEPENDS fake_sensor_app ctt
+        COMMENT "fake sensor → fb_api readback → CTT Modbus mock (not certification)"
+        USES_TERMINAL
+    )
 endif()
