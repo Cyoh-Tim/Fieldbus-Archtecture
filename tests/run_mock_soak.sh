@@ -3,6 +3,8 @@
 #
 # Protocols: Modbus TCP, SLMP Binary 3E, EtherNet/IP Adapter Class 1,
 # PROFINET CC-B RT Class 1. Sequential (jitter not mixed across protocols).
+# Soak loops use CLOCK_MONOTONIC + TIMER_ABSTIME (not relative sleep_ms).
+# Soft budget: late @ 1.5×cycle = 0. Not PREEMPT_RT / IRT / certification.
 #
 # NOT PI / ODVA / Modbus.org / Mitsubishi / CODESYS certification.
 # No CAP_NET_RAW, no real NIC, no CC-C/IRT, no licensed Bundle copy.

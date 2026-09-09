@@ -129,6 +129,15 @@ EtherNet/IP actions (mock `eip_cfg_t.mock`; no NIC):
 
 ## Soak / metrics
 
+Timed `soak` loops (MB/SLMP/EIP/PN nightly and `soak_short`) wait with
+`clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)` (`tools/ctt/cycle_clock.c`),
+same idea as `core/scheduler.c`. Relative `nanosleep(cycle_ms)` is not used
+on that path — it accumulated work time and kernel slack. Soft bound on a
+normal kernel: **not PREEMPT_RT**, not IRT / CC-C, not a µs certification claim.
+Nightly YAML `max_late: 0` / `max_missed: 0` means inter-arrival stays
+`≤ 1.5 × cycle_us` (12 ms at 8 ms). Aim lower `jitter_max`; do not treat
+millisecond jitter as a PI/ODVA number.
+
 `io_cycle` and `soak` record:
 
 - unexpected frame count (non-RTC1, non-LLDP during soak)

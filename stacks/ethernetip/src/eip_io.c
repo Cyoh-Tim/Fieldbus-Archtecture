@@ -115,8 +115,9 @@ void eip_io_produce(eip_stack_t *s)
         if (rpi == 0) {
             rpi = 8000;
         }
-        if (c->last_tx_ns != 0 &&
-            now - c->last_tx_ns < (uint64_t)rpi * 1000ull) {
+        uint64_t period_ns = (uint64_t)rpi * 1000ull;
+        /* last_tx_ns = next due (0 = due immediately). Keep RPI phase. */
+        if (c->last_tx_ns != 0 && now < c->last_tx_ns) {
             continue;
         }
 
@@ -159,7 +160,14 @@ void eip_io_produce(eip_stack_t *s)
 
         c->last_produce_len = off;
         c->produce_ready = 1;
-        c->last_tx_ns = now;
+        if (c->last_tx_ns == 0) {
+            c->last_tx_ns = now + period_ns;
+        } else {
+            c->last_tx_ns += period_ns;
+            if (c->last_tx_ns <= now) {
+                c->last_tx_ns = now + period_ns;
+            }
+        }
 
         if (s->tops_set && s->tops.udp_send) {
             uint32_t be = ((c->peer_ip >> 24) & 0xff) |

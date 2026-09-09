@@ -22,3 +22,4 @@ steps:
       min_frames: 1
       unexpected_frames: 0
       ar_drops: 0
+      # Aim late/missed = 0 (1.5× / 2.5× cycle_us). CC-B RT1, not IRT.

@@ -30,3 +30,4 @@ steps:
       min_frames: 1
       unexpected_frames: 0
       class1: up
+      # Aim late/missed = 0 (1.5× / 2.5× cycle_us). Not a hard YAML gate.

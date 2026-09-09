@@ -1,11 +1,11 @@
 #include "ctt.h"
+#include "cycle_clock.h"
 
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "logger.h"
 #include "mb_stack.h"
@@ -15,17 +15,6 @@ typedef struct {
     uint8_t unit_id;
     uint16_t next_tid;
 } mb_priv_t;
-
-static void sleep_ms(unsigned ms)
-{
-    if (!ms) {
-        return;
-    }
-    struct timespec ts;
-    ts.tv_sec = (time_t)(ms / 1000u);
-    ts.tv_nsec = (long)(ms % 1000u) * 1000000L;
-    nanosleep(&ts, NULL);
-}
 
 static int parse_hex_buf(const char *s, uint8_t *out, size_t cap, size_t *n)
 {
@@ -629,6 +618,16 @@ static int step_soak(ctt_run_t *run, mb_priv_t *priv, const yaml_node_t *step,
     uint64_t start = ctt_now_ns();
     uint64_t deadline =
         duration_s ? start + (uint64_t)duration_s * 1000000000ull : 0;
+    uint8_t req[MB_ADU_MAX];
+    size_t req_len = 0;
+    if (build_request(priv, step, req, sizeof(req), &req_len) != 0) {
+        ctt_failf(run, idx, action, "soak request template failed");
+        return -1;
+    }
+    uint16_t tid = rd_be16(req);
+    uint8_t resp[MB_ADU_MAX];
+    ctt_cycle_clock_t clk;
+    ctt_cycle_clock_init(&clk, (uint64_t)cycle_ms * 1000000ull);
     int i = 0;
     while (1) {
         if (duration_s) {
@@ -639,18 +638,15 @@ static int step_soak(ctt_run_t *run, mb_priv_t *priv, const yaml_node_t *step,
             break;
         }
         i++;
-        uint8_t req[MB_ADU_MAX];
-        size_t req_len = 0;
-        if (build_request(priv, step, req, sizeof(req), &req_len) != 0) {
-            unexpected++;
-            continue;
-        }
-        uint8_t resp[MB_ADU_MAX];
+        wr_be16(req, tid++);
         size_t resp_len = 0;
         int rc = mb_stack_handle_adu(priv->stack, req, req_len, resp,
                                       sizeof(resp), &resp_len);
         if (rc != 0 || resp_len < 9 || (resp[7] & 0x80)) {
             unexpected++;
+            if (cycle_ms) {
+                ctt_cycle_clock_wait(&clk);
+            }
             continue;
         }
         uint64_t now = ctt_now_ns();
@@ -661,9 +657,10 @@ static int step_soak(ctt_run_t *run, mb_priv_t *priv, const yaml_node_t *step,
         ok++;
         run->metrics.rtc1_frames++; /* reuse counter: successful PDUs */
         if (cycle_ms) {
-            sleep_ms(cycle_ms);
+            ctt_cycle_clock_wait(&clk);
         }
     }
+    priv->next_tid = tid;
     run->metrics.unexpected_frames += unexpected;
     int out = 0;
     out |= ctt_check(run, idx, action, (int)ok >= min_ok,

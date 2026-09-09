@@ -216,7 +216,7 @@ steps:
 | `dcp_set` | FrameID `0xFEFD` Set.Req. `signed: true` 이면 option `0xF0` / sub `0x01` HMAC | `accept` 또는 `reject`, 변경된 `station_name` |
 | `rpc_connect` | CM Connect. `integrity: true` 이면 block type `0x0E01` | `ar: up` 또는 `rejected` |
 | `io_cycle` | AR 이후 RTC1 (비동기 cyclic). `count`, `cycle_ms`. IRT/CC-C 스텝 없음 | 프레임 개수, 주기 상한 (ms, soft) |
-| `soak` | `duration_s` 또는 `iterations` | unexpected frame = 0, AR drop = 0 |
+| `soak` | `duration_s` 또는 `iterations`. 절대시각 (`TIMER_ABSTIME`) 대기. 소프트 late@1.5×cycle | unexpected = 0, AR drop = 0, max_late/max_missed (nightly 0) |
 | `rpc_release` | Phase 2 | AR down |
 | `alarm` / `record_read` / `lldp` / `snmp_get` | Phase 2 | 해당 PDU |
 

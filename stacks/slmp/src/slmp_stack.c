@@ -854,10 +854,7 @@ int slmp_stack_handle_request(slmp_stack_t *s, const uint8_t *req,
                 return build_response(req, 0xC051, NULL, 0, resp, resp_cap,
                                       resp_len);
             }
-            uint16_t *words = calloc(qty, sizeof(uint16_t));
-            if (!words) {
-                return -ENOMEM;
-            }
+            uint16_t words[SLMP_PAYLOAD_MAX / 2u];
             rc = slmp_stack_read_words(s, code, head, words, qty);
             if (rc == 0) {
                 for (uint16_t i = 0; i < qty; i++) {
@@ -865,7 +862,6 @@ int slmp_stack_handle_request(slmp_stack_t *s, const uint8_t *req,
                 }
                 plen = (size_t)qty * 2u;
             }
-            free(words);
         }
         if (rc != 0) {
             return build_response(req, 0xC056, NULL, 0, resp, resp_cap,
@@ -885,15 +881,11 @@ int slmp_stack_handle_request(slmp_stack_t *s, const uint8_t *req,
         if (bit_unit) {
             rc = slmp_stack_write_bits(s, code, head, data, qty);
         } else {
-            uint16_t *words = calloc(qty, sizeof(uint16_t));
-            if (!words) {
-                return -ENOMEM;
-            }
+            uint16_t words[SLMP_PAYLOAD_MAX / 2u];
             for (uint16_t i = 0; i < qty; i++) {
                 words[i] = rd_le16(data + i * 2u);
             }
             rc = slmp_stack_write_words(s, code, head, words, qty);
-            free(words);
         }
         if (rc != 0) {
             return build_response(req, 0xC056, NULL, 0, resp, resp_cap,

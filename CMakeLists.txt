@@ -183,6 +183,7 @@ if(BUILD_CTT)
     add_executable(ctt
         tools/ctt/main.c
         tools/ctt/runner.c
+        tools/ctt/cycle_clock.c
         tools/ctt/yaml_mini.c
         tools/ctt/mock_eth.c
         tools/ctt/transport.c
