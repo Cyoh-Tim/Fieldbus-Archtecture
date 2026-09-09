@@ -303,6 +303,19 @@ if(BUILD_DAEMON AND BUILD_API)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             LABELS "example")
     endforeach()
+    # CODESYS-shaped Modbus TCP master stand-in (not SoftPLC). Shares
+    # 127.0.0.1:15560 with example_fake_sensor_once.
+    add_test(NAME codesys_shaped_modbus_standin
+        COMMAND bash "${CMAKE_SOURCE_DIR}/examples/run_codesys_dut.sh"
+                --stand-in --cycles 8 --skip-configure --skip-build
+                --build-dir "${CMAKE_BINARY_DIR}")
+    set_tests_properties(codesys_shaped_modbus_standin PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        LABELS "example;codesys"
+        TIMEOUT 60
+        RESOURCE_LOCK "modbus_15560")
+    set_tests_properties(example_fake_sensor_once PROPERTIES
+        RESOURCE_LOCK "modbus_15560")
 endif()
 
 if(BUILD_CTT)
@@ -404,6 +417,18 @@ if(BUILD_DAEMON AND BUILD_API AND BUILD_CTT)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         DEPENDS fake_sensor_app ctt
         COMMENT "fake sensor → fb_api readback → CTT mock, all protocols (not certification)"
+        USES_TERMINAL
+    )
+endif()
+
+if(BUILD_DAEMON AND BUILD_API)
+    add_custom_target(run_codesys_dut
+        COMMAND "${CMAKE_COMMAND}" -E env "BUILD_DIR=${CMAKE_BINARY_DIR}"
+                bash "${CMAKE_SOURCE_DIR}/examples/run_codesys_dut.sh"
+                --skip-configure --stand-in --cycles 8
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        DEPENDS fake_sensor_app
+        COMMENT "Modbus DUT + CODESYS-shaped stand-in (not SoftPLC, not certification)"
         USES_TERMINAL
     )
 endif()

@@ -101,6 +101,10 @@ veth 양끝에 붙인다. `pn_device_run` + `dcp_probe` 는 **두 프로세스**
 CODESYS Control Win / SoftPLC / Development System 은 이 저장소 CI 에 없다.
 GitHub Actions 에서 Windows CODESYS 를 실행하지 않는다.
 
+**Linux SoftPLC 를 Modbus TCP 마스터로** 두는 DUT 경로(앱 다운로드는 IDE 수동):
+[`docs/codesys_master_io.md`](codesys_master_io.md),
+`examples/run_codesys_dut.sh`. 스탠드인 마스터는 CODESYS 가 아니다.
+
 랩에서 Device 를 CODESYS Controller 에 붙이려면 체크리스트 스크립트:
 
 ```
@@ -147,6 +151,7 @@ CTT YAML 은 `handle_adu` / `handle_request` / Encaps inject 다. **`:502` /
 | 경로 | 포트 | 언제 |
 |------|------|------|
 | `fake_sensor_app` Modbus | `127.0.0.1:15560` | `examples/run_mock_flow.sh modbus` |
+| CODESYS-shaped Modbus stand-in | `127.0.0.1:15560` | `examples/run_codesys_dut.sh --stand-in` (**SoftPLC 아님**) |
 | `fake_sensor_app` SLMP lab 서버 | `127.0.0.1:15561` | `examples/run_mock_flow.sh slmp` |
 | `test_slmp_stack` client/server loopback | `127.0.0.1:15557` | `ctest -R test_slmp_stack` (daemon job) |
 | 데몬 `example.modbus.json` | 설정 포트 (예: 1502) | 수동 |

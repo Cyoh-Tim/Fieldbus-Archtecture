@@ -6,6 +6,7 @@
 | 열기 | 역할 |
 |------|------|
 | [`demo.md`](demo.md) | **10분 스크립트** (이 저장소의 “보여 줘”) |
+| [`codesys_master_io.md`](codesys_master_io.md) | CODESYS SoftPLC 마스터 ↔ 우리 DUT (Modbus 정본; SoftPLC 앱은 수동) |
 | [`index.html`](index.html) | 브라우저 허브 (이 폴더를 파일로 열 때) |
 | [`json-config-flow.html`](json-config-flow.html) | JSON → 런타임 애니메이션 (데모 정본 HTML) |
 | [`config-viz.html`](config-viz.html) | (선택) 필드 의미·메모리 맵 시각화 |
@@ -34,5 +35,5 @@
 | [`ctt_mb_bundle.md`](ctt_mb_bundle.md) · [`ctt_slmp_bundle.md`](ctt_slmp_bundle.md) | Modbus/SLMP 내부 bundle-grade |
 | [`ctt_pi_matrix.md`](ctt_pi_matrix.md) · [`ctt_odva_matrix.md`](ctt_odva_matrix.md) | 내부 매핑 |
 | [`ctt_modbus_matrix.md`](ctt_modbus_matrix.md) · [`ctt_slmp_matrix.md`](ctt_slmp_matrix.md) | FC / 3E 커버리지 |
-| [`ctt_lab.md`](ctt_lab.md) | 랩 / AF_PACKET (기본 데모 아님) |
+| [`ctt_lab.md`](ctt_lab.md) | 랩 / AF_PACKET / Windows CODESYS PN (기본 데모 아님) |
 | [`soak_report_20260909.md`](soak_report_20260909.md) | 2026-09-09 장비 없는 mock soak (5min×4; **인증 아님**) |
