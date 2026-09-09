@@ -422,15 +422,24 @@ def run_slmp(args: argparse.Namespace) -> int:
         sock = connect_tcp(args.host, args.slmp_port)
 
     def cycle(n: int) -> str | None:
-        req = slmp_encode_batch_read(net, pc, dest, mon, SLMP_DEV_D, 100, 17)
+        # fake_sensor.slmp.json: barcode D100 (16 words), temperature D110
+        # (overlaps the barcode window; string is null-padded before D110).
+        req = slmp_encode_batch_read(net, pc, dest, mon, SLMP_DEV_D, 100, 16)
         end, data = slmp_decode_resp(slmp_transact(sock, req))
         if end != SLMP_END_OK:
-            return f"batch_read end_code=0x{end:04x}"
-        if len(data) < 34:
+            return f"batch_read D100 end_code=0x{end:04x}"
+        if len(data) < 32:
             return f"short D100 payload {len(data)}"
-        be = slmp_words_le_to_be_chars(data[:34])
+        be = slmp_words_le_to_be_chars(data[:32])
         barcode = unpack_barcode_be_chars(be[0:32])
-        temp_raw = struct.unpack(">H", be[32:34])[0]
+        treq = slmp_encode_batch_read(net, pc, dest, mon, SLMP_DEV_D, 110, 1)
+        tend, tdata = slmp_decode_resp(slmp_transact(sock, treq))
+        if tend != SLMP_END_OK:
+            return f"batch_read D110 end_code=0x{tend:04x}"
+        if len(tdata) < 2:
+            return f"short D110 payload {len(tdata)}"
+        tbe = slmp_words_le_to_be_chars(tdata[:2])
+        temp_raw = struct.unpack(">H", tbe)[0]
         temp_c = temp_raw * 0.1
         err = check_sensor_barcode_temp(barcode, temp_c, stats.t0, args.wait_s)
         if err:
@@ -648,11 +657,28 @@ def parse_class1_io(frame: bytes) -> tuple[int, bytes]:
     return conn_id, payload
 
 
+def parse_assembly_temp(raw4: bytes) -> float:
+    """fb_api encodes F32 as big-endian on the process image; CIP REAL is LE.
+
+    Accept whichever lands in the fake-sensor band so the soak stays honest
+    about the bytes on the wire without assuming a scanner byte swap.
+    """
+    if len(raw4) < 4:
+        raise IOError("short REAL")
+    be = struct.unpack(">f", raw4)[0]
+    le = struct.unpack("<f", raw4)[0]
+    if 20.0 <= be <= 40.0:
+        return be
+    if 20.0 <= le <= 40.0:
+        return le
+    return be
+
+
 def parse_assembly_input(data: bytes) -> tuple[str, float]:
     if len(data) < 36:
         raise IOError(f"short assembly {len(data)}")
     barcode = data[0:32].split(b"\x00", 1)[0].decode("ascii", "replace").rstrip()
-    temp_c = struct.unpack_from("<f", data, 32)[0]
+    temp_c = parse_assembly_temp(data[32:36])
     return barcode, temp_c
 
 

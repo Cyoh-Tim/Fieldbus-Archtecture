@@ -116,7 +116,7 @@ DUT: **랩 서버** (`role: server`). 마스터: Binary 3E **클라이언트** (
 |------|-----|
 | 주소 | `127.0.0.1:15561` |
 | 프레임 | `0x0050` 요청 / `0x00D0` 응답. ASCII/4E 없음 |
-| 읽기 | batch read `0x0401` 디바이스 D(`0xA8`) 선두 100, 17워드 |
+| 읽기 | batch read `0x0401` 디바이스 D(`0xA8`) 선두 100, 16워드 (바코드) + 선두 110, 1워드 (온도 `× 0.1` ℃) |
 | 쓰기 | batch write `0x1401` D200, 1워드 후 읽기 확인 |
 
 ### 2.3 EtherNet/IP
@@ -128,7 +128,7 @@ DUT: Adapter (`mock: false`, `security_class: 0`, LLDP/ACD off).
 | TCP | `127.0.0.1:15562` Encapsulation |
 | UDP IO | `127.0.0.1:15563` (특권 포트 아님, `CAP_NET_RAW` 없음) |
 | Identity | Get_Attribute_Single class 0x01 inst 1 attr 1 → vendor `0xABCD` |
-| Class 1 | Forward Open (`0x54`) + O→T / T→O. Input assembly 150 (64 B): 바코드[0..31] + float32 LE 온도 @32. Output 101 (16 B) 에 사이클 카운터 |
+| Class 1 | Forward Open (`0x54`) + O→T / T→O. Input assembly 150 (64 B): 바코드[0..31] + float32 온도 @32 (`fb_api` 는 프로세스 이미지 F32 를 **BE** 로 씀. 마스터는 BE/LE 중 센서 범위에 맞는 쪽을 사용). Output 101 (16 B) 에 사이클 카운터 |
 | explicit 모드 | 같은 TCP 세션에서 Assembly 150 attr 3 주기 Get, 101 attr 3 Set. **Class 1 이 아님** |
 
 Class 1 이 실패하면 마스터가 explicit 로 **폴백**하고 결과 `transport=` 에 명시한다.

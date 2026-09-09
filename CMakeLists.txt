@@ -327,7 +327,7 @@ if(BUILD_DAEMON AND BUILD_API)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         LABELS "example;sw_master"
         TIMEOUT 90
-        RESOURCE_LOCK "modbus_15560" "slmp_15561" "eip_15562")
+        RESOURCE_LOCK "modbus_15560;slmp_15561;eip_15562")
     set_tests_properties(example_fake_sensor_once_slmp PROPERTIES
         RESOURCE_LOCK "slmp_15561")
     set_tests_properties(example_fake_sensor_once_ethernetip PROPERTIES
