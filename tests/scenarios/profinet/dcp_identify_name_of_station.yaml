@@ -1,0 +1,16 @@
+name: dcp_identify_name_of_station
+protocol: profinet
+tags: [dcp, identify, migrate]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+steps:
+  - action: dcp_identify
+    xid: 0x11223344
+    expect:
+      ethertype: 0x8892
+      frame_id: 0xFEFF          # PN_FRAMEID_DCP_ID_RES
+      service: identify
+      status: success           # PN_DCP_RESP_SUCCESS
+      name_of_station: sensor-line1

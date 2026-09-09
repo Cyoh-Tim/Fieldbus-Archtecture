@@ -1,0 +1,13 @@
+name: rpc_connect_without_integrity
+protocol: profinet
+tags: [rpc, connect, security, migrate]
+device:
+  security_class: 1
+  psk_hex: "2222222222222222222222222222222222222222222222222222222222222222"
+  iface: mock
+steps:
+  - action: rpc_connect
+    integrity: false            # block 0x0E01 없음
+    expect:
+      rpc_response: true        # 스택은 RPC 응답을 돌려줌
+      ar: rejected              # pn_stack_ar_up() == 0
