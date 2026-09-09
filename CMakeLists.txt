@@ -10,6 +10,7 @@ option(ENABLE_PN_TESTS "PROFINET HMAC 단위 테스트" ON)
 option(ENABLE_MB_TESTS "Modbus TCP stack/adapter unit tests" ON)
 option(ENABLE_SLMP_TESTS "SLMP Binary 3E stack/adapter unit tests" ON)
 option(BUILD_DAEMON "multiproto_daemon + 어댑터 (cJSON 필요, libmodbus 없음)" ON)
+option(BUILD_API "Application C API (fb_api) tests, demo, install headers" ON)
 option(BUILD_CTT "Controller Test Tool (pn/eip/mb/slmp stacks + YAML 시나리오)" ON)
 option(ENABLE_CTT_AF_PACKET "Compile CTT AF_PACKET lab transport (not used by default ctest)" ON)
 option(BUILD_PN_LAB_TOOLS "Build dcp_probe / pn_device_run (manual lab; not ctest)" ON)
@@ -98,9 +99,10 @@ if(BUILD_DAEMON)
         core/config_loader.c
         core/scheduler.c
         core/adapter_registry.c
+        core/fb_api.c
     )
-    target_include_directories(core PUBLIC
-        include
+    target_include_directories(core PUBLIC include)
+    target_include_directories(core PRIVATE
         core
         adapters/modbus
         adapters/slmp
@@ -108,7 +110,7 @@ if(BUILD_DAEMON)
         adapters/ethernetip
         adapters/profinet
     )
-    target_link_libraries(core PUBLIC ${CJSON_TARGET})
+    target_link_libraries(core PUBLIC ${CJSON_TARGET} Threads::Threads m)
 
     # ---- 어댑터: Modbus (자체 스택 stacks/modbus/, libmodbus 없음) ----
     add_library(adapter_modbus STATIC
@@ -144,10 +146,10 @@ if(BUILD_DAEMON)
     target_include_directories(adapter_profinet PRIVATE include core stacks/profinet/include)
     target_link_libraries(adapter_profinet PUBLIC ${CJSON_TARGET} pn_stack)
 
-    # ---- 데몬 실행파일 ----
-    add_executable(multiproto_daemon core/main.c)
-    target_include_directories(multiproto_daemon PRIVATE include core)
-    target_link_libraries(multiproto_daemon PRIVATE
+    # ---- 앱이 링크하는 집합 타깃 (프로토콜 헤더 없이 fb_api.h 만 사용) ----
+    add_library(fieldbus INTERFACE)
+    target_include_directories(fieldbus INTERFACE include)
+    target_link_libraries(fieldbus INTERFACE
         core
         adapter_modbus
         adapter_slmp
@@ -155,6 +157,22 @@ if(BUILD_DAEMON)
         adapter_ethernetip
         adapter_profinet
     )
+
+    # ---- 데몬 실행파일 ----
+    add_executable(multiproto_daemon core/main.c)
+    target_include_directories(multiproto_daemon PRIVATE include)
+    target_link_libraries(multiproto_daemon PRIVATE fieldbus)
+
+    if(BUILD_API)
+        include(GNUInstallDirs)
+        add_executable(fb_api_demo examples/fb_api_demo.c)
+        target_link_libraries(fb_api_demo PRIVATE fieldbus)
+
+        add_executable(test_fb_api tests/test_fb_api.c)
+        target_link_libraries(test_fb_api PRIVATE fieldbus m)
+
+        install(FILES include/fb_api.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    endif()
 endif()
 
 if(BUILD_CTT)
@@ -260,6 +278,10 @@ if(ENABLE_SLMP_TESTS)
     if(BUILD_DAEMON)
         add_test(NAME test_slmp_adapter COMMAND test_slmp_adapter)
     endif()
+endif()
+
+if(BUILD_DAEMON AND BUILD_API)
+    add_test(NAME test_fb_api COMMAND test_fb_api)
 endif()
 
 if(BUILD_CTT)
