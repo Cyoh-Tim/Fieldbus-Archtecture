@@ -48,6 +48,7 @@ python3 tools/ctt/gen_board_data.py --check
 ## 관련 문서
 
 - [`docs/ctt.md`](ctt.md) — CTT 설계
+- [`docs/ctt_pn_bundle.md`](ctt_pn_bundle.md) — PN 내부 bundle v1 (≠ PI 인증)
 - [`docs/ctt_pi_matrix.md`](ctt_pi_matrix.md) · [`docs/ctt_odva_matrix.md`](ctt_odva_matrix.md)
 - [`docs/ctt_modbus_matrix.md`](ctt_modbus_matrix.md) · [`docs/ctt_slmp_matrix.md`](ctt_slmp_matrix.md)
 - [`docs/ctt_lab.md`](ctt_lab.md) — lab / AF_PACKET

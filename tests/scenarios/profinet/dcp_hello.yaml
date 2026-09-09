@@ -1,4 +1,6 @@
 name: dcp_hello
+id: PN-B-DCP-003
+suite: PN-B-v1
 protocol: profinet
 tags: [dcp, hello]
 device:

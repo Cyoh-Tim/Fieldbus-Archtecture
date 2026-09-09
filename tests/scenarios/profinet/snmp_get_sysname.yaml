@@ -1,4 +1,6 @@
 name: snmp_get_sysname
+id: PN-B-NBR-002
+suite: PN-B-v1
 protocol: profinet
 tags: [snmp, phase2]
 device:

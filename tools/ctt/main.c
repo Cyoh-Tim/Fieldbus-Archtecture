@@ -46,17 +46,23 @@ int main(int argc, char **argv)
             snprintf(opts.capture, sizeof(opts.capture), "%s", argv[i] + 10);
         } else if (strcmp(argv[i], "--capture") == 0 && i + 1 < argc) {
             snprintf(opts.capture, sizeof(opts.capture), "%s", argv[++i]);
+        } else if (starts_with(argv[i], "--report=")) {
+            snprintf(opts.report, sizeof(opts.report), "%s", argv[i] + 9);
+        } else if (strcmp(argv[i], "--report") == 0 && i + 1 < argc) {
+            snprintf(opts.report, sizeof(opts.report), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--help") == 0 ||
                    strcmp(argv[i], "-h") == 0) {
             LOG_INFO("ctt",
                      "usage: ctt --scenario <file.yaml> "
                      "[--transport=mock|af_packet] [--iface <ctl>] "
-                     "[--dut-iface <dut>] [--capture <dir|file.pcap>]");
+                     "[--dut-iface <dut>] [--capture <dir|file.pcap>] "
+                     "[--report <file.json|file.md>]");
             LOG_INFO("ctt",
                      "default transport=mock (no AF_PACKET/sudo). "
                      "lab: --transport=af_packet --iface=ctt-ctl "
                      "--dut-iface=ctt-dut (CAP_NET_RAW). env: CTT_TRANSPORT, "
-                     "CTT_IFACE, CTT_DUT_IFACE, CTT_CAPTURE");
+                     "CTT_IFACE, CTT_DUT_IFACE, CTT_CAPTURE, CTT_REPORT. "
+                     "report schema: ctt-report/v1 (internal gate, not cert)");
             return 0;
         } else if (!scenario && argv[i][0] != '-') {
             scenario = argv[i];

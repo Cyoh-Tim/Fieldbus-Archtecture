@@ -1,4 +1,6 @@
 name: rpc_connect_without_integrity
+id: PN-B-NEG-001
+suite: PN-B-v1
 protocol: profinet
 tags: [rpc, connect, security, migrate]
 device:

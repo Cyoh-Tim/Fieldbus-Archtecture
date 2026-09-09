@@ -1,4 +1,6 @@
 name: dcp_set_sec_class1
+id: PN-B-SEC-001
+suite: PN-B-v1
 protocol: profinet
 tags: [dcp, set, security, migrate]
 device:

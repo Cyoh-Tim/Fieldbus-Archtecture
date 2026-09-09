@@ -1,0 +1,21 @@
+# Internal TC PN-B-NEG-005 — unknown record index is empty, not I&M0 leak.
+name: record_unknown_index
+id: PN-B-NEG-005
+suite: PN-B-v1
+protocol: profinet
+tags: [record, negative, boundary, bundle]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  ip: 192.168.200.2
+  netmask: 255.255.255.0
+steps:
+  - action: record_read
+    index: 0x1234
+    slot: 0
+    subslot: 1
+    expect:
+      min_len: 4
+      max_len: 4
+      absent: FB-ARCH-PN-DEV

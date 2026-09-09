@@ -72,8 +72,8 @@ MATRIX_FILES = {
 CMAKE_TOPLEVEL_ONLY = True
 
 DISCLAIMER_KO = (
-    "내부 CTT 보드입니다. PI Test Bundle / ODVA CT / Modbus.org / "
-    "Mitsubishi 공식 인증 증거가 아닙니다. 배지는 시나리오가 기본 mock CI"
+    "내부 CTT 보드입니다. 내부 bundle-grade 게이트 ≠ PI / ODVA / Modbus.org / "
+    "Mitsubishi 공식 인증. 배지는 시나리오가 기본 mock CI"
     "(`ctest -LE soak_ci`)에 등록되는지·매트릭스에 갭/범위 밖으로 적혀 "
     "있는지를 분류한 것이며, 이 페이지가 ctest 를 실행하지는 않습니다."
 )
@@ -293,18 +293,36 @@ def load_matrix_index() -> tuple[dict[str, dict], list[dict]]:
 def parse_yaml_header(text: str) -> dict:
     name = None
     protocol = None
+    bundle_id = None
+    suite = None
     tags: list[str] = []
     for line in text.splitlines():
+        if not line or line[0] in " \t":
+            continue
         if line.startswith("name:"):
             name = line.split(":", 1)[1].strip().strip("'\"")
         elif line.startswith("protocol:"):
             protocol = line.split(":", 1)[1].strip().strip("'\"")
+        elif line.startswith("bundle_id:"):
+            bundle_id = line.split(":", 1)[1].strip().strip("'\"")
+        elif line.startswith("id:"):
+            # id: is the catalog TC id unless bundle_id: overrides.
+            if not bundle_id:
+                bundle_id = line.split(":", 1)[1].strip().strip("'\"")
+        elif line.startswith("suite:"):
+            suite = line.split(":", 1)[1].strip().strip("'\"")
         elif line.startswith("tags:"):
             inner = line.split(":", 1)[1].strip()
             m = re.match(r"\[(.*)\]", inner)
             if m:
                 tags = [t.strip() for t in m.group(1).split(",") if t.strip()]
-    return {"name": name, "protocol": protocol, "tags": tags}
+    return {
+        "name": name,
+        "protocol": protocol,
+        "tags": tags,
+        "bundle_id": bundle_id,
+        "suite": suite,
+    }
 
 
 def cmake_registered(path: Path) -> bool:
@@ -396,6 +414,8 @@ def collect_yaml_rows(matrix_by_file: dict[str, dict]) -> list[dict]:
         rows.append(
             {
                 "id": sc_name,
+                "bundle_id": header.get("bundle_id") or None,
+                "suite": header.get("suite") or None,
                 "protocol": protocol,
                 "filename": path.name,
                 "path": rel,
@@ -429,6 +449,8 @@ def finish_row(row: dict) -> dict:
     out.setdefault("ctest_name", None)
     out.setdefault("golden", False)
     out.setdefault("cover", None)
+    out.setdefault("bundle_id", None)
+    out.setdefault("suite", None)
     return out
 
 
@@ -485,7 +507,9 @@ def build_payload() -> dict:
             "pass = YAML registered in CMake and included in default mock CI. "
             "skip = soak_ci / nightly / lab (opt-in). "
             "gap = matrix DUT-not-implemented or not-yet. "
-            "out_of_scope = CC-C/IRT, official cert labs, EtherCAT, etc."
+            "out_of_scope = CC-C/IRT, official cert labs, EtherCAT, etc. "
+            "Internal bundle-grade gate != PI certification. "
+            "PROFINET catalog: docs/ctt_pn_bundle.md (PN-B-* ids)."
         ),
         "counts": counts,
         "by_protocol": by_proto,
@@ -517,6 +541,13 @@ def assert_invariants(data: dict) -> None:
             desc = t.get("description") or ""
             if "(cur & and)" not in desc or "(or & ~and)" not in desc:
                 raise RuntimeError(f"fc22_mask_write description truncated: {desc!r}")
+        if t["protocol"] == "profinet" and t["kind"] == "scenario":
+            bid = t.get("bundle_id") or ""
+            if not re.fullmatch(r"PN-B-[A-Z]+-\d{3}", bid):
+                raise RuntimeError(
+                    f"{t['path']}: missing/invalid bundle_id {bid!r} "
+                    "(expect PN-B-AREA-NNN; see docs/ctt_pn_bundle.md)"
+                )
     if len(soak_titles) >= 2 and len(set(soak_titles.values())) < len(soak_titles):
         raise RuntimeError(f"soak_short titles collided across protocols: {soak_titles}")
 

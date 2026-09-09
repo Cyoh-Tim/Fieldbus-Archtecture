@@ -473,6 +473,7 @@ docs/ctt.md                      # 이 문서
 docs/ctt_board.html              # 시나리오 현황 보드 (인증 아님). 재생성: tools/ctt/gen_board_data.py
 docs/ctt_lab.md                  # Phase 3 lab / veth / CODESYS
 docs/ctt_pi_matrix.md            # CC-A/B 내부 매핑 (인증 evidence 아님)
+docs/ctt_pn_bundle.md            # PN 내부 bundle-grade 로드맵 + TC ID (≠ PI 인증)
 docs/ctt_odva_matrix.md          # EIP 내부 CT-style 매핑 (공식 CT 아님)
 docs/ctt_modbus_matrix.md        # Modbus TCP FC (공식 Modbus.org 아님)
 docs/ctt_slmp_matrix.md          # SLMP Binary 3E (Mitsubishi 공식 인증 아님)

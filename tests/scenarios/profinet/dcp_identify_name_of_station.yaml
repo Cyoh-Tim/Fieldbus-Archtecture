@@ -1,4 +1,6 @@
 name: dcp_identify_name_of_station
+id: PN-B-DCP-001
+suite: PN-B-v1
 protocol: profinet
 tags: [dcp, identify, migrate]
 device:

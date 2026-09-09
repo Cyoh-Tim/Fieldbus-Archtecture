@@ -62,6 +62,10 @@ void ctt_opts_apply_env(ctt_opts_t *opts)
     if (c && c[0]) {
         snprintf(opts->capture, sizeof(opts->capture), "%s", c);
     }
+    const char *r = getenv("CTT_REPORT");
+    if (r && r[0]) {
+        snprintf(opts->report, sizeof(opts->report), "%s", r);
+    }
 }
 
 static int set_nonblock(int fd)

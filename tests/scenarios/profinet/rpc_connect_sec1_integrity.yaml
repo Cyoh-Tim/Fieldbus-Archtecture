@@ -1,4 +1,6 @@
 name: rpc_connect_sec1_integrity
+id: PN-B-CM-001
+suite: PN-B-v1
 protocol: profinet
 tags: [rpc, connect, security, phase2]
 device:

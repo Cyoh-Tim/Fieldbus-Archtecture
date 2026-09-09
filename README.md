@@ -81,7 +81,10 @@ ctest --test-dir build --output-on-failure -LE soak_ci
 ```
 CTT 설계·시나리오 스키마는 [`docs/ctt.md`](docs/ctt.md), 사용법은 [`tools/ctt/README.md`](tools/ctt/README.md).
 시나리오 통과/건너뜀/갭 보드는 [`docs/ctt_board.html`](docs/ctt_board.html).
-랩/golden/PI 매핑은 [`docs/ctt_lab.md`](docs/ctt_lab.md), [`docs/ctt_pi_matrix.md`](docs/ctt_pi_matrix.md).
+랩/golden 은 [`docs/ctt_lab.md`](docs/ctt_lab.md).
+PI 매핑은 [`docs/ctt_pi_matrix.md`](docs/ctt_pi_matrix.md).
+PN 내부 bundle-grade 로드맵·TC ID (`PN-B-*`, **≠ PI 인증**):
+[`docs/ctt_pn_bundle.md`](docs/ctt_pn_bundle.md).
 EIP 내부 ODVA 매핑은 [`docs/ctt_odva_matrix.md`](docs/ctt_odva_matrix.md).
 Modbus/SLMP 내부 매트릭스: [`docs/ctt_modbus_matrix.md`](docs/ctt_modbus_matrix.md),
 [`docs/ctt_slmp_matrix.md`](docs/ctt_slmp_matrix.md).

@@ -1,4 +1,6 @@
 name: soak_ci
+id: PN-B-CYC-011
+suite: PN-B-v1
 protocol: profinet
 tags: [soak, rtc1, phase2, soak_ci]
 device:

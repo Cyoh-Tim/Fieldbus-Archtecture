@@ -1,4 +1,6 @@
 name: dcp_signal
+id: PN-B-DCP-004
+suite: PN-B-v1
 protocol: profinet
 tags: [dcp, signal]
 device:

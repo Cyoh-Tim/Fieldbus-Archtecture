@@ -1,4 +1,6 @@
 name: lldp
+id: PN-B-NBR-001
+suite: PN-B-v1
 protocol: profinet
 tags: [lldp, phase2]
 device:
