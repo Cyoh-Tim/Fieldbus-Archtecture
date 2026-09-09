@@ -11,7 +11,8 @@ CTT 커버리지 보드 (인증 아님): [`docs/ctt_board.html`](../docs/ctt_boa
 
 앱은 프로토콜 헤더 없이 [`include/fb_api.h`](../include/fb_api.h) 만 포함한다.
 포인트 의미는 [`docs/app_api.md`](../docs/app_api.md). 프로토콜은 config JSON
-이 고른다.
+이 고른다. 한 줄 요약: [`docs/demo.md`](../docs/demo.md).
+브라우저 인덱스: [`docs/index.html`](../docs/index.html).
 
 ## 한 방에 보기 (권장)
 

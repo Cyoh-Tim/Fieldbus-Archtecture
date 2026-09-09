@@ -12,6 +12,9 @@ JSON 애니메이션: [`json-config-flow.html`](json-config-flow.html).
 | [`docs/ctt_board_data.json`](ctt_board_data.json) | 생성 데이터 (HTML 이 fetch, 실패 시 HTML 에 임베드) |
 | `tools/ctt/gen_board_data.py` | YAML + 매트릭스 → JSON/임베드 |
 
+Unreleased: EIP ListServices (`EIP-A-ENC-003`) + Large Forward Open
+(`EIP-A-CM-004`) YAML. Alarm Ack / FC08 / MEI 는 DUT 미구현으로 gap 유지.
+
 ## 배지
 
 CMake `BUILD_CTT` 의 `add_test` / `LABELS` 와 기본 CI
@@ -51,6 +54,8 @@ python3 tools/ctt/gen_board_data.py --check
 
 ## 관련 문서
 
+- [`docs/demo.md`](demo.md) — 장비 없는 mock 플로
+- [`docs/index.html`](index.html) — 문서 인덱스
 - [`docs/ctt.md`](ctt.md) — CTT 설계
 - [`docs/ctt_pn_bundle.md`](ctt_pn_bundle.md) — PN 내부 bundle v1 (≠ PI 인증)
 - [`docs/ctt_eip_bundle.md`](ctt_eip_bundle.md) — EIP 내부 bundle v1 (≠ ODVA 인증)

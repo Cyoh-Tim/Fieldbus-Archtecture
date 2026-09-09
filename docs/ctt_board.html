@@ -278,18 +278,18 @@
 <!-- CTT_BOARD_DATA_BEGIN -->
 <script type="application/json" id="ctt-board-data">
 {
-  "generated_at": "2026-09-09T09:30:11Z",
+  "generated_at": "2026-09-09T10:34:14Z",
   "generator": "tools/ctt/gen_board_data.py",
   "disclaimer": "내부 CTT 보드입니다. 내부 bundle-grade 게이트 ≠ PI / ODVA / Modbus.org / Mitsubishi 공식 인증. 배지는 시나리오가 기본 mock CI(`ctest -LE soak_ci`)에 등록되는지·매트릭스에 갭/범위 밖으로 적혀 있는지를 분류한 것이며, 이 페이지가 ctest 를 실행하지는 않습니다.",
   "ci_default": "ctest --test-dir build --output-on-failure -LE soak_ci",
   "note": "pass = YAML registered in CMake and included in default mock CI. skip = soak_ci / nightly / lab (opt-in). gap = matrix DUT-not-implemented or not-yet. out_of_scope = CC-C/IRT, official cert labs, EtherCAT, etc. Internal bundle-grade gate != PI / ODVA certification. PROFINET catalog: docs/ctt_pn_bundle.md (PN-B-* ids). EtherNet/IP catalog: docs/ctt_eip_bundle.md (EIP-A-* ids). Modbus TCP catalog: docs/ctt_mb_bundle.md (MB-T-* ids). SLMP Binary 3E catalog: docs/ctt_slmp_bundle.md (SLMP-3E-* ids).",
   "counts": {
-    "pass": 70,
+    "pass": 72,
     "skip": 4,
     "gap": 9,
     "out_of_scope": 13,
-    "total": 96,
-    "scenarios": 72
+    "total": 98,
+    "scenarios": 74
   },
   "by_protocol": {
     "profinet": {
@@ -300,18 +300,18 @@
       "total": 40
     },
     "ethernetip": {
-      "pass": 16,
+      "pass": 18,
       "skip": 0,
-      "gap": 5,
+      "gap": 4,
       "out_of_scope": 1,
-      "total": 22
+      "total": 23
     },
     "modbus_tcp": {
       "pass": 13,
       "skip": 0,
-      "gap": 1,
+      "gap": 2,
       "out_of_scope": 3,
-      "total": 17
+      "total": 18
     },
     "slmp": {
       "pass": 10,
@@ -1919,6 +1919,38 @@
       "cover": null
     },
     {
+      "id": "large_forward_open",
+      "bundle_id": "EIP-A-CM-004",
+      "suite": "EIP-A-v1",
+      "protocol": "ethernetip",
+      "filename": "large_forward_open.yaml",
+      "path": "tests/scenarios/ethernetip/large_forward_open.yaml",
+      "title": "Large Forward Open (0x5B)",
+      "title_ko": "Large Forward Open (0x5B)",
+      "description": "Class1 IO + Close. EIP-A-CM-004",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_eip_large_forward_open",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "ethernetip"
+      ],
+      "tags": [
+        "cm",
+        "large_forward_open",
+        "class1",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_odva_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "EtherNet/IP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
       "id": "list_identity",
       "bundle_id": "EIP-A-ENC-002",
       "suite": "EIP-A-v1",
@@ -1941,6 +1973,37 @@
         "identity",
         "protection",
         "migrate",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_odva_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "EtherNet/IP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "list_services",
+      "bundle_id": "EIP-A-ENC-003",
+      "suite": "EIP-A-v1",
+      "protocol": "ethernetip",
+      "filename": "list_services.yaml",
+      "path": "tests/scenarios/ethernetip/list_services.yaml",
+      "title": "Encapsulation ListServices",
+      "title_ko": "Encapsulation ListServices",
+      "description": "Communications item. EIP-A-ENC-003",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_eip_list_services",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "ethernetip"
+      ],
+      "tags": [
+        "encap",
+        "list_services",
         "bundle"
       ],
       "source": "yaml",
@@ -2104,13 +2167,13 @@
       "suite": null
     },
     {
-      "id": "matrix_ethernetip_encapsulation_listservices_listinterfaces",
+      "id": "matrix_ethernetip_encapsulation_listinterfaces",
       "protocol": "ethernetip",
       "filename": null,
       "path": null,
-      "title": "Encapsulation ListServices / ListInterfaces",
-      "title_ko": "Encapsulation ListServices / ListInterfaces",
-      "description": "ListIdentity / RegisterSession 만. ListServices DUT 핸들러는 있으나 CTT YAML 없음. ListInterfaces DUT not implemented",
+      "title": "Encapsulation ListInterfaces",
+      "title_ko": "Encapsulation ListInterfaces",
+      "description": "ListServices 는 EIP-A-ENC-003. ListInterfaces DUT not implemented",
       "status": "gap",
       "reason": "docs/ctt_odva_matrix.md: not yet",
       "ctest_name": null,
@@ -2136,31 +2199,6 @@
       "title": "Ethernet Link / Port objects",
       "title_ko": "Ethernet Link / Port objects",
       "description": "DUT 객체는 있음",
-      "status": "gap",
-      "reason": "docs/ctt_odva_matrix.md: not yet",
-      "ctest_name": null,
-      "ctest_registered": false,
-      "ci_default": false,
-      "labels": [],
-      "tags": [],
-      "source": "docs/ctt_odva_matrix.md",
-      "matrix": "docs/ctt_odva_matrix.md",
-      "kind": "matrix",
-      "cover": "not yet",
-      "protocol_label": "EtherNet/IP",
-      "status_label_ko": "갭",
-      "golden": false,
-      "bundle_id": null,
-      "suite": null
-    },
-    {
-      "id": "matrix_ethernetip_large_forward_open",
-      "protocol": "ethernetip",
-      "filename": null,
-      "path": null,
-      "title": "Large Forward Open",
-      "title_ko": "Large Forward Open",
-      "description": "standard FO + Close + dual conn (EIP-A-CM-002/003)",
       "status": "gap",
       "reason": "docs/ctt_odva_matrix.md: not yet",
       "ctest_name": null,
@@ -2636,13 +2674,38 @@
       "cover": null
     },
     {
+      "id": "matrix_modbus_tcp_fc08_diagnostics_fc11_12_mei_fc43",
+      "protocol": "modbus_tcp",
+      "filename": null,
+      "path": null,
+      "title": "FC08 Diagnostics / FC11/12 / MEI (FC43)",
+      "title_ko": "FC08 Diagnostics / FC11/12 / MEI (FC43)",
+      "description": "illegal FC 로만 고정. 가짜 pass 금지",
+      "status": "gap",
+      "reason": "docs/ctt_modbus_matrix.md: DUT not implemented",
+      "ctest_name": null,
+      "ctest_registered": false,
+      "ci_default": false,
+      "labels": [],
+      "tags": [],
+      "source": "docs/ctt_modbus_matrix.md",
+      "matrix": "docs/ctt_modbus_matrix.md",
+      "kind": "matrix",
+      "cover": "DUT not implemented",
+      "protocol_label": "Modbus TCP",
+      "status_label_ko": "갭",
+      "golden": false,
+      "bundle_id": null,
+      "suite": null
+    },
+    {
       "id": "matrix_modbus_tcp_live_tcp_502_in_default_ci",
       "protocol": "modbus_tcp",
       "filename": null,
       "path": null,
       "title": "Live TCP :502 in default CI",
       "title_ko": "Live TCP :502 in default CI",
-      "description": "inject 훅. 실 소켓 soak 는 PR #2 harness",
+      "description": "inject 훅. 라이브는 데몬/fake_sensor :15560. 기본 ctest 에 :502 없음",
       "status": "gap",
       "reason": "docs/ctt_modbus_matrix.md: not yet",
       "ctest_name": null,
@@ -3058,7 +3121,7 @@
       "path": null,
       "title": "Live TCP :5000 in default CI",
       "title_ko": "Live TCP :5000 in default CI",
-      "description": "inject 훅. PR #3 test_slmp_stack 은 localhost TCP 잔여",
+      "description": "inject 훅. test_slmp_stack localhost :15557. 기본 ctest 에 :5000 없음",
       "status": "gap",
       "reason": "docs/ctt_slmp_matrix.md: not yet",
       "ctest_name": null,

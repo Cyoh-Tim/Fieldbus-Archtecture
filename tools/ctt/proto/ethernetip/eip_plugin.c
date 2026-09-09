@@ -388,7 +388,9 @@ static int check_encap_expect(ctt_run_t *run, eip_priv_t *priv, int idx,
         int want = yaml_bool(expect, "privilege", 1);
         int saw = 0;
         for (size_t i = 0; i + 3 < priv->last_resp_len; i++) {
-            if ((priv->last_resp[i] & 0x7f) == CIP_SVC_FORWARD_OPEN &&
+            uint8_t svc = priv->last_resp[i] & 0x7f;
+            if ((svc == CIP_SVC_FORWARD_OPEN ||
+                 svc == CIP_SVC_LARGE_FORWARD_OPEN) &&
                 (priv->last_resp[i] & 0x80) &&
                 priv->last_resp[i + 2] == CIP_STATUS_PRIVILEGE) {
                 saw = 1;
@@ -443,6 +445,12 @@ static int check_encap_expect(ctt_run_t *run, eip_priv_t *priv, int idx,
                          contains(priv->last_resp, priv->last_resp_len, name),
                          "product_name '%s' not in reply", name);
     }
+    if (expect && yaml_has(expect, "contains")) {
+        const char *needle = yaml_cstr(expect, "contains", "");
+        out |= ctt_check(run, idx, action,
+                         contains(priv->last_resp, priv->last_resp_len, needle),
+                         "contains '%s' not in reply", needle);
+    }
 
     if (expect && yaml_has(expect, "class1")) {
         const char *c1 = yaml_cstr(expect, "class1", "");
@@ -482,6 +490,18 @@ static int step_list_identity(ctt_run_t *run, eip_priv_t *priv,
     uint8_t req[EIP_ENCAP_HDR_SIZE];
     memset(req, 0, sizeof(req));
     eip_wr_le16(req, EIP_CMD_LISTIDENTITY);
+    int rc = inject_encap(run, priv, req, sizeof(req));
+    return check_encap_expect(run, priv, idx, action,
+                              yaml_map_get(step, "expect"), rc);
+}
+
+static int step_list_services(ctt_run_t *run, eip_priv_t *priv,
+                              const yaml_node_t *step, int idx)
+{
+    const char *action = "list_services";
+    uint8_t req[EIP_ENCAP_HDR_SIZE];
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req, EIP_CMD_LISTSERVICES);
     int rc = inject_encap(run, priv, req, sizeof(req));
     return check_encap_expect(run, priv, idx, action,
                               yaml_map_get(step, "expect"), rc);
@@ -589,7 +609,8 @@ static size_t build_forward_open_body(uint8_t *fo, uint16_t serial,
                                       uint16_t orig_vendor, uint32_t orig_serial,
                                       uint32_t o2t_rpi,
                                       uint32_t t2o_rpi, uint16_t o2t_size,
-                                      uint16_t t2o_size, uint8_t timeout_mult)
+                                      uint16_t t2o_size, uint8_t timeout_mult,
+                                      int large)
 {
     size_t off = 0;
     fo[off++] = 0x0A;
@@ -610,22 +631,44 @@ static size_t build_forward_open_body(uint8_t *fo, uint16_t serial,
     fo[off++] = 0;
     eip_wr_le32(fo + off, o2t_rpi);
     off += 4;
-    eip_wr_le16(fo + off, o2t_size);
-    off += 2;
+    if (large) {
+        eip_wr_le32(fo + off, o2t_size);
+        off += 4;
+    } else {
+        eip_wr_le16(fo + off, o2t_size);
+        off += 2;
+    }
     eip_wr_le32(fo + off, t2o_rpi);
     off += 4;
-    eip_wr_le16(fo + off, t2o_size);
-    off += 2;
+    if (large) {
+        eip_wr_le32(fo + off, t2o_size);
+        off += 4;
+    } else {
+        eip_wr_le16(fo + off, t2o_size);
+        off += 2;
+    }
     fo[off++] = 0x01; /* transport class 1 */
     fo[off++] = 0;    /* path size words */
     return off;
 }
 
+static int fo_reply_at(const uint8_t *resp, size_t n, size_t i)
+{
+    if (i + 12 >= n) {
+        return 0;
+    }
+    uint8_t svc = resp[i];
+    if (resp[i + 2] != 0) {
+        return 0;
+    }
+    return svc == (uint8_t)(CIP_SVC_FORWARD_OPEN | CIP_SVC_REPLY) ||
+           svc == (uint8_t)(CIP_SVC_LARGE_FORWARD_OPEN | CIP_SVC_REPLY);
+}
+
 static uint32_t parse_fo_o2t(const uint8_t *resp, size_t n)
 {
     for (size_t i = 0; i + 12 < n; i++) {
-        if (resp[i] == (uint8_t)(CIP_SVC_FORWARD_OPEN | CIP_SVC_REPLY) &&
-            resp[i + 2] == 0) {
+        if (fo_reply_at(resp, n, i)) {
             return eip_rd_le32(resp + i + 4);
         }
     }
@@ -635,8 +678,7 @@ static uint32_t parse_fo_o2t(const uint8_t *resp, size_t n)
 static uint32_t parse_fo_t2o(const uint8_t *resp, size_t n)
 {
     for (size_t i = 0; i + 12 < n; i++) {
-        if (resp[i] == (uint8_t)(CIP_SVC_FORWARD_OPEN | CIP_SVC_REPLY) &&
-            resp[i + 2] == 0) {
+        if (fo_reply_at(resp, n, i)) {
             return eip_rd_le32(resp + i + 8);
         }
     }
@@ -661,13 +703,14 @@ static int step_forward_open(ctt_run_t *run, eip_priv_t *priv,
         (uint16_t)yaml_ulong(step, "t2o_size",
                              eip_stack_cfg(priv->stack)->input_size);
     uint8_t tmo = (uint8_t)yaml_ulong(step, "timeout_mult", 0);
+    int large = yaml_bool(step, "large", 0);
 
     uint8_t fo[64];
     size_t off =
         build_forward_open_body(fo, serial, orig_vendor, orig_serial, rpi, rpi,
-                                o2t_size, t2o_size, tmo);
+                                o2t_size, t2o_size, tmo, large);
     uint8_t cip[2 + 8 + 64];
-    cip[0] = CIP_SVC_FORWARD_OPEN;
+    cip[0] = large ? CIP_SVC_LARGE_FORWARD_OPEN : CIP_SVC_FORWARD_OPEN;
     cip[1] = 2;
     cip[2] = 0x20;
     cip[3] = CIP_CLASS_CONN_MANAGER;
@@ -1204,6 +1247,9 @@ static int eip_step(ctt_run_t *run, const yaml_node_t *step, int index)
     if (strcmp(action, "list_identity") == 0) {
         return step_list_identity(run, priv, step, index);
     }
+    if (strcmp(action, "list_services") == 0) {
+        return step_list_services(run, priv, step, index);
+    }
     if (strcmp(action, "get_attr") == 0) {
         return step_get_attr(run, priv, step, index);
     }
@@ -1245,9 +1291,9 @@ static int eip_step(ctt_run_t *run, const yaml_node_t *step, int index)
     }
     ctt_failf(run, index, action,
               "unknown action (ethernetip: register_session, list_identity, "
-              "get_attr, write_input, read_input, read_output, forward_open, "
-              "forward_close, encap_inject, class1_io, io_cycle, acd_conflict, "
-              "lldp, watchdog, poll)");
+              "list_services, get_attr, write_input, read_input, read_output, "
+              "forward_open, forward_close, encap_inject, class1_io, io_cycle, "
+              "acd_conflict, lldp, watchdog, poll)");
     return -1;
 }
 

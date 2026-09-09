@@ -118,7 +118,7 @@ Wave 2 (이 PR) 가 메운 갭:
 
 | 주제 | 상태 |
 |------|------|
-| Alarm 풀 상태머신 / Ack | dummy TX 만 (`PN-B-ALM-*`). 다음 wave |
+| Alarm 풀 상태머신 / Ack | dummy TX 만 (`PN-B-ALM-*`). DUT 에 Ack/상태머신 없음 — 다음 wave (스택 작업) |
 | Record 인덱스 맵 (GSDML 전 구간) | I&M0–4 + unknown empty. 추가 인덱스는 DUT 가 비면 gap |
 | CM 다중 AR / 동시 Connect | 스택 **단일 AR** (`PN-B-CM-005` 가 replace 를 고정). 동시 AR 은 DUT 미구현 = gap |
 | Lab 프로파일 RTC1 jitter | mock soft ms. 랩은 `tests/run_ctt_lab.sh` (opt-in) |

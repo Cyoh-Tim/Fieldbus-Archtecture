@@ -43,7 +43,7 @@ DUT: `stacks/slmp/` 자체 스택. Binary **3E** 일괄 읽기(`0x0401`) /
 | 4E binary / ASCII | **N/A** | 시나리오는 reject only |
 | Random R/W (`0x0403` / `0x1402`) | N/A | end `0xC050` |
 | Mitsubishi 공식 인증 | N/A | 공인 랩. 이 하네스가 대체하지 않음 |
-| Live TCP :5000 in default CI | not yet | inject 훅. PR #3 `test_slmp_stack` 은 localhost TCP 잔여 |
+| Live TCP :5000 in default CI | not yet | inject 훅. `test_slmp_stack` localhost `:15557`. **기본 ctest 에 `:5000` 없음** |
 
 ## 이 표가 말해 주지 않는 것
 
