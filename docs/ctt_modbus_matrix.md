@@ -29,6 +29,7 @@ DUT: `stacks/modbus/` 자체 TCP 서버 (`mb_stack_handle_adu`). 데몬도 동�
 | `holding_lifetime.yaml` | Holding write/read lifetime | mock | FC16→FC03→wrong unit→overwrite. `MB-T-CM-001` |
 | `coil_lifetime.yaml` | Coil write/read lifetime | mock | FC05→FC01→wrong unit→overwrite. `MB-T-CM-002` |
 | `fc03_cyclic_metrics.yaml` | FC03 cyclic metrics | mock | 48 cycles, late/missed/jitter. `MB-T-CYC-002` |
+| `fc03_cycle_4ms.yaml` | FC03 4 ms metrics | mock | 48×4ms. `MB-T-CYC-003` |
 | `soak_short.yaml` | FC03 soak (내부) | mock (`ctest`) | 32 iterations + metrics. `MB-T-CYC-001` |
 | `exception_illegal_address.yaml` | Exception 0x02 / illegal FC | mock | Holding/Coil OOB, qty=0. `MB-T-NEG-001` |
 | `adu_malformed.yaml` | Truncated / bad MBAP | mock | fail closed. `MB-T-NEG-002` |

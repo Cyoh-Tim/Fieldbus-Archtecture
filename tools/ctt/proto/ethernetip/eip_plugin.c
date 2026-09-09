@@ -728,7 +728,8 @@ static int step_forward_close(ctt_run_t *run, eip_priv_t *priv,
     int rc = sendrr_cip(run, priv, cip, 6 + 12, integrity, integrity_bad);
     int out = check_encap_expect(run, priv, idx, action,
                                  yaml_map_get(step, "expect"), rc);
-    if (rc == 0) {
+    if (rc == 0 && serial == priv->conn_serial &&
+        orig_serial == priv->orig_serial) {
         priv->o2t_conn_id = 0;
         priv->t2o_conn_id = 0;
     }

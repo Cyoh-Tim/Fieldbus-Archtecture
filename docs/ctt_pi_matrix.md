@@ -36,15 +36,22 @@
 | `rpc_connect_sec1_integrity.yaml` | CM Connect + Sec1 integrity | mock | UDP + 이후 RTC1 은 veth | `PN-B-CM-001`. block `0x0E01` |
 | `rpc_release.yaml` | CM Release | mock | UDP | `PN-B-CM-002` |
 | `rpc_ar_lifetime.yaml` | CM lifetime + reconnect | mock | UDP | `PN-B-CM-003`. Connect→IO→Release→Connect |
+| `rpc_ar_replace.yaml` | CM single-AR replace | mock | UDP | `PN-B-CM-005`. second Connect keeps one AR |
+| `rpc_ar_lifetime_cm.yaml` | CM lifetime + PrmEnd | mock | UDP | `PN-B-CM-006`. Write / PrmEnd / AppReady / IO |
 | `rpc_write_prmend_appready.yaml` | CM Write / ParameterEnd / ApplicationReady | mock | UDP CODESYS-like | `PN-B-CM-004` |
 | `rtc1_io_cycle_smoke.yaml` | RTC1 cyclic IO (CC-A/B) | mock | UDP Connect + RTC1 on veth | `PN-B-CYC-001`. IRT 아님. soft ms bound |
 | `rtc1_cyclic_metrics.yaml` | RTC1 cyclic metrics | mock | 권장하지 않음 (기본 CI) | `PN-B-CYC-002`. late/missed/jitter vs `cycle_us` |
+| `rtc1_cycle_payload.yaml` | RTC1 payload + cycle counter | mock | — | `PN-B-CYC-003`. input payload, output consume |
+| `rtc1_cycle_4ms.yaml` | RTC1 4 ms metrics | mock | 권장하지 않음 (기본 CI) | `PN-B-CYC-004`. `cycle_us: 4000`, not IRT |
 | `io_without_ar.yaml` | RTC1 without AR | mock | — | `PN-B-NEG-004`. no cyclic if AR down |
 | `alarm_tx.yaml` | Alarm High TX | mock | TX on veth (AR 후) | `PN-B-ALM-001`. dummy TX |
 | `alarm_low.yaml` | Alarm Low TX | mock + golden | TX on veth | `PN-B-ALM-002`. FrameID `0xFE01` |
 | `record_read_im0.yaml` | Record / I&M0 | mock | UDP | `PN-B-REC-001`. index `0xAFF0` |
 | `record_read_im1_4.yaml` | Record / I&M1–4 | mock | UDP | `PN-B-REC-002`. `0xAFF1`–`0xAFF4` |
 | `record_unknown_index.yaml` | Record unknown index | mock | UDP | `PN-B-NEG-005`. empty, not I&M0 leak |
+| `dcp_set_name_boundary.yaml` | DCP NameOfStation boundary | mock | — | `PN-B-NEG-006`. 240 accept, oversize truncate |
+| `dcp_malformed.yaml` | DCP truncated / unknown option | mock | — | `PN-B-NEG-007`. name unchanged |
+| `rpc_cm_without_ar.yaml` | CM/Alarm/output without AR | mock | — | `PN-B-NEG-008`. Control fail-closed |
 | `lldp.yaml` | LLDP (CC-B) | mock | veth 가능 | `PN-B-NBR-001`. ethertype `0x88CC` |
 | `snmp_get_sysname.yaml` | SNMP (CC-B) | mock (`handle_snmp`) | **UDP 161** when `device.ip` set | `PN-B-NBR-002` |
 | `soak_short.yaml` | RTC1 soak (내부) | mock (`ctest`) | 권장하지 않음 | `PN-B-CYC-010`. 회귀 길이 + metrics |

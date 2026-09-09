@@ -325,6 +325,11 @@ if(BUILD_CTT)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             LABELS "${_pn_labels}")
     endforeach()
+    add_test(NAME ctt_board_data_fresh
+        COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/ctt/gen_board_data.py" --check)
+    set_tests_properties(ctt_board_data_fresh PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        LABELS "profinet")
     add_test(NAME ctt_report_schema_v1
         COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/ctt/check_report_schema.py"
                 --ctt $<TARGET_FILE:ctt>

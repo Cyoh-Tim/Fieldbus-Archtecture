@@ -1,0 +1,75 @@
+# Internal TC EIP-A-CM-003 — two Class1 conns; Close first, second stays.
+name: class1_lifetime_dual
+id: EIP-A-CM-003
+suite: EIP-A-v1
+protocol: ethernetip
+tags: [forward_open, forward_close, lifetime, class1, bundle]
+device:
+  iface: mock
+  product_name: DualSensor
+  input_size: 8
+  output_size: 8
+  rpi_us: 8000
+  cycle_us: 8000
+steps:
+  - action: forward_open
+    serial: 0xD001
+    orig_serial: 0xD1
+    rpi_us: 8000
+    o2t_size: 8
+    t2o_size: 8
+    timeout_mult: 4
+    expect:
+      cip_status: 0
+      class1: up
+  - action: io_cycle
+    count: 8
+    cycle_ms: 8
+    expect:
+      min_frames: 8
+      period_max_ms: 20
+      class1: up
+  - action: forward_open
+    serial: 0xD002
+    orig_serial: 0xD2
+    rpi_us: 8000
+    o2t_size: 8
+    t2o_size: 8
+    timeout_mult: 4
+    expect:
+      cip_status: 0
+      class1: up
+  - action: io_cycle
+    count: 8
+    cycle_ms: 8
+    expect:
+      min_frames: 8
+      period_max_ms: 20
+      class1: up
+  - action: forward_close
+    serial: 0xD001
+    orig_serial: 0xD1
+    expect:
+      cip_status: 0
+      class1: up
+  - action: io_cycle
+    count: 16
+    cycle_ms: 8
+    expect:
+      min_frames: 8
+      period_max_ms: 20
+      class1: up
+  - action: forward_close
+    serial: 0xD002
+    orig_serial: 0xD2
+    expect:
+      cip_status: 0
+      class1: down
+  - action: io_cycle
+    require_class1: false
+    count: 8
+    cycle_ms: 8
+    expect:
+      class1: down
+      min_frames: 0
+      max_frames: 0

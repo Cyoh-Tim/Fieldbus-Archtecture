@@ -345,12 +345,12 @@ def ctest_labels(protocol: str, sc_name: str, text: str, registered: bool) -> li
             labels.append("nightly")
         return labels
     if protocol == "profinet":
-        labels = []
+        # CMake always starts with "profinet", then appends soak_ci / golden.
+        labels = ["profinet"]
         if sc_name == "soak_ci":
-            labels = ["soak_ci"]
-        if re.search(r"^\s*golden:", text, re.M):
-            # CMake overwrites LABELS when golden: is present.
-            labels = ["golden"]
+            labels.append("soak_ci")
+        if "golden:" in text:
+            labels.append("golden")
         return labels
     if protocol == "modbus_tcp":
         return ["modbus"]

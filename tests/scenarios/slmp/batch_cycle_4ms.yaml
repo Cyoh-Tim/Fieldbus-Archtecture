@@ -1,0 +1,33 @@
+# Internal TC SLMP-3E-CYC-003 — batch metrics at 4 ms. Not Mitsubishi timing.
+name: batch_cycle_4ms
+id: SLMP-3E-CYC-003
+suite: SLMP-3E-v1
+protocol: slmp
+tags: [batch, cyclic, metrics, bundle]
+device:
+  role: server
+  frame: 3e_binary
+  pc_no: 0xFF
+  dest_module_io: 0x03FF
+  iface: mock
+  cycle_us: 4000
+steps:
+  - action: seed_words
+    device: D
+    head: 0
+    values: [0x0001]
+  - action: soak
+    device: D
+    head: 0
+    unit: word
+    quantity: 1
+    iterations: 48
+    cycle_ms: 4
+    expect:
+      min_ok: 48
+      unexpected_frames: 0
+      min_period_samples: 24
+      period_max_ms: 20
+      max_late: 16
+      max_missed: 0
+      jitter_max_ms: 16

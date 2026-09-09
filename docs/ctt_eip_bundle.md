@@ -73,9 +73,11 @@ protocol: ethernetip
 | EIP-A-ENC-002 | `list_identity.yaml` | catalog | pass | ListIdentity + Protection Mode | ID only |
 | EIP-A-ID-001 | `identity_get.yaml` | catalog | pass | Identity Get_Attribute_Single | ID only |
 | EIP-A-CM-001 | `assembly_fo_io.yaml` | CM | pass | Assembly + FO + Class 1 IO | ID only (단축) |
-| EIP-A-CM-002 | `class1_lifetime.yaml` | **lifetime** | pass | FO lifetime + Close | **new** FO→IO→Close→re-Open |
+| EIP-A-CM-002 | `class1_lifetime.yaml` | **lifetime** | pass | FO lifetime + Close | wave 1 FO→IO→Close→re-Open |
+| EIP-A-CM-003 | `class1_lifetime_dual.yaml` | **lifetime** | pass | two Class1 conns | **wave 2** FO A+B, Close A, B stays |
 | EIP-A-CYC-001 | `class1_watchdog.yaml` | cyclic | pass | Class 1 watchdog + RT stats | ID only |
-| EIP-A-CYC-002 | `class1_cyclic_metrics.yaml` | **cyclic** | pass | Class1 metrics | **new** 48 cycles, late/missed/jitter vs `rpi_us`/`cycle_us` |
+| EIP-A-CYC-002 | `class1_cyclic_metrics.yaml` | **cyclic** | pass | Class1 metrics | wave 1 48 cycles, late/missed/jitter vs `rpi_us`/`cycle_us` |
+| EIP-A-CYC-003 | `class1_cycle_4ms.yaml` | **cyclic** | pass | Class1 4 ms metrics | **wave 2** `rpi_us: 4000` |
 | EIP-A-SEC-001 | `sec_integrity_fo.yaml` | SEC | pass | Sec1 unsigned reject + HMAC accept | ID only |
 | EIP-A-NEG-001 | `fo_bad_hmac.yaml` | **NEG** | pass | FO reject (bad HMAC) | **new** |
 | EIP-A-NEG-002 | `encap_malformed.yaml` | **NEG** | pass | truncated Encaps / unknown cmd | **new** |
@@ -93,6 +95,11 @@ Wave 1 이 메운 갭:
 - Sec1 reject 는 integrity **부재** 만 (`EIP-A-SEC-001`) → **HMAC 불량**
 - truncated Encaps / unknown cmd / FO 없이 IO 없음 → **fail-closed TCs**
 - DUT Encaps 가 claimed length 초과를 clamp 하던 경로 → **거부** (`-EINVAL`)
+
+Wave 2 (PN fill 과 같은 기둥, cheap YAML):
+
+- 두 Class1 연결 lifetime (`EIP-A-CM-003`)
+- 4 ms Class1 메트릭 (`EIP-A-CYC-003`)
 
 아직 얇음 (다음 wave, 이 PR 에서 가짜 pass 하지 않음):
 

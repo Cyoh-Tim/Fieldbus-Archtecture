@@ -29,7 +29,9 @@ lab profile). `adapters/ethernetip/` 데몬 어댑터는 DUT 가 아니다.
 | `identity_get.yaml` | Identity Get_Attribute_Single | mock | vendor_id. `EIP-A-ID-001` |
 | `assembly_fo_io.yaml` | Assembly + Forward Open + Class 1 IO | mock | consume O→T. `EIP-A-CM-001` |
 | `class1_lifetime.yaml` | Forward Open lifetime + Forward Close | mock | FO→IO→Close→re-Open. `EIP-A-CM-002` |
+| `class1_lifetime_dual.yaml` | two Class 1 connections | mock | FO A+B, Close A, B stays. `EIP-A-CM-003` |
 | `class1_cyclic_metrics.yaml` | Class 1 cyclic metrics | mock | 48 cycles, late/missed/jitter vs RPI. `EIP-A-CYC-002` |
+| `class1_cycle_4ms.yaml` | Class 1 4 ms metrics | mock | `rpi_us: 4000`. `EIP-A-CYC-003` |
 | `sec_integrity_fo.yaml` | Security Class 1 integrity (lab profile) | mock | unsigned FO 거부, HMAC 수락. CPF item `0x00C1` 은 이 저장소 프로파일. `EIP-A-SEC-001` |
 | `fo_bad_hmac.yaml` | Security Class 1 reject (bad HMAC) | mock | item 있음, MAC 불량. `EIP-A-NEG-001` |
 | `encap_malformed.yaml` | Encapsulation truncated / unknown cmd | mock | fail closed. `EIP-A-NEG-002` |
@@ -44,7 +46,7 @@ lab profile). `adapters/ethernetip/` 데몬 어댑터는 DUT 가 아니다.
 | 카테고리 | 커버 | 메모 |
 |----------|------|------|
 | Encapsulation ListServices / ListInterfaces | not yet | ListIdentity / RegisterSession 만. ListServices DUT 핸들러는 있으나 CTT YAML 없음. ListInterfaces **DUT not implemented** |
-| Large Forward Open | not yet | standard FO + Close + IO 만 (`EIP-A-CM-002`) |
+| Large Forward Open | not yet | standard FO + Close + dual conn (`EIP-A-CM-002`/`003`) |
 | Originator UCMM tag R/W | not yet | Adapter DUT 경로 |
 | CIP Security TLS (Class 2) port 2221 | not yet | 스택은 있으나 CTT mock 미연결 |
 | Ethernet Link / Port objects | not yet | DUT 객체는 있음 |
