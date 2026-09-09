@@ -74,7 +74,8 @@ protocol: modbus_tcp
 | MB-T-CM-001 | `holding_lifetime.yaml` | **lifetime** | pass | Holding write/read lifetime | **new** FC16→FC03→wrong unit→overwrite |
 | MB-T-CM-002 | `coil_lifetime.yaml` | **lifetime** | pass | Coil write/read lifetime | **new** FC05→FC01→overwrite |
 | MB-T-CYC-001 | `soak_short.yaml` | cyclic | pass | FC03 soak | **thickened** 32×8ms + late/missed/jitter |
-| MB-T-CYC-002 | `fc03_cyclic_metrics.yaml` | **cyclic** | pass | FC03 metrics | **new** 48×8ms |
+| MB-T-CYC-002 | `fc03_cyclic_metrics.yaml` | **cyclic** | pass | FC03 metrics | wave 1 48×8ms |
+| MB-T-CYC-003 | `fc03_cycle_4ms.yaml` | **cyclic** | pass | FC03 4 ms metrics | **wave 2** 48×4ms |
 | MB-T-NEG-001 | `exception_illegal_address.yaml` | **NEG** | pass | Exception 0x02 | **thickened** Holding/Coil OOB, qty=0, illegal FC |
 | MB-T-NEG-002 | `adu_malformed.yaml` | **NEG** | pass | Truncated / bad MBAP | **new** fail closed |
 | MB-T-NEG-003 | `exception_illegal_value.yaml` | **NEG** | pass | Exception 0x03 | **new** bad coil value / short PDU |
@@ -87,6 +88,8 @@ Wave 1 이 메운 갭:
 - FC16/FC03 스모크에 overwrite / wrong-unit 이 없음 → **Holding + Coil lifetime**
 - Exception 은 Holding OOB 한 장 → **Coil OOB / qty=0 / illegal FC / illegal value**
 - truncated MBAP / proto≠0 없음 → **fail-closed TCs** (`mb_stack_handle_adu` `-EINVAL`)
+
+Wave 2: 4 ms FC03 메트릭 (`MB-T-CYC-003`). Holding/Coil lifetime·NEG 는 wave 1 으로 충분.
 
 아직 얇음 (다음 wave, 이 PR 에서 가짜 pass 하지 않음):
 

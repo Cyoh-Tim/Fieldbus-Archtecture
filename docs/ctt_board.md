@@ -43,7 +43,8 @@ python3 tools/ctt/gen_board_data.py --check
 ```
 
 시나리오 YAML 이나 `docs/ctt_*_matrix.md` 를 바꾸면 보드 데이터도 같이 재생성해
-커밋한다.
+커밋한다. `BUILD_CTT` 일 때 `ctest -R ctt_board_data_fresh` 가 같은 `--check` 를
+돌린다.
 
 ## 관련 문서
 

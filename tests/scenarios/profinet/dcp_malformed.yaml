@@ -1,0 +1,24 @@
+# Internal TC PN-B-NEG-007 — truncated / unknown DCP Set must not rename.
+name: dcp_malformed
+id: PN-B-NEG-007
+suite: PN-B-v1
+protocol: profinet
+tags: [dcp, negative, boundary, bundle]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+steps:
+  - action: dcp_inject
+    payload_hex: "fefd0400aabb"          # shorter than DCP Set header
+    expect:
+      station_name: sensor-line1
+  - action: dcp_inject
+    # SET + unknown option 0x99/0x01 — no-op, name stays
+    payload_hex: "fefd0400aabbccdd000000089901000400010000"
+    expect:
+      station_name: sensor-line1
+  - action: dcp_get
+    expect:
+      status: success
+      name_of_station: sensor-line1

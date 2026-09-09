@@ -1,0 +1,35 @@
+# Internal TC PN-B-NEG-006 — NameOfStation max / oversize truncate.
+name: dcp_set_name_boundary
+id: PN-B-NEG-006
+suite: PN-B-v1
+protocol: profinet
+tags: [dcp, set, negative, boundary, bundle]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+steps:
+  - action: dcp_set
+    name_len: 240
+    name_fill: a
+    xid: 0xB0000001
+    expect:
+      result: accept
+      station_name_len: 240
+  - action: dcp_get
+    expect:
+      status: success
+  - action: dcp_set
+    name_len: 260
+    name_fill: b
+    xid: 0xB0000002
+    expect:
+      result: accept
+      station_name_len: 240
+  - action: dcp_set
+    name_of_station: sensor-line1
+    xid: 0xB0000003
+    expect:
+      result: accept
+      station_name: sensor-line1
+      station_name_len: 13

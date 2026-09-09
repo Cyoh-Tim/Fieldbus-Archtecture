@@ -1,0 +1,74 @@
+# Internal TC PN-B-CM-006 — Connect → Write → PrmEnd → AppReady → IO → Release.
+name: rpc_ar_lifetime_cm
+id: PN-B-CM-006
+suite: PN-B-v1
+protocol: profinet
+tags: [rpc, connect, release, lifetime, prm_end, bundle]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  ip: 192.168.200.2
+  netmask: 255.255.255.0
+  cycle_us: 8000
+  input_len: 32
+  output_len: 8
+steps:
+  - action: rpc_connect
+    integrity: false
+    expect:
+      rpc_response: true
+      ar: up
+  - action: rpc_write
+    index: 0xAFF1
+    slot: 0
+    subslot: 1
+    data: line-A
+    expect:
+      rpc_response: true
+  - action: rpc_control
+    command: parameter_end
+    expect:
+      rpc_response: true
+      ar: up
+      app_ready: true
+  - action: rpc_application_ready
+    expect:
+      rpc_request: true
+      app_ready: true
+  - action: io_cycle
+    count: 8
+    cycle_ms: 8
+    expect:
+      ar: up
+      min_frames: 8
+      period_max_ms: 20
+      ethertype: 0x8892
+  - action: rpc_release
+    expect:
+      rpc_response: true
+      ar: down
+  - action: io_cycle
+    require_ar: false
+    count: 8
+    cycle_ms: 8
+    expect:
+      ar: down
+      min_frames: 0
+      max_frames: 0
+  - action: rpc_connect
+    integrity: false
+    expect:
+      rpc_response: true
+      ar: up
+  - action: io_cycle
+    count: 8
+    cycle_ms: 8
+    expect:
+      min_frames: 8
+      period_max_ms: 20
+      ethertype: 0x8892
+  - action: rpc_release
+    expect:
+      rpc_response: true
+      ar: down

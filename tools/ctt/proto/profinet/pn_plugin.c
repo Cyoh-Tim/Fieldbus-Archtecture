@@ -379,23 +379,39 @@ static int step_dcp_set(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step
     const char *new_name = yaml_cstr(step, "name_of_station", NULL);
     uint32_t xid = (uint32_t)yaml_ulong(step, "xid", 0xAABBCCDDul);
     const yaml_node_t *expect = yaml_map_get(step, "expect");
+    char generated[512];
+    if (yaml_has(step, "name_len")) {
+        int nwant = (int)yaml_long(step, "name_len", 0);
+        if (nwant < 1 || nwant >= (int)sizeof(generated)) {
+            ctt_failf(run, idx, action, "name_len out of range");
+            return -1;
+        }
+        const char *fill_s = yaml_cstr(step, "name_fill", "a");
+        char fill = (fill_s && fill_s[0]) ? fill_s[0] : 'a';
+        memset(generated, fill, (size_t)nwant);
+        generated[nwant] = '\0';
+        new_name = generated;
+    }
     if (!new_name) {
-        ctt_failf(run, idx, action, "missing name_of_station");
+        ctt_failf(run, idx, action, "missing name_of_station or name_len");
         return -1;
     }
 
     const pn_cfg_t *cfg = pn_stack_cfg(priv->stack);
     size_t nlen = strlen(new_name);
-    uint8_t nameblk[2 + PN_STATION_NAME_MAX];
+    uint8_t nameblk[2 + 512];
+    if (nlen > sizeof(nameblk) - 2) {
+        nlen = sizeof(nameblk) - 2;
+    }
     pn_wr_be16(nameblk, 1);
     memcpy(nameblk + 2, new_name, nlen);
 
-    uint8_t blocks[256];
+    uint8_t blocks[768];
     size_t bn = 0;
     bn += append_dcp_block(blocks + bn, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME,
                            nameblk, (uint16_t)(2 + nlen));
 
-    uint8_t pay[512];
+    uint8_t pay[PN_FRAME_MAX];
     pn_wr_be16(pay, PN_FRAMEID_DCP_GETSET);
     pay[2] = PN_DCP_SET;
     pay[3] = PN_DCP_REQ;
@@ -437,6 +453,13 @@ static int step_dcp_set(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step
         rc |= ctt_check(run, idx, action, strcmp(got_sta, want_sta) == 0,
                         "station_name expect=%s actual=%s (signed=%s)", want_sta,
                         got_sta, signed_req ? "true" : "false");
+    }
+    if (expect && yaml_has(expect, "station_name_len")) {
+        unsigned long want_n = yaml_ulong(expect, "station_name_len", 0);
+        size_t got_n = strlen(got_sta);
+        rc |= ctt_check(run, idx, action, got_n == (size_t)want_n,
+                        "station_name_len expect=%lu actual=%zu (max %d)",
+                        want_n, got_n, PN_STATION_NAME_MAX);
     }
     if (want_result) {
         int accept = strcmp(want_result, "accept") == 0;
@@ -981,8 +1004,39 @@ static int is_rtc1(const uint8_t *frame, int n, uint16_t want_et)
     return et == want_et && fid >= 0x8000u && fid <= 0xBBFFu;
 }
 
+typedef struct {
+    uint8_t last[CTT_FRAME_MAX];
+    size_t last_n;
+    uint16_t first_cc;
+    uint16_t last_cc;
+    int cc_samples;
+    int cc_not_increasing;
+    int contains_hits;
+} rtc1_harvest_t;
+
+static uint16_t rtc1_data_len(pn_priv_t *priv)
+{
+    const pn_cfg_t *cfg = pn_stack_cfg(priv->stack);
+    uint16_t n = cfg->input_len;
+    return n ? n : 32;
+}
+
+static int rtc1_cycle_counter(const uint8_t *frame, int n, uint16_t data_len,
+                              uint16_t *cc)
+{
+    /* eth(14) + FrameID(2) + data + IOPS(1) + CycleCounter(2) */
+    size_t off = 16u + (size_t)data_len + 1u;
+    if (n < (int)(off + 2u)) {
+        return 0;
+    }
+    *cc = pn_rd_be16(frame + off);
+    return 1;
+}
+
 static void drain_io_frames(ctt_run_t *run, int *got_rtc1, uint64_t *last_ts,
-                            uint16_t want_et, int count_unexpected)
+                            uint16_t want_et, int count_unexpected,
+                            rtc1_harvest_t *h, uint16_t data_len,
+                            const char *needle)
 {
     uint8_t buf[CTT_FRAME_MAX];
     uint64_t ts = 0;
@@ -997,6 +1051,27 @@ static void drain_io_frames(ctt_run_t *run, int *got_rtc1, uint64_t *last_ts,
             run->metrics.rtc1_frames++;
             if (got_rtc1) {
                 (*got_rtc1)++;
+            }
+            if (h) {
+                memcpy(h->last, buf, (size_t)n);
+                h->last_n = (size_t)n;
+                uint16_t cc = 0;
+                if (rtc1_cycle_counter(buf, n, data_len, &cc)) {
+                    if (h->cc_samples == 0) {
+                        h->first_cc = cc;
+                    } else {
+                        uint16_t d = (uint16_t)(cc - h->last_cc);
+                        if (d == 0 || d > 64u) {
+                            h->cc_not_increasing = 1;
+                        }
+                    }
+                    h->last_cc = cc;
+                    h->cc_samples++;
+                }
+                if (needle && needle[0] &&
+                    contains(buf, (size_t)n, needle)) {
+                    h->contains_hits++;
+                }
             }
         } else if (kind == CTT_PN_LLDP) {
             /* periodic CC-B neighbor; expected during soak */
@@ -1099,10 +1174,18 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
         budget_ns = 120000000ull;
     }
     uint64_t deadline = ctt_now_ns() + budget_ns;
+    rtc1_harvest_t harvest;
+    memset(&harvest, 0, sizeof(harvest));
+    uint16_t data_len = rtc1_data_len(priv);
+    const char *needle =
+        expect && yaml_has(expect, "contains")
+            ? yaml_cstr(expect, "contains", NULL)
+            : NULL;
 
     while (ctt_now_ns() < deadline) {
         pump(run, priv);
-        drain_io_frames(run, &got, &last_ts, want_et, 0);
+        drain_io_frames(run, &got, &last_ts, want_et, 0, &harvest, data_len,
+                        needle);
         if (!prove_none && !hold_for_max && got >= min_frames) {
             break;
         }
@@ -1129,6 +1212,22 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
                         period_max_ms, max_ms);
     }
     rc |= check_cyclic_expect(run, &before, expect, idx, action, got);
+    if (expect && yaml_has(expect, "contains")) {
+        rc |= ctt_check(run, idx, action, harvest.contains_hits > 0,
+                        "RTC1 payload contains '%s' hits=%d frames=%d",
+                        needle ? needle : "", harvest.contains_hits, got);
+    }
+    if (expect && yaml_has(expect, "cycle_counter")) {
+        const char *mode = yaml_cstr(expect, "cycle_counter", "increasing");
+        int want_inc = (strcmp(mode, "increasing") == 0);
+        int ok = want_inc && harvest.cc_samples >= 2 &&
+                 !harvest.cc_not_increasing;
+        rc |= ctt_check(run, idx, action, ok,
+                        "cycle_counter expect=%s samples=%d first=0x%04x "
+                        "last=0x%04x stall_or_jump=%d",
+                        mode, harvest.cc_samples, harvest.first_cc,
+                        harvest.last_cc, harvest.cc_not_increasing);
+    }
     return rc;
 }
 
@@ -1465,8 +1564,39 @@ static int step_alarm(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
     }
 
     if (!pn_stack_ar_up(priv->stack)) {
-        ctt_failf(run, idx, action, "AR not up; Connect first");
-        return -1;
+        if (yaml_bool(step, "require_ar", 1)) {
+            ctt_failf(run, idx, action, "AR not up; Connect first");
+            return -1;
+        }
+        ctt_ctl_clear_rx(run);
+        int src = pn_stack_send_alarm_ex(priv->stack, (uint16_t)want_fid);
+        int found = 0;
+        uint8_t buf[CTT_FRAME_MAX];
+        int n;
+        pump(run, priv);
+        while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), NULL)) >
+               0) {
+            if (n >= 16) {
+                uint16_t fid = pn_rd_be16(buf + 14);
+                if (fid == (uint16_t)want_fid) {
+                    found = 1;
+                    break;
+                }
+            }
+        }
+        int out = 0;
+        if (expect && yaml_has(expect, "tx")) {
+            int want_tx = yaml_bool(expect, "tx", 0);
+            out |= ctt_check(run, idx, action, found == want_tx,
+                             "alarm tx expect=%s actual=%s rc=%d (no AR)",
+                             want_tx ? "true" : "false",
+                             found ? "true" : "false", src);
+        } else {
+            out |= ctt_check(run, idx, action, src != 0 && !found,
+                             "alarm without AR must not TX rc=%d found=%d", src,
+                             found);
+        }
+        return out;
     }
 
     ctt_ctl_clear_rx(run);
@@ -1735,7 +1865,8 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
             break;
         }
         pump(run, priv);
-        drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1);
+        drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1, NULL,
+                        rtc1_data_len(priv), NULL);
         if (!pn_stack_ar_up(priv->stack)) {
             run->metrics.ar_drops++;
             break;
@@ -1744,7 +1875,8 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
     }
     /* catch frames that arrived on the last poll */
     pump(run, priv);
-    drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1);
+    drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1, NULL,
+                    rtc1_data_len(priv), NULL);
 
     unsigned unexp = run->metrics.unexpected_frames - unexp_before;
     unsigned drops = run->metrics.ar_drops - drops_before;
@@ -1770,6 +1902,204 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
     }
     out |= check_cyclic_expect(run, &before, expect, idx, action, (int)rtc1);
     (void)cycle_ms;
+    return out;
+}
+
+static int parse_data_field(const yaml_node_t *step, uint8_t *buf, size_t cap,
+                            size_t *n)
+{
+    const char *ascii = yaml_cstr(step, "data", NULL);
+    const char *hex = yaml_cstr(step, "data_hex", NULL);
+    if (ascii && ascii[0]) {
+        *n = strlen(ascii);
+        if (*n > cap) {
+            *n = cap;
+        }
+        memcpy(buf, ascii, *n);
+        return 0;
+    }
+    if (hex && hex[0]) {
+        return parse_hex_buf(hex, buf, cap, n);
+    }
+    return -1;
+}
+
+static int step_write_input(ctt_run_t *run, pn_priv_t *priv,
+                            const yaml_node_t *step, int idx)
+{
+    const char *action = "write_input";
+    uint8_t buf[PN_IO_MAX];
+    size_t n = 0;
+    if (parse_data_field(step, buf, sizeof(buf), &n) != 0 || n == 0) {
+        ctt_failf(run, idx, action, "missing data or data_hex");
+        return -1;
+    }
+    size_t off = (size_t)yaml_ulong(step, "offset", 0);
+    int wr = pn_stack_write_input(priv->stack, off, buf, n);
+    return ctt_check(run, idx, action, wr == 0, "write_input rc=%d n=%zu off=%zu",
+                     wr, n, off);
+}
+
+static int step_read_output(ctt_run_t *run, pn_priv_t *priv,
+                            const yaml_node_t *step, int idx)
+{
+    const char *action = "read_output";
+    const yaml_node_t *expect = yaml_map_get(step, "expect");
+    size_t n = (size_t)yaml_ulong(step, "length", 8);
+    if (n > PN_IO_MAX) {
+        n = PN_IO_MAX;
+    }
+    uint8_t buf[PN_IO_MAX];
+    memset(buf, 0, sizeof(buf));
+    int rd = pn_stack_read_output(priv->stack, 0, buf, n);
+    int out = ctt_check(run, idx, action, rd == 0, "read_output rc=%d", rd);
+    if (expect && yaml_has(expect, "u8")) {
+        unsigned long want = yaml_ulong(expect, "u8", 0);
+        out |= ctt_check(run, idx, action, rd == 0 && buf[0] == (uint8_t)want,
+                         "output[0] expect=0x%02lx actual=0x%02x", want, buf[0]);
+    }
+    if (expect && yaml_has(expect, "data")) {
+        const char *s = yaml_cstr(expect, "data", "");
+        size_t sl = strlen(s);
+        out |= ctt_check(run, idx, action,
+                         rd == 0 && sl <= n && memcmp(buf, s, sl) == 0,
+                         "output data mismatch");
+    }
+    return out;
+}
+
+static int step_read_input(ctt_run_t *run, pn_priv_t *priv,
+                           const yaml_node_t *step, int idx)
+{
+    const char *action = "read_input";
+    const yaml_node_t *expect = yaml_map_get(step, "expect");
+    size_t n = (size_t)yaml_ulong(step, "length", 32);
+    if (n > PN_IO_MAX) {
+        n = PN_IO_MAX;
+    }
+    uint8_t buf[PN_IO_MAX];
+    memset(buf, 0, sizeof(buf));
+    int rd = pn_stack_read_input(priv->stack, 0, buf, n);
+    int out = ctt_check(run, idx, action, rd == 0, "read_input rc=%d", rd);
+    if (expect && yaml_has(expect, "data")) {
+        const char *s = yaml_cstr(expect, "data", "");
+        size_t sl = strlen(s);
+        out |= ctt_check(run, idx, action,
+                         rd == 0 && sl <= n && memcmp(buf, s, sl) == 0,
+                         "input data mismatch");
+    }
+    if (expect && yaml_has(expect, "contains")) {
+        const char *s = yaml_cstr(expect, "contains", "");
+        out |= ctt_check(run, idx, action, rd == 0 && contains(buf, n, s),
+                         "input contains '%s'", s);
+    }
+    return out;
+}
+
+static int step_dcp_inject(ctt_run_t *run, pn_priv_t *priv,
+                           const yaml_node_t *step, int idx)
+{
+    const char *action = "dcp_inject";
+    const yaml_node_t *expect = yaml_map_get(step, "expect");
+    const char *hex = yaml_cstr(step, "payload_hex", NULL);
+    uint8_t pay[512];
+    size_t plen = 0;
+    if (!hex || parse_hex_buf(hex, pay, sizeof(pay), &plen) != 0 || plen == 0) {
+        ctt_failf(run, idx, action, "need payload_hex");
+        return -1;
+    }
+    const pn_cfg_t *cfg = pn_stack_cfg(priv->stack);
+    const char *before = cfg->station_name;
+    char saved[PN_STATION_NAME_MAX + 1];
+    snprintf(saved, sizeof(saved), "%s", before);
+
+    uint8_t frame[PN_FRAME_MAX];
+    size_t flen = pn_eth_build(frame, sizeof(frame), cfg->mac, priv->ctl_mac,
+                               PN_ETHTYPE_PN, pay, plen);
+    ctt_ctl_clear_rx(run);
+    inject_eth(run, priv, frame, flen);
+
+    const pn_cfg_t *got = pn_stack_cfg(priv->stack);
+    int out = 0;
+    if (expect && yaml_has(expect, "station_name")) {
+        const char *want = yaml_cstr(expect, "station_name", saved);
+        out |= ctt_check(run, idx, action, strcmp(got->station_name, want) == 0,
+                         "station_name expect=%s actual=%s (malformed DCP)",
+                         want, got->station_name);
+    } else {
+        out |= ctt_check(run, idx, action,
+                         strcmp(got->station_name, saved) == 0,
+                         "malformed DCP must not change NameOfStation "
+                         "was=%s now=%s",
+                         saved, got->station_name);
+    }
+    if (expect && yaml_has(expect, "station_name_len")) {
+        unsigned long want_n = yaml_ulong(expect, "station_name_len", 0);
+        size_t got_n = strlen(got->station_name);
+        out |= ctt_check(run, idx, action, got_n == (size_t)want_n,
+                         "station_name_len expect=%lu actual=%zu", want_n,
+                         got_n);
+    }
+    return out;
+}
+
+static int step_rt_output(ctt_run_t *run, pn_priv_t *priv,
+                          const yaml_node_t *step, int idx)
+{
+    const char *action = "rt_output";
+    const yaml_node_t *expect = yaml_map_get(step, "expect");
+    const pn_cfg_t *cfg = pn_stack_cfg(priv->stack);
+    uint16_t data_len = cfg->output_len ? cfg->output_len : 8;
+    uint8_t data[PN_IO_MAX];
+    memset(data, 0x5A, sizeof(data));
+    size_t n = 0;
+    if (parse_data_field(step, data, sizeof(data), &n) == 0 && n > 0) {
+        data_len = (uint16_t)n;
+    }
+    if (yaml_has(step, "fill")) {
+        memset(data, (int)yaml_ulong(step, "fill", 0x5A), data_len);
+    }
+    uint16_t fid = (uint16_t)yaml_ulong(step, "frame_id", 0x8002);
+
+    uint8_t pay[PN_FRAME_MAX];
+    size_t pn = 0;
+    pn_wr_be16(pay, fid);
+    pn += 2;
+    memcpy(pay + pn, data, data_len);
+    pn += data_len;
+    pay[pn++] = PN_IOPS_GOOD;
+    pn_wr_be16(pay + pn, 1);
+    pn += 2;
+    pay[pn++] = (uint8_t)(PN_DATASTATUS_PRIMARY | PN_DATASTATUS_VALID |
+                          PN_DATASTATUS_RUN);
+    pay[pn++] = 0;
+
+    uint8_t frame[PN_FRAME_MAX];
+    size_t flen = pn_eth_build(frame, sizeof(frame), cfg->mac, priv->ctl_mac,
+                               PN_ETHTYPE_PN, pay, pn);
+    inject_eth(run, priv, frame, flen);
+
+    uint8_t got[PN_IO_MAX];
+    memset(got, 0, sizeof(got));
+    int rd = pn_stack_read_output(priv->stack, 0, got, data_len);
+    int out = 0;
+    int consumed = (rd == 0 && memcmp(got, data, data_len) == 0);
+    if (expect && yaml_has(expect, "consumed")) {
+        int want = yaml_bool(expect, "consumed", 1);
+        out |= ctt_check(run, idx, action, consumed == want,
+                         "consumed expect=%s actual=%s rd=%d (AR %s)",
+                         want ? "true" : "false", consumed ? "true" : "false",
+                         rd, pn_stack_ar_up(priv->stack) ? "up" : "down");
+    }
+    if (expect && yaml_has(expect, "u8")) {
+        unsigned long want = yaml_ulong(expect, "u8", 0);
+        out |= ctt_check(run, idx, action, rd == 0 && got[0] == (uint8_t)want,
+                         "output[0] expect=0x%02lx actual=0x%02x", want, got[0]);
+    }
+    if (!expect) {
+        out |= ctt_check(run, idx, action, consumed,
+                         "RTC1 output not consumed rd=%d", rd);
+    }
     return out;
 }
 
@@ -1950,11 +2280,26 @@ static int pn_step(ctt_run_t *run, const yaml_node_t *step, int index)
     if (strcmp(action, "dcp_hello") == 0) {
         return step_dcp_hello(run, priv, step, index);
     }
+    if (strcmp(action, "dcp_inject") == 0) {
+        return step_dcp_inject(run, priv, step, index);
+    }
     if (strcmp(action, "rpc_connect") == 0) {
         return step_rpc_connect(run, priv, step, index);
     }
     if (strcmp(action, "io_cycle") == 0) {
         return step_io_cycle(run, priv, step, index);
+    }
+    if (strcmp(action, "write_input") == 0) {
+        return step_write_input(run, priv, step, index);
+    }
+    if (strcmp(action, "read_input") == 0) {
+        return step_read_input(run, priv, step, index);
+    }
+    if (strcmp(action, "read_output") == 0) {
+        return step_read_output(run, priv, step, index);
+    }
+    if (strcmp(action, "rt_output") == 0) {
+        return step_rt_output(run, priv, step, index);
     }
     if (strcmp(action, "rpc_release") == 0) {
         return step_rpc_release(run, priv, step, index);
@@ -1988,8 +2333,9 @@ static int pn_step(ctt_run_t *run, const yaml_node_t *step, int index)
     }
     ctt_failf(run, index, action,
               "unknown action (profinet CC-B: dcp_identify, dcp_get, dcp_set, "
-              "dcp_set_ip, dcp_signal, dcp_hello, rpc_connect, rpc_write, "
-              "rpc_control, rpc_application_ready, rpc_release, rpc_inject, "
+              "dcp_set_ip, dcp_signal, dcp_hello, dcp_inject, rpc_connect, "
+              "rpc_write, rpc_control, rpc_application_ready, rpc_release, "
+              "rpc_inject, write_input, read_input, read_output, rt_output, "
               "io_cycle, alarm, record_read, lldp, snmp_get, soak; CC-C/IRT "
               "never in scope)");
     return -1;

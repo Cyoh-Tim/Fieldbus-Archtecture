@@ -421,6 +421,10 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         so = ndr_wrap(stub_out, z, 4);
         LOG_INFO("pn_rpc", "AR released");
     } else if (op == OP_CONTROL) {
+        if (!s->ar.established) {
+            LOG_WARN("pn_rpc", "Control without AR — fail closed (no RTC1)");
+            return -EINVAL;
+        }
         ctrl_walk_t cw = {.command = PN_CONTROL_PRM_END, .saw = 0};
         size_t blen = 0;
         const uint8_t *blocks = ndr_blocks(stub, slen, &blen);

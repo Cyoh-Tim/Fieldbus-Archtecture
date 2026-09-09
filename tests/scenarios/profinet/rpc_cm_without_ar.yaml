@@ -1,0 +1,52 @@
+# Internal TC PN-B-NEG-008 — Write/Control/Alarm/output without AR fail closed.
+name: rpc_cm_without_ar
+id: PN-B-NEG-008
+suite: PN-B-v1
+protocol: profinet
+tags: [rpc, alarm, negative, bundle]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  ip: 192.168.200.2
+  netmask: 255.255.255.0
+  cycle_us: 8000
+  input_len: 32
+  output_len: 8
+steps:
+  - action: rpc_write
+    index: 0xAFF1
+    slot: 0
+    subslot: 1
+    data: no-ar
+    expect:
+      rpc_response: true
+  - action: record_read
+    index: 0xAFF1
+    slot: 0
+    subslot: 1
+    expect:
+      contains: no-ar
+  - action: rpc_control
+    command: parameter_end
+    expect:
+      rpc_response: false
+      ar: down
+      app_ready: false
+  - action: alarm
+    require_ar: false
+    expect:
+      tx: false
+  - action: rt_output
+    fill: 0x5A
+    frame_id: 0x8002
+    expect:
+      consumed: false
+  - action: io_cycle
+    require_ar: false
+    count: 8
+    cycle_ms: 8
+    expect:
+      ar: down
+      min_frames: 0
+      max_frames: 0

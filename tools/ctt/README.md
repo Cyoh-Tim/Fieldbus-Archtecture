@@ -85,15 +85,18 @@ PROFINET actions (CC-B / RTC1):
 
 | action | notes |
 |--------|--------|
-| `dcp_identify` / `dcp_get` / `dcp_set` | Identify.Res, Get.Res, Sec1 HMAC Set |
+| `dcp_identify` / `dcp_get` / `dcp_set` | Identify.Res, Get.Res, Sec1 HMAC Set. `dcp_set` `name_len` for boundary |
 | `dcp_set_ip` | DCP Set IP + DUT Hello (`0xFEFC`) |
 | `dcp_signal` | Control/Signal Set (LED stub) |
 | `dcp_hello` | DUT Hello TX helper |
+| `dcp_inject` | raw Ethernet DCP `payload_hex` — truncated / unknown option |
 | `rpc_connect` | mock: `handle_rpc`. lab + `device.ip`: UDP 34964 |
 | `rpc_write` / `rpc_control` / `rpc_application_ready` | Write, ParameterEnd, Device AppReady indication |
 | `rpc_release` | AR down |
 | `rpc_inject` | raw `pdu_hex` or `opcode` — malformed / unknown CM (fail closed) |
-| `io_cycle` | RTC1 cyclic + period / late / missed / jitter vs `cycle_us` |
+| `write_input` / `read_input` / `read_output` | cyclic process image |
+| `rt_output` | inject RTC1 output CR (consume) |
+| `io_cycle` | RTC1 cyclic + period / late / missed / jitter vs `cycle_us`. `contains`, `cycle_counter: increasing` |
 
 Modbus TCP (`protocol: modbus_tcp`): `seed`, `request` (FC 01–06, 0F, 10, 16, 17),
 `map_check`, `adu_inject` (`pdu_hex` — truncated / bad MBAP fail closed),

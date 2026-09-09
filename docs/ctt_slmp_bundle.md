@@ -71,7 +71,8 @@ protocol: slmp
 | SLMP-3E-CM-001 | `batch_read_write_loopback.yaml` | CM | pass | Batch R/W + bits + ASCII + X hex | ID only |
 | SLMP-3E-CM-002 | `batch_lifetime.yaml` | **lifetime** | pass | Batch write/read lifetime | **new** D word + M bit overwrite |
 | SLMP-3E-CYC-001 | `soak_short.yaml` | cyclic | pass | batch read soak | **thickened** 32×8ms + late/missed/jitter |
-| SLMP-3E-CYC-002 | `batch_cyclic_metrics.yaml` | **cyclic** | pass | Batch metrics | **new** 48×8ms |
+| SLMP-3E-CYC-002 | `batch_cyclic_metrics.yaml` | **cyclic** | pass | Batch metrics | wave 1 48×8ms |
+| SLMP-3E-CYC-003 | `batch_cycle_4ms.yaml` | **cyclic** | pass | Batch 4 ms metrics | **wave 2** 48×4ms |
 | SLMP-3E-NEG-001 | `reject_non_3e.yaml` | NEG | pass | ASCII/4E/unknown cmd | ID only |
 | SLMP-3E-NEG-002 | `frame_malformed.yaml` | **NEG** | pass | Truncated 3E / short write | **new** fail closed |
 | SLMP-3E-NEG-003 | `oob_batch_read.yaml` | **NEG** | pass | OOB batch | **new** read+write end `0xC056`, map 유지 |
@@ -83,6 +84,8 @@ Wave 1 이 메운 갭:
 - Soak 가 iteration 카운트만 있었음 → **cycle_us 대비 late/missed/jitter** + 48 사이클 기본 CI
 - loopback 스모크에 overwrite 가 없음 → **D word + M bit lifetime**
 - ASCII/4E 거절만 있고 truncated/OOB 없음 → **fail-closed + `0xC056`**
+
+Wave 2: 4 ms batch 메트릭 (`SLMP-3E-CYC-003`). Map lifetime·NEG 는 wave 1 으로 충분.
 
 아직 얇음 (다음 wave, 이 PR 에서 가짜 pass 하지 않음):
 

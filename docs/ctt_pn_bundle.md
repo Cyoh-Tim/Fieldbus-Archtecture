@@ -73,10 +73,14 @@ protocol: profinet
 | PN-B-SEC-001 | `dcp_set_sec_class1.yaml` | NEG/SEC | pass + golden | DCP Set + Sec1 | ID only |
 | PN-B-CM-001 | `rpc_connect_sec1_integrity.yaml` | CM | pass | CM Connect + Sec1 | ID only |
 | PN-B-CM-002 | `rpc_release.yaml` | CM | pass | CM Release | ID only (IO 없는 단축) |
-| PN-B-CM-003 | `rpc_ar_lifetime.yaml` | **lifetime** | pass | CM lifetime | **new** Connect→IO→Release→reconnect |
+| PN-B-CM-003 | `rpc_ar_lifetime.yaml` | **lifetime** | pass | CM lifetime | wave 1 Connect→IO→Release→reconnect |
 | PN-B-CM-004 | `rpc_write_prmend_appready.yaml` | CM | pass | Write / PrmEnd / AppReady | ID only |
+| PN-B-CM-005 | `rpc_ar_replace.yaml` | **lifetime** | pass | CM single-AR replace | **wave 2** Connect→IO→Connect→IO |
+| PN-B-CM-006 | `rpc_ar_lifetime_cm.yaml` | **lifetime** | pass | CM lifetime + PrmEnd | **wave 2** Connect→Write→PrmEnd→IO→Release |
 | PN-B-CYC-001 | `rtc1_io_cycle_smoke.yaml` | cyclic | pass | RTC1 cyclic smoke | ID only |
-| PN-B-CYC-002 | `rtc1_cyclic_metrics.yaml` | **cyclic** | pass | RTC1 metrics | **new** 48 cycles, late/missed/jitter vs `cycle_us` |
+| PN-B-CYC-002 | `rtc1_cyclic_metrics.yaml` | **cyclic** | pass | RTC1 metrics | wave 1 48 cycles, late/missed/jitter vs `cycle_us` |
+| PN-B-CYC-003 | `rtc1_cycle_payload.yaml` | **cyclic** | pass | RTC1 payload + CC | **wave 2** input payload, cycle_counter, output consume |
+| PN-B-CYC-004 | `rtc1_cycle_4ms.yaml` | **cyclic** | pass | RTC1 4 ms metrics | **wave 2** `cycle_us: 4000`, mock soft bound |
 | PN-B-CYC-010 | `soak_short.yaml` | cyclic | pass | RTC1 soak 회귀 | **thickened** late/missed/jitter asserts |
 | PN-B-CYC-011 | `soak_ci.yaml` | cyclic | skip (`soak_ci`) | 30s soak | ID only |
 | PN-B-CYC-012 | `nightly/soak_nightly.yaml` | cyclic | skip (GLOB 밖) | 1h soak | ID only |
@@ -84,7 +88,10 @@ protocol: profinet
 | PN-B-NEG-002 | `rpc_connect_bad_hmac.yaml` | **NEG** | pass | Connect reject (bad HMAC) | **new** |
 | PN-B-NEG-003 | `rpc_malformed.yaml` | **NEG** | pass | truncated / unknown op | **new** |
 | PN-B-NEG-004 | `io_without_ar.yaml` | **NEG** | pass | no AR ⇒ no RTC1 | **new** |
-| PN-B-NEG-005 | `record_unknown_index.yaml` | **NEG** | pass | unknown record empty | **new** |
+| PN-B-NEG-005 | `record_unknown_index.yaml` | **NEG** | pass | unknown record empty | wave 1 |
+| PN-B-NEG-006 | `dcp_set_name_boundary.yaml` | **NEG** | pass | NameOfStation max/oversize | **wave 2** 240 accept, 260 truncate |
+| PN-B-NEG-007 | `dcp_malformed.yaml` | **NEG** | pass | truncated / unknown DCP | **wave 2** name unchanged |
+| PN-B-NEG-008 | `rpc_cm_without_ar.yaml` | **NEG** | pass | CM/Alarm/output without AR | **wave 2** Control fail-closed |
 | PN-B-ALM-001 | `alarm_tx.yaml` | catalog | pass | Alarm High | ID only |
 | PN-B-ALM-002 | `alarm_low.yaml` | catalog | pass + golden | Alarm Low | ID only |
 | PN-B-REC-001 | `record_read_im0.yaml` | catalog | pass | I&M0 | ID only |
@@ -101,14 +108,19 @@ Wave 1 이 메운 갭:
 - Sec1 reject 는 integrity **부재** 만 → **HMAC 불량**
 - malformed CM / AR 없이 cyclic / unknown record 없음 → **fail-closed TCs**
 
-아직 얇음 (다음 wave, 이 PR 에서 가짜 pass 하지 않음):
+Wave 2 (이 PR) 가 메운 갭:
+
+- 단일 AR 재 Connect / 전체 CM 경로 lifetime (`PN-B-CM-005`, `PN-B-CM-006`)
+- RTC1 **payload + cycle_counter + output consume** (`PN-B-CYC-003`) 과 **4 ms** 메트릭 (`PN-B-CYC-004`)
+- DCP 이름 길이 경계 / truncated DCP / AR 없이 Control·Alarm·output (`PN-B-NEG-006`–`008`). Control without AR 는 DUT 가 AR 을 올리지 않도록 fail-closed
+
+아직 얇음 (다음 wave, 가짜 pass 하지 않음):
 
 | 주제 | 상태 |
 |------|------|
 | Alarm 풀 상태머신 / Ack | dummy TX 만 (`PN-B-ALM-*`). 다음 wave |
 | Record 인덱스 맵 (GSDML 전 구간) | I&M0–4 + unknown empty. 추가 인덱스는 DUT 가 비면 gap |
-| CM 다중 AR / 동시 Connect | 스택 단일 AR. 시나리오 없음 = 미커버, pass 아님 |
-| DCP Set 이름 길이 경계 | 단위 경로에 가깝다. 다음 NEG wave |
+| CM 다중 AR / 동시 Connect | 스택 **단일 AR** (`PN-B-CM-005` 가 replace 를 고정). 동시 AR 은 DUT 미구현 = gap |
 | Lab 프로파일 RTC1 jitter | mock soft ms. 랩은 `tests/run_ctt_lab.sh` (opt-in) |
 
 ## 4. 명시적 범위 밖 / 갭
@@ -141,8 +153,11 @@ Wave 1 이 메운 갭:
 - `min_frames`, `max_frames`, `period_max_ms` (기존)
 - `max_late`, `max_missed`, `jitter_max_ms`, `min_period_samples`
 - `require_ar: false` — AR 없이 돌리고 RTC1 이 나오면 fail (NEG)
+- `contains` — RTC1 프로세스 이미지에 바이트열
+- `cycle_counter: increasing` — Frame CycleCounter 가 증가 (wrap 허용, stall/점프 거부)
 
-기본 CI 의 두꺼운 테스트는 `PN-B-CYC-002` (48 사이클, mock, 서브초~1.5s).
+기본 CI 의 두꺼운 테스트는 `PN-B-CYC-002` (48 사이클, 8 ms) 과 `PN-B-CYC-004` (4 ms).
+`PN-B-CYC-003` 은 payload / cycle_counter / output consume.
 30s / 1h 는 기존처럼 `-L soak_ci` / nightly. **IRT µs 를 주장하지 않는다.**
 
 ## 6. 리포트 스키마 (`ctt-report/v1`)

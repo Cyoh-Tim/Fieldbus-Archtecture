@@ -1,45 +1,45 @@
 {
-  "generated_at": "2026-09-09T07:25:45Z",
+  "generated_at": "2026-09-09T09:30:11Z",
   "generator": "tools/ctt/gen_board_data.py",
   "disclaimer": "내부 CTT 보드입니다. 내부 bundle-grade 게이트 ≠ PI / ODVA / Modbus.org / Mitsubishi 공식 인증. 배지는 시나리오가 기본 mock CI(`ctest -LE soak_ci`)에 등록되는지·매트릭스에 갭/범위 밖으로 적혀 있는지를 분류한 것이며, 이 페이지가 ctest 를 실행하지는 않습니다.",
   "ci_default": "ctest --test-dir build --output-on-failure -LE soak_ci",
   "note": "pass = YAML registered in CMake and included in default mock CI. skip = soak_ci / nightly / lab (opt-in). gap = matrix DUT-not-implemented or not-yet. out_of_scope = CC-C/IRT, official cert labs, EtherCAT, etc. Internal bundle-grade gate != PI / ODVA certification. PROFINET catalog: docs/ctt_pn_bundle.md (PN-B-* ids). EtherNet/IP catalog: docs/ctt_eip_bundle.md (EIP-A-* ids). Modbus TCP catalog: docs/ctt_mb_bundle.md (MB-T-* ids). SLMP Binary 3E catalog: docs/ctt_slmp_bundle.md (SLMP-3E-* ids).",
   "counts": {
-    "pass": 59,
+    "pass": 70,
     "skip": 4,
     "gap": 9,
     "out_of_scope": 13,
-    "total": 85,
-    "scenarios": 61
+    "total": 96,
+    "scenarios": 72
   },
   "by_protocol": {
     "profinet": {
-      "pass": 24,
+      "pass": 31,
       "skip": 4,
       "gap": 2,
       "out_of_scope": 3,
-      "total": 33
+      "total": 40
     },
     "ethernetip": {
-      "pass": 14,
+      "pass": 16,
       "skip": 0,
       "gap": 5,
       "out_of_scope": 1,
-      "total": 20
+      "total": 22
     },
     "modbus_tcp": {
-      "pass": 12,
+      "pass": 13,
       "skip": 0,
       "gap": 1,
       "out_of_scope": 3,
-      "total": 16
+      "total": 17
     },
     "slmp": {
-      "pass": 9,
+      "pass": 10,
       "skip": 0,
       "gap": 1,
       "out_of_scope": 4,
-      "total": 14
+      "total": 15
     },
     "other": {
       "pass": 0,
@@ -66,6 +66,7 @@
       "ctest_registered": true,
       "ci_default": true,
       "labels": [
+        "profinet",
         "golden"
       ],
       "tags": [
@@ -95,7 +96,9 @@
       "ctest_name": "ctt_pn_alarm_tx",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "alarm",
         "phase2"
@@ -124,6 +127,7 @@
       "ctest_registered": true,
       "ci_default": true,
       "labels": [
+        "profinet",
         "golden"
       ],
       "tags": [
@@ -154,6 +158,7 @@
       "ctest_registered": true,
       "ci_default": true,
       "labels": [
+        "profinet",
         "golden"
       ],
       "tags": [
@@ -184,6 +189,7 @@
       "ctest_registered": true,
       "ci_default": true,
       "labels": [
+        "profinet",
         "golden"
       ],
       "tags": [
@@ -195,6 +201,38 @@
       "matrix": "docs/ctt_pi_matrix.md",
       "kind": "scenario",
       "golden": true,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "dcp_malformed",
+      "bundle_id": "PN-B-NEG-007",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "dcp_malformed.yaml",
+      "path": "tests/scenarios/profinet/dcp_malformed.yaml",
+      "title": "DCP truncated / unknown option",
+      "title_ko": "DCP truncated / unknown option",
+      "description": "PN-B-NEG-007. name unchanged",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_dcp_malformed",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "profinet"
+      ],
+      "tags": [
+        "dcp",
+        "negative",
+        "boundary",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
       "protocol_label": "PROFINET",
       "status_label_ko": "통과",
       "cover": null
@@ -215,6 +253,7 @@
       "ctest_registered": true,
       "ci_default": true,
       "labels": [
+        "profinet",
         "golden"
       ],
       "tags": [
@@ -227,6 +266,39 @@
       "matrix": "docs/ctt_pi_matrix.md",
       "kind": "scenario",
       "golden": true,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "dcp_set_name_boundary",
+      "bundle_id": "PN-B-NEG-006",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "dcp_set_name_boundary.yaml",
+      "path": "tests/scenarios/profinet/dcp_set_name_boundary.yaml",
+      "title": "DCP NameOfStation boundary",
+      "title_ko": "DCP NameOfStation boundary",
+      "description": "PN-B-NEG-006. 240 accept, oversize truncate",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_dcp_set_name_boundary",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "profinet"
+      ],
+      "tags": [
+        "dcp",
+        "set",
+        "negative",
+        "boundary",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
       "protocol_label": "PROFINET",
       "status_label_ko": "통과",
       "cover": null
@@ -247,6 +319,7 @@
       "ctest_registered": true,
       "ci_default": true,
       "labels": [
+        "profinet",
         "golden"
       ],
       "tags": [
@@ -279,6 +352,7 @@
       "ctest_registered": true,
       "ci_default": true,
       "labels": [
+        "profinet",
         "golden"
       ],
       "tags": [
@@ -308,7 +382,9 @@
       "ctest_name": "ctt_pn_io_without_ar",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "rtc1",
         "negative",
@@ -337,7 +413,9 @@
       "ctest_name": "ctt_pn_lldp",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "lldp",
         "phase2"
@@ -365,7 +443,9 @@
       "ctest_name": "ctt_pn_record_read_im0",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "record",
         "im0",
@@ -394,7 +474,9 @@
       "ctest_name": "ctt_pn_record_read_im1_4",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "record",
         "im1",
@@ -425,7 +507,9 @@
       "ctest_name": "ctt_pn_record_unknown_index",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "record",
         "negative",
@@ -455,12 +539,113 @@
       "ctest_name": "ctt_pn_rpc_ar_lifetime",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "rpc",
         "connect",
         "release",
         "lifetime",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "rpc_ar_lifetime_cm",
+      "bundle_id": "PN-B-CM-006",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "rpc_ar_lifetime_cm.yaml",
+      "path": "tests/scenarios/profinet/rpc_ar_lifetime_cm.yaml",
+      "title": "CM lifetime + PrmEnd",
+      "title_ko": "CM lifetime + PrmEnd",
+      "description": "PN-B-CM-006. Write / PrmEnd / AppReady / IO",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_rpc_ar_lifetime_cm",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "profinet"
+      ],
+      "tags": [
+        "rpc",
+        "connect",
+        "release",
+        "lifetime",
+        "prm_end",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "rpc_ar_replace",
+      "bundle_id": "PN-B-CM-005",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "rpc_ar_replace.yaml",
+      "path": "tests/scenarios/profinet/rpc_ar_replace.yaml",
+      "title": "CM single-AR replace",
+      "title_ko": "CM single-AR replace",
+      "description": "PN-B-CM-005. second Connect keeps one AR",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_rpc_ar_replace",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "profinet"
+      ],
+      "tags": [
+        "rpc",
+        "connect",
+        "lifetime",
+        "replace",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "rpc_cm_without_ar",
+      "bundle_id": "PN-B-NEG-008",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "rpc_cm_without_ar.yaml",
+      "path": "tests/scenarios/profinet/rpc_cm_without_ar.yaml",
+      "title": "CM/Alarm/output without AR",
+      "title_ko": "CM/Alarm/output without AR",
+      "description": "PN-B-NEG-008. Control fail-closed",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_rpc_cm_without_ar",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "profinet"
+      ],
+      "tags": [
+        "rpc",
+        "alarm",
+        "negative",
         "bundle"
       ],
       "source": "yaml",
@@ -486,7 +671,9 @@
       "ctest_name": "ctt_pn_rpc_connect_bad_hmac",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "rpc",
         "connect",
@@ -517,7 +704,9 @@
       "ctest_name": "ctt_pn_rpc_connect_sec1_integrity",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "rpc",
         "connect",
@@ -547,7 +736,9 @@
       "ctest_name": "ctt_pn_rpc_connect_without_integrity",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "rpc",
         "connect",
@@ -577,7 +768,9 @@
       "ctest_name": "ctt_pn_rpc_malformed",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "rpc",
         "negative",
@@ -607,7 +800,9 @@
       "ctest_name": "ctt_pn_rpc_release",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "rpc",
         "release",
@@ -636,12 +831,78 @@
       "ctest_name": "ctt_pn_rpc_write_prmend_appready",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "rpc",
         "write",
         "control",
         "codesys"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "rtc1_cycle_4ms",
+      "bundle_id": "PN-B-CYC-004",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "rtc1_cycle_4ms.yaml",
+      "path": "tests/scenarios/profinet/rtc1_cycle_4ms.yaml",
+      "title": "RTC1 4 ms metrics",
+      "title_ko": "RTC1 4 ms metrics",
+      "description": "PN-B-CYC-004. cycle_us: 4000, not IRT",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_rtc1_cycle_4ms",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "profinet"
+      ],
+      "tags": [
+        "rtc1",
+        "cyclic",
+        "metrics",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "rtc1_cycle_payload",
+      "bundle_id": "PN-B-CYC-003",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "rtc1_cycle_payload.yaml",
+      "path": "tests/scenarios/profinet/rtc1_cycle_payload.yaml",
+      "title": "RTC1 payload + cycle counter",
+      "title_ko": "RTC1 payload + cycle counter",
+      "description": "PN-B-CYC-003. input payload, output consume",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_rtc1_cycle_payload",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "profinet"
+      ],
+      "tags": [
+        "rtc1",
+        "cyclic",
+        "payload",
+        "bundle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_pi_matrix.md",
@@ -666,7 +927,9 @@
       "ctest_name": "ctt_pn_rtc1_cyclic_metrics",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "rtc1",
         "cyclic",
@@ -696,7 +959,9 @@
       "ctest_name": "ctt_pn_rtc1_io_cycle_smoke",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "rtc1",
         "smoke"
@@ -724,7 +989,9 @@
       "ctest_name": "ctt_pn_snmp_get_sysname",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "snmp",
         "phase2"
@@ -752,7 +1019,9 @@
       "ctest_name": "ctt_pn_soak_short",
       "ctest_registered": true,
       "ci_default": true,
-      "labels": [],
+      "labels": [
+        "profinet"
+      ],
       "tags": [
         "soak",
         "rtc1",
@@ -873,6 +1142,7 @@
       "ctest_registered": true,
       "ci_default": false,
       "labels": [
+        "profinet",
         "soak_ci"
       ],
       "tags": [
@@ -1080,6 +1350,38 @@
       "cover": null
     },
     {
+      "id": "class1_cycle_4ms",
+      "bundle_id": "EIP-A-CYC-003",
+      "suite": "EIP-A-v1",
+      "protocol": "ethernetip",
+      "filename": "class1_cycle_4ms.yaml",
+      "path": "tests/scenarios/ethernetip/class1_cycle_4ms.yaml",
+      "title": "Class 1 4 ms metrics",
+      "title_ko": "Class 1 4 ms metrics",
+      "description": "rpi_us: 4000. EIP-A-CYC-003",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_eip_class1_cycle_4ms",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "ethernetip"
+      ],
+      "tags": [
+        "class1",
+        "cyclic",
+        "metrics",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_odva_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "EtherNet/IP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
       "id": "class1_cyclic_metrics",
       "bundle_id": "EIP-A-CYC-002",
       "suite": "EIP-A-v1",
@@ -1124,6 +1426,39 @@
       "status": "pass",
       "reason": "covered in default mock CI (ctest -LE soak_ci)",
       "ctest_name": "ctt_eip_class1_lifetime",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "ethernetip"
+      ],
+      "tags": [
+        "forward_open",
+        "forward_close",
+        "lifetime",
+        "class1",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_odva_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "EtherNet/IP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "class1_lifetime_dual",
+      "bundle_id": "EIP-A-CM-003",
+      "suite": "EIP-A-v1",
+      "protocol": "ethernetip",
+      "filename": "class1_lifetime_dual.yaml",
+      "path": "tests/scenarios/ethernetip/class1_lifetime_dual.yaml",
+      "title": "two Class 1 connections",
+      "title_ko": "two Class 1 connections",
+      "description": "FO A+B, Close A, B stays. EIP-A-CM-003",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_eip_class1_lifetime_dual",
       "ctest_registered": true,
       "ci_default": true,
       "labels": [
@@ -1546,7 +1881,7 @@
       "path": null,
       "title": "Large Forward Open",
       "title_ko": "Large Forward Open",
-      "description": "standard FO + Close + IO 만 (EIP-A-CM-002)",
+      "description": "standard FO + Close + dual conn (EIP-A-CM-002/003)",
       "status": "gap",
       "reason": "docs/ctt_odva_matrix.md: not yet",
       "ctest_name": null,
@@ -1729,6 +2064,38 @@
       "tags": [
         "exception",
         "negative",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_modbus_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "Modbus TCP",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "fc03_cycle_4ms",
+      "bundle_id": "MB-T-CYC-003",
+      "suite": "MB-T-v1",
+      "protocol": "modbus_tcp",
+      "filename": "fc03_cycle_4ms.yaml",
+      "path": "tests/scenarios/modbus/fc03_cycle_4ms.yaml",
+      "title": "FC03 4 ms metrics",
+      "title_ko": "FC03 4 ms metrics",
+      "description": "48×4ms. MB-T-CYC-003",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_mb_fc03_cycle_4ms",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "modbus"
+      ],
+      "tags": [
+        "fc03",
+        "cyclic",
+        "metrics",
         "bundle"
       ],
       "source": "yaml",
@@ -2088,6 +2455,38 @@
       "golden": false,
       "bundle_id": null,
       "suite": null
+    },
+    {
+      "id": "batch_cycle_4ms",
+      "bundle_id": "SLMP-3E-CYC-003",
+      "suite": "SLMP-3E-v1",
+      "protocol": "slmp",
+      "filename": "batch_cycle_4ms.yaml",
+      "path": "tests/scenarios/slmp/batch_cycle_4ms.yaml",
+      "title": "Batch 4 ms metrics",
+      "title_ko": "Batch 4 ms metrics",
+      "description": "48×4ms. SLMP-3E-CYC-003",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_slmp_batch_cycle_4ms",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "slmp"
+      ],
+      "tags": [
+        "batch",
+        "cyclic",
+        "metrics",
+        "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_slmp_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "SLMP",
+      "status_label_ko": "통과",
+      "cover": null
     },
     {
       "id": "batch_cyclic_metrics",
