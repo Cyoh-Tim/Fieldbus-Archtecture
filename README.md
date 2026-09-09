@@ -57,6 +57,12 @@ cmake --build build
 ctest --test-dir build --output-on-failure -LE soak_ci
 ```
 
+## Config 시각화 (비전문가용)
+
+예제 JSON을 그림(누가 서버인지, 포인트가 어느 주소에 붙는지)으로 보려면
+브라우저에서 [`docs/config-viz.html`](docs/config-viz.html) 을 엽니다.
+탭으로 Modbus / SLMP / EtherNet/IP / PROFINET 예제를 고르거나, 자기 JSON을 붙여 넣을 수 있습니다.
+
 ## 실행
 ```
 ./build/multiproto_daemon config/example.modbus.json

@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Config 시각화 · Fieldbus Architecture</title>
+  <style>
+    :root {
+      --bg: #101418;
+      --panel: #1a2128;
+      --panel2: #222b34;
+      --line: #31404c;
+      --text: #e8eef2;
+      --muted: #8ea0ad;
+      --plc: #3db8a8;
+      --sensor: #7eb8e8;
+      --read: #6ee7b7;
+      --write: #f5c16c;
+      --warn: #f0a07a;
+      --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif; }
+    header {
+      padding: 20px 24px 12px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 24px;
+      align-items: flex-end;
+      justify-content: space-between;
+    }
+    h1 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.02em; }
+    .sub { color: var(--muted); font-size: 13px; max-width: 52rem; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    button, label.btn {
+      background: var(--panel2);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 12px;
+      cursor: pointer;
+      font: inherit;
+    }
+    button:hover, label.btn:hover { border-color: #4d5e6c; }
+    input[type=file] { display: none; }
+    .tabs { display: flex; gap: 6px; padding: 14px 24px 0; flex-wrap: wrap; }
+    .tab {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      padding: 8px 14px;
+      border-radius: 999px;
+    }
+    .tab.active { background: #24313b; color: var(--text); border-color: #5b7384; }
+    main { padding: 16px 24px 40px; display: grid; gap: 16px; }
+    .row { display: grid; gap: 16px; grid-template-columns: 1.1fr 0.9fr; }
+    @media (max-width: 980px) { .row { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px 18px;
+    }
+    .card h2 { margin: 0 0 10px; font-size: 13px; color: var(--muted); font-weight: 600; text-transform: none; letter-spacing: 0.04em; }
+    .topo {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 12px;
+      align-items: center;
+    }
+    .node {
+      border-radius: 12px;
+      padding: 14px;
+      min-height: 92px;
+    }
+    .node.plc { background: #16332f; border: 1px solid #2a6b62; }
+    .node.sensor { background: #1a2c3d; border: 1px solid #3d5c78; }
+    .node .k { font-size: 11px; color: var(--muted); }
+    .node .n { font-size: 18px; font-weight: 650; margin-top: 2px; }
+    .arrow { color: var(--muted); text-align: center; font-size: 13px; min-width: 110px; }
+    .arrow b { display: block; color: var(--text); font-size: 20px; }
+    .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+    .kv div { background: var(--panel2); border-radius: 8px; padding: 8px 10px; }
+    .kv .k { font-size: 11px; color: var(--muted); }
+    .kv .v { font-family: var(--mono); font-size: 13px; word-break: break-all; }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+    .pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 650; }
+    .pill.read { background: #1c3d32; color: var(--read); }
+    .pill.write { background: #3d3320; color: var(--write); }
+    .pill.rw { background: #2d3340; color: #c5d4e8; }
+    .map { display: grid; gap: 12px; }
+    .lane { background: var(--panel2); border-radius: 10px; padding: 10px; }
+    .lane .title { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    .track {
+      position: relative;
+      height: 42px;
+      background: repeating-linear-gradient(90deg, #1a2128 0 11px, #24303a 11px 12px);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .blk {
+      position: absolute; top: 6px; height: 30px; border-radius: 6px;
+      display: flex; align-items: center; padding: 0 6px;
+      font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      min-width: 8px;
+    }
+    .blk.read { background: #215c4a; }
+    .blk.write { background: #6b4e1e; }
+    .points { display: grid; gap: 8px; }
+    .pt {
+      display: grid;
+      grid-template-columns: 140px 88px 90px 1fr;
+      gap: 8px;
+      align-items: center;
+      background: var(--panel2);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    @media (max-width: 720px) { .pt { grid-template-columns: 1fr; } }
+    .pt .name { font-weight: 650; }
+    .addr { font-family: var(--mono); font-size: 12px; color: #c9d7e2; }
+    .hint { font-size: 12px; color: var(--muted); }
+    textarea {
+      width: 100%; min-height: 160px; background: #0c1014; color: #d7e3ec;
+      border: 1px solid var(--line); border-radius: 10px; padding: 10px;
+      font: 12px/1.4 var(--mono);
+    }
+    .err { color: var(--warn); font-size: 13px; }
+    details { margin-top: 8px; }
+    pre { margin: 8px 0 0; background: #0c1014; border-radius: 8px; padding: 10px; overflow: auto; font: 11px/1.4 var(--mono); color: #c5d3de; }
+    footer { padding: 0 24px 28px; color: var(--muted); font-size: 12px; }
+    a { color: var(--sensor); }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Config 시각화</h1>
+      <p class="sub">
+        프로토콜을 몰라도 됩니다. 예제 JSON을 그림으로 보면
+        <b>누가 서버인지</b>, <b>PLC가 읽는 값/쓰는 값</b>, <b>주소가 어디에 붙는지</b>가 보입니다.
+        벤더 통신 가이드의 숫자를 이 칸에 옮기면 데몬이 동작합니다.
+      </p>
+    </div>
+    <div class="actions">
+      <label class="btn">JSON 파일 열기<input id="file" type="file" accept="application/json,.json"></label>
+      <button id="paste-toggle" type="button">JSON 붙여넣기</button>
+    </div>
+  </header>
+  <div class="tabs" id="tabs"></div>
+  <main>
+    <div id="paste-box" class="card" hidden>
+      <h2>JSON 붙여넣기 · 편집</h2>
+      <textarea id="editor" spellcheck="false"></textarea>
+      <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+        <button id="apply" type="button">이 JSON으로 그리기</button>
+        <span id="parse-err" class="err"></span>
+      </div>
+    </div>
+    <div class="row">
+      <section class="card">
+        <h2>누가 누구와 말하는가</h2>
+        <div class="topo" id="topo"></div>
+        <p class="hint" id="topo-hint" style="margin:12px 0 0"></p>
+      </section>
+      <section class="card">
+        <h2>연결 · 주기</h2>
+        <div class="kv" id="params"></div>
+      </section>
+    </div>
+    <section class="card">
+      <h2>메모리 / 프로세스 이미지 맵</h2>
+      <div class="legend">
+        <span><span class="pill read">read</span> PLC가 읽어 감 (센서가 게시)</span>
+        <span><span class="pill write">write</span> PLC가 씀 (센서가 받음)</span>
+      </div>
+      <div class="map" id="map"></div>
+    </section>
+    <section class="card">
+      <h2>포인트 — 통신 가이드에서 옮긴 칸</h2>
+      <div class="points" id="points"></div>
+    </section>
+    <section class="card">
+      <h2>원본 JSON</h2>
+      <details open>
+        <summary>접기 / 펴기</summary>
+        <pre id="raw"></pre>
+      </details>
+    </section>
+  </main>
+  <footer>
+    예제는 저장소 <code>config/example.*.json</code> 입니다.
+    입문 문서:
+    <a href="modbus_stack.md">Modbus</a> ·
+    <a href="slmp_stack.md">SLMP</a> ·
+    <a href="ethernetip_guide.md">EtherNet/IP</a> ·
+    <a href="profinet_stack.md">PROFINET</a>
+    · 실행 <code>./build/multiproto_daemon config/example.&lt;protocol&gt;.json</code>
+  </footer>
+
+  <script>
+    const EXAMPLES = {
+      modbus_tcp: {
+        protocol: "modbus_tcp",
+        device: { name: "barcode_sensor_1", role: "server" },
+        cycle_ms: 8,
+        protocol_params: {
+          role: "server", ip: "0.0.0.0", port: 1502, unit_id: 1,
+          unit_id_any: false, max_clients: 4, client_timeout_ms: 200
+        },
+        points: [
+          { name: "barcode_value", access: "read", data_type: "string", length: 32, chars_per_register: 2, trim_null: true,
+            address: { modbus: { type: "holding", start: 40001, offset: 0, byte_offset: 0 } } },
+          { name: "temperature", access: "read", data_type: "uint16", scale: 0.1, offset: 0.0, endian: "ABCD",
+            address: { modbus: { type: "4x", address: "40001", offset: 16, quantity: 1 } } },
+          { name: "pressure", access: "read", data_type: "float", endian: "CDAB",
+            address: { modbus: { register_type: "input", start: 30001, quantity: 2 } } },
+          { name: "trigger", access: "write", data_type: "bool",
+            address: { modbus: { type: "coil", start: 1 } } },
+          { name: "alarm_bit", access: "write", data_type: "bool",
+            address: { modbus: { type: "hr", start: 40100, bit: 3, bit_count: 1 } } },
+          { name: "status_nibble", access: "write", data_type: "uint16",
+            address: { modbus: { type: "holding", start: 40101, bit: 0, bit_count: 4 } } }
+        ]
+      },
+      slmp: {
+        protocol: "slmp",
+        device: { name: "barcode_sensor_1", role: "client" },
+        cycle_ms: 8,
+        protocol_params: {
+          role: "client", plc_ip: "192.168.0.20", port: 5000, network_no: 0, pc_no: 255,
+          dest_module_io: 1023, monitoring_timer: 16, timeout_ms: 1000, frame: "3E"
+        },
+        points: [
+          { name: "barcode_value", access: "read", data_type: "string", length: 32, chars_per_word: 2, trim_null: true,
+            address: { slmp: { device_code: "D", start: 100 } } },
+          { name: "temperature", access: "read", data_type: "uint16", scale: 0.1, endian: "ABCD",
+            address: { slmp: { device: "D", address: "110", quantity: 1 } } },
+          { name: "pressure", access: "read", data_type: "float", endian: "CDAB",
+            address: { slmp: { device_code: "D", start: 200, quantity: 2 } } },
+          { name: "plc_trigger", access: "write", data_type: "bool",
+            address: { slmp: { device_code: "M", start: 10, unit: "bit" } } },
+          { name: "alarm_bit", access: "write", data_type: "bool",
+            address: { slmp: { device_code: "D", start: 300, bit: 3, bit_count: 1 } } },
+          { name: "input_x", access: "write", data_type: "bool",
+            address: { slmp: { device_code: "X", start: "1A", unit: "bit" } } }
+        ]
+      },
+      ethernetip: {
+        protocol: "ethernetip",
+        device: { name: "barcode_sensor_1", role: "server" },
+        cycle_ms: 8,
+        protocol_params: {
+          role: "server", bind_ip: "0.0.0.0", port: 44818, udp_io_port: 2222,
+          vendor_id: 43981, device_type: 12, product_code: 1, serial_number: 305419896,
+          product_name: "FieldbusSensor", input_assembly: 150, output_assembly: 101,
+          config_assembly: 100, input_size: 512, output_size: 128, rpi_us: 8000,
+          security_class: 1, psk_hex: "1111111111111111111111111111111111111111111111111111111111111111",
+          secure_tcp_port: 2221, protection_mode: 0, lldp_enable: true,
+          lldp_tx_interval_sec: 30, acd_enable: true, iface: "eth0", mock: true
+        },
+        points: [
+          { name: "barcode_value", access: "read", data_type: "string", length: 32,
+            address: { ethernetip: { tag: "Sensor1.Barcode", assembly: 150, byte_offset: 0, length: 32 } } },
+          { name: "status_word", access: "read", data_type: "uint16", length: 2,
+            address: { ethernetip: { assembly: 150, byte_offset: 32, length: 2 } } },
+          { name: "trigger", access: "write", data_type: "bool", length: 1,
+            address: { ethernetip: { assembly: 101, byte_offset: 0, length: 1 } } }
+        ]
+      },
+      profinet: {
+        protocol: "profinet",
+        device: { name: "barcode_sensor_1", role: "server" },
+        cycle_ms: 8,
+        protocol_params: {
+          iface: "mock", device_name: "sensor-line1", vendor_id: 43981, device_id: 1,
+          ip: "192.168.0.10", netmask: "255.255.255.0", gateway: "192.168.0.1",
+          security_class: 1, psk_hex: "1111111111111111111111111111111111111111111111111111111111111111",
+          input_len: 32, output_len: 8, cycle_us: 8000
+        },
+        points: [
+          { name: "barcode_value", access: "read", data_type: "string", length: 32,
+            address: { profinet: { slot: 1, subslot: 1, index: 1, byte_offset: 0, length: 32 } } },
+          { name: "trigger", access: "write", data_type: "bool", length: 1,
+            address: { profinet: { slot: 1, subslot: 1, index: 1, byte_offset: 0, length: 1 } } }
+        ]
+      }
+    };
+
+    const META = {
+      modbus_tcp: {
+        label: "Modbus TCP",
+        doc: "modbus_stack.md",
+        sensorRole: "서버(슬레이브). PLC가 접속해서 레지스터를 읽고 씀",
+        plcRole: "마스터. TCP로 센서에 붙음",
+        link: (p) => (p.ip || "0.0.0.0") + ":" + (p.port || 502)
+      },
+      slmp: {
+        label: "SLMP Binary 3E",
+        doc: "slmp_stack.md",
+        sensorRole: "클라이언트. 센서가 PLC 메모리(D/M/X…)에 쓰고 읽음",
+        plcRole: "서버. 보통 미쓰비시 PLC",
+        link: (p) => (p.plc_ip || p.ip || "?") + ":" + (p.port || 5000)
+      },
+      ethernetip: {
+        label: "EtherNet/IP",
+        doc: "ethernetip_guide.md",
+        sensorRole: "Adapter(Target). PLC 스캐너가 Assembly를 주기 교환",
+        plcRole: "Scanner. TCP 44818 + UDP 2222",
+        link: (p) => (p.bind_ip || "0.0.0.0") + ":" + (p.port || 44818)
+      },
+      profinet: {
+        label: "PROFINET",
+        doc: "profinet_stack.md",
+        sensorRole: "Device. CC-B + RT Class 1 (IRT 없음)",
+        plcRole: "Controller. DCP로 이름 찾고 cyclic IO",
+        link: (p) => (p.device_name || "") + " @ " + (p.ip || "")
+      }
+    };
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[c]));
+    }
+
+    function accessClass(a) {
+      if (a === "write") return "write";
+      if (a === "readwrite") return "rw";
+      return "read";
+    }
+
+    function numish(v, d) {
+      if (v === undefined || v === null || v === "") return d;
+      if (typeof v === "number") return v;
+      if (typeof v === "string" && /^0x/i.test(v)) return parseInt(v, 16);
+      const n = Number(v);
+      return Number.isFinite(n) ? n : d;
+    }
+
+    function mbNorm(type) {
+      const t = String(type || "holding").toLowerCase();
+      if (["holding", "hr", "4x", "4xxxx"].includes(t)) return "holding";
+      if (["input", "ir", "3x", "3xxxx"].includes(t)) return "input";
+      if (["coil", "0x", "coils"].includes(t)) return "coil";
+      if (["discrete", "di", "1x"].includes(t)) return "discrete";
+      return t;
+    }
+
+    function mbPoint(p) {
+      const a = (p.address && p.address.modbus) || {};
+      const type = mbNorm(a.register_type || a.type);
+      const start = numish(a.start ?? a.address, 0) + numish(a.offset, 0);
+      const qty = numish(a.quantity ?? a.count, p.length ? Math.max(1, Math.ceil(p.length / 2)) : 1);
+      return { type, start, qty, bit: a.bit, bit_count: a.bit_count };
+    }
+
+    function slmpPoint(p) {
+      const a = (p.address && p.address.slmp) || {};
+      const dev = a.device_code || a.device || a.dev || "?";
+      const start = a.start ?? a.address ?? a.head ?? 0;
+      const unit = a.unit || (["M", "X", "Y", "B"].includes(String(dev)) ? "bit" : "word");
+      return { dev, start, unit, qty: numish(a.quantity ?? a.count, 1), bit: a.bit, bit_count: a.bit_count };
+    }
+
+    function eipPoint(p) {
+      const a = (p.address && p.address.ethernetip) || {};
+      return {
+        assembly: a.assembly, off: numish(a.byte_offset, 0),
+        len: numish(a.length ?? p.length, 1), tag: a.tag || ""
+      };
+    }
+
+    function pnPoint(p) {
+      const a = (p.address && p.address.profinet) || {};
+      return {
+        slot: a.slot, subslot: a.subslot, index: a.index,
+        off: numish(a.byte_offset, 0), len: numish(a.length ?? p.length, 1)
+      };
+    }
+
+    function prettyAddr(cfg, p) {
+      const proto = cfg.protocol;
+      if (proto === "modbus_tcp") {
+        const m = mbPoint(p);
+        let s = m.type + " " + m.start;
+        if (m.qty > 1) s += " ×" + m.qty;
+        if (m.bit != null) s += " bit" + m.bit + (m.bit_count > 1 ? ".." + (m.bit + m.bit_count - 1) : "");
+        return s;
+      }
+      if (proto === "slmp") {
+        const m = slmpPoint(p);
+        let s = m.dev + String(m.start);
+        if (m.unit === "bit") s += " (bit)";
+        if (m.bit != null) s += " bit" + m.bit;
+        if (m.qty > 1) s += " ×" + m.qty;
+        return s;
+      }
+      if (proto === "ethernetip") {
+        const m = eipPoint(p);
+        let s = m.tag ? ("tag " + m.tag + " · ") : "";
+        s += "asm " + m.assembly + " +" + m.off + " (" + m.len + "B)";
+        return s;
+      }
+      if (proto === "profinet") {
+        const m = pnPoint(p);
+        return "slot " + m.slot + "." + m.subslot + " idx " + m.index + " +" + m.off + " (" + m.len + "B)";
+      }
+      return JSON.stringify(p.address || {});
+    }
+
+    function lane(title, items, rangeLo, rangeHi, getStart, getSpan) {
+      const lo = rangeLo;
+      const hi = Math.max(rangeHi, lo + 1);
+      const span = hi - lo;
+      const blocks = items.map((it) => {
+        const start = getStart(it);
+        const w = Math.max(getSpan(it), 1);
+        const left = ((start - lo) / span) * 100;
+        const width = Math.max((w / span) * 100, 2.2);
+        return `<div class="blk ${accessClass(it.access)}" style="left:${left}%;width:${width}%" title="${esc(it.name)}">${esc(it.name)}</div>`;
+      }).join("");
+      return `<div class="lane"><div class="title">${esc(title)} · ${lo} … ${hi}</div><div class="track">${blocks}</div></div>`;
+    }
+
+    function renderMap(cfg) {
+      const pts = cfg.points || [];
+      const proto = cfg.protocol;
+      if (proto === "modbus_tcp") {
+        const groups = { holding: [], input: [], coil: [], discrete: [] };
+        pts.forEach((p) => {
+          const m = mbPoint(p);
+          (groups[m.type] || (groups[m.type] = [])).push({ ...p, _m: m });
+        });
+        return Object.entries(groups).filter(([, arr]) => arr.length).map(([k, arr]) => {
+          const starts = arr.map((x) => x._m.start);
+          const lo = Math.min(...starts);
+          const hi = Math.max(...arr.map((x) => x._m.start + x._m.qty));
+          return lane("Modbus " + k, arr, lo, hi, (x) => x._m.start, (x) => x._m.qty);
+        }).join("");
+      }
+      if (proto === "slmp") {
+        const groups = {};
+        pts.forEach((p) => {
+          const m = slmpPoint(p);
+          const key = m.dev + " (" + m.unit + ")";
+          (groups[key] || (groups[key] = [])).push({ ...p, _m: m });
+        });
+        return Object.entries(groups).map(([k, arr]) => {
+          const toN = (x) => {
+            const s = x._m.start;
+            if (typeof s === "string" && /[A-Fa-f]/.test(s) && !/^\d+$/.test(s)) return parseInt(s, 16);
+            return numish(s, 0);
+          };
+          const lo = Math.min(...arr.map(toN));
+          const hi = Math.max(...arr.map((x) => toN(x) + x._m.qty));
+          return lane("SLMP " + k, arr, lo, hi, toN, (x) => x._m.qty);
+        }).join("");
+      }
+      if (proto === "ethernetip") {
+        const pp = cfg.protocol_params || {};
+        const groups = {};
+        pts.forEach((p) => {
+          const m = eipPoint(p);
+          const key = "Assembly " + m.assembly;
+          (groups[key] || (groups[key] = [])).push({ ...p, _m: m });
+        });
+        return Object.entries(groups).map(([k, arr]) => {
+          const asm = arr[0]._m.assembly;
+          const size = asm === pp.input_assembly ? (pp.input_size || 64)
+            : asm === pp.output_assembly ? (pp.output_size || 32) : 64;
+          const hi = Math.max(size, ...arr.map((x) => x._m.off + x._m.len));
+          return lane(k + " (byte)", arr, 0, hi, (x) => x._m.off, (x) => x._m.len);
+        }).join("");
+      }
+      if (proto === "profinet") {
+        const pp = cfg.protocol_params || {};
+        const inn = pts.filter((p) => p.access !== "write");
+        const out = pts.filter((p) => p.access === "write");
+        let html = "";
+        if (inn.length) {
+          const hi = Math.max(pp.input_len || 32, ...inn.map((p) => pnPoint(p).off + pnPoint(p).len));
+          html += lane("Device → Controller (input image)", inn.map((p) => ({ ...p, _m: pnPoint(p) })), 0, hi, (x) => x._m.off, (x) => x._m.len);
+        }
+        if (out.length) {
+          const hi = Math.max(pp.output_len || 8, ...out.map((p) => pnPoint(p).off + pnPoint(p).len));
+          html += lane("Controller → Device (output image)", out.map((p) => ({ ...p, _m: pnPoint(p) })), 0, hi, (x) => x._m.off, (x) => x._m.len);
+        }
+        return html;
+      }
+      return "<p class='hint'>이 프로토콜은 맵 프리셋이 없습니다. 포인트 목록을 보세요.</p>";
+    }
+
+    function kv(label, value) {
+      if (value === undefined || value === null || value === "") return "";
+      let v = value;
+      if (label.toLowerCase().includes("psk") && String(v).length > 12) v = String(v).slice(0, 8) + "…";
+      return `<div><div class="k">${esc(label)}</div><div class="v">${esc(v)}</div></div>`;
+    }
+
+    function render(cfg, sourceKey) {
+      const proto = cfg.protocol || "modbus_tcp";
+      const meta = META[proto] || { label: proto, sensorRole: "", plcRole: "", link: () => "", doc: "" };
+      const pp = cfg.protocol_params || {};
+      const role = (cfg.device && cfg.device.role) || pp.role || "server";
+      const sensorIsServer = role === "server" || role === "adapter" || proto === "profinet" || proto === "ethernetip" && role !== "client";
+      const name = (cfg.device && cfg.device.name) || "device";
+
+      document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.key === sourceKey));
+
+      const left = sensorIsServer
+        ? `<div class="node plc"><div class="k">PLC / 컨트롤러</div><div class="n">${esc(meta.plcRole.split(".")[0])}</div><div class="hint">${esc(meta.plcRole)}</div></div>`
+        : `<div class="node plc"><div class="k">PLC (서버)</div><div class="n">${esc(meta.link(pp))}</div><div class="hint">${esc(meta.plcRole)}</div></div>`;
+      const right = `<div class="node sensor"><div class="k">이 데몬 · ${esc(name)}</div><div class="n">${esc(meta.label)}</div><div class="hint">${esc(meta.sensorRole)}</div></div>`;
+      const arrow = sensorIsServer
+        ? `<div class="arrow"><b>← ${cfg.cycle_ms || 8} ms →</b>PLC가 센서에 붙음</div>`
+        : `<div class="arrow"><b>→ ${cfg.cycle_ms || 8} ms →</b>센서가 PLC에 붙음</div>`;
+      document.getElementById("topo").innerHTML = sensorIsServer ? left + arrow + right : right + arrow + left;
+      document.getElementById("topo-hint").textContent =
+        "access=read 는 PLC가 가져가는 값, access=write 는 PLC가 내리는 명령입니다. 상세: " + meta.doc;
+
+      const keys = {
+        modbus_tcp: ["ip", "port", "unit_id", "max_clients", "client_timeout_ms"],
+        slmp: ["plc_ip", "port", "frame", "network_no", "pc_no", "timeout_ms"],
+        ethernetip: ["bind_ip", "port", "udp_io_port", "input_assembly", "output_assembly", "rpi_us", "security_class", "iface"],
+        profinet: ["iface", "device_name", "ip", "cycle_us", "security_class", "input_len", "output_len"]
+      }[proto] || Object.keys(pp);
+      document.getElementById("params").innerHTML =
+        kv("protocol", proto) + kv("device", name) + kv("role", role) + kv("cycle_ms", cfg.cycle_ms) +
+        keys.map((k) => kv(k, pp[k])).join("");
+
+      document.getElementById("map").innerHTML = renderMap(cfg) || "<p class='hint'>포인트가 없습니다.</p>";
+
+      document.getElementById("points").innerHTML = (cfg.points || []).map((p) => {
+        const extra = [];
+        if (p.scale != null) extra.push("scale " + p.scale);
+        if (p.endian) extra.push(p.endian);
+        if (p.length) extra.push(p.length + "B");
+        return `<div class="pt">
+          <div class="name">${esc(p.name)}</div>
+          <div><span class="pill ${accessClass(p.access)}">${esc(p.access || "read")}</span></div>
+          <div class="hint">${esc(p.data_type || "")}${extra.length ? " · " + extra.join(" · ") : ""}</div>
+          <div class="addr">${esc(prettyAddr(cfg, p))}</div>
+        </div>`;
+      }).join("") || "<p class='hint'>points 배열이 비어 있습니다.</p>";
+
+      document.getElementById("raw").textContent = JSON.stringify(cfg, null, 2);
+      document.getElementById("editor").value = JSON.stringify(cfg, null, 2);
+    }
+
+    const tabOrder = ["modbus_tcp", "slmp", "ethernetip", "profinet"];
+    const tabs = document.getElementById("tabs");
+    tabOrder.forEach((k) => {
+      const b = document.createElement("button");
+      b.className = "tab";
+      b.dataset.key = k;
+      b.type = "button";
+      b.textContent = META[k].label + " 예제";
+      b.addEventListener("click", () => render(EXAMPLES[k], k));
+      tabs.appendChild(b);
+    });
+
+    document.getElementById("paste-toggle").addEventListener("click", () => {
+      const box = document.getElementById("paste-box");
+      box.hidden = !box.hidden;
+    });
+    document.getElementById("apply").addEventListener("click", () => {
+      const err = document.getElementById("parse-err");
+      err.textContent = "";
+      try {
+        const cfg = JSON.parse(document.getElementById("editor").value);
+        if (!cfg.protocol) throw new Error("protocol 필드가 필요합니다");
+        render(cfg, cfg.protocol);
+      } catch (e) {
+        err.textContent = e.message;
+      }
+    });
+    document.getElementById("file").addEventListener("change", (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = () => {
+        document.getElementById("editor").value = r.result;
+        document.getElementById("paste-box").hidden = false;
+        document.getElementById("apply").click();
+      };
+      r.readAsText(f);
+    });
+
+    render(EXAMPLES.modbus_tcp, "modbus_tcp");
+  </script>
+</body>
+</html>
