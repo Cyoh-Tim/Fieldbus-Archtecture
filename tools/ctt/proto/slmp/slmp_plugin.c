@@ -1,10 +1,10 @@
 #include "ctt.h"
+#include "cycle_clock.h"
 
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "logger.h"
 #include "slmp_stack.h"
@@ -13,17 +13,6 @@ typedef struct {
     slmp_stack_t *stack;
     slmp_cfg_t cfg;
 } slmp_priv_t;
-
-static void sleep_ms(unsigned ms)
-{
-    if (!ms) {
-        return;
-    }
-    struct timespec ts;
-    ts.tv_sec = (time_t)(ms / 1000u);
-    ts.tv_nsec = (long)(ms % 1000u) * 1000000L;
-    nanosleep(&ts, NULL);
-}
 
 static int parse_hex_buf(const char *s, uint8_t *out, size_t cap, size_t *n)
 {
@@ -728,6 +717,16 @@ static int step_soak(ctt_run_t *run, slmp_priv_t *priv, const yaml_node_t *step,
     uint64_t start = ctt_now_ns();
     uint64_t deadline =
         duration_s ? start + (uint64_t)duration_s * 1000000000ull : 0;
+    uint8_t req[64];
+    size_t req_len = 0;
+    if (slmp_encode_batch_read(&priv->cfg, &range, req, sizeof(req),
+                              &req_len) != 0) {
+        ctt_failf(run, idx, action, "soak batch-read template failed");
+        return -1;
+    }
+    uint8_t resp[SLMP_FRAME_MAX];
+    ctt_cycle_clock_t clk;
+    ctt_cycle_clock_init(&clk, (uint64_t)cycle_ms * 1000000ull);
     int i = 0;
     while (1) {
         if (duration_s) {
@@ -738,14 +737,6 @@ static int step_soak(ctt_run_t *run, slmp_priv_t *priv, const yaml_node_t *step,
             break;
         }
         i++;
-        uint8_t req[64];
-        size_t req_len = 0;
-        if (slmp_encode_batch_read(&priv->cfg, &range, req, sizeof(req),
-                                  &req_len) != 0) {
-            unexpected++;
-            continue;
-        }
-        uint8_t resp[SLMP_FRAME_MAX];
         size_t resp_len = 0;
         uint16_t end = 0xFFFF;
         const uint8_t *data = NULL;
@@ -755,6 +746,9 @@ static int step_soak(ctt_run_t *run, slmp_priv_t *priv, const yaml_node_t *step,
             slmp_decode_response(resp, resp_len, &end, &data, &dlen) != 0 ||
             end != SLMP_END_OK) {
             unexpected++;
+            if (cycle_ms) {
+                ctt_cycle_clock_wait(&clk);
+            }
             continue;
         }
         uint64_t now = ctt_now_ns();
@@ -765,7 +759,7 @@ static int step_soak(ctt_run_t *run, slmp_priv_t *priv, const yaml_node_t *step,
         ok++;
         run->metrics.rtc1_frames++;
         if (cycle_ms) {
-            sleep_ms(cycle_ms);
+            ctt_cycle_clock_wait(&clk);
         }
     }
     run->metrics.unexpected_frames += unexpected;

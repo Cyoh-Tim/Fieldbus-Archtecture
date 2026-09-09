@@ -22,3 +22,5 @@ steps:
       min_frames: 1
       unexpected_frames: 0
       ar_drops: 0
+      max_late: 0              # soft: late @ 1.5×cycle_us. CC-B RT1, not IRT.
+      max_missed: 0

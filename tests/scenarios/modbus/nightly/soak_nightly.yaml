@@ -30,3 +30,5 @@ steps:
     expect:
       min_ok: 1
       unexpected_frames: 0
+      max_late: 0              # soft: late @ 1.5×cycle_us. not cert.
+      max_missed: 0

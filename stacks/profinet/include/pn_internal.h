@@ -48,7 +48,7 @@ struct pn_stack {
     uint8_t input_image[PN_IO_MAX];
     uint8_t output_image[PN_IO_MAX];
     uint16_t cycle_counter;
-    uint64_t last_rt_ns;
+    uint64_t last_rt_ns; /* next RTC1 due (0 = immediately); abs phase */
     uint64_t last_lldp_ns;
     uint64_t start_ns;
 

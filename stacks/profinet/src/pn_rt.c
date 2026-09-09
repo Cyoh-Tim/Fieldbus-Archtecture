@@ -36,10 +36,11 @@ void pn_rt_send_if_due(pn_stack_t *s)
     if (period == 0) {
         period = 8000000ull;
     }
-    if (s->last_rt_ns != 0 && now - s->last_rt_ns < period) {
+    /* last_rt_ns = next due (0 = due immediately). Phase += period so
+     * poll jitter does not accumulate (soft CC-B / RT1; not IRT). */
+    if (s->last_rt_ns != 0 && now < s->last_rt_ns) {
         return;
     }
-    s->last_rt_ns = now;
 
     uint16_t data_len = s->ar.in_data_len;
     if (data_len == 0) {
@@ -71,5 +72,13 @@ void pn_rt_send_if_due(pn_stack_t *s)
         pn_eth_build(frame, sizeof(frame), dst, s->cfg.mac, PN_ETHTYPE_PN, pay, n);
     if (flen) {
         pn_eth_send(s, frame, flen);
+    }
+    if (s->last_rt_ns == 0) {
+        s->last_rt_ns = now + period;
+    } else {
+        s->last_rt_ns += period;
+        if (s->last_rt_ns <= now) {
+            s->last_rt_ns = now + period; /* slipped: resync, no burst */
+        }
     }
 }

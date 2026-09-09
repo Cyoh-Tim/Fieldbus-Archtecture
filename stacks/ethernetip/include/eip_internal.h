@@ -29,7 +29,7 @@ typedef struct {
     uint32_t o2t_seq;
     uint32_t t2o_seq;
     uint64_t last_rx_ns;
-    uint64_t last_tx_ns;
+    uint64_t last_tx_ns; /* next Class1 produce due (0 = immediately) */
     uint16_t conn_serial;
     uint16_t vendor_id;
     uint32_t originator_serial;

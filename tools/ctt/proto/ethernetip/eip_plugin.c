@@ -1,4 +1,5 @@
 #include "ctt.h"
+#include "cycle_clock.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -32,11 +33,6 @@ static void sleep_us(unsigned us)
     ts.tv_sec = (time_t)(us / 1000000u);
     ts.tv_nsec = (long)(us % 1000000u) * 1000L;
     nanosleep(&ts, NULL);
-}
-
-static void sleep_ms(unsigned ms)
-{
-    sleep_us(ms * 1000u);
 }
 
 static int parse_hex_bytes(const char *s, uint8_t *out, size_t out_len)
@@ -1002,6 +998,10 @@ static int step_class1_cyclic(ctt_run_t *run, eip_priv_t *priv,
     uint64_t start = ctt_now_ns();
     uint64_t deadline =
         duration_s ? start + (uint64_t)duration_s * 1000000000ull : 0;
+    uint8_t io[16 + EIP_ASSEMBLY_SIZE_MAX];
+    uint8_t buf[CTT_FRAME_MAX];
+    ctt_cycle_clock_t clk;
+    ctt_cycle_clock_init(&clk, (uint64_t)cycle_ms * 1000000ull);
     uint32_t seq = 0;
     while (1) {
         if (duration_s) {
@@ -1012,14 +1012,12 @@ static int step_class1_cyclic(ctt_run_t *run, eip_priv_t *priv,
             break;
         }
         seq++;
-        uint8_t io[16 + EIP_ASSEMBLY_SIZE_MAX];
         size_t ioff = build_class1_io(io, o2t, seq, payload, plen);
         int iorc = eip_stack_handle_io(priv->stack, io, ioff);
         if (iorc != 0 && require_c1) {
             run->metrics.unexpected_frames++;
         }
         pump(priv);
-        uint8_t buf[CTT_FRAME_MAX];
         int n;
         while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), NULL)) >
                0) {
@@ -1034,7 +1032,7 @@ static int step_class1_cyclic(ctt_run_t *run, eip_priv_t *priv,
             }
         }
         if (cycle_ms) {
-            sleep_ms(cycle_ms);
+            ctt_cycle_clock_wait(&clk);
         }
     }
     int out = 0;

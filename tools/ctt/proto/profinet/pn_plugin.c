@@ -1,4 +1,5 @@
 #include "ctt.h"
+#include "cycle_clock.h"
 #include "transport.h"
 
 #include <errno.h>
@@ -1858,6 +1859,8 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
         deadline = start + 250000000ull;
     }
 
+    ctt_cycle_clock_t clk;
+    ctt_cycle_clock_init(&clk, (uint64_t)cycle_ms * 1000000ull);
     while (ctt_now_ns() < deadline) {
         if (!duration_s && iterations > 0 && got >= iterations) {
             break;
@@ -1869,7 +1872,7 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
             run->metrics.ar_drops++;
             break;
         }
-        sleep_ms(1);
+        ctt_cycle_clock_wait(&clk);
     }
     /* catch frames that arrived on the last poll */
     pump(run, priv);
@@ -1899,7 +1902,6 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
                          period_max_ms, max_ms);
     }
     out |= check_cyclic_expect(run, &before, expect, idx, action, (int)rtc1);
-    (void)cycle_ms;
     return out;
 }
 
