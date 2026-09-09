@@ -123,14 +123,18 @@ fb_close(rt);
 
 `BUILD_DAEMON=ON` (기본) 이면 API 가 코어에 포함된다.
 `BUILD_API=ON` (기본, 데몬과 함께) 이면 `test_fb_api`, `fb_api_demo`,
-헤더 install 이 켜진다.
+`fake_sensor_app`, 헤더 install 이 켜진다.
 
 ```
 cmake -S . -B build-daemon -DBUILD_DAEMON=ON -DBUILD_API=ON
 cmake --build build-daemon
 ./build-daemon/test_fb_api
 ./build-daemon/fb_api_demo config/example.modbus.json
+./build-daemon/fake_sensor_app --once config/example.fake_sensor.json
 ```
+
+장비 없는 게시→readback→CTT Modbus mock 한 줄 실행:
+[`examples/README.md`](../examples/README.md) (`./examples/run_mock_flow.sh`).
 
 CTT (`BUILD_DAEMON=OFF -DBUILD_CTT=ON`) 는 이 라이브러리를 링크하지 않으며
 동작이 바뀌지 않는다.
