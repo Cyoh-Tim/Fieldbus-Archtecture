@@ -1,0 +1,1406 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fieldbus · 설정 마법사</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #121a2b;
+    --panel2: #182338;
+    --line: #2a3a55;
+    --text: #e8eefc;
+    --muted: #93a4c3;
+    --accent: #3dd6c6;
+    --accent2: #5b8cff;
+    --warn: #ffb020;
+    --ok: #4ade80;
+    --modbus: #5b8cff;
+    --slmp: #a78bfa;
+    --eip: #fb7185;
+    --pn: #34d399;
+    --font: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    --danger: #fb7185;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: radial-gradient(1200px 600px at 10% -10%, #1a2744 0%, var(--bg) 55%); color: var(--text); font-family: var(--font); }
+  body { padding: 28px 20px 48px; }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 1.55rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 18px; line-height: 1.55; font-size: 0.98rem; }
+  .sub strong { color: var(--accent); font-weight: 600; }
+  code { font-family: var(--mono); font-size: 0.86em; color: #c9d7f2; }
+  a { color: var(--accent); }
+  .demo-nav {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin: 0 0 18px; font-size: 0.82rem;
+  }
+  .demo-nav a {
+    color: var(--muted); text-decoration: none;
+    padding: 6px 12px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel);
+    font-weight: 600;
+  }
+  .demo-nav a:hover { color: var(--text); border-color: #46608a; }
+  .demo-nav a.on {
+    color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  }
+  .banner {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 12px 14px; margin-bottom: 16px;
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+    background: color-mix(in srgb, var(--warn) 10%, var(--panel));
+    border-radius: 14px; color: #fde7b0; font-size: 0.9rem; line-height: 1.5;
+  }
+  .banner .mark {
+    flex: 0 0 auto; font-weight: 800; letter-spacing: .04em; font-size: 0.72rem;
+    padding: 4px 8px; border-radius: 999px; background: #3a2a12; color: var(--warn);
+  }
+  .progress {
+    display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 18px;
+  }
+  .progress button {
+    border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+    padding: 6px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 700;
+    cursor: pointer;
+  }
+  .progress button.on { color: #042220; background: var(--accent); border-color: var(--accent); }
+  .progress button.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
+  .progress button:disabled { opacity: .45; cursor: default; }
+  .card {
+    background: linear-gradient(180deg, var(--panel), var(--panel2));
+    border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.28);
+    padding: 20px 20px 18px;
+  }
+  .card h2 { margin: 0 0 8px; font-size: 1.15rem; letter-spacing: -0.02em; }
+  .hint { color: var(--muted); font-size: 0.9rem; line-height: 1.5; margin: 0 0 16px; }
+  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 700px) { .choices { grid-template-columns: 1fr; } }
+  .choice {
+    text-align: left; cursor: pointer;
+    border: 1px solid var(--line); background: #0f1728; color: inherit;
+    border-radius: 14px; padding: 14px 14px 12px; font: inherit;
+    transition: .15s ease;
+  }
+  .choice:hover { border-color: #46608a; }
+  .choice.selected {
+    border-color: color-mix(in srgb, var(--accent) 70%, var(--line));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, #0f1728);
+  }
+  .choice .k { font-weight: 800; margin-bottom: 4px; }
+  .choice .d { color: var(--muted); font-size: 0.84rem; line-height: 1.45; }
+  .choice[data-p="modbus_tcp"].selected { border-color: var(--modbus); }
+  .choice[data-p="slmp"].selected { border-color: var(--slmp); }
+  .choice[data-p="ethernetip"].selected { border-color: var(--eip); }
+  .choice[data-p="profinet"].selected { border-color: var(--pn); }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 0.82rem; font-weight: 700; color: #c5d4ee; margin-bottom: 6px; }
+  .field .help { display: block; color: var(--muted); font-size: 0.78rem; font-weight: 500; margin-top: 4px; line-height: 1.4; }
+  input[type="text"], input[type="number"], select, textarea {
+    width: 100%; border: 1px solid var(--line); background: #0c1424; color: var(--text);
+    border-radius: 10px; padding: 10px 12px; font: inherit;
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); border-color: var(--accent); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 600px) { .row2 { grid-template-columns: 1fr; } }
+  .nav-row {
+    display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between;
+    margin-top: 16px; align-items: center;
+  }
+  .nav-row .right { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+  .btn {
+    border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 700; cursor: pointer;
+    background: linear-gradient(135deg, var(--accent), #2bb3d6); color: #042220;
+    box-shadow: 0 8px 24px rgba(61,214,198,.25); font: inherit;
+  }
+  .btn.secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--line); box-shadow: none; }
+  .btn.ghost { background: transparent; color: var(--muted); box-shadow: none; border: 1px solid transparent; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .err {
+    color: #ffb4c4; background: #3a1d2a; border: 1px solid #6b3348;
+    border-radius: 10px; padding: 8px 10px; font-size: 0.84rem; margin: 0 0 12px;
+  }
+  .oknote {
+    color: #bbf7d0; background: color-mix(in srgb, var(--ok) 12%, #0f1728);
+    border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--line));
+    border-radius: 10px; padding: 8px 10px; font-size: 0.84rem; margin: 0 0 12px;
+  }
+  .note {
+    color: var(--muted); background: #0c1424; border: 1px dashed var(--line);
+    border-radius: 10px; padding: 10px 12px; font-size: 0.84rem; line-height: 1.45; margin-bottom: 12px;
+  }
+  .pt-list { display: grid; gap: 8px; margin-bottom: 12px; }
+  .pt {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center;
+    background: #0c1424; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+  }
+  @media (max-width: 640px) { .pt { grid-template-columns: 1fr; } }
+  .pt .name { font-weight: 800; }
+  .pt .meta { color: var(--muted); font-size: 0.82rem; font-family: var(--mono); }
+  .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 0.72rem; font-weight: 800; }
+  .pill.read { background: #1c3d32; color: var(--ok); }
+  .pill.write { background: #3d3320; color: var(--warn); }
+  details.adv {
+    border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; background: #0c1424; margin: 12px 0;
+  }
+  details.adv summary { cursor: pointer; font-weight: 700; font-size: 0.86rem; color: #c5d4ee; }
+  details.adv .body { margin-top: 10px; }
+  .editor {
+    margin: 0; padding: 14px 16px; font-family: var(--mono); font-size: 12.5px;
+    line-height: 1.55; white-space: pre; overflow: auto; max-height: 420px;
+    color: #c9d7f2; background: #0c1424; border: 1px solid var(--line); border-radius: 12px;
+  }
+  .summary { display: grid; gap: 8px; margin-bottom: 14px; }
+  .summary .item {
+    background: #0c1424; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+  }
+  .summary .item b { display: block; margin-bottom: 4px; }
+  .summary .item span { color: var(--muted); font-size: 0.84rem; line-height: 1.45; }
+  .presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .chip {
+    border: 1px solid var(--line); background: #182338; color: var(--text);
+    border-radius: 999px; padding: 6px 10px; font-size: 0.8rem; font-weight: 700; cursor: pointer;
+  }
+  .chip:hover { border-color: #46608a; }
+  footer { margin-top: 18px; color: #6f82a6; font-size: 0.78rem; line-height: 1.5; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="demo-nav" aria-label="데모 경로">
+      <a href="index.html">데모 허브</a>
+      <a href="config-wizard.html" class="on">설정 마법사</a>
+      <a href="json-config-flow.html">JSON 흐름</a>
+      <a href="config-viz.html">필드 맵 (선택)</a>
+      <a href="ctt_board.html">CTT 보드</a>
+      <a href="demo.md">10분 스크립트</a>
+    </nav>
+    <h1>질문에 답하면 설정 파일이 나옵니다</h1>
+    <p class="sub">
+      통신 문서를 읽지 않아도 됩니다. <strong>일상 말</strong>로 고르면
+      데몬이 읽는 <code>config.json</code> 을 만들어 줍니다.
+      (Fieldbus-Archtecture · <code>multiproto_daemon</code>)
+    </p>
+    <div class="banner" role="note">
+      <span class="mark">NO HW · NOT CERT</span>
+      <div>
+        브라우저만으로 JSON을 만듭니다. PLC / NIC / <code>CAP_NET_RAW</code> 불필요.
+        <strong>인증이 아닙니다.</strong> PI / ODVA / Modbus.org / Mitsubishi 공인 랩 evidence 가 아닙니다.
+      </div>
+    </div>
+
+    <div class="progress" id="progress" aria-label="진행"></div>
+    <section class="card" id="screen"></section>
+    <footer>
+      생성된 JSON은 <code>config/config.schema.json</code> 모양과
+      <code>config/example.*.json</code> 패턴을 따릅니다.
+      다음: <a href="json-config-flow.html">JSON 흐름</a>으로 값이 어떻게 움직이는지 보기
+      · 실행은 저장소 루트 <code>./multiproto_daemon config.json</code>
+      또는 <code>./examples/run_mock_flow.sh</code>.
+      CC-Link 는 아직 스텁이라 이 마법사에 없습니다.
+    </footer>
+  </div>
+
+<script>
+const PROTOCOLS = {
+  modbus_tcp: {
+    id: "modbus_tcp",
+    title: "Modbus TCP 장비",
+    desc: "이더넷으로 숫자·켜짐을 주고받는 흔한 공장 장비.",
+    addrKey: "modbus",
+    canTalk: true
+  },
+  slmp: {
+    id: "slmp",
+    title: "미쓰비시 PLC (SLMP)",
+    desc: "가이드에 D100, M10 처럼 적혀 있는 미쓰비시 쪽.",
+    addrKey: "slmp",
+    canTalk: true
+  },
+  ethernetip: {
+    id: "ethernetip",
+    title: "EtherNet/IP 장비",
+    desc: "조립(assembly) 번호로 값을 나눠 담는 방식. 초보자는 예제 기본값 권장.",
+    addrKey: "ethernetip",
+    canTalk: true,
+    guided: true
+  },
+  profinet: {
+    id: "profinet",
+    title: "PROFINET 장비",
+    desc: "우리가 장비로 기다리고, PLC가 붙습니다. 초보자는 예제 기본값 권장.",
+    addrKey: "profinet",
+    canTalk: false,
+    guided: true
+  }
+};
+
+const STEPS = [
+  { id: "protocol", label: "장비" },
+  { id: "name", label: "이름" },
+  { id: "role", label: "역할" },
+  { id: "connect", label: "연결" },
+  { id: "points", label: "값" },
+  { id: "review", label: "확인" }
+];
+
+const PRESETS = {
+  modbus_tcp: [
+    {
+      id: "barcode",
+      label: "바코드 글자",
+      point: {
+        name: "barcode_value", access: "read", data_type: "string", length: 32,
+        chars_per_register: 2, trim_null: true,
+        address: { type: "holding", start: 40001 }
+      }
+    },
+    {
+      id: "temp",
+      label: "온도 (×0.1)",
+      point: {
+        name: "temperature", access: "read", data_type: "uint16", scale: 0.1, offset: 0.0,
+        address: { type: "4x", address: "40001", offset: 16, quantity: 1 }
+      }
+    },
+    {
+      id: "trigger",
+      label: "PLC가 켜는 트리거",
+      point: {
+        name: "trigger", access: "write", data_type: "bool",
+        address: { type: "coil", start: 1 }
+      }
+    }
+  ],
+  slmp: [
+    {
+      id: "barcode",
+      label: "바코드 글자 (D100)",
+      point: {
+        name: "barcode_value", access: "read", data_type: "string", length: 32,
+        chars_per_word: 2, trim_null: true,
+        address: { device_code: "D", start: 100 }
+      }
+    },
+    {
+      id: "temp",
+      label: "온도 D110 (×0.1)",
+      point: {
+        name: "temperature", access: "read", data_type: "uint16", scale: 0.1,
+        address: { device: "D", address: "110", quantity: 1 }
+      }
+    },
+    {
+      id: "trigger",
+      label: "PLC가 켜는 M10",
+      point: {
+        name: "plc_trigger", access: "write", data_type: "bool",
+        address: { device_code: "M", start: 10, unit: "bit" }
+      }
+    }
+  ],
+  ethernetip: [
+    {
+      id: "barcode",
+      label: "바코드 (예제 조립 150)",
+      point: {
+        name: "barcode_value", access: "read", data_type: "string", length: 32,
+        address: { tag: "Sensor1.Barcode", assembly: 150, byte_offset: 0, length: 32 }
+      }
+    },
+    {
+      id: "status",
+      label: "상태 워드 (offset 32)",
+      point: {
+        name: "status_word", access: "read", data_type: "uint16", length: 2,
+        address: { assembly: 150, byte_offset: 32, length: 2 }
+      }
+    },
+    {
+      id: "trigger",
+      label: "PLC가 쓰는 트리거",
+      point: {
+        name: "trigger", access: "write", data_type: "bool", length: 1,
+        address: { assembly: 101, byte_offset: 0, length: 1 }
+      }
+    }
+  ],
+  profinet: [
+    {
+      id: "barcode",
+      label: "바코드 (슬롯1)",
+      point: {
+        name: "barcode_value", access: "read", data_type: "string", length: 32,
+        address: { slot: 1, subslot: 1, index: 1, byte_offset: 0, length: 32 }
+      }
+    },
+    {
+      id: "temp",
+      label: "온도 (offset 32)",
+      point: {
+        name: "temperature", access: "read", data_type: "float", length: 4,
+        address: { slot: 1, subslot: 1, index: 1, byte_offset: 32, length: 4 }
+      }
+    },
+    {
+      id: "trigger",
+      label: "PLC가 쓰는 트리거",
+      point: {
+        name: "trigger", access: "write", data_type: "bool", length: 1,
+        address: { slot: 1, subslot: 1, index: 1, byte_offset: 0, length: 1 }
+      }
+    }
+  ]
+};
+
+function clone(x) { return JSON.parse(JSON.stringify(x)); }
+
+function defaultState() {
+  return {
+    protocol: "modbus_tcp",
+    deviceName: "barcode_sensor_1",
+    waiting: true,
+    connMode: "demo",
+    ip: "127.0.0.1",
+    port: 15560,
+    unit_id: 1,
+    plc_ip: "127.0.0.1",
+    bind_ip: "127.0.0.1",
+    device_name: "sensor-line1",
+    cycle_ms: 8,
+    endian: "",
+    points: [],
+    editingIndex: -1,
+    draft: null,
+    advancedOpen: false
+  };
+}
+
+let state = defaultState();
+let step = "protocol";
+let flash = "";
+
+function connectionDefaults(protocol, waiting, connMode) {
+  const demo = connMode === "demo";
+  if (protocol === "modbus_tcp") {
+    if (waiting) {
+      return demo
+        ? { ip: "127.0.0.1", port: 15560, unit_id: 1 }
+        : { ip: "0.0.0.0", port: 1502, unit_id: 1 };
+    }
+    return demo
+      ? { ip: "127.0.0.1", port: 1502, unit_id: 1 }
+      : { ip: "192.168.0.10", port: 502, unit_id: 1 };
+  }
+  if (protocol === "slmp") {
+    if (waiting) {
+      return demo
+        ? { ip: "127.0.0.1", port: 15561 }
+        : { ip: "0.0.0.0", port: 5000 };
+    }
+    return demo
+      ? { plc_ip: "127.0.0.1", port: 5000 }
+      : { plc_ip: "192.168.0.20", port: 5000 };
+  }
+  if (protocol === "ethernetip") {
+    if (waiting) {
+      return demo
+        ? { bind_ip: "127.0.0.1", port: 15562 }
+        : { bind_ip: "0.0.0.0", port: 44818 };
+    }
+    return demo
+      ? { ip: "127.0.0.1", port: 44818 }
+      : { ip: "192.168.0.10", port: 44818 };
+  }
+  return demo
+    ? { ip: "192.168.0.10", device_name: "sensor-line1" }
+    : { ip: "192.168.0.10", device_name: "sensor-line1" };
+}
+
+function applyConnDefaults() {
+  const d = connectionDefaults(state.protocol, state.waiting, state.connMode);
+  Object.assign(state, d);
+}
+
+function emptyDraft(protocol) {
+  if (protocol === "modbus_tcp") {
+    return {
+      name: "temperature", access: "read", kind: "number",
+      type: "holding", start: "40001", scale: "", endian: "",
+      bit: "", bit_count: "", offset: "", quantity: ""
+    };
+  }
+  if (protocol === "slmp") {
+    return {
+      name: "temperature", access: "read", kind: "number",
+      device_code: "D", start: "100", scale: "", unit: "", endian: "",
+      bit: "", bit_count: ""
+    };
+  }
+  if (protocol === "ethernetip") {
+    return {
+      name: "status_word", access: "read", kind: "number",
+      assembly: "150", byte_offset: "0", length: "2", tag: "", scale: "", endian: ""
+    };
+  }
+  return {
+    name: "temperature", access: "read", kind: "number",
+    slot: "1", subslot: "1", index: "1", byte_offset: "0", length: "4", scale: "", endian: ""
+  };
+}
+
+function kindOf(dt) {
+  if (dt === "string" || dt === "ascii") return "text";
+  if (dt === "bool") return "bool";
+  return "number";
+}
+
+function dataTypeFromKind(kind, protocol) {
+  if (kind === "text") return "string";
+  if (kind === "bool") return "bool";
+  if (protocol === "profinet") return "float";
+  return "uint16";
+}
+
+function buildProtocolParams(s) {
+  const role = s.waiting ? "server" : "client";
+  const demo = s.connMode === "demo";
+  if (s.protocol === "modbus_tcp") {
+    const p = {
+      role,
+      ip: s.ip || (role === "server" ? "0.0.0.0" : "127.0.0.1"),
+      port: Number(s.port) || (role === "server" ? (demo ? 15560 : 1502) : 502),
+      unit_id: Number(s.unit_id) || 1
+    };
+    if (demo && role === "server") {
+      p.unit_id_any = false;
+      p.max_clients = 2;
+      p.client_timeout_ms = 200;
+    }
+    return p;
+  }
+  if (s.protocol === "slmp") {
+    if (role === "client") {
+      return {
+        role: "client",
+        plc_ip: s.plc_ip || s.ip || "192.168.0.20",
+        port: Number(s.port) || 5000,
+        network_no: 0,
+        pc_no: 255,
+        dest_module_io: 1023,
+        monitoring_timer: 16,
+        timeout_ms: demo ? 200 : 1000,
+        frame: "3E"
+      };
+    }
+    const p = {
+      role: "server",
+      ip: s.ip || "127.0.0.1",
+      port: Number(s.port) || (demo ? 15561 : 5000),
+      network_no: 0,
+      pc_no: 255,
+      dest_module_io: 1023,
+      monitoring_timer: 16,
+      timeout_ms: demo ? 200 : 1000,
+      max_clients: 2,
+      frame: "3E"
+    };
+    return p;
+  }
+  if (s.protocol === "ethernetip") {
+    if (role === "client") {
+      return {
+        role: "client",
+        ip: s.ip || "127.0.0.1",
+        port: Number(s.port) || 44818,
+        udp_io_port: demo ? 15563 : 2222,
+        vendor_id: 43981,
+        device_type: 12,
+        product_code: 1,
+        serial_number: 305419896,
+        product_name: "FieldbusSensor",
+        input_assembly: 150,
+        output_assembly: 101,
+        config_assembly: 100,
+        input_size: 64,
+        output_size: 16,
+        rpi_us: 8000,
+        security_class: 1,
+        psk_hex: "1111111111111111111111111111111111111111111111111111111111111111",
+        mock: demo,
+        iface: demo ? "mock" : "eth0"
+      };
+    }
+    if (demo) {
+      return {
+        role: "server",
+        bind_ip: s.bind_ip || "127.0.0.1",
+        port: Number(s.port) || 15562,
+        udp_io_port: 15563,
+        vendor_id: 43981,
+        device_type: 12,
+        product_code: 1,
+        serial_number: 305419896,
+        product_name: "FieldbusSensor",
+        input_assembly: 150,
+        output_assembly: 101,
+        config_assembly: 100,
+        input_size: 64,
+        output_size: 16,
+        rpi_us: 8000,
+        security_class: 1,
+        psk_hex: "1111111111111111111111111111111111111111111111111111111111111111",
+        secure_tcp_port: 15564,
+        protection_mode: 0,
+        lldp_enable: true,
+        lldp_tx_interval_sec: 30,
+        acd_enable: true,
+        iface: "mock",
+        mock: true
+      };
+    }
+    return {
+      role: "server",
+      bind_ip: s.bind_ip || "0.0.0.0",
+      port: Number(s.port) || 44818,
+      udp_io_port: 2222,
+      vendor_id: 43981,
+      device_type: 12,
+      product_code: 1,
+      serial_number: 305419896,
+      product_name: "FieldbusSensor",
+      input_assembly: 150,
+      output_assembly: 101,
+      config_assembly: 100,
+      input_size: 512,
+      output_size: 128,
+      rpi_us: 8000,
+      security_class: 1,
+      psk_hex: "1111111111111111111111111111111111111111111111111111111111111111",
+      secure_tcp_port: 2221,
+      protection_mode: 0,
+      lldp_enable: true,
+      lldp_tx_interval_sec: 30,
+      acd_enable: true,
+      iface: "eth0",
+      mock: true
+    };
+  }
+  return {
+    iface: "mock",
+    device_name: s.device_name || "sensor-line1",
+    vendor_id: 43981,
+    device_id: 1,
+    ip: s.ip || "192.168.0.10",
+    netmask: "255.255.255.0",
+    gateway: "192.168.0.1",
+    security_class: 1,
+    psk_hex: "1111111111111111111111111111111111111111111111111111111111111111",
+    input_len: 40,
+    output_len: 8,
+    cycle_us: 8000
+  };
+}
+
+function parseMaybeInt(v) {
+  if (v === "" || v === undefined || v === null) return undefined;
+  if (typeof v === "number") return v;
+  if (/^-?\d+$/.test(String(v))) return parseInt(v, 10);
+  return String(v);
+}
+
+function finishPointFromStored(p, protocol) {
+  const out = {
+    name: p.name,
+    access: p.access,
+    data_type: p.data_type
+  };
+  if (p.length != null) out.length = p.length;
+  if (p.scale != null && p.scale !== "") out.scale = Number(p.scale);
+  if (p.offset != null && p.offset !== "") out.offset = Number(p.offset);
+  if (p.endian) out.endian = p.endian;
+  if (p.chars_per_register != null) out.chars_per_register = p.chars_per_register;
+  if (p.chars_per_word != null) out.chars_per_word = p.chars_per_word;
+  if (p.trim_null != null) out.trim_null = p.trim_null;
+  const key = PROTOCOLS[protocol].addrKey;
+  out.address = {};
+  out.address[key] = clone(p.address);
+  return out;
+}
+
+function pointFromDraft(draft, protocol) {
+  const kind = draft.kind || "number";
+  const p = {
+    name: (draft.name || "").trim(),
+    access: draft.access || "read",
+    data_type: dataTypeFromKind(kind, protocol)
+  };
+  if (kind === "text") {
+    p.length = 32;
+    if (protocol === "modbus_tcp") { p.chars_per_register = 2; p.trim_null = true; }
+    if (protocol === "slmp") { p.chars_per_word = 2; p.trim_null = true; }
+  }
+  if (draft.scale !== "" && draft.scale != null) p.scale = Number(draft.scale);
+  if (p.scale != null && protocol === "modbus_tcp") p.offset = 0.0;
+  if (draft.endian) p.endian = draft.endian;
+  if (protocol === "modbus_tcp") {
+    const addr = { type: draft.type || "holding" };
+    const start = parseMaybeInt(draft.start);
+    if (start !== undefined) addr.start = start;
+    if (draft.offset !== "" && draft.offset != null) addr.offset = Number(draft.offset);
+    if (draft.quantity !== "" && draft.quantity != null) addr.quantity = Number(draft.quantity);
+    if (draft.bit !== "" && draft.bit != null) addr.bit = Number(draft.bit);
+    if (draft.bit_count !== "" && draft.bit_count != null) addr.bit_count = Number(draft.bit_count);
+    if (kind === "bool" && !addr.type) addr.type = "coil";
+    p.address = addr;
+  } else if (protocol === "slmp") {
+    const addr = { device_code: draft.device_code || "D" };
+    const start = parseMaybeInt(draft.start);
+    if (start !== undefined) addr.start = start;
+    if (draft.unit) addr.unit = draft.unit;
+    else if (kind === "bool" && ["M", "X", "Y", "B"].includes(addr.device_code)) addr.unit = "bit";
+    if (draft.bit !== "" && draft.bit != null) addr.bit = Number(draft.bit);
+    if (draft.bit_count !== "" && draft.bit_count != null) addr.bit_count = Number(draft.bit_count);
+    p.address = addr;
+  } else if (protocol === "ethernetip") {
+    const len = kind === "text" ? 32 : kind === "bool" ? 1 : Number(draft.length || 2);
+    p.length = len;
+    const addr = {
+      assembly: Number(draft.assembly || (p.access === "write" ? 101 : 150)),
+      byte_offset: Number(draft.byte_offset || 0),
+      length: len
+    };
+    if (draft.tag) addr.tag = draft.tag;
+    p.address = addr;
+  } else {
+    const len = kind === "text" ? 32 : kind === "bool" ? 1 : Number(draft.length || 4);
+    p.length = len;
+    p.address = {
+      slot: Number(draft.slot || 1),
+      subslot: Number(draft.subslot || 1),
+      index: Number(draft.index || 1),
+      byte_offset: Number(draft.byte_offset || 0),
+      length: len
+    };
+  }
+  return p;
+}
+
+function buildConfig(s) {
+  const waiting = s.protocol === "profinet" ? true : !!s.waiting;
+  return {
+    protocol: s.protocol,
+    device: {
+      name: (s.deviceName || "").trim() || "device_1",
+      role: waiting ? "server" : "client"
+    },
+    cycle_ms: Number(s.cycle_ms) || 8,
+    protocol_params: buildProtocolParams(Object.assign({}, s, { waiting: waiting })),
+    points: (s.points || []).map((p) => finishPointFromStored(p, s.protocol))
+  };
+}
+
+const ALLOWED_PROTOCOL = ["modbus_tcp", "slmp", "cclink", "ethernetip", "profinet"];
+const ALLOWED_DEVICE_ROLE = ["server", "client"];
+
+function isIPv4(s) {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(String(s || ""));
+}
+
+function validateConfig(cfg) {
+  const errors = [];
+  if (!cfg || typeof cfg !== "object") return ["설정 객체가 없습니다."];
+  if (!ALLOWED_PROTOCOL.includes(cfg.protocol)) errors.push("protocol 값이 스키마 enum에 없습니다.");
+  if (!cfg.device || typeof cfg.device !== "object") errors.push("device 가 필요합니다.");
+  else {
+    if (!cfg.device.name || typeof cfg.device.name !== "string") errors.push("device.name 이 필요합니다.");
+    if (cfg.device.role && !ALLOWED_DEVICE_ROLE.includes(cfg.device.role)) {
+      errors.push("device.role 은 server 또는 client 여야 합니다.");
+    }
+  }
+  if (cfg.cycle_ms != null && (!Number.isInteger(cfg.cycle_ms) || cfg.cycle_ms < 1)) {
+    errors.push("cycle_ms 는 1 이상 정수여야 합니다.");
+  }
+  if (!Array.isArray(cfg.points) || cfg.points.length === 0) {
+    errors.push("points 를 하나 이상 넣어 주세요.");
+  } else {
+    cfg.points.forEach((pt, i) => {
+      if (!pt.name) errors.push("포인트 " + (i + 1) + ": 이름이 필요합니다.");
+      if (!pt.access) errors.push("포인트 " + (i + 1) + ": 읽기/쓰기가 필요합니다.");
+      if (!pt.address || typeof pt.address !== "object") {
+        errors.push("포인트 " + (i + 1) + ": address 가 필요합니다.");
+      } else {
+        const key = cfg.protocol === "modbus_tcp" ? "modbus"
+          : cfg.protocol === "slmp" ? "slmp"
+          : cfg.protocol === "ethernetip" ? "ethernetip"
+          : cfg.protocol === "profinet" ? "profinet" : null;
+        if (key && !pt.address[key]) errors.push("포인트 " + (i + 1) + ": address." + key + " 가 필요합니다.");
+      }
+    });
+  }
+  const pp = cfg.protocol_params || {};
+  if (cfg.protocol === "modbus_tcp") {
+    if (!isIPv4(pp.ip)) errors.push("연결 IP를 확인하세요 (예: 127.0.0.1).");
+    if (!pp.port) errors.push("포트가 필요합니다.");
+    if (pp.role === "client" && !pp.ip) errors.push("PLC에 붙으려면 IP가 필요합니다.");
+  }
+  if (cfg.protocol === "slmp" && pp.role === "client" && !pp.plc_ip) {
+    errors.push("PLC에 붙으려면 PLC 주소가 필요합니다.");
+  }
+  if (cfg.protocol === "slmp" && pp.role === "client" && pp.plc_ip && !isIPv4(pp.plc_ip)) {
+    errors.push("PLC 주소를 확인하세요.");
+  }
+  return errors;
+}
+
+function describeAddr(protocol, addr) {
+  if (!addr) return "";
+  if (protocol === "modbus_tcp") {
+    const t = addr.type || addr.register_type || "";
+    const n = addr.start != null ? addr.start : addr.address;
+    const extra = addr.offset ? (" +" + addr.offset) : "";
+    return t + " " + n + extra;
+  }
+  if (protocol === "slmp") {
+    const d = addr.device_code || addr.device || "";
+    const n = addr.start != null ? addr.start : addr.address;
+    return d + String(n) + (addr.unit ? (" " + addr.unit) : "");
+  }
+  if (protocol === "ethernetip") {
+    return "assembly " + addr.assembly + " @ " + addr.byte_offset;
+  }
+  return "slot " + addr.slot + "/" + addr.subslot + " @ " + addr.byte_offset;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+function stepIndex(id) { return STEPS.findIndex((x) => x.id === id); }
+
+function renderProgress() {
+  const el = document.getElementById("progress");
+  const cur = step === "point" ? "points" : step;
+  el.innerHTML = STEPS.map((s, i) => {
+    const on = s.id === cur;
+    const done = stepIndex(cur) > i;
+    const reached = i <= Math.max(stepIndex(cur), 0);
+    return `<button type="button" data-go="${s.id}" class="${on ? "on" : done ? "done" : ""}" ${reached ? "" : "disabled"}>${i + 1}. ${s.label}</button>`;
+  }).join("");
+}
+
+function screenProtocol() {
+  return `
+    <h2>어떤 장비와 연결할까요?</h2>
+    <p class="hint">통신 이름을 몰라도 됩니다. 가이드 표지에 있는 로고·문구에 가까운 것을 고르세요.</p>
+    <div class="choices">
+      ${Object.values(PROTOCOLS).map((p) => `
+        <button type="button" class="choice ${state.protocol === p.id ? "selected" : ""}" data-p="${p.id}">
+          <div class="k">${escapeHtml(p.title)}</div>
+          <div class="d">${escapeHtml(p.desc)}</div>
+        </button>`).join("")}
+    </div>
+    <div class="nav-row"><div class="right"><button class="btn" data-next="name">다음</button></div></div>`;
+}
+
+function screenName() {
+  return `
+    <h2>이 장비를 뭐라고 부를까요?</h2>
+    <p class="hint">현장 별명입니다. 나중에 로그에 이렇게 보입니다.</p>
+    <div class="field">
+      <label for="deviceName">별명</label>
+      <input id="deviceName" type="text" value="${escapeHtml(state.deviceName)}" placeholder="예: line1_sensor" />
+      <span class="help">영어·숫자·밑줄이 가장 안전합니다. 예제 기본값은 barcode_sensor_1 입니다.</span>
+    </div>
+    <div class="nav-row">
+      <button class="btn secondary" data-next="protocol">뒤로</button>
+      <div class="right"><button class="btn" data-next="role">다음</button></div>
+    </div>`;
+}
+
+function screenRole() {
+  const proto = PROTOCOLS[state.protocol];
+  const talkDisabled = !proto.canTalk;
+  return `
+    <h2>누가 먼저 말을 걸까요?</h2>
+    <p class="hint">우리는 이 프로그램을 돌리는 쪽입니다. PLC는 공장 컨트롤러입니다.</p>
+    <div class="choices">
+      <button type="button" class="choice ${state.waiting ? "selected" : ""}" data-wait="1">
+        <div class="k">우리는 장비 · PLC가 붙습니다</div>
+        <div class="d">센서처럼 기다립니다. 대부분의 데모·가짜 센서가 이 방식입니다.</div>
+      </button>
+      <button type="button" class="choice ${!state.waiting && !talkDisabled ? "selected" : ""}" data-wait="0" ${talkDisabled ? "disabled style='opacity:.45'" : ""}>
+        <div class="k">우리가 PLC에 붙습니다</div>
+        <div class="d">${talkDisabled
+          ? "이 선택지는 이 장비 종류에서는 아직 없습니다. 우리가 장비로 기다립니다."
+          : "우리가 먼저 PLC 주소로 찾아갑니다."}</div>
+      </button>
+    </div>
+    ${talkDisabled ? `<p class="note">PROFINET 예제·어댑터는 장비가 PLC를 기다리는 구성입니다. <code>device.role</code> 은 server 로 저장됩니다.</p>` : ""}
+    <div class="nav-row">
+      <button class="btn secondary" data-next="name">뒤로</button>
+      <div class="right"><button class="btn" data-next="connect">다음</button></div>
+    </div>`;
+}
+
+function ipFields() {
+  const waiting = state.waiting || state.protocol === "profinet";
+  if (state.protocol === "modbus_tcp") {
+    return `
+      <div class="row2">
+        <div class="field">
+          <label for="ip">${waiting ? "우리가 기다릴 주소" : "PLC 주소"}</label>
+          <input id="ip" type="text" value="${escapeHtml(state.ip || "")}" />
+          <span class="help">${waiting ? "0.0.0.0 은 모든 네트워크에서 받습니다. 데모는 127.0.0.1." : "가이드의 PLC IP."}</span>
+        </div>
+        <div class="field">
+          <label for="port">포트 번호</label>
+          <input id="port" type="number" value="${escapeHtml(state.port)}" />
+          <span class="help">모르면 데모 기본값을 유지하세요. 흔한 값은 502 / 1502.</span>
+        </div>
+      </div>`;
+  }
+  if (state.protocol === "slmp") {
+    const ipId = waiting ? "ip" : "plc_ip";
+    const ipVal = waiting ? state.ip : state.plc_ip;
+    return `
+      <div class="row2">
+        <div class="field">
+          <label for="${ipId}">${waiting ? "우리가 기다릴 주소" : "PLC 주소"}</label>
+          <input id="${ipId}" type="text" value="${escapeHtml(ipVal || "")}" />
+          <span class="help">${waiting ? "데모는 127.0.0.1." : "예제 기본값은 192.168.0.20 입니다."}</span>
+        </div>
+        <div class="field">
+          <label for="port">포트 번호</label>
+          <input id="port" type="number" value="${escapeHtml(state.port)}" />
+          <span class="help">예제 기본값 5000. 프레임은 Binary 3E 로 고정됩니다.</span>
+        </div>
+      </div>`;
+  }
+  if (state.protocol === "ethernetip") {
+    const ipId = waiting ? "bind_ip" : "ip";
+    const ipVal = waiting ? state.bind_ip : state.ip;
+    return `
+      <p class="note">EtherNet/IP 연결 값은 <code>example.ethernetip.json</code> / 가짜 센서 예제를 기본으로 채웁니다. 조립 번호는 고급에서 볼 수 있습니다.</p>
+      <div class="row2">
+        <div class="field">
+          <label for="${ipId}">${waiting ? "우리가 기다릴 주소" : "상대 주소"}</label>
+          <input id="${ipId}" type="text" value="${escapeHtml(ipVal || "")}" />
+        </div>
+        <div class="field">
+          <label for="port">TCP 포트</label>
+          <input id="port" type="number" value="${escapeHtml(state.port)}" />
+          <span class="help">예제 기본값 44818 (데모는 15562).</span>
+        </div>
+      </div>`;
+  }
+  return `
+    <p class="note">PROFINET 은 예제처럼 <code>iface: mock</code> 과 데모 키를 넣습니다. 실제 NIC·IRT 는 이 마법사 범위가 아닙니다.</p>
+    <div class="row2">
+      <div class="field">
+        <label for="ip">장비 IP</label>
+        <input id="ip" type="text" value="${escapeHtml(state.ip || "")}" />
+      </div>
+      <div class="field">
+        <label for="device_name">스테이션 이름</label>
+        <input id="device_name" type="text" value="${escapeHtml(state.device_name || "")}" />
+        <span class="help">가이드의 장치 이름. 예제 기본값 sensor-line1.</span>
+      </div>
+    </div>`;
+}
+
+function screenConnect() {
+  return `
+    <h2>어디로 연결할까요?</h2>
+    <p class="hint">장비가 없으면 데모를 고르세요. 예제 설정과 같은 안전한 기본값을 채웁니다.</p>
+    <div class="choices" style="margin-bottom:14px">
+      <button type="button" class="choice ${state.connMode === "demo" ? "selected" : ""}" data-conn="demo">
+        <div class="k">데모 / 장비 없음</div>
+        <div class="d">가짜 센서 예제와 같은 주소. 이 컴퓨터 안에서만 씁니다.</div>
+      </button>
+      <button type="button" class="choice ${state.connMode === "guide" ? "selected" : ""}" data-conn="guide">
+        <div class="k">가이드에 IP가 있다</div>
+        <div class="d">적힌 숫자만 옮기면 됩니다. 빈칸은 예제 기본값입니다.</div>
+      </button>
+    </div>
+    ${ipFields()}
+    <details class="adv">
+      <summary>고급 · 모르면 기본값 유지</summary>
+      <div class="body">
+        <div class="row2">
+          <div class="field">
+            <label for="cycle_ms">반복 주기 (ms)</label>
+            <input id="cycle_ms" type="number" min="1" value="${escapeHtml(state.cycle_ms)}" />
+            <span class="help">예제 기본값 8.</span>
+          </div>
+          ${state.protocol === "modbus_tcp" ? `
+          <div class="field">
+            <label for="unit_id">장치 번호 (unit id)</label>
+            <input id="unit_id" type="number" min="0" value="${escapeHtml(state.unit_id)}" />
+            <span class="help">가이드에 Slave/Unit 이 있으면 그 숫자. 기본 1.</span>
+          </div>` : `<div></div>`}
+        </div>
+        ${state.protocol === "ethernetip" || state.protocol === "profinet" ? `
+        <p class="help">조립 번호·벤더 ID·데모 키(<code>psk_hex</code>)·<code>mock</code> 은
+          <code>config/example.${state.protocol === "ethernetip" ? "ethernetip" : "profinet"}.json</code>
+          과 가짜 센서 예제 값을 그대로 넣습니다. 모르면 바꾸지 마세요. 인증용이 아닙니다.</p>` : ""}
+      </div>
+    </details>
+    <div class="nav-row">
+      <button class="btn secondary" data-next="role">뒤로</button>
+      <div class="right"><button class="btn" data-next="points">다음</button></div>
+    </div>`;
+}
+
+function screenPoints() {
+  const proto = state.protocol;
+  const rows = state.points.map((p, i) => `
+    <div class="pt">
+      <div>
+        <div class="name">${escapeHtml(p.name)} <span class="pill ${p.access === "write" ? "write" : "read"}">${p.access === "write" ? "PLC가 씀" : "PLC가 읽음"}</span></div>
+        <div class="meta">${escapeHtml(p.data_type || "")} · ${escapeHtml(describeAddr(proto, p.address))}${p.scale != null ? " · ×" + p.scale : ""}</div>
+      </div>
+      <button class="btn secondary" data-edit="${i}">수정</button>
+      <button class="btn secondary" data-del="${i}">삭제</button>
+    </div>`).join("");
+  return `
+    <h2>주고받을 값을 넣을까요?</h2>
+    <p class="hint">가이드의 “온도”, “바코드” 한 줄이 여기 해당합니다. 예제에 있는 흔한 값을 바로 넣을 수 있습니다.</p>
+    ${state.points.length ? `<div class="pt-list">${rows}</div>` : `<p class="note">아직 값이 없습니다. 아래 데모 세트를 넣거나 하나씩 추가하세요.</p>`}
+    <div class="presets">
+      ${PRESETS[proto].map((pr) => `<button type="button" class="chip" data-preset="${pr.id}">+ ${escapeHtml(pr.label)}</button>`).join("")}
+    </div>
+    <div class="nav-row">
+      <button class="btn secondary" data-next="connect">뒤로</button>
+      <div class="right">
+        <button class="btn secondary" data-add="1">직접 추가</button>
+        <button class="btn" data-next="review">다 했어요</button>
+      </div>
+    </div>`;
+}
+
+function screenPoint() {
+  const d = state.draft || emptyDraft(state.protocol);
+  const proto = state.protocol;
+  let addr = "";
+  if (proto === "modbus_tcp") {
+    addr = `
+      <div class="row2">
+        <div class="field">
+          <label for="type">값이 들어 있는 칸</label>
+          <select id="type">
+            <option value="holding" ${d.type === "holding" || d.type === "4x" || d.type === "hr" ? "selected" : ""}>홀딩 레지스터 (4xxxx, 가장 흔함)</option>
+            <option value="input" ${d.type === "input" ? "selected" : ""}>입력 레지스터 (3xxxx)</option>
+            <option value="coil" ${d.type === "coil" ? "selected" : ""}>코일 (켜짐/꺼짐)</option>
+            <option value="discrete" ${d.type === "discrete" ? "selected" : ""}>이산 입력</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="start">가이드에 적힌 번호</label>
+          <input id="start" type="text" value="${escapeHtml(d.start || "")}" placeholder="예: 40001" />
+          <span class="help">“Holding 40017” 이면 40017 을 적으면 됩니다.</span>
+        </div>
+      </div>`;
+  } else if (proto === "slmp") {
+    addr = `
+      <div class="row2">
+        <div class="field">
+          <label for="device_code">가이드의 글자 (D / M / X …)</label>
+          <select id="device_code">
+            ${["D","M","X","Y","W","R","B"].map((c) => `<option value="${c}" ${d.device_code === c ? "selected" : ""}>${c}</option>`).join("")}
+          </select>
+          <span class="help">D 는 숫자, M/X/Y 는 켜짐·꺼짐에 자주 씁니다.</span>
+        </div>
+        <div class="field">
+          <label for="start">가이드의 번호</label>
+          <input id="start" type="text" value="${escapeHtml(d.start || "")}" placeholder="D100 이면 100" />
+          <span class="help">X1A 처럼 16진이면 1A 만 적습니다.</span>
+        </div>
+      </div>`;
+  } else if (proto === "ethernetip") {
+    addr = `
+      <p class="note">초보자는 예제 기본값을 유지하세요. 조립 번호·바이트 위치는 통신 가이드 표와 같아야 합니다.</p>
+      <div class="row2">
+        <div class="field">
+          <label for="assembly">조립 번호 (가이드)</label>
+          <input id="assembly" type="number" value="${escapeHtml(d.assembly || "150")}" />
+        </div>
+        <div class="field">
+          <label for="byte_offset">바이트 위치</label>
+          <input id="byte_offset" type="number" value="${escapeHtml(d.byte_offset || "0")}" />
+        </div>
+      </div>
+      <div class="field">
+        <label for="eip_len">길이 (바이트)</label>
+        <input id="eip_len" type="number" value="${escapeHtml(d.length || "2")}" />
+      </div>`;
+  } else {
+    addr = `
+      <p class="note">초보자는 예제 기본값(슬롯 1 / 서브슬롯 1)을 유지하세요.</p>
+      <div class="row2">
+        <div class="field">
+          <label for="slot">슬롯</label>
+          <input id="slot" type="number" value="${escapeHtml(d.slot || "1")}" />
+        </div>
+        <div class="field">
+          <label for="subslot">서브슬롯</label>
+          <input id="subslot" type="number" value="${escapeHtml(d.subslot || "1")}" />
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="index">인덱스</label>
+          <input id="index" type="number" value="${escapeHtml(d.index || "1")}" />
+        </div>
+        <div class="field">
+          <label for="byte_offset">바이트 위치</label>
+          <input id="byte_offset" type="number" value="${escapeHtml(d.byte_offset || "0")}" />
+        </div>
+      </div>`;
+  }
+  return `
+    <h2>${state.editingIndex >= 0 ? "값 수정" : "값 하나 추가"}</h2>
+    <p class="hint">일상 이름 → PLC가 읽는지/쓰는지 → 가이드에 적힌 주소 순서입니다.</p>
+    <div class="field">
+      <label for="ptName">이 값을 뭐라고 부를까요?</label>
+      <input id="ptName" type="text" value="${escapeHtml(d.name || "")}" placeholder="예: temperature" />
+    </div>
+    <div class="field">
+      <label>PLC는 이 값을?</label>
+      <div class="choices">
+        <button type="button" class="choice ${d.access === "read" ? "selected" : ""}" data-acc="read">
+          <div class="k">읽어 갑니다</div>
+          <div class="d">온도·바코드처럼 우리가 보여 주는 값.</div>
+        </button>
+        <button type="button" class="choice ${d.access === "write" ? "selected" : ""}" data-acc="write">
+          <div class="k">써서 지시합니다</div>
+          <div class="d">트리거처럼 PLC가 켜고 끄는 값.</div>
+        </button>
+      </div>
+    </div>
+    <div class="field">
+      <label>값의 모양</label>
+      <div class="choices">
+        <button type="button" class="choice ${d.kind === "number" ? "selected" : ""}" data-kind="number"><div class="k">숫자</div><div class="d">온도, 압력, 카운트</div></button>
+        <button type="button" class="choice ${d.kind === "text" ? "selected" : ""}" data-kind="text"><div class="k">글자</div><div class="d">바코드, 시리얼</div></button>
+        <button type="button" class="choice ${d.kind === "bool" ? "selected" : ""}" data-kind="bool"><div class="k">켜짐/꺼짐</div><div class="d">트리거, 알람</div></button>
+      </div>
+    </div>
+    ${addr}
+    <div class="field">
+      <label for="scale">가이드에 스케일이 있으면 (없으면 비우기)</label>
+      <input id="scale" type="text" value="${escapeHtml(d.scale ?? "")}" placeholder="예: 0.1" />
+      <span class="help">적힌 숫자 250 이 실제 25.0 이면 0.1 입니다. 없으면 건너뛰세요.</span>
+    </div>
+    <details class="adv" ${state.advancedOpen ? "open" : ""}>
+      <summary>고급 · 모르면 기본값 유지</summary>
+      <div class="body">
+        <p class="help" style="margin-bottom:8px">엔디안·비트 위치는 가이드에 따로 있을 때만. 비우면 예제처럼 생략합니다.</p>
+        <div class="row2">
+          <div class="field">
+            <label for="endian">엔디안</label>
+            <input id="endian" type="text" value="${escapeHtml(d.endian || "")}" placeholder="비우기 또는 ABCD / CDAB" />
+          </div>
+          ${proto === "modbus_tcp" || proto === "slmp" ? `
+          <div class="field">
+            <label for="bit">비트 위치</label>
+            <input id="bit" type="text" value="${escapeHtml(d.bit || "")}" />
+          </div>` : `<div></div>`}
+        </div>
+        ${proto === "ethernetip" ? `<div class="field"><label for="tag">태그 이름 (선택)</label><input id="tag" type="text" value="${escapeHtml(d.tag || "")}" placeholder="Sensor1.Barcode" /></div>` : ""}
+        ${proto === "modbus_tcp" ? `<div class="row2"><div class="field"><label for="offset">레지스터 오프셋</label><input id="offset" type="text" value="${escapeHtml(d.offset || "")}" /></div><div class="field"><label for="quantity">개수</label><input id="quantity" type="text" value="${escapeHtml(d.quantity || "")}" /></div></div>` : ""}
+        ${proto === "slmp" ? `<div class="field"><label for="unit">단위 (bit / word, 비우면 자동)</label><input id="unit" type="text" value="${escapeHtml(d.unit || "")}" /></div>` : ""}
+      </div>
+    </details>
+    <div class="nav-row">
+      <button class="btn secondary" data-next="points">취소</button>
+      <div class="right"><button class="btn" data-save-point="1">이 값 저장</button></div>
+    </div>`;
+}
+
+function humanSummary(cfg) {
+  const proto = PROTOCOLS[cfg.protocol];
+  const wait = cfg.device.role === "server";
+  const pp = cfg.protocol_params || {};
+  const conn = cfg.protocol === "slmp" && pp.role === "client"
+    ? (pp.plc_ip + ":" + pp.port)
+    : cfg.protocol === "ethernetip" && wait
+      ? ((pp.bind_ip || pp.ip) + ":" + pp.port)
+      : ((pp.ip || "") + (pp.port ? (":" + pp.port) : ""));
+  const roleKo = wait ? "우리는 장비로 기다립니다 (server)" : "우리가 PLC에 붙습니다 (client)";
+  return `
+    <div class="summary">
+      <div class="item"><b>무엇을 연결하나</b><span>${escapeHtml(proto.title)}. 설정 파일에는 protocol: ${escapeHtml(cfg.protocol)} 로 적힙니다.</span></div>
+      <div class="item"><b>별명</b><span>${escapeHtml(cfg.device.name)} — 로그에 보이는 이름입니다.</span></div>
+      <div class="item"><b>역할</b><span>${roleKo}. 프로토콜 파라미터의 role 도 같은 뜻을 씁니다${cfg.protocol === "profinet" ? " (PROFINET 예제는 role 키 없이 Device로 동작)" : ""}.</span></div>
+      <div class="item"><b>연결</b><span>${escapeHtml(conn || (pp.device_name || "예제 기본값"))}. 주기는 ${cfg.cycle_ms} ms.</span></div>
+      <div class="item"><b>주고받는 값</b><span>${cfg.points.map((p) => escapeHtml(p.name) + " (" + (p.access === "write" ? "PLC가 씀" : "PLC가 읽음") + ", " + escapeHtml(describeAddr(cfg.protocol, p.address[PROTOCOLS[cfg.protocol].addrKey])) + ")").join(" · ")}</span></div>
+    </div>`;
+}
+
+function screenReview() {
+  const cfg = buildConfig(state);
+  const errors = validateConfig(cfg);
+  const json = JSON.stringify(cfg, null, 2);
+  return `
+    <h2>이 설정으로 될까요?</h2>
+    <p class="hint">왼쪽 설명은 일상 말, 오른쪽은 데몬이 읽는 JSON 입니다. 복사하거나 <code>config.json</code> 으로 받으세요.</p>
+    ${errors.length ? `<div class="err">${errors.map(escapeHtml).join("<br>")}</div>` : `<div class="oknote">스키마에 필요한 키(protocol, device, points)가 들어 있습니다. 인증 클레임이 아닙니다.</div>`}
+    ${humanSummary(cfg)}
+    <pre class="editor" id="jsonOut">${escapeHtml(json)}</pre>
+    <div class="nav-row">
+      <button class="btn secondary" data-next="points">뒤로</button>
+      <div class="right">
+        <button class="btn secondary" data-copy="1">JSON 복사</button>
+        <button class="btn" data-download="1" ${errors.length ? "disabled" : ""}>config.json 받기</button>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:12px">저장 후 예: <code>./multiproto_daemon config.json</code> · 흐름 보기: <a href="json-config-flow.html">json-config-flow.html</a></p>`;
+}
+
+function render() {
+  renderProgress();
+  const root = document.getElementById("screen");
+  let html = "";
+  if (step === "protocol") html = screenProtocol();
+  else if (step === "name") html = screenName();
+  else if (step === "role") html = screenRole();
+  else if (step === "connect") html = screenConnect();
+  else if (step === "points") html = screenPoints();
+  else if (step === "point") html = screenPoint();
+  else html = screenReview();
+  if (flash) html = `<div class="oknote">${escapeHtml(flash)}</div>` + html;
+  root.innerHTML = html;
+  flash = "";
+}
+
+function readConnectFields() {
+  const g = (id) => document.getElementById(id);
+  if (g("deviceName")) state.deviceName = g("deviceName").value;
+  if (g("ip")) state.ip = g("ip").value.trim();
+  if (g("plc_ip")) state.plc_ip = g("plc_ip").value.trim();
+  if (g("bind_ip")) state.bind_ip = g("bind_ip").value.trim();
+  if (g("port")) state.port = Number(g("port").value);
+  if (g("unit_id")) state.unit_id = Number(g("unit_id").value);
+  if (g("cycle_ms")) state.cycle_ms = Number(g("cycle_ms").value);
+  if (g("device_name")) state.device_name = g("device_name").value.trim();
+}
+
+function readDraftFields() {
+  if (!state.draft) return;
+  const g = (id) => document.getElementById(id);
+  const d = state.draft;
+  if (g("ptName")) d.name = g("ptName").value;
+  if (g("type")) d.type = g("type").value;
+  if (g("start")) d.start = g("start").value;
+  if (g("device_code")) d.device_code = g("device_code").value;
+  if (g("assembly")) d.assembly = g("assembly").value;
+  if (g("byte_offset")) d.byte_offset = g("byte_offset").value;
+  if (g("eip_len")) d.length = g("eip_len").value;
+  if (g("slot")) d.slot = g("slot").value;
+  if (g("subslot")) d.subslot = g("subslot").value;
+  if (g("index")) d.index = g("index").value;
+  if (g("scale")) d.scale = g("scale").value;
+  if (g("endian")) d.endian = g("endian").value;
+  if (g("bit")) d.bit = g("bit").value;
+  if (g("offset")) d.offset = g("offset").value;
+  if (g("quantity")) d.quantity = g("quantity").value;
+  if (g("unit")) d.unit = g("unit").value;
+  if (g("tag")) d.tag = g("tag").value;
+  state.advancedOpen = !!document.querySelector("details.adv")?.open;
+}
+
+function addPreset(id) {
+  const pr = PRESETS[state.protocol].find((x) => x.id === id);
+  if (!pr) return;
+  if (state.points.some((p) => p.name === pr.point.name)) {
+    flash = pr.point.name + " 은 이미 있습니다.";
+    return;
+  }
+  state.points.push(clone(pr.point));
+  flash = pr.label + " 을 넣었습니다.";
+}
+
+function savePoint() {
+  readDraftFields();
+  const p = pointFromDraft(state.draft, state.protocol);
+  if (!p.name) {
+    flash = "값 이름을 적어 주세요.";
+    return false;
+  }
+  if (state.editingIndex >= 0) state.points[state.editingIndex] = p;
+  else state.points.push(p);
+  state.draft = null;
+  state.editingIndex = -1;
+  step = "points";
+  flash = p.name + " 을 저장했습니다.";
+  return true;
+}
+
+function go(next) {
+  readConnectFields();
+  if (next === "role" && step === "name" && !(state.deviceName || "").trim()) {
+    flash = "별명을 적어 주세요.";
+    render();
+    return;
+  }
+  if (next === "review") {
+    const cfg = buildConfig(state);
+    const errors = validateConfig(cfg);
+    if (errors.length && state.points.length === 0) {
+      flash = "값을 하나 이상 넣어 주세요. 데모 세트를 눌러도 됩니다.";
+      render();
+      return;
+    }
+  }
+  if (next === "points" && step === "point") {
+    state.draft = null;
+    state.editingIndex = -1;
+  }
+  step = next;
+  render();
+}
+
+function downloadJson() {
+  const cfg = buildConfig(state);
+  if (validateConfig(cfg).length) return;
+  const blob = new Blob([JSON.stringify(cfg, null, 2) + "\n"], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "config.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  flash = "config.json 을 저장했습니다.";
+  render();
+}
+
+async function copyJson() {
+  const cfg = buildConfig(state);
+  const text = JSON.stringify(cfg, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    flash = "클립보드에 복사했습니다.";
+  } catch (e) {
+    flash = "복사에 실패했습니다. JSON을 직접 선택해 복사하세요.";
+  }
+  render();
+}
+
+document.getElementById("progress").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-go]");
+  if (!b || b.disabled) return;
+  readConnectFields();
+  step = b.dataset.go;
+  render();
+});
+
+document.getElementById("screen").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-p],[data-wait],[data-conn],[data-next],[data-preset],[data-add],[data-edit],[data-del],[data-acc],[data-kind],[data-save-point],[data-copy],[data-download]");
+  if (!t) return;
+  if (t.dataset.p) {
+    const prev = state.protocol;
+    state.protocol = t.dataset.p;
+    if (state.protocol !== prev) {
+      state.points = [];
+      if (state.protocol === "profinet") state.waiting = true;
+      applyConnDefaults();
+    }
+    render();
+    return;
+  }
+  if (t.dataset.wait != null) {
+    if (t.disabled) return;
+    state.waiting = t.dataset.wait === "1";
+    applyConnDefaults();
+    render();
+    return;
+  }
+  if (t.dataset.conn) {
+    state.connMode = t.dataset.conn;
+    applyConnDefaults();
+    render();
+    return;
+  }
+  if (t.dataset.next) { go(t.dataset.next); return; }
+  if (t.dataset.preset) { addPreset(t.dataset.preset); render(); return; }
+  if (t.dataset.add) {
+    state.editingIndex = -1;
+    state.draft = emptyDraft(state.protocol);
+    step = "point";
+    render();
+    return;
+  }
+  if (t.dataset.edit != null) {
+    const p = state.points[Number(t.dataset.edit)];
+    state.editingIndex = Number(t.dataset.edit);
+    const d = emptyDraft(state.protocol);
+    d.name = p.name;
+    d.access = p.access;
+    d.kind = kindOf(p.data_type);
+    d.scale = p.scale != null ? String(p.scale) : "";
+    d.endian = p.endian || "";
+    const a = p.address || {};
+    d.type = a.type || a.register_type || d.type;
+    d.start = a.start != null ? String(a.start) : (a.address != null ? String(a.address) : d.start);
+    d.device_code = a.device_code || a.device || d.device_code;
+    d.unit = a.unit || "";
+    d.assembly = a.assembly != null ? String(a.assembly) : d.assembly;
+    d.byte_offset = a.byte_offset != null ? String(a.byte_offset) : d.byte_offset;
+    d.length = a.length != null ? String(a.length) : (p.length != null ? String(p.length) : d.length);
+    d.tag = a.tag || "";
+    d.slot = a.slot != null ? String(a.slot) : d.slot;
+    d.subslot = a.subslot != null ? String(a.subslot) : d.subslot;
+    d.index = a.index != null ? String(a.index) : d.index;
+    d.bit = a.bit != null ? String(a.bit) : "";
+    d.offset = a.offset != null ? String(a.offset) : "";
+    d.quantity = a.quantity != null ? String(a.quantity) : "";
+    state.draft = d;
+    step = "point";
+    render();
+    return;
+  }
+  if (t.dataset.del != null) {
+    state.points.splice(Number(t.dataset.del), 1);
+    render();
+    return;
+  }
+  if (t.dataset.acc) {
+    readDraftFields();
+    state.draft.access = t.dataset.acc;
+    render();
+    return;
+  }
+  if (t.dataset.kind) {
+    readDraftFields();
+    state.draft.kind = t.dataset.kind;
+    if (t.dataset.kind === "bool" && state.protocol === "modbus_tcp") state.draft.type = "coil";
+    if (t.dataset.kind === "bool" && state.protocol === "slmp") { state.draft.device_code = "M"; state.draft.unit = "bit"; }
+    render();
+    return;
+  }
+  if (t.dataset.savePoint) { savePoint(); render(); return; }
+  if (t.dataset.copy) { copyJson(); return; }
+  if (t.dataset.download) { downloadJson(); return; }
+});
+
+document.getElementById("screen").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if (e.target && e.target.tagName === "TEXTAREA") return;
+  if (e.target && e.target.tagName === "BUTTON") return;
+  e.preventDefault();
+  const next = document.querySelector("[data-next].btn:not(.secondary), [data-save-point]");
+  if (next) next.click();
+});
+
+applyConnDefaults();
+window.Wizard = { buildConfig, validateConfig, defaultState, PRESETS, finishPointFromStored, pointFromDraft, buildProtocolParams };
+
+render();
+</script>
+</body>
+</html>

@@ -12,6 +12,16 @@ PROFINET 은 **CC-B + RT Class 1** 만. **IRT / CC-C 는 목표 아님.**
 
 ---
 
+## 0. 설정 마법사 (JSON을 처음 만든다면)
+
+```
+xdg-open docs/config-wizard.html
+```
+
+질문에 답하면 `config.json` 이 만들어집니다. 프로토콜 문서를 읽지 않아도 됩니다.
+Modbus / SLMP 은 주소 칸을 일상 말로 묻고, EtherNet/IP · PROFINET 은 예제 기본값을 안내합니다.
+그다음 아래 JSON 흐름으로 값이 어떻게 움직이는지 보세요.
+
 ## 1. JSON → 런타임 (브라우저, 빌드 없음)
 
 ```
@@ -75,6 +85,7 @@ xdg-open docs/ctt_board.html
 CODESYS SoftPLC 마스터(Modbus 정본, 앱은 IDE 수동): [`codesys_master_io.md`](codesys_master_io.md).
 
 선택 시각화(정본 아님): 필드 의미·메모리 맵 [`config-viz.html`](config-viz.html).
+JSON을 처음 만든다면 [`config-wizard.html`](config-wizard.html).
 데모 경로의 HTML 은 **`json-config-flow.html`** 이다.
 
 ## 다음에 읽을 것
