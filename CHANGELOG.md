@@ -8,6 +8,18 @@
 
 내부 CTT. **인증이 아니다.**
 
+### Fixed
+
+- Config JSON parse error: print `cJSON_GetErrorPtr()` before `free(raw)`
+  (heap use-after-free on `fb_reload` of malformed JSON; ASan)
+- CTT PROFINET `dcp_set_ip`: do not pass uninitialized `frames[0]`/`flens[0]`
+  into `finish_eth_step` when no Set.Res was captured (C UB on the miss path)
+- SLMP client batch read: skip `memcpy`/`wire_words_to_be` on empty OK payload
+  (`data == NULL`, length 0) instead of C `memcpy(NULL, 0)` UB
+- GCC `-Wsign-compare` in `slmp_encode_batch_read` and EIP originator SendRR
+- CTT AF_PACKET: reject iface names longer than `IFNAMSIZ` instead of truncating
+- `tools/ctt/gen_board_data.py`: drop unused table-header local (pyflakes)
+
 ### Changed
 
 - CTT timed soak: `clock_nanosleep(TIMER_ABSTIME)` 절대시각 대기
@@ -20,6 +32,8 @@
 
 ### Added
 
+- 정적+동적 분석 리포트 [`docs/reports/analysis_20260910.md`](docs/reports/analysis_20260910.md)
+  (ASan UAF / C UB 수정 포함, **인증 아님**)
 - 소프트웨어 마스터 soak (CODESYS 없음): Modbus TCP · SLMP Binary 3E · EtherNet/IP
   Class 1(또는 explicit) 가 우리 DUT 스택에 **라이브 TCP(/UDP) 루프백** IO.
   [`docs/sw_master_io.md`](docs/sw_master_io.md), `examples/sw_master.py`,

@@ -1,6 +1,7 @@
 #include "slmp_stack.h"
 
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -19,6 +20,12 @@ static void expect(int cond, const char *msg)
 static uint16_t rd_le16(const uint8_t *p)
 {
     return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+}
+
+static void wr_le16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v & 0xff);
+    p[1] = (uint8_t)(v >> 8);
 }
 
 static void test_device_table(void)
@@ -73,6 +80,24 @@ static void test_encode_batch_read(void)
     expect(frame[15] == 100 && frame[16] == 0 && frame[17] == 0, "head");
     expect(frame[18] == SLMP_DEV_D, "dev");
     expect(rd_le16(frame + 19) == 2, "qty");
+}
+
+static void test_decode_empty_ok_payload(void)
+{
+    /* Binary 3E response: subheader + net/pc/io/multi + length=2 + end=OK */
+    uint8_t frame[11];
+    memset(frame, 0, sizeof(frame));
+    wr_le16(frame, SLMP_SUBHEADER_RES_3E);
+    wr_le16(frame + 7, 2);
+    wr_le16(frame + 9, SLMP_END_OK);
+
+    uint16_t end = 0xFFFFu;
+    const uint8_t *data = (const uint8_t *)(uintptr_t)1;
+    size_t dlen = 99;
+    expect(slmp_decode_response(frame, sizeof(frame), &end, &data, &dlen) == 0,
+           "decode empty OK");
+    expect(end == SLMP_END_OK, "end OK");
+    expect(data == NULL && dlen == 0, "empty payload is NULL/0 not a crash");
 }
 
 static void test_handle_read_write(void)
@@ -212,6 +237,11 @@ static void test_client_server_loopback(void)
            "client read");
     expect(out_len == 4 && memcmp(out, be, 4) == 0, "readback");
 
+    wr.quantity = 0;
+    expect(slmp_stack_client_batch_read(client, &wr, out, sizeof(out),
+                                        &out_len) != 0,
+           "client read qty 0 rejected");
+
     g_serve = 0;
     pthread_join(th, NULL);
     slmp_stack_destroy(client);
@@ -222,6 +252,7 @@ int main(void)
 {
     test_device_table();
     test_encode_batch_read();
+    test_decode_empty_ok_payload();
     test_handle_read_write();
     test_client_server_loopback();
     if (g_fail) {

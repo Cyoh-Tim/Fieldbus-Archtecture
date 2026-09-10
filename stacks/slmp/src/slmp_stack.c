@@ -460,7 +460,7 @@ int slmp_encode_batch_read(const slmp_cfg_t *cfg, const slmp_range_t *range,
     }
     /* monitoring(2)+cmd(2)+sub(2)+dev(4)+qty(2) = 12 */
     const uint16_t data_len = 12;
-    if (out_cap < 9 + data_len) {
+    if (out_cap < (size_t)9 + (size_t)data_len) {
         return -ENOSPC;
     }
     encode_subheader(cfg, data_len, out, out_cap);
@@ -725,7 +725,12 @@ int slmp_stack_client_batch_read(slmp_stack_t *s, const slmp_range_t *range,
         if (dlen < range->quantity || raw_cap < range->quantity) {
             return -ENOSPC;
         }
-        memcpy(raw_out, data, range->quantity);
+        if (range->quantity > 0) {
+            if (!data) {
+                return -EIO;
+            }
+            memcpy(raw_out, data, range->quantity);
+        }
         *raw_len = range->quantity;
         slmp_stack_write_bits(s, range->addr.device_code, range->addr.head,
                               raw_out, range->quantity);
@@ -735,7 +740,12 @@ int slmp_stack_client_batch_read(slmp_stack_t *s, const slmp_range_t *range,
     if (dlen < need || raw_cap < need) {
         return -ENOSPC;
     }
-    wire_words_to_be(data, range->quantity, raw_out);
+    if (need > 0) {
+        if (!data) {
+            return -EIO;
+        }
+        wire_words_to_be(data, range->quantity, raw_out);
+    }
     *raw_len = need;
     slmp_stack_write_bytes(s, range->addr.device_code, range->addr.head, raw_out,
                            need);

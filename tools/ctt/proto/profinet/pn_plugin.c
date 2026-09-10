@@ -642,7 +642,7 @@ static int step_dcp_set_ip(ctt_run_t *run, pn_priv_t *priv,
                        (got_ip >> 8) & 0xff, got_ip & 0xff);
 
     uint8_t frames[8][CTT_FRAME_MAX];
-    size_t flens[8];
+    size_t flens[8] = {0};
     int nf = 0;
     uint8_t tmp[CTT_FRAME_MAX];
     int tn = 0;
@@ -689,9 +689,12 @@ static int step_dcp_set_ip(ctt_run_t *run, pn_priv_t *priv,
     if (want_hello && hello_ok) {
         rc |= finish_eth_step(run, step, idx, action, 1, frames[hello_i],
                               flens[hello_i]);
-    } else {
-        rc |= finish_eth_step(run, step, idx, action, set_ok, frames[set_i],
+    } else if (set_ok) {
+        rc |= finish_eth_step(run, step, idx, action, 1, frames[set_i],
                               flens[set_i]);
+    } else {
+        /* No matching Set.Res: do not pass uninitialized frames[0]/flens[0]. */
+        rc |= finish_eth_step(run, step, idx, action, 0, NULL, 0);
     }
     return rc;
 }
@@ -2117,7 +2120,14 @@ static int pn_setup(ctt_run_t *run)
                       "(see tests/run_ctt_lab.sh)");
             return -EINVAL;
         }
-        snprintf(cfg.iface, sizeof(cfg.iface), "%s", run->opts.dut_iface);
+        {
+            size_t nlen = strlen(run->opts.dut_iface);
+            if (nlen >= sizeof(cfg.iface)) {
+                LOG_ERROR("ctt_pn", "dut-iface name too long for IFNAMSIZ");
+                return -ENAMETOOLONG;
+            }
+            memcpy(cfg.iface, run->opts.dut_iface, nlen + 1);
+        }
     } else {
         if (strcmp(iface, "mock") != 0) {
             LOG_ERROR("ctt_pn",

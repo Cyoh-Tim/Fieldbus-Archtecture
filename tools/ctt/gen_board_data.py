@@ -228,7 +228,6 @@ def load_matrix_index() -> tuple[dict[str, dict], list[dict]]:
         for table in parse_md_tables(path):
             if len(table) < 2:
                 continue
-            header = [h.lower() for h in table[0]]
             rows = table[1:]
             # YAML mapping tables have a first column that is a .yaml name.
             yamlish = sum(1 for r in rows if yaml_name_from_cell(r[0]))
