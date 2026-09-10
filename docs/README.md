@@ -10,7 +10,8 @@
 | [`codesys_master_io.md`](codesys_master_io.md) | CODESYS SoftPLC 마스터 ↔ 우리 DUT (Modbus 정본; SoftPLC 앱은 수동) |
 | [`index.html`](index.html) | 브라우저 허브 (이 폴더를 파일로 열 때) |
 | [`config-wizard.html`](config-wizard.html) | 질문으로 `config.json` 생성 (비전문가 입문) |
-| [`json-config-flow.html`](json-config-flow.html) | JSON → 런타임 애니메이션 (데모 정본 HTML) |
+| [`runtime-storyboard.html`](runtime-storyboard.html) | 내 JSON이 런타임을 움직이는 단계별 스토리보드 |
+| [`json-config-flow.html`](json-config-flow.html) | JSON → 런타임 애니메이션 (가벼운 탭 데모) |
 | [`config-viz.html`](config-viz.html) | (선택) 필드 의미·메모리 맵 시각화 |
 | [`ctt_board.html`](ctt_board.html) | CTT 시나리오 현황 보드 (≠ 인증) |
 | [`app_api.md`](app_api.md) | 앱은 `fb_api.h` 만 |

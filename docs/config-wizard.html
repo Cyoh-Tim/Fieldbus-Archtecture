@@ -175,6 +175,7 @@
     <nav class="demo-nav" aria-label="데모 경로">
       <a href="index.html">데모 허브</a>
       <a href="config-wizard.html" class="on">설정 마법사</a>
+      <a href="runtime-storyboard.html">동작 스토리보드</a>
       <a href="json-config-flow.html">JSON 흐름</a>
       <a href="config-viz.html">필드 맵 (선택)</a>
       <a href="ctt_board.html">CTT 보드</a>
@@ -199,7 +200,8 @@
     <footer>
       생성된 JSON은 <code>config/config.schema.json</code> 모양과
       <code>config/example.*.json</code> 패턴을 따릅니다.
-      다음: <a href="json-config-flow.html">JSON 흐름</a>으로 값이 어떻게 움직이는지 보기
+      다음: <a href="runtime-storyboard.html">동작 스토리보드</a>에서 이 JSON이 데몬을 어떻게 움직이는지 보기
+      · 가벼운 탭 데모: <a href="json-config-flow.html">JSON 흐름</a>
       · 실행은 저장소 루트 <code>./multiproto_daemon config.json</code>
       또는 <code>./examples/run_mock_flow.sh</code>.
       CC-Link 는 아직 스텁이라 이 마법사에 없습니다.
@@ -1157,10 +1159,13 @@ function screenReview() {
       <button class="btn secondary" data-next="points">뒤로</button>
       <div class="right">
         <button class="btn secondary" data-copy="1">JSON 복사</button>
+        <button class="btn secondary" data-storyboard="1" ${errors.length ? "disabled" : ""}>이 JSON으로 동작 보기</button>
         <button class="btn" data-download="1" ${errors.length ? "disabled" : ""}>config.json 받기</button>
       </div>
     </div>
-    <p class="hint" style="margin-top:12px">저장 후 예: <code>./multiproto_daemon config.json</code> · 흐름 보기: <a href="json-config-flow.html">json-config-flow.html</a></p>`;
+    <p class="hint" style="margin-top:12px">저장 후 예: <code>./multiproto_daemon config.json</code>
+      · 동작 보기: <a href="runtime-storyboard.html">runtime-storyboard.html</a>
+      · 가벼운 탭 데모: <a href="json-config-flow.html">json-config-flow.html</a></p>`;
 }
 
 function render() {
@@ -1299,8 +1304,19 @@ document.getElementById("progress").addEventListener("click", (e) => {
   render();
 });
 
+function openStoryboard() {
+  const built = buildConfig(state);
+  if (validateConfig(built).length) return;
+  const json = JSON.stringify(built);
+  try {
+    localStorage.setItem("fb_runtime_storyboard_config", json);
+  } catch (e) { /* private mode 등 */ }
+  // hash 는 file:// 에서 파일마다 origin 이 갈라져 localStorage 가 안 보일 때를 대비.
+  window.location.href = "runtime-storyboard.html?from=wizard#fbcfg=" + encodeURIComponent(json);
+}
+
 document.getElementById("screen").addEventListener("click", (e) => {
-  const t = e.target.closest("[data-p],[data-wait],[data-conn],[data-next],[data-preset],[data-add],[data-edit],[data-del],[data-acc],[data-kind],[data-save-point],[data-copy],[data-download]");
+  const t = e.target.closest("[data-p],[data-wait],[data-conn],[data-next],[data-preset],[data-add],[data-edit],[data-del],[data-acc],[data-kind],[data-save-point],[data-copy],[data-download],[data-storyboard]");
   if (!t) return;
   if (t.dataset.p) {
     const prev = state.protocol;
@@ -1386,6 +1402,7 @@ document.getElementById("screen").addEventListener("click", (e) => {
   if (t.dataset.savePoint) { savePoint(); render(); return; }
   if (t.dataset.copy) { copyJson(); return; }
   if (t.dataset.download) { downloadJson(); return; }
+  if (t.dataset.storyboard) { openStoryboard(); return; }
 });
 
 document.getElementById("screen").addEventListener("keydown", (e) => {

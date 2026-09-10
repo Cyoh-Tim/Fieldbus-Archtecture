@@ -84,28 +84,32 @@
         <h2><span class="n">1</span> 설정 마법사</h2>
         <p>통신 문서를 읽지 않아도 됩니다. 질문에 답하면 <code>config.json</code> 이 나옵니다. JSON을 처음 만든다면 여기부터.</p>
       </a>
+      <a class="card" href="runtime-storyboard.html">
+        <h2><span class="n">2</span> 설정 → 동작 스토리보드</h2>
+        <p>예제 또는 방금 만든 JSON이 파싱·어댑터·연결·포인트·한 사이클에서 무엇을 하는지, 단계마다 보여 줍니다.</p>
+      </a>
       <a class="card" href="json-config-flow.html">
-        <h2><span class="n">2</span> JSON 흐름</h2>
-        <p>빌드 없이 브라우저에서. 탭을 Modbus → SLMP → EtherNet/IP → PROFINET 으로 바꾸고 ▶ 동작 보기.</p>
+        <h2><span class="n">3</span> JSON 흐름</h2>
+        <p>가벼운 탭 데모. Modbus → SLMP → EtherNet/IP → PROFINET 으로 바꾸고 ▶ 동작 보기. 스토리보드의 짧은 버전.</p>
       </a>
       <div class="card">
-        <h2><span class="n">3</span> 가짜 센서 → fb_api → CTT mock</h2>
+        <h2><span class="n">4</span> 가짜 센서 → fb_api → CTT mock</h2>
         <p>저장소 루트 터미널. sudo / 원시 소켓 없음. 하나만 돌리면 <code>modbus</code> 가 가장 짧다.</p>
         <pre>./examples/run_mock_flow.sh
 ./examples/run_mock_flow.sh modbus</pre>
       </div>
       <a class="card" href="sw_master_io.md">
-        <h2><span class="n">3b</span> 소프트웨어 마스터 soak</h2>
+        <h2><span class="n">4b</span> 소프트웨어 마스터 soak</h2>
         <p>CODESYS 없이 Modbus / SLMP / EIP 라이브 루프백. PROFINET 은 mock 만. 인증 아님.</p>
         <pre>./examples/run_sw_master_soak.sh</pre>
       </a>
       <a class="card" href="codesys_master_io.md">
-        <h2><span class="n">3c</span> CODESYS SoftPLC 마스터</h2>
+        <h2><span class="n">4c</span> CODESYS SoftPLC 마스터</h2>
         <p>우리 DUT 는 Modbus TCP 서버. SoftPLC/IDE 앱은 수동. 스탠드인 ≠ CODESYS.</p>
         <pre>./examples/run_codesys_dut.sh --stand-in</pre>
       </a>
       <a class="card" href="ctt_board.html">
-        <h2><span class="n">4</span> CTT 커버리지 보드</h2>
+        <h2><span class="n">5</span> CTT 커버리지 보드</h2>
         <p>통과 / 건너뜀 / 갭 / 범위 밖. 공식 인증 evidence 가 아니다.</p>
       </a>
     </div>
@@ -113,6 +117,8 @@
       선택(정본 아님): 필드 의미·메모리 맵
       <a href="config-viz.html">config-viz.html</a>
       — JSON 흐름 애니메이션의 보완 시각화.
+      내 설정으로 자세히 보려면
+      <a href="runtime-storyboard.html">runtime-storyboard.html</a>.
     </p>
     <footer>
       앱 API: <a href="app_api.md">app_api.md</a>
