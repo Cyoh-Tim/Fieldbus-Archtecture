@@ -10,6 +10,7 @@
 | [`codesys_master_io.md`](codesys_master_io.md) | CODESYS SoftPLC 마스터 ↔ 우리 DUT (Modbus 정본; SoftPLC 앱은 수동) |
 | [`index.html`](index.html) | 브라우저 허브 (이 폴더를 파일로 열 때) |
 | [`config-wizard.html`](config-wizard.html) | 질문으로 `config.json` 생성 (비전문가 입문) |
+| [`wizard-howto.html`](wizard-howto.html) | 설정 마법사 화면 따라하기 (Modbus 스크린샷) |
 | [`runtime-storyboard.html`](runtime-storyboard.html) | 내 JSON이 런타임을 움직이는 단계별 스토리보드 |
 | [`json-config-flow.html`](json-config-flow.html) | JSON → 런타임 애니메이션 (가벼운 탭 데모) |
 | [`config-viz.html`](config-viz.html) | (선택) 필드 의미·메모리 맵 시각화 |

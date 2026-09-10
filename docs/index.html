@@ -28,6 +28,20 @@
   .sub strong { color: var(--accent); font-weight: 600; }
   code { font-family: var(--mono); font-size: 0.86em; color: #c9d7f2; }
   a { color: var(--accent); }
+  .demo-nav {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin: 0 0 18px; font-size: 0.82rem;
+  }
+  .demo-nav a {
+    color: var(--muted); text-decoration: none;
+    padding: 6px 12px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel);
+    font-weight: 600;
+  }
+  .demo-nav a:hover { color: var(--text); border-color: #46608a; }
+  .demo-nav a.on {
+    color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  }
   .banner {
     display: flex; gap: 12px; align-items: flex-start;
     padding: 12px 14px; margin-bottom: 18px;
@@ -47,6 +61,7 @@
     display: block;
   }
   a.card:hover { border-color: #46608a; }
+  .card strong { color: var(--accent); font-weight: 700; }
   .n {
     display: inline-flex; width: 1.6rem; height: 1.6rem; align-items: center; justify-content: center;
     border-radius: 999px; background: #24344f; color: var(--accent); font-weight: 800; font-size: 0.82rem;
@@ -64,6 +79,16 @@
 </head>
 <body>
   <div class="wrap">
+    <nav class="demo-nav" aria-label="데모 경로">
+      <a href="index.html" class="on">데모 허브</a>
+      <a href="config-wizard.html">설정 마법사</a>
+      <a href="wizard-howto.html">마법사 따라하기</a>
+      <a href="runtime-storyboard.html">동작 스토리보드</a>
+      <a href="json-config-flow.html">JSON 흐름</a>
+      <a href="config-viz.html">필드 맵 (선택)</a>
+      <a href="ctt_board.html">CTT 보드</a>
+      <a href="demo.md">10분 스크립트</a>
+    </nav>
     <h1>장비 없는 제품 데모</h1>
     <p class="sub">
       JSON 이 프로토콜을 고른다 → 가짜 센서가 포인트를 게시한다 → 내부 CTT mock 이 같은 스택을 확인한다.
@@ -83,6 +108,9 @@
       <a class="card" href="config-wizard.html">
         <h2><span class="n">1</span> 설정 마법사</h2>
         <p>통신 문서를 읽지 않아도 됩니다. 질문에 답하면 <code>config.json</code> 이 나옵니다. JSON을 처음 만든다면 여기부터.</p>
+      </a>
+      <a class="card" href="wizard-howto.html" style="padding:12px 18px">
+        <p><strong>화면으로 따라하기</strong> — 위 마법사를 스크린샷 6장으로 한 장씩 보여 줍니다. 처음이면 여기.</p>
       </a>
       <a class="card" href="runtime-storyboard.html">
         <h2><span class="n">2</span> 설정 → 동작 스토리보드</h2>
