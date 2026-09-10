@@ -44,11 +44,13 @@ int config_load(const char *path, daemon_config_t *out)
     }
 
     cJSON *root = cJSON_Parse(raw);
-    free(raw);
     if (!root) {
-        fprintf(stderr, "[config] JSON 파싱 실패: %s\n", cJSON_GetErrorPtr());
+        const char *ep = cJSON_GetErrorPtr();
+        fprintf(stderr, "[config] JSON 파싱 실패: %s\n", ep ? ep : "(unknown)");
+        free(raw);
         return -1;
     }
+    free(raw);
 
     cJSON *protocol = cJSON_GetObjectItemCaseSensitive(root, "protocol");
     if (!cJSON_IsString(protocol) || !protocol->valuestring[0]) {

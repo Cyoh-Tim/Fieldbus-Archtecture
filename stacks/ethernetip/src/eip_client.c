@@ -89,7 +89,7 @@ static int originator_sendrr(eip_stack_t *s, const uint8_t *cip, size_t cip_len,
         return n < 0 ? n : -EIO;
     }
     uint16_t body_len = eip_rd_le16(resp + 2);
-    if ((size_t)n < EIP_ENCAP_HDR_SIZE + body_len) {
+    if ((size_t)n < (size_t)EIP_ENCAP_HDR_SIZE + (size_t)body_len) {
         return -EIO;
     }
     const uint8_t *body = resp + EIP_ENCAP_HDR_SIZE;

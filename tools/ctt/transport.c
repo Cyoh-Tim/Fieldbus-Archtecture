@@ -110,7 +110,15 @@ static int af_open(ctt_run_t *run)
 
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", run->opts.iface);
+    {
+        size_t nlen = strlen(run->opts.iface);
+        if (nlen >= sizeof(ifr.ifr_name)) {
+            LOG_ERROR("ctt", "iface name too long for IFNAMSIZ");
+            close(fd);
+            return -ENAMETOOLONG;
+        }
+        memcpy(ifr.ifr_name, run->opts.iface, nlen + 1);
+    }
     if (ioctl(fd, SIOCGIFINDEX, &ifr) < 0) {
         LOG_ERROR("ctt", "iface %s not found", run->opts.iface);
         close(fd);
