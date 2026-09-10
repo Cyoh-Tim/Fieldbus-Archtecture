@@ -20,7 +20,18 @@ xdg-open docs/config-wizard.html
 
 질문에 답하면 `config.json` 이 만들어집니다. 프로토콜 문서를 읽지 않아도 됩니다.
 Modbus / SLMP 은 주소 칸을 일상 말로 묻고, EtherNet/IP · PROFINET 은 예제 기본값을 안내합니다.
-그다음 아래 JSON 흐름으로 값이 어떻게 움직이는지 보세요.
+확인 화면의 **이 JSON으로 동작 보기** 로 아래 스토리보드에 바로 넘길 수 있습니다.
+
+## 0.5 설정 → 동작 스토리보드 (브라우저, 빌드 없음)
+
+```
+xdg-open docs/runtime-storyboard.html
+```
+
+예제 버튼(Modbus / SLMP / EtherNet/IP / PROFINET) 또는 마법사 JSON 붙여넣기 →
+**다음 단계** 또는 **▶ 자동재생**.
+`protocol` 파싱 → 어댑터 선택 → 연결(기다림/붙음) → 포인트 표 → 한 사이클 raw/eng 순입니다.
+가벼운 탭 데모는 아래 JSON 흐름에 그대로 있습니다.
 
 ## 1. JSON → 런타임 (브라우저, 빌드 없음)
 
@@ -86,7 +97,8 @@ CODESYS SoftPLC 마스터(Modbus 정본, 앱은 IDE 수동): [`codesys_master_io
 
 선택 시각화(정본 아님): 필드 의미·메모리 맵 [`config-viz.html`](config-viz.html).
 JSON을 처음 만든다면 [`config-wizard.html`](config-wizard.html).
-데모 경로의 HTML 은 **`json-config-flow.html`** 이다.
+그 JSON이 데몬을 어떻게 움직이는지: [`runtime-storyboard.html`](runtime-storyboard.html).
+가벼운 탭 데모 HTML 은 **`json-config-flow.html`** 이다.
 
 ## 다음에 읽을 것
 
