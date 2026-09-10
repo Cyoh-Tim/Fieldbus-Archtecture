@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Fieldbus · 설정 → 동작 스토리보드</title>
+<link rel="icon" href="data:,">
 <style>
   :root {
     --bg: #0b1220;
@@ -812,9 +813,16 @@ function goStage(i) {
   haltPlay();
   stage = Math.max(0, Math.min(STAGES.length - 1, i));
   if (stage < 4) { ptIndex = 0; phase = 0; }
-  if (stage === 4 && cycleNo === 0) {
-    cycleNo = 1;
-    fillCycleValues(cycleNo);
+  if (stage === 4) {
+    if (cycleNo === 0) cycleNo = 1;
+    if (!lastValues.length) fillCycleValues(cycleNo);
+    ptIndex = 0;
+    phase = 0;
+  }
+  if (stage === 5) {
+    if (cycleNo === 0) cycleNo = 1;
+    if (!lastValues.length) fillCycleValues(cycleNo);
+    phase = 3;
   }
   renderAll();
 }
@@ -862,13 +870,9 @@ function advancePlay() {
 }
 
 function stepNext() {
-  if (stage < 5) {
-    if (stage === 4 && !playing) {
-      if (phase < 3) { phase += 1; renderAll(); return; }
-      if (ptIndex < points().length - 1) { ptIndex += 1; phase = 0; renderAll(); return; }
-    }
-    goStage(stage + 1);
-  } else {
+  if (stage < 5) goStage(stage + 1);
+  else {
+    haltPlay();
     cycleNo += 1;
     fillCycleValues(cycleNo);
     ptIndex = (ptIndex + 1) % Math.max(points().length, 1);
@@ -878,12 +882,7 @@ function stepNext() {
 }
 
 function stepPrev() {
-  if (stage === 4 && (ptIndex > 0 || phase > 0)) {
-    if (phase > 0) phase -= 1;
-    else { ptIndex -= 1; phase = 3; }
-    renderAll();
-    return;
-  }
+  if (stage <= 0) return;
   goStage(stage - 1);
 }
 
@@ -1099,7 +1098,7 @@ function narrationFor() {
   if (stage === 4) {
     const p = points()[ptIndex];
     if (isStub()) return "스텁이라 와이어가 없습니다.";
-    return `한 사이클 안에서 포인트를 순서대로 처리합니다. 지금 <em>${escapeHtml(everyday(p.name))}</em> · ${escapeHtml(PHASES[phase].title)}.`;
+    return `한 사이클 안에서 포인트를 순서대로 처리합니다. 지금 <em>${escapeHtml(everyday(p.name))}</em> · ${escapeHtml(PHASES[phase].title)}. ▶ 자동재생이면 틱 → 어댑터 → 와이어 → 공학값이 이어집니다.`;
   }
   return `라이브: cycle <em>#${cycleNo}</em> 가 ${cycleMs()}ms 마다 돕니다. 오른쪽 패널이 방금 갱신된 공학값입니다.`;
 }
@@ -1120,7 +1119,7 @@ function renderAll() {
   else html = renderLiveStage();
   document.getElementById("stageBody").innerHTML = html;
   renderLive();
-  document.getElementById("btnPrev").disabled = stage === 0 && phase === 0 && ptIndex === 0;
+  document.getElementById("btnPrev").disabled = stage === 0;
 }
 
 document.getElementById("exRow").addEventListener("click", (e) => {
