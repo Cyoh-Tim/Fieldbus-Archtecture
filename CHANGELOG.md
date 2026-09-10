@@ -32,6 +32,9 @@
 
 ### Added
 
+- 풀테스트 리포트 [`docs/reports/full_test_20260910.md`](docs/reports/full_test_20260910.md)
+  (`main` @ `e387a31`, daemon+API+CTT 92/92 포함 `soak_ci`, mock flow 4프로토콜,
+  sw-master 30s, CODESYS stand-in, ASan+UBSan+LSan; **인증 아님**)
 - 정적+동적 분석 리포트 [`docs/reports/analysis_20260910.md`](docs/reports/analysis_20260910.md)
   (ASan UAF / C UB 수정 포함, **인증 아님**)
 - 소프트웨어 마스터 soak (CODESYS 없음): Modbus TCP · SLMP Binary 3E · EtherNet/IP
