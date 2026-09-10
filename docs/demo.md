@@ -22,6 +22,15 @@ xdg-open docs/config-wizard.html
 Modbus / SLMP 은 주소 칸을 일상 말로 묻고, EtherNet/IP · PROFINET 은 예제 기본값을 안내합니다.
 확인 화면의 **이 JSON으로 동작 보기** 로 아래 스토리보드에 바로 넘길 수 있습니다.
 
+처음이면 화면으로 따라하기:
+
+```
+xdg-open docs/wizard-howto.html
+```
+
+Modbus TCP → 별명 기본값 → 우리는 장비 → 데모 / 장비 없음 → + 온도 (×0.1) → `config.json` 받기.
+스크린샷 6장입니다. 마법사 자체는 바꾸지 않습니다.
+
 ## 0.5 설정 → 동작 스토리보드 (브라우저, 빌드 없음)
 
 ```
@@ -97,6 +106,7 @@ CODESYS SoftPLC 마스터(Modbus 정본, 앱은 IDE 수동): [`codesys_master_io
 
 선택 시각화(정본 아님): 필드 의미·메모리 맵 [`config-viz.html`](config-viz.html).
 JSON을 처음 만든다면 [`config-wizard.html`](config-wizard.html).
+처음이면 화면으로 따라하기: [`wizard-howto.html`](wizard-howto.html).
 그 JSON이 데몬을 어떻게 움직이는지: [`runtime-storyboard.html`](runtime-storyboard.html).
 가벼운 탭 데모 HTML 은 **`json-config-flow.html`** 이다.
 

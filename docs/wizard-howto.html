@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fieldbus · 설정 마법사 화면 따라하기</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #121a2b;
+    --panel2: #182338;
+    --line: #2a3a55;
+    --text: #e8eefc;
+    --muted: #93a4c3;
+    --accent: #3dd6c6;
+    --accent2: #5b8cff;
+    --warn: #ffb020;
+    --ok: #4ade80;
+    --font: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: radial-gradient(1200px 600px at 10% -10%, #1a2744 0%, var(--bg) 55%); color: var(--text); font-family: var(--font); }
+  body { padding: 28px 20px 48px; }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 1.55rem; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 18px; line-height: 1.55; font-size: 0.98rem; }
+  .sub strong { color: var(--accent); font-weight: 600; }
+  code { font-family: var(--mono); font-size: 0.86em; color: #c9d7f2; }
+  a { color: var(--accent); }
+  .demo-nav {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin: 0 0 18px; font-size: 0.82rem;
+  }
+  .demo-nav a {
+    color: var(--muted); text-decoration: none;
+    padding: 6px 12px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel);
+    font-weight: 600;
+  }
+  .demo-nav a:hover { color: var(--text); border-color: #46608a; }
+  .demo-nav a.on {
+    color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  }
+  .banner {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 12px 14px; margin-bottom: 16px;
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+    background: color-mix(in srgb, var(--warn) 10%, var(--panel));
+    border-radius: 14px; color: #fde7b0; font-size: 0.9rem; line-height: 1.5;
+  }
+  .banner .mark {
+    flex: 0 0 auto; font-weight: 800; letter-spacing: .04em; font-size: 0.72rem;
+    padding: 4px 8px; border-radius: 999px; background: #3a2a12; color: var(--warn);
+  }
+  .card {
+    background: linear-gradient(180deg, var(--panel), var(--panel2));
+    border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.28);
+    padding: 20px 20px 18px;
+    margin-bottom: 16px;
+  }
+  .card h2 { margin: 0 0 8px; font-size: 1.15rem; letter-spacing: -0.02em; }
+  .hint { color: var(--muted); font-size: 0.9rem; line-height: 1.5; margin: 0 0 12px; }
+  pre {
+    margin: 10px 0 12px; padding: 10px 12px; border-radius: 10px; overflow: auto;
+    background: #0c1424; border: 1px solid var(--line); color: #c9d7f2;
+    font-family: var(--mono); font-size: 0.82rem;
+  }
+  .path {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    margin: 0; font-size: 0.84rem; color: var(--muted); line-height: 1.5;
+  }
+  .path span {
+    padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: #0c1424; color: var(--text);
+    font-weight: 700; font-size: 0.78rem;
+  }
+  .path .arrow { border: 0; background: transparent; padding: 0; color: var(--muted); font-weight: 800; }
+  .toc {
+    list-style: none; margin: 0; padding: 0; display: grid; gap: 8px;
+  }
+  .toc a {
+    display: flex; gap: 10px; align-items: baseline;
+    text-decoration: none; color: inherit;
+    padding: 10px 12px; border-radius: 12px;
+    border: 1px solid var(--line); background: #0c1424;
+  }
+  .toc a:hover { border-color: #46608a; }
+  .toc .n {
+    flex: 0 0 auto; color: var(--accent); font-weight: 800; font-size: 0.82rem;
+  }
+  .toc .t { font-weight: 700; }
+  .toc .d { color: var(--muted); font-size: 0.84rem; margin-left: auto; }
+  @media (max-width: 640px) { .toc .d { display: none; } }
+  .step { scroll-margin-top: 16px; }
+  .step h2 { margin: 0 0 8px; font-size: 1.15rem; letter-spacing: -0.02em; }
+  .shot {
+    display: block; width: 100%; height: auto;
+    margin: 12px 0 0; border-radius: 14px;
+    border: 1px solid var(--line);
+    box-shadow: 0 12px 40px rgba(0,0,0,.22);
+    background: #0c1424;
+  }
+  footer { margin-top: 18px; color: #6f82a6; font-size: 0.78rem; line-height: 1.5; }
+  .nexts {
+    display: grid; gap: 10px;
+  }
+  .nexts a {
+    text-decoration: none; color: inherit;
+    display: block;
+  }
+  .nexts a:hover { border-color: #46608a; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="demo-nav" aria-label="데모 경로">
+      <a href="index.html">데모 허브</a>
+      <a href="config-wizard.html">설정 마법사</a>
+      <a href="wizard-howto.html" class="on">마법사 따라하기</a>
+      <a href="runtime-storyboard.html">동작 스토리보드</a>
+      <a href="json-config-flow.html">JSON 흐름</a>
+      <a href="config-viz.html">필드 맵 (선택)</a>
+      <a href="ctt_board.html">CTT 보드</a>
+      <a href="demo.md">10분 스크립트</a>
+    </nav>
+    <h1>설정 마법사, 화면으로 따라하기</h1>
+    <p class="sub">
+      통신 문서를 읽지 않아도 됩니다. 아래는 실제
+      <a href="config-wizard.html"><code>config-wizard.html</code></a>
+      의 <strong>Modbus 입문 경로</strong>입니다.
+      같은 버튼을 누르면 데몬이 읽는 <code>config.json</code> 이 나옵니다.
+    </p>
+    <div class="banner" role="note">
+      <span class="mark">NO HW · NOT CERT</span>
+      <div>
+        브라우저만으로 JSON을 만듭니다. PLC / NIC / <code>CAP_NET_RAW</code> 불필요.
+        <strong>인증이 아닙니다.</strong> PI / ODVA / Modbus.org / Mitsubishi 공인 랩 evidence 가 아닙니다.
+      </div>
+    </div>
+
+    <section class="card">
+      <h2>마법사 열기</h2>
+      <p class="hint">저장소 루트에서 브라우저로 엽니다. 이 페이지는 스크린샷 안내일 뿐, 마법사 자체를 바꾸지 않습니다.</p>
+      <pre>xdg-open docs/config-wizard.html</pre>
+      <p class="hint" style="margin-bottom:8px">추천 경로 (초보자 · 장비 없음):</p>
+      <p class="path">
+        <span>Modbus TCP</span><span class="arrow">→</span>
+        <span>별명 기본값</span><span class="arrow">→</span>
+        <span>우리는 장비</span><span class="arrow">→</span>
+        <span>데모 / 장비 없음</span><span class="arrow">→</span>
+        <span>+ 온도 (×0.1)</span><span class="arrow">→</span>
+        <span>config.json 받기</span>
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>목차</h2>
+      <ol class="toc">
+        <li><a href="#s1"><span class="n">1.</span> <span class="t">장비</span> <span class="d">Modbus TCP 고르고 다음</span></a></li>
+        <li><a href="#s2"><span class="n">2.</span> <span class="t">이름</span> <span class="d">별명 기본값 OK, 다음</span></a></li>
+        <li><a href="#s3"><span class="n">3.</span> <span class="t">역할</span> <span class="d">우리는 장비 · PLC가 붙습니다</span></a></li>
+        <li><a href="#s4"><span class="n">4.</span> <span class="t">연결</span> <span class="d">데모 / 장비 없음</span></a></li>
+        <li><a href="#s5"><span class="n">5.</span> <span class="t">값</span> <span class="d">+ 온도 (×0.1) 후 다 했어요</span></a></li>
+        <li><a href="#s6"><span class="n">6.</span> <span class="t">확인</span> <span class="d">JSON 복사 / config.json 받기</span></a></li>
+      </ol>
+    </section>
+
+    <section class="card step" id="s1">
+      <h2>1. 어떤 장비와 연결할까요?</h2>
+      <p class="hint">
+        <strong>Modbus TCP 장비</strong>를 고르고 <strong>다음</strong>을 누릅니다.
+        기본값도 Modbus입니다. 통신 이름을 몰라도, 가이드 표지의 로고·문구에 가까운 것을 고르면 됩니다.
+      </p>
+      <img class="shot" src="wizard-howto/01-protocol.jpg" alt="설정 마법사 1단계: Modbus TCP 장비가 선택된 화면" width="1100" />
+    </section>
+
+    <section class="card step" id="s2">
+      <h2>2. 이 장비를 뭐라고 부를까요?</h2>
+      <p class="hint">
+        별명 기본값 <code>barcode_sensor_1</code> 을 그대로 두고 <strong>다음</strong>을 누릅니다.
+        영어·숫자·밑줄이 가장 안전합니다. 나중에 로그에 이 이름이 보입니다.
+      </p>
+      <img class="shot" src="wizard-howto/02-name.jpg" alt="설정 마법사 2단계: 별명 barcode_sensor_1" width="1100" />
+    </section>
+
+    <section class="card step" id="s3">
+      <h2>3. 누가 먼저 말을 걸까요?</h2>
+      <p class="hint">
+        <strong>우리는 장비 · PLC가 붙습니다</strong>를 고릅니다.
+        센서처럼 기다리는 쪽입니다. 대부분의 데모·가짜 센서가 이 방식입니다.
+      </p>
+      <img class="shot" src="wizard-howto/03-role.jpg" alt="설정 마법사 3단계: 우리는 장비 · PLC가 붙습니다 선택" width="1100" />
+    </section>
+
+    <section class="card step" id="s4">
+      <h2>4. 어디로 연결할까요?</h2>
+      <p class="hint">
+        <strong>데모 / 장비 없음</strong>을 고릅니다.
+        주소는 <code>127.0.0.1</code>, 포트는 <code>15560</code> 입니다.
+        가짜 센서 예제와 같은 안전한 기본값입니다. 고급 칸은 비워 두면 됩니다.
+      </p>
+      <img class="shot" src="wizard-howto/04-connect.jpg" alt="설정 마법사 4단계: 데모 / 장비 없음, 127.0.0.1:15560" width="1100" />
+    </section>
+
+    <section class="card step" id="s5">
+      <h2>5. 주고받을 값을 넣을까요?</h2>
+      <p class="hint">
+        <strong>+ 온도 (×0.1)</strong>을 누른 뒤 <strong>다 했어요</strong>를 누릅니다.
+        가이드의 “온도” 한 줄이 여기 해당합니다. 바코드·트리거가 필요하면 같은 줄의 칩을 더 눌러도 됩니다.
+      </p>
+      <img class="shot" src="wizard-howto/05-points.jpg" alt="설정 마법사 5단계: 온도 ×0.1 포인트가 추가된 화면" width="1100" />
+    </section>
+
+    <section class="card step" id="s6">
+      <h2>6. 이 설정으로 될까요?</h2>
+      <p class="hint">
+        왼쪽은 일상 말, 아래는 데몬이 읽는 JSON 입니다.
+        <strong>JSON 복사</strong>, <strong>config.json 받기</strong>, 또는
+        <strong>이 JSON으로 동작 보기</strong>로 스토리보드에 넘길 수 있습니다.
+      </p>
+      <img class="shot" src="wizard-howto/06-review.jpg" alt="설정 마법사 6단계: 확인 화면과 config.json 받기" width="1100" />
+    </section>
+
+    <section class="card">
+      <h2>다음</h2>
+      <p class="hint">마법사에서 받은 JSON이 데몬을 어떻게 움직이는지, 가벼운 탭 데모로 이어서 볼 수 있습니다.</p>
+      <div class="nexts">
+        <a class="card" href="config-wizard.html" style="margin:0">
+          <h2>설정 마법사</h2>
+          <p class="hint" style="margin:0">같은 질문을 직접 눌러 <code>config.json</code> 을 만듭니다.</p>
+        </a>
+        <a class="card" href="runtime-storyboard.html" style="margin:0">
+          <h2>동작 스토리보드</h2>
+          <p class="hint" style="margin:0">방금 만든 JSON이 파싱·어댑터·연결·한 사이클에서 무엇을 하는지.</p>
+        </a>
+        <a class="card" href="json-config-flow.html" style="margin:0">
+          <h2>JSON 흐름</h2>
+          <p class="hint" style="margin:0">가벼운 탭 데모. Modbus → SLMP → EtherNet/IP → PROFINET.</p>
+        </a>
+      </div>
+    </section>
+
+    <footer>
+      이 화면은 교육용입니다. 마법사 출력을 바꾸지 않습니다.
+      실행은 저장소 루트 <code>./multiproto_daemon config.json</code>
+      또는 <code>./examples/run_mock_flow.sh</code>.
+      CC-Link 는 아직 스텁. IRT / CC-C · 공식 PI/ODVA 인증은 제품 범위 밖입니다.
+      스크립트: <a href="demo.md">docs/demo.md</a>.
+    </footer>
+  </div>
+</body>
+</html>
