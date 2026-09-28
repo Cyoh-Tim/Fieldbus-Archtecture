@@ -238,7 +238,7 @@ static void test_assembly_rw_and_forward_open(void)
 
     /* Grab O->T conn id from Forward Open reply (service | 0x80 == 0xD4) */
     uint32_t o2t = 0;
-    for (size_t i = 0; i + 12 < resp_len; i++) {
+    for (size_t i = EIP_ENCAP_HDR_SIZE; i + 12 < resp_len; i++) {
         if (resp[i] == (CIP_SVC_FORWARD_OPEN | CIP_SVC_REPLY) &&
             resp[i + 2] == 0) {
             o2t = eip_rd_le32(resp + i + 4);
@@ -389,7 +389,7 @@ static void test_security_integrity(void)
                                   sizeof(resp), &resp_len) == 0,
            "sec FO without mac encap");
     int saw_priv = 0;
-    for (size_t i = 0; i + 3 < resp_len; i++) {
+    for (size_t i = EIP_ENCAP_HDR_SIZE; i + 3 < resp_len; i++) {
         if ((resp[i] & 0x7f) == CIP_SVC_FORWARD_OPEN &&
             (resp[i] & 0x80) && resp[i + 2] == CIP_STATUS_PRIVILEGE) {
             saw_priv = 1;
@@ -749,7 +749,7 @@ static void test_class1_watchdog_and_rt_stats(void)
     expect(eip_stack_class1_up(s) == 1, "class1 after FO");
 
     uint32_t o2t = 0;
-    for (size_t i = 0; i + 12 < resp_len; i++) {
+    for (size_t i = EIP_ENCAP_HDR_SIZE; i + 12 < resp_len; i++) {
         if (resp[i] == (CIP_SVC_FORWARD_OPEN | CIP_SVC_REPLY) &&
             resp[i + 2] == 0) {
             o2t = eip_rd_le32(resp + i + 4);

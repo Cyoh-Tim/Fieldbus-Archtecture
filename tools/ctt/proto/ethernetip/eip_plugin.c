@@ -410,7 +410,7 @@ static int check_encap_expect(ctt_run_t *run, eip_priv_t *priv, int idx,
     if (expect && yaml_has(expect, "privilege")) {
         int want = yaml_bool(expect, "privilege", 1);
         int saw = 0;
-        for (size_t i = 0; i + 3 < priv->last_resp_len; i++) {
+        for (size_t i = EIP_ENCAP_HDR_SIZE; i + 3 < priv->last_resp_len; i++) {
             uint8_t svc = priv->last_resp[i] & 0x7f;
             if ((svc == CIP_SVC_FORWARD_OPEN ||
                  svc == CIP_SVC_LARGE_FORWARD_OPEN) &&
@@ -699,7 +699,8 @@ static int fo_reply_at(const uint8_t *resp, size_t n, size_t i)
 
 static uint32_t parse_fo_o2t(const uint8_t *resp, size_t n)
 {
-    for (size_t i = 0; i + 12 < n; i++) {
+    size_t start = n > EIP_ENCAP_HDR_SIZE ? EIP_ENCAP_HDR_SIZE : n;
+    for (size_t i = start; i + 12 < n; i++) {
         if (fo_reply_at(resp, n, i)) {
             return eip_rd_le32(resp + i + 4);
         }
@@ -709,7 +710,8 @@ static uint32_t parse_fo_o2t(const uint8_t *resp, size_t n)
 
 static uint32_t parse_fo_t2o(const uint8_t *resp, size_t n)
 {
-    for (size_t i = 0; i + 12 < n; i++) {
+    size_t start = n > EIP_ENCAP_HDR_SIZE ? EIP_ENCAP_HDR_SIZE : n;
+    for (size_t i = start; i + 12 < n; i++) {
         if (fo_reply_at(resp, n, i)) {
             return eip_rd_le32(resp + i + 8);
         }
