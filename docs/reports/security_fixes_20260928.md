@@ -16,7 +16,7 @@ SLMP **Binary 3E only**, PREEMPT_RT 없음, 라이선스 Bundle 복제 없음.
 | G3 | MED | PN IODWriteReq header | `parse_write_req` requires body `blen >= 34` before reading record-data length | `test_pn_rpc` (`test_write_short_block`) | 4-1 SI-2; 4-2 CR 3.5 |
 | G4 | MED | PN RPC AR ownership | Reject Connect while AR established; ARUUID + sender IP on Release/Control/Write/Read | `test_pn_rpc` (`test_ar_ownership`); `ctt_pn_rpc_cm_without_ar` | 4-1 SI-2; 4-2 CR 2.1, 3.5 |
 | G5 | MED | EIP Encaps / uninit | `cip_len < 2` reject; SendRR session must be registered (status `0x64`); zero-init + check `eip_encap_process` | `test_eip_stack` (`test_g5_encap_session_and_cip_len`) | 4-1 SI-2; 4-2 CR 2.1, 3.5, 7.2 |
-| G9 | — | Fuzz + hardening | libFuzzer harnesses + seed corpora; clang CI ~60 s/target; `-fstack-protector-strong`; `-D_FORTIFY_SOURCE=2` with opt | `.github/workflows/ci.yml` `fuzz` / `sanitizers` jobs | 4-1 SVV-3; 4-2 CR 3.5, 7.1 |
+| G9 | — | Fuzz + hardening | libFuzzer harnesses + seed corpora; clang CI ~60 s/target; `-fstack-protector-strong`; `-D_FORTIFY_SOURCE=2` with opt. Fuzz found PN NDR `UINT32_MAX` wrap (fixed) | `.github/workflows/ci.yml` `fuzz` / `sanitizers`; `test_ndr_huge_args_len` | 4-1 SVV-3; 4-2 CR 3.5, 7.1 |
 
 **Out of scope for this PR** (tracked, not fixed here):
 
@@ -143,11 +143,35 @@ non-Debug / non-sanitizer / non-fuzzer: `-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2`
 
 ### Local fuzz runs
 
-| Target | Time | Result |
-|--------|------|--------|
-| *(filled after local run)* | | |
+clang 18, `-fsanitize=fuzzer,address,undefined`, stack libs built with
+`-fsanitize=fuzzer-no-link`. 180 s per target, seed corpora under
+`tests/fuzz/corpus/`. Parallel on this VM (2026-09-28).
 
-Crashes found locally (fixed in this PR if any): listed after the run.
+| Target | Time | exec | cov | result |
+|--------|------|------|-----|--------|
+| `fuzz_mb_adu` | 180 s | 97.7e6 | 186 | OK, no crash |
+| `fuzz_slmp_request` | 180 s | 76.5e6 | 268 | OK, no crash |
+| `fuzz_eip_encap` | 180 s | 51.4e6 | 160 | OK, no crash |
+| `fuzz_eip_io` | 180 s | 87.8e6 | 38 | OK, no crash |
+| `fuzz_pn_eth` | 180 s | 49.3e6 | 248 | OK, no crash |
+| `fuzz_pn_rpc` | 180 s | 47.5e6 | 415 | OK after fix below |
+
+**Crash found locally (fixed in this PR):** `fuzz_pn_rpc` ASan SEGV
+(`crash-1df26b21…`). `ndr_blocks()` used `if (20 + n > len)` with
+`n == UINT32_MAX`, which wraps so a 4 GiB block window was accepted and
+`walk_blocks` read off the stub. Fix: `if (n > len - 20)`. Regression:
+`test_pn_rpc` / `test_ndr_huge_args_len`; seed
+`tests/fuzz/corpus/pn_rpc/ndr_u32max.bin`.
+
+No other fuzzer crashes in the 180 s runs.
+
+### Verification (this session)
+
+| Gate | Result |
+|------|--------|
+| `ctest` daemon+CTT+API (93 tests, incl. `soak_ci`) | pass |
+| ASan+UBSan `ctest` (84 tests, `BUILD_DAEMON=OFF`, incl. `soak_ci`) | pass |
+| libFuzzer 180 s × 6 targets | pass after NDR wrap fix |
 
 ---
 

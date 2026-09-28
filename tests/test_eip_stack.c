@@ -1074,7 +1074,7 @@ static void test_g5_encap_session_and_cip_len(void)
     expect(s != NULL, "g5 stack");
 
     /* SendRRData with no registered session -> 0x64 */
-    uint8_t body[16];
+    uint8_t body[32];
     size_t boff = 0;
     eip_wr_le32(body + boff, 0);
     boff += 4;

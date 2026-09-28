@@ -65,7 +65,7 @@ jobs:
       - name: Install clang
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake libssl-dev
+          sudo apt-get install -y clang g++ cmake libssl-dev libclang-rt-18-dev
       - name: Configure fuzzers
         run: |
           cmake -S . -B build-fuzz -DCMAKE_C_COMPILER=clang -DBUILD_DAEMON=OFF -DBUILD_CTT=OFF -DBUILD_FUZZERS=ON -DENABLE_PN_TESTS=OFF -DENABLE_EIP_TESTS=OFF -DENABLE_MB_TESTS=OFF -DENABLE_SLMP_TESTS=OFF

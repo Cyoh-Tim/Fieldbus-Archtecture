@@ -5,6 +5,14 @@ build-*/
 *.so
 compile_commands.json
 
+# libFuzzer artifacts (named *.bin seeds under tests/fuzz/corpus are kept)
+crash-*
+leak-*
+timeout-*
+tests/fuzz/corpus/**/*
+!tests/fuzz/corpus/**/
+!tests/fuzz/corpus/**/*.bin
+
 # 벤더 라이선스 코드 - 저장소에 커밋하지 않음
 third_party/ethernetip_stack/*
 third_party/profinet_stack/*

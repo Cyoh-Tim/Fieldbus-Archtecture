@@ -361,7 +361,9 @@ static const uint8_t *ndr_blocks(const uint8_t *stub, size_t len, size_t *blen)
     uint32_t args_len = pn_rd_le32(stub + 4);
     uint32_t actual = pn_rd_le32(stub + 16);
     uint32_t n = args_len < actual ? args_len : actual;
-    if (20 + n > len) {
+    /* Do not use `20 + n > len`: n==UINT32_MAX wraps and accepts a 4 GiB
+     * window, then walk_blocks reads off the stub (fuzz SEGV). */
+    if (n > len - 20) {
         n = (uint32_t)(len - 20);
     }
     *blen = n;

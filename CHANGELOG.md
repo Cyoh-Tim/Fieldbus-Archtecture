@@ -18,7 +18,8 @@
   sizes to configured assemblies (G2)
 - PROFINET RPC: IODWriteReq body must be ≥34 bytes before reading record
   length (G3); reject Connect while AR is up; ARUUID + sender IP on
-  Release/Control/Write/Read-with-AR (G4)
+  Release/Control/Write/Read-with-AR (G4); NDR `argsLen==UINT32_MAX` no
+  longer wraps `20+n` into an unbounded block walk (fuzz SEGV)
 - EtherNet/IP Encaps: reject CIP item length <2; SendRRData requires a
   registered session (status `0x64`); zero-init / check `eip_encap_process`
   before reading the response handle (G5)

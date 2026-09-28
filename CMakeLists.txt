@@ -14,6 +14,11 @@ option(BUILD_FUZZERS "libFuzzer harnesses (clang -fsanitize=fuzzer)" OFF)
 if(ENABLE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
+elseif(BUILD_FUZZERS)
+    # Instrument stack libs for coverage; executables add -fsanitize=fuzzer.
+    add_compile_options(-fsanitize=fuzzer-no-link,address,undefined
+                        -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
 elseif(NOT BUILD_FUZZERS)
     # FORTIFY_SOURCE requires optimization; skip Debug and fuzzer+ASan builds.
     add_compile_options($<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
@@ -482,7 +487,15 @@ if(BUILD_FUZZERS)
         target_include_directories(${name} PRIVATE include core
             stacks/modbus/include stacks/slmp/include
             stacks/ethernetip/include stacks/profinet/include)
-        target_link_libraries(${name} PRIVATE ${ARGN})
+        target_link_libraries(${name} PRIVATE ${ARGN} stdc++)
+        # libFuzzer is C++; clang does not always search gcc's libstdc++ dir.
+        execute_process(COMMAND gcc -print-file-name=libstdc++.so
+            OUTPUT_VARIABLE _fb_stdcxx OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+        get_filename_component(_fb_stdcxx_dir "${_fb_stdcxx}" DIRECTORY)
+        if(_fb_stdcxx_dir)
+            target_link_directories(${name} PRIVATE "${_fb_stdcxx_dir}")
+        endif()
         target_compile_options(${name} PRIVATE
             -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
         target_link_options(${name} PRIVATE

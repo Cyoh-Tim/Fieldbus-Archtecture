@@ -1,4 +1,5 @@
-# Internal TC PN-B-CM-005 — single AR replace. Not PI Bundle text.
+# Internal TC PN-B-CM-005 — second Connect while AR up is rejected (spec).
+# Not PI Bundle text. Keeps the first AR; does not replace it.
 name: rpc_ar_replace
 id: PN-B-CM-005
 suite: PN-B-v1
@@ -33,8 +34,6 @@ steps:
     expect:
       rpc_response: true
       ar: up
-      in_frame_id: 0x8001
-      out_frame_id: 0x8002
   - action: io_cycle
     count: 8
     cycle_ms: 8

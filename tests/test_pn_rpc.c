@@ -231,10 +231,38 @@ static void test_ar_ownership(void)
     pn_stack_destroy(s);
 }
 
+static void test_ndr_huge_args_len(void)
+{
+    /* Fuzz: NDR argsLen/actual = UINT32_MAX used to wrap 20+n and OOB-read. */
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "ndr create");
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = build_connect(pdu);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "ndr connect");
+    expect(pn_stack_ar_up(s) == 1, "ndr ar up");
+
+    memset(pdu, 0, sizeof(pdu));
+    pdu[0] = 1;
+    pdu[1] = 0;
+    pn_wr_le16(pdu + 68, 1); /* Release */
+    pn_wr_le16(pdu + 74, 24);
+    memset(pdu + 80, 0xff, 24); /* argsMax/Len/max/offset/actual = UINT32_MAX */
+    rlen = 0;
+    int rc = pn_rpc_handle(s, pdu, 80 + 24, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect(rc == -EPERM || rc == 0, "huge NDR release handled");
+    expect(pn_stack_ar_up(s) == 1, "AR kept when UUID not parsed");
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
     test_write_short_block();
     test_ar_ownership();
+    test_ndr_huge_args_len();
     if (g_fail) {
         fprintf(stderr, "test_pn_rpc: FAILED\n");
         return 1;
