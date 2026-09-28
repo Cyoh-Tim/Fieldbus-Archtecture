@@ -2,6 +2,7 @@
 #include "eip_internal.h"
 
 #include <errno.h>
+#include "logger.h"
 #include <string.h>
 
 static size_t cm_err(uint8_t *resp, size_t cap, uint8_t service, uint8_t status,
@@ -36,6 +37,91 @@ static uint16_t conn_size_from_net(uint32_t net_params, int large)
         return (uint16_t)(net_params & 0xffff);
     }
     return (uint16_t)(net_params & 0x1ff);
+}
+
+static int conn_size_matches(uint16_t net, uint16_t asm_sz)
+{
+    return net == asm_sz || net == (uint16_t)(asm_sz + 2u);
+}
+
+static eip_class1_conn_t *find_dup_triad(eip_stack_t *s, uint16_t serial,
+                                         uint16_t vendor, uint32_t orig_serial)
+{
+    for (int i = 0; i < EIP_CLASS1_CONN_MAX; i++) {
+        eip_class1_conn_t *c = &s->class1[i];
+        if (c->in_use && c->conn_serial == serial && c->vendor_id == vendor &&
+            c->originator_serial == orig_serial) {
+            return c;
+        }
+    }
+    return NULL;
+}
+
+/* Exclusive-owner path: Assembly class + config inst + O->T + T->O points. */
+static int parse_fo_path(const uint8_t *path, size_t path_bytes,
+                         uint16_t *insts, int *n_insts, int insts_cap)
+{
+    size_t i = 0;
+    *n_insts = 0;
+    while (i < path_bytes) {
+        uint8_t seg = path[i++];
+        uint16_t val = 0;
+        int is_inst = 0;
+        if (seg == 0x20 && i < path_bytes) {
+            i += 1; /* class 8-bit */
+        } else if (seg == 0x21 && i + 2 < path_bytes) {
+            i += 3; /* pad + class 16 */
+        } else if ((seg == 0x24 || seg == 0x2C) && i < path_bytes) {
+            val = path[i++];
+            is_inst = 1;
+        } else if ((seg == 0x25 || seg == 0x2D) && i + 2 < path_bytes) {
+            i += 1; /* pad */
+            val = eip_rd_le16(path + i);
+            i += 2;
+            is_inst = 1;
+        } else if (seg == 0x34 && i < path_bytes) {
+            /* Electronic key: key format in low nibble of next, then 8 bytes. */
+            uint8_t key_fmt = path[i++];
+            size_t key_len = (key_fmt == 4) ? 8u : 8u;
+            if (i + key_len > path_bytes) {
+                return -EINVAL;
+            }
+            i += key_len;
+        } else if (seg == 0x01 && i < path_bytes) {
+            /* Port segment — skip remaining of this word. */
+            i += 1;
+        } else {
+            return -EINVAL;
+        }
+        if (is_inst) {
+            if (*n_insts >= insts_cap) {
+                return -EINVAL;
+            }
+            insts[(*n_insts)++] = val;
+        }
+    }
+    return 0;
+}
+
+static int fo_path_matches_asm(eip_stack_t *s, const uint8_t *path,
+                               size_t path_bytes)
+{
+    uint16_t insts[8];
+    int n = 0;
+    if (parse_fo_path(path, path_bytes, insts, &n, 8) != 0) {
+        return 0;
+    }
+    int saw_out = 0;
+    int saw_in = 0;
+    for (int i = 0; i < n; i++) {
+        if (insts[i] == s->cfg.output_assembly) {
+            saw_out = 1;
+        }
+        if (insts[i] == s->cfg.input_assembly) {
+            saw_in = 1;
+        }
+    }
+    return saw_out && saw_in;
 }
 
 int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
@@ -99,26 +185,38 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
         return 0;
     }
 
+    if (path_bytes == 0 ||
+        !fo_path_matches_asm(s, data + off, path_bytes)) {
+        LOG_WARN("ethernetip",
+                 "Forward Open rejected: connection path missing configured "
+                 "assemblies in=%u out=%u",
+                 s->cfg.input_assembly, s->cfg.output_assembly);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_STATUS_PATH_DEST, 0);
+        return 0;
+    }
+
     uint16_t o2t_size = conn_size_from_net(o2t_params, large);
     uint16_t t2o_size = conn_size_from_net(t2o_params, large);
+    if (!conn_size_matches(o2t_size, s->output_size) ||
+        !conn_size_matches(t2o_size, s->input_size)) {
+        LOG_WARN("ethernetip",
+                 "Forward Open rejected: size o2t=%u (need %u[+2]) t2o=%u "
+                 "(need %u[+2])",
+                 o2t_size, s->output_size, t2o_size, s->input_size);
+        *resp_len =
+            cm_err(resp, resp_cap, service, CIP_STATUS_INVALID_PARAM,
+                   CIP_EXT_CONN_SIZE);
+        return 0;
+    }
 
-    /* Accept if sizes fit configured assemblies (allow seq count + data).
-     * Originators often include 2-byte sequence in connected data size. */
-    uint16_t need_out = s->output_size;
-    uint16_t need_in = s->input_size;
-    if (o2t_size < need_out || t2o_size < need_in) {
-        /* Still accept if they match with +2 seq overhead or equal raw */
-        if (!(o2t_size == need_out + 2 || o2t_size == need_out) ||
-            !(t2o_size == need_in + 2 || t2o_size == need_in)) {
-            /* Be permissive for scanners that negotiate different sizes:
-             * clamp to our assembly sizes. */
-            if (o2t_size > EIP_ASSEMBLY_SIZE_MAX ||
-                t2o_size > EIP_ASSEMBLY_SIZE_MAX) {
-                *resp_len =
-                    cm_err(resp, resp_cap, service, CIP_STATUS_INVALID_PARAM, 0x109);
-                return 0;
-            }
-        }
+    if (find_dup_triad(s, conn_serial, orig_vendor, orig_serial)) {
+        LOG_WARN("ethernetip",
+                 "Forward Open rejected: duplicate triad serial=0x%04x "
+                 "vendor=0x%04x orig=0x%08x",
+                 conn_serial, orig_vendor, orig_serial);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_STATUS_CONN_FAILURE,
+                           CIP_EXT_CONN_IN_USE);
+        return 0;
     }
 
     eip_class1_conn_t *c = alloc_conn(s);
@@ -147,9 +245,9 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
         uint32_t rpi = o2t_rpi ? o2t_rpi : s->cfg.rpi_us;
         c->watchdog_us = eip_class1_watchdog_us(rpi, timeout_mult);
     }
-    c->last_rx_ns = 0; /* arm after first IO */
+    /* Arm watchdog at Forward Open so a connection without IO is reclaimed. */
+    c->last_rx_ns = eip_now_ns();
     c->last_tx_ns = 0;
-    (void)path_bytes;
 
     /* Success reply */
     size_t need = large ? 30 : 26;

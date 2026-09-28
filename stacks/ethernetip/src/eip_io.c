@@ -89,8 +89,8 @@ void eip_io_watchdog(eip_stack_t *s)
             wd = eip_class1_watchdog_us(rpi, c->timeout_multiplier);
             c->watchdog_us = wd;
         }
-        /* Only arm after first O->T so FO without IO yet is not killed */
-        if (c->last_rx_ns == 0 || c->peer_udp_port == 0) {
+        if (c->last_rx_ns == 0) {
+            c->last_rx_ns = now;
             continue;
         }
         if (now - c->last_rx_ns > (uint64_t)wd * 1000ull) {

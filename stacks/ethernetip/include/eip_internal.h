@@ -69,6 +69,8 @@ struct eip_stack {
     int running;
 
     uint32_t next_session;
+    uint32_t sessions[EIP_CLASS3_SESSIONS_MAX];
+    int n_sessions;
     uint32_t next_conn_id;
 
     eip_tcp_client_t clients[EIP_TCP_CLIENTS_MAX];

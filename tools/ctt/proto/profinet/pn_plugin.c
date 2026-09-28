@@ -163,6 +163,13 @@ static size_t wr_pn_block(uint8_t *p, uint16_t type, const uint8_t *body,
     return n;
 }
 
+static void fill_connect_aruuid(uint8_t *dst)
+{
+    for (int i = 0; i < 16; i++) {
+        dst[i] = (uint8_t)(0xA0 + i);
+    }
+}
+
 static void pump(ctt_run_t *run, pn_priv_t *priv)
 {
     pn_stack_poll(priv->stack);
@@ -807,9 +814,7 @@ static size_t build_connect_pdu(uint8_t *pdu, size_t cap, int integrity,
     uint8_t ar[2 + 16 + 2 + 6];
     memset(ar, 0, sizeof(ar));
     pn_wr_be16(ar, 0x0001);
-    for (int i = 0; i < 16; i++) {
-        ar[2 + i] = (uint8_t)(0xA0 + i);
-    }
+    fill_connect_aruuid(ar + 2);
     pn_wr_be16(ar + 18, 1);
     memcpy(ar + 20, initiator_mac, 6);
     bn += wr_pn_block(blocks + bn, PN_BLOCK_AR_REQ, ar, sizeof(ar));
@@ -1241,12 +1246,16 @@ static int step_rpc_release(ctt_run_t *run, pn_priv_t *priv,
     const char *action = "rpc_release";
     const yaml_node_t *expect = yaml_map_get(step, "expect");
 
-    uint8_t pdu[128];
+    uint8_t pdu[256];
     memset(pdu, 0, sizeof(pdu));
     pdu[0] = 1;
     pn_wr_le16(pdu + 68, RPC_OP_RELEASE);
-    uint8_t z[4] = {0};
-    size_t stub = ndr_wrap(pdu + 80, z, 4);
+    uint8_t rel[18];
+    memset(rel, 0, sizeof(rel));
+    fill_connect_aruuid(rel + 2);
+    uint8_t blocks[32];
+    size_t bn = wr_pn_block(blocks, PN_BLOCK_AR_REQ, rel, sizeof(rel));
+    size_t stub = ndr_wrap(pdu + 80, blocks, bn);
     pn_wr_le16(pdu + 74, (uint16_t)stub);
 
     uint8_t resp[512];
@@ -1376,6 +1385,7 @@ static int step_rpc_write(ctt_run_t *run, pn_priv_t *priv,
     uint8_t body[34 + 128];
     memset(body, 0, sizeof(body));
     pn_wr_be16(body, 1);
+    fill_connect_aruuid(body + 2);
     pn_wr_be16(body + 22, slot);
     pn_wr_be16(body + 24, subslot);
     pn_wr_be16(body + 28, index);
@@ -1421,6 +1431,7 @@ static int step_rpc_control(ctt_run_t *run, pn_priv_t *priv,
 
     uint8_t body[26];
     memset(body, 0, sizeof(body));
+    fill_connect_aruuid(body + 2);
     pn_wr_be16(body + 22, cmd);
     uint8_t blocks[64];
     size_t bn = wr_pn_block(blocks, PN_BLOCK_CONTROL_REQ, body, sizeof(body));
@@ -1660,6 +1671,7 @@ static int step_record_read(ctt_run_t *run, pn_priv_t *priv,
     uint8_t body[34];
     memset(body, 0, sizeof(body));
     pn_wr_be16(body, 1); /* seqNumber */
+    fill_connect_aruuid(body + 2);
     pn_wr_be16(body + 22, slot);
     pn_wr_be16(body + 24, subslot);
     pn_wr_be16(body + 28, index);

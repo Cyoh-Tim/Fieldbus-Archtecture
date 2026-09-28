@@ -591,6 +591,9 @@ def cip_forward_open(
     conn_serial: int,
     vendor: int,
     orig_serial: int,
+    config_asm: int = 100,
+    output_asm: int = 101,
+    input_asm: int = 150,
 ) -> bytes:
     fo = bytearray()
     fo.append(0x0A)
@@ -607,7 +610,19 @@ def cip_forward_open(
     fo += le32(rpi_us)
     fo += le16(t2o_size)
     fo.append(0x01)  # class 1
-    fo.append(0)  # empty connection path (our DUT accepts this)
+    fo.append(4)  # path size words
+    fo += bytes(
+        [
+            0x20,
+            CIP_CLASS_ASSEMBLY,
+            0x24,
+            config_asm & 0xFF,
+            0x2C,
+            output_asm & 0xFF,
+            0x2C,
+            input_asm & 0xFF,
+        ]
+    )
     path = bytes([0x20, CIP_CLASS_CONN_MANAGER, 0x24, 1])
     return bytes([CIP_SVC_FORWARD_OPEN, 2]) + path + bytes(fo)
 
@@ -741,6 +756,9 @@ def run_eip_class1(args: argparse.Namespace, sock: socket.socket, session: int) 
         conn_serial,
         orig_vendor,
         orig_serial,
+        100,
+        args.eip_output_asm,
+        args.eip_input_asm,
     )
     fo = eip_sendrr(sock, session, cip)
     if len(fo) < 8:

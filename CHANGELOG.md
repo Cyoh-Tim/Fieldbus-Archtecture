@@ -10,6 +10,19 @@
 
 ### Fixed
 
+- SLMP Binary 3E: bound batch qty (word ≤960, bit ≤7168, qty≠0) with end
+  `0xC051`; unknown subcommand `0xC050`; unknown device `0xC056` (no map alloc).
+  Closes stack overflow when `qty≈1013` into a 960-word array (G1)
+- EtherNet/IP: arm Class1 watchdog at Forward Open; reject duplicate
+  connection triad; require exclusive-owner assembly path; match o2t/t2o
+  sizes to configured assemblies (G2)
+- PROFINET RPC: IODWriteReq body must be ≥34 bytes before reading record
+  length (G3); reject Connect while AR is up; ARUUID + sender IP on
+  Release/Control/Write/Read-with-AR (G4)
+- EtherNet/IP Encaps: reject CIP item length <2; SendRRData requires a
+  registered session (status `0x64`); zero-init / check `eip_encap_process`
+  before reading the response handle (G5)
+
 - Config JSON parse error: print `cJSON_GetErrorPtr()` before `free(raw)`
   (heap use-after-free on `fb_reload` of malformed JSON; ASan)
 - CTT PROFINET `dcp_set_ip`: do not pass uninitialized `frames[0]`/`flens[0]`
@@ -29,9 +42,16 @@
   (avg 8.000 ms·37500 사이클; `jitter_max` 는 공유 VM 스파이크가 지배)
 - PN RTC1 / EIP Class1 produce 주기를 last=now 가 아니라 phase += period 로 유지
 - Soak 핫패스: YAML/encode 재파싱·SLMP handle_request heap alloc 제거 (루프 안만)
+- Default `CMAKE_BUILD_TYPE` RelWithDebInfo so `_FORTIFY_SOURCE=2` has `-O2`
 
 ### Added
 
+- IEC 62443 coding-level 수정 리포트
+  [`docs/reports/security_fixes_20260928.md`](docs/reports/security_fixes_20260928.md)
+  (G1–G5 + G9 fuzz/hardening; G6/G7/G8 는 이 PR 범위 밖. **인증 아님**)
+- libFuzzer 하네스 `tests/fuzz/` (`mb_adu`, `slmp_request`, `eip_encap`,
+  `eip_io`, `pn_eth`, `pn_rpc`) + CI `fuzz` (~60s/target) +
+  `-fstack-protector-strong` / `_FORTIFY_SOURCE=2` (opt)
 - 풀테스트 리포트 [`docs/reports/full_test_20260910.md`](docs/reports/full_test_20260910.md)
   (`main` @ `e387a31`, daemon+API+CTT 92/92 포함 `soak_ci`, mock flow 4프로토콜,
   sw-master 30s, CODESYS stand-in, ASan+UBSan+LSan; **인증 아님**)

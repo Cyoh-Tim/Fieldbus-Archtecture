@@ -63,7 +63,9 @@ typedef struct {
     uint16_t slot;
     uint16_t subslot;
     uint16_t index;
+    uint8_t aruuid[PN_UUID_LEN];
     int saw;
+    int saw_uuid;
 } read_walk_t;
 
 typedef struct {
@@ -72,13 +74,32 @@ typedef struct {
     uint16_t index;
     const uint8_t *data;
     uint32_t dlen;
+    uint8_t aruuid[PN_UUID_LEN];
     int saw;
+    int saw_uuid;
 } write_walk_t;
 
 typedef struct {
     uint16_t command;
+    uint8_t aruuid[PN_UUID_LEN];
     int saw;
+    int saw_uuid;
 } ctrl_walk_t;
+
+typedef struct {
+    uint8_t aruuid[PN_UUID_LEN];
+    int saw_uuid;
+} uuid_walk_t;
+
+static void copy_uuid(uint8_t *dst, const uint8_t *src)
+{
+    memcpy(dst, src, PN_UUID_LEN);
+}
+
+static int aruuid_eq(const uint8_t *a, const uint8_t *b)
+{
+    return memcmp(a, b, PN_UUID_LEN) == 0;
+}
 
 static int parse_read_req(uint16_t type, const uint8_t *body, uint16_t blen,
                           void *u)
@@ -86,6 +107,8 @@ static int parse_read_req(uint16_t type, const uint8_t *body, uint16_t blen,
     read_walk_t *r = u;
     /* IODReadReq: seq(2) ARUUID(16) API(4) slot(2) subslot(2) pad(2) index(2) */
     if (type == PN_BLOCK_IOD_READ_REQ && blen >= 30) {
+        copy_uuid(r->aruuid, body + 2);
+        r->saw_uuid = 1;
         r->slot = pn_rd_be16(body + 22);
         r->subslot = pn_rd_be16(body + 24);
         r->index = pn_rd_be16(body + 28);
@@ -98,7 +121,10 @@ static int parse_write_req(uint16_t type, const uint8_t *body, uint16_t blen,
                            void *u)
 {
     write_walk_t *w = u;
-    if (type == PN_BLOCK_IOD_WRITE_REQ && blen >= 30) {
+    /* seq(2)+ARUUID(16)+API(4)+slot(2)+subslot(2)+pad(2)+index(2)+dlen(4)=34 */
+    if (type == PN_BLOCK_IOD_WRITE_REQ && blen >= 34) {
+        copy_uuid(w->aruuid, body + 2);
+        w->saw_uuid = 1;
         w->slot = pn_rd_be16(body + 22);
         w->subslot = pn_rd_be16(body + 24);
         w->index = pn_rd_be16(body + 28);
@@ -119,11 +145,49 @@ static int parse_ctrl_req(uint16_t type, const uint8_t *body, uint16_t blen,
     ctrl_walk_t *c = u;
     if (type == PN_BLOCK_CONTROL_REQ && blen >= 24) {
         /* pad(2) + ARUUID(16) + session(2) + reserved(2) + command(2) */
+        copy_uuid(c->aruuid, body + 2);
+        c->saw_uuid = 1;
         size_t cmd_off = (blen >= 26) ? 22u : 20u;
         c->command = pn_rd_be16(body + cmd_off);
         c->saw = 1;
     }
     return 0;
+}
+
+static int parse_uuid_any(uint16_t type, const uint8_t *body, uint16_t blen,
+                          void *u)
+{
+    uuid_walk_t *w = u;
+    if (w->saw_uuid) {
+        return 0;
+    }
+    if ((type == PN_BLOCK_AR_REQ && blen >= 18) ||
+        (type == PN_BLOCK_CONTROL_REQ && blen >= 18) ||
+        (type == PN_BLOCK_IOD_READ_REQ && blen >= 18) ||
+        (type == PN_BLOCK_IOD_WRITE_REQ && blen >= 18)) {
+        copy_uuid(w->aruuid, body + 2);
+        w->saw_uuid = 1;
+    }
+    return 0;
+}
+
+static int ar_owner_ok(const pn_stack_t *s, uint32_t src_ip)
+{
+    if (s->ar.owner_ip == 0 || src_ip == 0) {
+        return 1;
+    }
+    return s->ar.owner_ip == src_ip;
+}
+
+static int ar_uuid_ok(const pn_stack_t *s, int saw_uuid, const uint8_t *uuid)
+{
+    if (!s->ar.established) {
+        return 1;
+    }
+    if (!saw_uuid) {
+        return 0;
+    }
+    return aruuid_eq(s->ar.uuid, uuid);
 }
 
 static int strip_sec_cb(uint16_t type, const uint8_t *body, uint16_t blen,
@@ -359,7 +423,7 @@ static void flush_pending_rpc(pn_stack_t *s)
 }
 
 int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
-                  size_t cap, size_t *out_len)
+                  size_t cap, size_t *out_len, uint32_t src_ip)
 {
     if (len < RPC_HDR) {
         return -EINVAL;
@@ -384,6 +448,14 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
         if (!blocks) {
             return -EINVAL;
+        }
+        if (s->ar.established) {
+            LOG_WARN("pn_rpc", "Connect rejected: AR already established");
+            uint8_t err[4];
+            pn_wr_be32(err, 0x81u << 24);
+            so = ndr_wrap(stub_out, err, 4);
+            *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so);
+            return 0;
         }
         if (verify_connect_sec(s, blocks, blen) != 0) {
             uint8_t err[4];
@@ -410,11 +482,34 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         size_t bn = build_connect_res_blocks(s, blocks_res, sizeof(blocks_res));
         so = ndr_wrap(stub_out, blocks_res, bn);
         s->ar.established = 1;
+        s->ar.owner_ip = src_ip;
         LOG_INFO("pn_rpc",
                  "AR established in_fid=0x%04x out_fid=0x%04x in=%u out=%u",
                  s->ar.in_frame_id, s->ar.out_frame_id, s->ar.in_data_len,
                  s->ar.out_data_len);
     } else if (op == OP_RELEASE) {
+        if (s->ar.established) {
+            if (!ar_owner_ok(s, src_ip)) {
+                LOG_WARN("pn_rpc", "Release rejected: sender IP mismatch");
+                return -EPERM;
+            }
+            uuid_walk_t uw;
+            memset(&uw, 0, sizeof(uw));
+            size_t blen = 0;
+            const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
+            if (blocks) {
+                walk_blocks(blocks, blen, parse_uuid_any, &uw);
+            }
+            if (!uw.saw_uuid && slen >= 20 + PN_UUID_LEN) {
+                /* NDR payload may be a raw UUID without a block header. */
+                copy_uuid(uw.aruuid, stub + 20);
+                uw.saw_uuid = 1;
+            }
+            if (!ar_uuid_ok(s, uw.saw_uuid, uw.aruuid)) {
+                LOG_WARN("pn_rpc", "Release rejected: ARUUID mismatch");
+                return -EPERM;
+            }
+        }
         s->ar.established = 0;
         memset(&s->ar, 0, sizeof(s->ar));
         uint8_t z[4] = {0};
@@ -425,7 +520,13 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
             LOG_WARN("pn_rpc", "Control without AR — fail closed (no RTC1)");
             return -EINVAL;
         }
-        ctrl_walk_t cw = {.command = PN_CONTROL_PRM_END, .saw = 0};
+        if (!ar_owner_ok(s, src_ip)) {
+            LOG_WARN("pn_rpc", "Control rejected: sender IP mismatch");
+            return -EPERM;
+        }
+        ctrl_walk_t cw;
+        memset(&cw, 0, sizeof(cw));
+        cw.command = PN_CONTROL_PRM_END;
         size_t blen = 0;
         const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
         if (blocks) {
@@ -433,6 +534,10 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         }
         if (!cw.saw) {
             cw.command = PN_CONTROL_PRM_END;
+        }
+        if (!ar_uuid_ok(s, cw.saw_uuid, cw.aruuid)) {
+            LOG_WARN("pn_rpc", "Control rejected: ARUUID mismatch");
+            return -EPERM;
         }
         uint8_t cres[26];
         memset(cres, 0, sizeof(cres));
@@ -455,23 +560,50 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
     } else if (op == OP_READ) {
         uint8_t rec[256];
         size_t rlen = 0;
-        read_walk_t rw = {.slot = 0, .subslot = 1, .index = PN_INDEX_IM0,
-                          .saw = 0};
+        read_walk_t rw;
+        memset(&rw, 0, sizeof(rw));
+        rw.slot = 0;
+        rw.subslot = 1;
+        rw.index = PN_INDEX_IM0;
         size_t blen = 0;
         const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
         if (blocks) {
             walk_blocks(blocks, blen, parse_read_req, &rw);
         }
+        if (s->ar.established) {
+            if (!ar_owner_ok(s, src_ip)) {
+                LOG_WARN("pn_rpc", "Read rejected: sender IP mismatch");
+                return -EPERM;
+            }
+            if (!ar_uuid_ok(s, rw.saw_uuid, rw.aruuid)) {
+                LOG_WARN("pn_rpc", "Read rejected: ARUUID mismatch");
+                return -EPERM;
+            }
+        }
         pn_record_read(s, rw.slot, rw.subslot, rw.index, rec, sizeof(rec),
                        &rlen);
         so = ndr_wrap(stub_out, rec, rlen);
     } else if (op == OP_WRITE) {
-        write_walk_t ww = {.slot = 0, .subslot = 1, .index = 0, .data = NULL,
-                           .dlen = 0, .saw = 0};
+        write_walk_t ww;
+        memset(&ww, 0, sizeof(ww));
+        ww.slot = 0;
+        ww.subslot = 1;
         size_t blen = 0;
         const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
         if (blocks) {
             walk_blocks(blocks, blen, parse_write_req, &ww);
+        }
+        if (!s->ar.established) {
+            LOG_WARN("pn_rpc", "Write without AR — fail closed");
+            return -EINVAL;
+        }
+        if (!ar_owner_ok(s, src_ip)) {
+            LOG_WARN("pn_rpc", "Write rejected: sender IP mismatch");
+            return -EPERM;
+        }
+        if (!ar_uuid_ok(s, ww.saw_uuid, ww.aruuid)) {
+            LOG_WARN("pn_rpc", "Write rejected: ARUUID mismatch");
+            return -EPERM;
         }
         if (ww.saw) {
             pn_record_write(s, ww.slot, ww.subslot, ww.index, ww.data, ww.dlen);
@@ -506,7 +638,8 @@ void pn_rpc_poll(pn_stack_t *s)
     s->rpc_peer_set = 1;
     uint8_t resp[2048];
     size_t rlen = 0;
-    if (pn_rpc_handle(s, buf, (size_t)n, resp, sizeof(resp), &rlen) == 0 &&
+    if (pn_rpc_handle(s, buf, (size_t)n, resp, sizeof(resp), &rlen,
+                      ntohl(src.sin_addr.s_addr)) == 0 &&
         rlen > 0) {
         sendto(s->fd_rpc, resp, rlen, 0, (struct sockaddr *)&src, sl);
     }

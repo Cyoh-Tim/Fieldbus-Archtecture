@@ -26,13 +26,19 @@
 #define SLMP_SUB_WORD 0x0000
 #define SLMP_SUB_BIT 0x0001
 
-/* End codes */
+/* End codes (Binary 3E / QnA compatible) */
 #define SLMP_END_OK 0x0000
+#define SLMP_END_CMD 0xC050     /* command / subcommand not supported */
+#define SLMP_END_POINTS 0xC051  /* number of points / data length */
+#define SLMP_END_DEVICE 0xC056  /* device designation */
 
 #define SLMP_FRAME_MAX 2048
 #define SLMP_HEADER_3E_LEN 11 /* up to and including request data length field */
 #define SLMP_PAYLOAD_MAX 1920
 #define SLMP_POINTS_PER_BATCH_MAX 960
+/* Binary 3E device batch (QnA compatible): word 1–960, bit 1–7168. */
+#define SLMP_QTY_WORD_MAX SLMP_POINTS_PER_BATCH_MAX
+#define SLMP_QTY_BIT_MAX 7168
 
 #define SLMP_DEV_MAP_MAX 48
 #define SLMP_DEV_WORDS_DEFAULT 4096

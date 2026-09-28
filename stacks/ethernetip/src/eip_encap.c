@@ -66,12 +66,55 @@ static int build_list_identity(eip_stack_t *s, uint8_t *payload, size_t cap,
     return 0;
 }
 
+static int session_registered(const eip_stack_t *s, uint32_t session)
+{
+    if (session == 0) {
+        return 0;
+    }
+    for (int i = 0; i < s->n_sessions && i < EIP_CLASS3_SESSIONS_MAX; i++) {
+        if (s->sessions[i] == session) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static uint32_t session_alloc(eip_stack_t *s)
+{
+    if (s->n_sessions >= EIP_CLASS3_SESSIONS_MAX) {
+        return 0;
+    }
+    uint32_t h = s->next_session++;
+    if (h == 0) {
+        h = s->next_session++;
+    }
+    s->sessions[s->n_sessions++] = h;
+    return h;
+}
+
+static void session_drop(eip_stack_t *s, uint32_t session)
+{
+    for (int i = 0; i < s->n_sessions; i++) {
+        if (s->sessions[i] == session) {
+            s->sessions[i] = s->sessions[s->n_sessions - 1];
+            s->n_sessions--;
+            return;
+        }
+    }
+}
+
 static int handle_sendrr(eip_stack_t *s, uint32_t session, const uint8_t *body,
                          size_t body_len, uint8_t *resp_body, size_t resp_cap,
-                         size_t *resp_len)
+                         size_t *resp_len, uint32_t *encap_status)
 {
     /* interface handle(4) + timeout(2) + CPF */
     if (body_len < 6) {
+        return -EINVAL;
+    }
+    if (!session_registered(s, session)) {
+        if (encap_status) {
+            *encap_status = EIP_ENCAP_STATUS_INVALID_SESSION;
+        }
         return -EINVAL;
     }
     size_t off = 6;
@@ -103,7 +146,7 @@ static int handle_sendrr(eip_stack_t *s, uint32_t session, const uint8_t *body,
         }
         off += length;
     }
-    if (!cip) {
+    if (!cip || cip_len < 2) {
         return -EINVAL;
     }
 
@@ -202,7 +245,7 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
 
     uint8_t body_resp[EIP_TCP_BUF_MAX];
     size_t body_len = 0;
-    uint32_t status = 0;
+    uint32_t status = EIP_ENCAP_STATUS_SUCCESS;
     uint32_t out_session = session;
 
     switch (cmd) {
@@ -212,9 +255,11 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
         return 0;
 
     case EIP_CMD_REGISTERSESSION:
-        out_session = s->next_session++;
+        out_session = session_alloc(s);
         if (out_session == 0) {
-            out_session = s->next_session++;
+            status = EIP_ENCAP_STATUS_INVALID_CMD;
+            body_len = 0;
+            break;
         }
         /* protocol version + options echo */
         if (length >= 4 && sizeof(body_resp) >= 4) {
@@ -228,6 +273,7 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
         break;
 
     case EIP_CMD_UNREGISTERSESSION:
+        session_drop(s, session);
         encap_hdr(resp, cmd, 0, session, 0, ctx);
         *resp_len = EIP_ENCAP_HDR_SIZE;
         return 0;
@@ -235,7 +281,7 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
     case EIP_CMD_LISTIDENTITY:
         if (build_list_identity(s, body_resp, sizeof(body_resp), &body_len) !=
             0) {
-            status = 1;
+            status = EIP_ENCAP_STATUS_INVALID_CMD;
             body_len = 0;
         }
         break;
@@ -252,16 +298,18 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
         body_len = 26;
         break;
 
-    case EIP_CMD_SENDRRDATA:
+    case EIP_CMD_SENDRRDATA: {
+        uint32_t sendrr_st = EIP_ENCAP_STATUS_INVALID_CMD;
         if (handle_sendrr(s, session, body, length, body_resp, sizeof(body_resp),
-                          &body_len) != 0) {
-            status = 1;
+                          &body_len, &sendrr_st) != 0) {
+            status = sendrr_st;
             body_len = 0;
         }
         break;
+    }
 
     default:
-        status = 1; /* unsupported command */
+        status = EIP_ENCAP_STATUS_INVALID_CMD;
         body_len = 0;
         break;
     }

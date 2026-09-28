@@ -63,7 +63,7 @@ int eip_sec_check_ucmm(eip_stack_t *s, uint32_t session, const uint8_t *cip,
     if (!eip_sec_required(s)) {
         return 0;
     }
-    if (!cip || cip_len < 1) {
+    if (!cip || cip_len < 2) {
         return -EINVAL;
     }
     if (!eip_sec_service_needs_mac(cip[0])) {
@@ -324,10 +324,12 @@ static void tls_service(eip_stack_t *s, eip_tls_client_t *c, int budget)
             }
             uint8_t resp[EIP_TCP_BUF_MAX];
             size_t resp_len = 0;
+            memset(resp, 0, sizeof(resp));
             pthread_mutex_lock(&s->lock);
-            eip_encap_process(s, c->rx, need, resp, sizeof(resp), &resp_len);
+            int rc = eip_encap_process(s, c->rx, need, resp, sizeof(resp),
+                                       &resp_len);
             pthread_mutex_unlock(&s->lock);
-            if (resp_len > 0) {
+            if (rc == 0 && resp_len > 0) {
                 int w = SSL_write(c->ssl, resp, (int)resp_len);
                 if (w <= 0) {
                     int err = SSL_get_error(c->ssl, w);

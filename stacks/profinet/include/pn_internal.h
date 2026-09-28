@@ -23,6 +23,7 @@ typedef struct {
     uint16_t send_clock_factor;
     uint16_t reduction_ratio;
     uint8_t initiator_mac[6];
+    uint32_t owner_ip; /* host-order IPv4 of Connect sender; 0 = unset */
     int established;
     int prm_end;
     int app_ready;
@@ -93,7 +94,7 @@ void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen);
 void pn_rt_send_if_due(pn_stack_t *s);
 
 int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
-                  size_t cap, size_t *out_len);
+                  size_t cap, size_t *out_len, uint32_t src_ip);
 void pn_rpc_poll(pn_stack_t *s);
 
 void pn_snmp_poll(pn_stack_t *s);

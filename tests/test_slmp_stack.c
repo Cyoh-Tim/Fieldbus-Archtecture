@@ -248,12 +248,165 @@ static void test_client_server_loopback(void)
     slmp_stack_destroy(server);
 }
 
+static void wr_le24(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v & 0xff);
+    p[1] = (uint8_t)((v >> 8) & 0xff);
+    p[2] = (uint8_t)((v >> 16) & 0xff);
+}
+
+static slmp_stack_t *make_server(void)
+{
+    slmp_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.role = SLMP_ROLE_SERVER;
+    cfg.frame = SLMP_FRAME_3E_BINARY;
+    cfg.port = 5000;
+    cfg.pc_no = 0xFF;
+    cfg.dest_module_io = 0x03FF;
+    cfg.monitoring_timer = 0x10;
+    return slmp_stack_create(&cfg);
+}
+
+static size_t build_batch_req(uint8_t *out, uint16_t cmd, uint16_t sub,
+                              uint8_t code, uint32_t head, uint16_t qty,
+                              const uint8_t *payload, size_t plen)
+{
+    wr_le16(out, SLMP_SUBHEADER_REQ_3E);
+    out[2] = 0;
+    out[3] = 0xFF;
+    wr_le16(out + 4, 0x03FF);
+    out[6] = 0;
+    wr_le16(out + 7, (uint16_t)(12 + plen));
+    wr_le16(out + 9, 0x0010);
+    wr_le16(out + 11, cmd);
+    wr_le16(out + 13, sub);
+    wr_le24(out + 15, head);
+    out[18] = code;
+    wr_le16(out + 19, qty);
+    if (plen && payload) {
+        memcpy(out + 21, payload, plen);
+    }
+    return 21 + plen;
+}
+
+static void test_handle_qty_and_unknown(void)
+{
+    slmp_stack_t *s = make_server();
+    expect(s != NULL, "sec create");
+    uint8_t resp[SLMP_FRAME_MAX];
+    size_t resp_len = 0;
+    uint16_t end = 0xFFFF;
+    const uint8_t *data = NULL;
+    size_t dlen = 0;
+
+    /* qty == 0 word write */
+    uint8_t req0[64];
+    size_t n0 = build_batch_req(req0, SLMP_CMD_BATCH_WRITE, SLMP_SUB_WORD,
+                                SLMP_DEV_D, 0, 0, NULL, 0);
+    expect(slmp_stack_handle_request(s, req0, n0, resp, sizeof(resp),
+                                     &resp_len) == 0,
+           "qty0 handle");
+    expect(slmp_decode_response(resp, resp_len, &end, &data, &dlen) == 0,
+           "qty0 decode");
+    expect(end == SLMP_END_POINTS, "qty0 end 0xC051");
+
+    /* qty == 0 bit read */
+    n0 = build_batch_req(req0, SLMP_CMD_BATCH_READ, SLMP_SUB_BIT, SLMP_DEV_M, 0,
+                         0, NULL, 0);
+    expect(slmp_stack_handle_request(s, req0, n0, resp, sizeof(resp),
+                                     &resp_len) == 0,
+           "bit qty0 handle");
+    expect(slmp_decode_response(resp, resp_len, &end, &data, &dlen) == 0,
+           "bit qty0 decode");
+    expect(end == SLMP_END_POINTS, "bit qty0 end 0xC051");
+
+    /* Word write qty=1013 would overflow uint16_t words[960] if unbounded. */
+    uint8_t req_big[SLMP_FRAME_MAX];
+    uint8_t payload[2026];
+    memset(payload, 0x5A, sizeof(payload));
+    uint16_t qty_over = 1013;
+    size_t nbig = build_batch_req(req_big, SLMP_CMD_BATCH_WRITE, SLMP_SUB_WORD,
+                                  SLMP_DEV_D, 0, qty_over, payload,
+                                  (size_t)qty_over * 2u);
+    expect(nbig > 21, "overflow req built");
+    expect(slmp_stack_handle_request(s, req_big, nbig, resp, sizeof(resp),
+                                     &resp_len) == 0,
+           "overflow handle");
+    expect(slmp_decode_response(resp, resp_len, &end, &data, &dlen) == 0,
+           "overflow decode");
+    expect(end == SLMP_END_POINTS, "word qty 1013 -> 0xC051");
+
+    /* Word read qty=961 (spec max 960) */
+    n0 = build_batch_req(req0, SLMP_CMD_BATCH_READ, SLMP_SUB_WORD, SLMP_DEV_D, 0,
+                         961, NULL, 0);
+    expect(slmp_stack_handle_request(s, req0, n0, resp, sizeof(resp),
+                                     &resp_len) == 0,
+           "read 961 handle");
+    expect(slmp_decode_response(resp, resp_len, &end, &data, &dlen) == 0,
+           "read 961 decode");
+    expect(end == SLMP_END_POINTS, "word read qty 961 -> 0xC051");
+
+    /* Bit write qty above spec (7168+1) — request may not carry payload;
+     * still reject on qty before copy. */
+    n0 = build_batch_req(req0, SLMP_CMD_BATCH_WRITE, SLMP_SUB_BIT, SLMP_DEV_M, 0,
+                         7169, NULL, 0);
+    expect(slmp_stack_handle_request(s, req0, n0, resp, sizeof(resp),
+                                     &resp_len) == 0,
+           "bit 7169 handle");
+    expect(slmp_decode_response(resp, resp_len, &end, &data, &dlen) == 0,
+           "bit 7169 decode");
+    expect(end == SLMP_END_POINTS, "bit qty 7169 -> 0xC051");
+
+    /* Unknown subcommand treated as word before: now 0xC050 */
+    n0 = build_batch_req(req0, SLMP_CMD_BATCH_READ, 0x0002, SLMP_DEV_D, 0, 1,
+                         NULL, 0);
+    expect(slmp_stack_handle_request(s, req0, n0, resp, sizeof(resp),
+                                     &resp_len) == 0,
+           "bad sub handle");
+    expect(slmp_decode_response(resp, resp_len, &end, &data, &dlen) == 0,
+           "bad sub decode");
+    expect(end == SLMP_END_CMD, "unknown sub -> 0xC050");
+
+    /* Unknown device code: do not allocate a new map */
+    int maps_before = slmp_device_known(0xEE) ? 1 : 0;
+    expect(maps_before == 0, "0xEE not a known device");
+    n0 = build_batch_req(req0, SLMP_CMD_BATCH_READ, SLMP_SUB_WORD, 0xEE, 0, 1,
+                         NULL, 0);
+    expect(slmp_stack_handle_request(s, req0, n0, resp, sizeof(resp),
+                                     &resp_len) == 0,
+           "unk dev handle");
+    expect(slmp_decode_response(resp, resp_len, &end, &data, &dlen) == 0,
+           "unk dev decode");
+    expect(end == SLMP_END_DEVICE, "unknown device -> 0xC056");
+
+    /* Spec-max word write (960) still accepted and bounded. */
+    uint8_t okpay[960 * 2];
+    memset(okpay, 0, sizeof(okpay));
+    okpay[0] = 0x34;
+    okpay[1] = 0x12;
+    size_t nok = build_batch_req(req_big, SLMP_CMD_BATCH_WRITE, SLMP_SUB_WORD,
+                                 SLMP_DEV_D, 0, 960, okpay, sizeof(okpay));
+    expect(slmp_stack_handle_request(s, req_big, nok, resp, sizeof(resp),
+                                     &resp_len) == 0,
+           "qty 960 handle");
+    expect(slmp_decode_response(resp, resp_len, &end, &data, &dlen) == 0,
+           "qty 960 decode");
+    expect(end == SLMP_END_OK, "qty 960 word write OK");
+    uint16_t w0 = 0;
+    expect(slmp_stack_read_words(s, SLMP_DEV_D, 0, &w0, 1) == 0, "read D0");
+    expect(w0 == 0x1234, "D0 written");
+
+    slmp_stack_destroy(s);
+}
+
 int main(void)
 {
     test_device_table();
     test_encode_batch_read();
     test_decode_empty_ok_payload();
     test_handle_read_write();
+    test_handle_qty_and_unknown();
     test_client_server_loopback();
     if (g_fail) {
         fprintf(stderr, "test_slmp_stack: FAILED\n");

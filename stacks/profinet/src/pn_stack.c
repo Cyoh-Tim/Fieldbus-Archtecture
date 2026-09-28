@@ -170,7 +170,7 @@ int pn_stack_handle_eth(pn_stack_t *s, const uint8_t *frame, size_t len)
 int pn_stack_handle_rpc(pn_stack_t *s, const uint8_t *udp_payload, size_t len,
                         uint8_t *resp, size_t resp_cap, size_t *resp_len)
 {
-    return pn_rpc_handle(s, udp_payload, len, resp, resp_cap, resp_len);
+    return pn_rpc_handle(s, udp_payload, len, resp, resp_cap, resp_len, 0);
 }
 
 int pn_stack_handle_snmp(pn_stack_t *s, const uint8_t *req, size_t len,

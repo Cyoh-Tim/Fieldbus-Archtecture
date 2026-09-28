@@ -165,6 +165,11 @@ int slmp_device_is_hex_addr(uint8_t code)
     return 0;
 }
 
+int slmp_device_known(uint8_t code)
+{
+    return slmp_device_name_from_code(code) != NULL;
+}
+
 static slmp_dev_slot_t *find_slot(slmp_stack_t *s, uint8_t code)
 {
     for (int i = 0; i < s->map_count; i++) {
@@ -846,7 +851,26 @@ int slmp_stack_handle_request(slmp_stack_t *s, const uint8_t *req,
     uint32_t head = rd_le24(req + 15);
     uint8_t code = req[18];
     uint16_t qty = rd_le16(req + 19);
+
+    if (cmd != SLMP_CMD_BATCH_READ && cmd != SLMP_CMD_BATCH_WRITE) {
+        return build_response(req, SLMP_END_CMD, NULL, 0, resp, resp_cap,
+                              resp_len);
+    }
+    if (sub != SLMP_SUB_WORD && sub != SLMP_SUB_BIT) {
+        return build_response(req, SLMP_END_CMD, NULL, 0, resp, resp_cap,
+                              resp_len);
+    }
+    if (!slmp_device_known(code)) {
+        return build_response(req, SLMP_END_DEVICE, NULL, 0, resp, resp_cap,
+                              resp_len);
+    }
+
     int bit_unit = (sub == SLMP_SUB_BIT);
+    uint16_t qty_max = bit_unit ? SLMP_QTY_BIT_MAX : SLMP_QTY_WORD_MAX;
+    if (qty == 0 || qty > qty_max) {
+        return build_response(req, SLMP_END_POINTS, NULL, 0, resp, resp_cap,
+                              resp_len);
+    }
 
     if (cmd == SLMP_CMD_BATCH_READ) {
         uint8_t payload[SLMP_PAYLOAD_MAX];
@@ -854,17 +878,17 @@ int slmp_stack_handle_request(slmp_stack_t *s, const uint8_t *req,
         int rc;
         if (bit_unit) {
             if (qty > sizeof(payload)) {
-                return build_response(req, 0xC051, NULL, 0, resp, resp_cap,
-                                      resp_len);
+                return build_response(req, SLMP_END_POINTS, NULL, 0, resp,
+                                      resp_cap, resp_len);
             }
             rc = slmp_stack_read_bits(s, code, head, payload, qty);
             plen = qty;
         } else {
             if ((size_t)qty * 2u > sizeof(payload)) {
-                return build_response(req, 0xC051, NULL, 0, resp, resp_cap,
-                                      resp_len);
+                return build_response(req, SLMP_END_POINTS, NULL, 0, resp,
+                                      resp_cap, resp_len);
             }
-            uint16_t words[SLMP_PAYLOAD_MAX / 2u];
+            uint16_t words[SLMP_QTY_WORD_MAX];
             rc = slmp_stack_read_words(s, code, head, words, qty);
             if (rc == 0) {
                 for (uint16_t i = 0; i < qty; i++) {
@@ -874,38 +898,33 @@ int slmp_stack_handle_request(slmp_stack_t *s, const uint8_t *req,
             }
         }
         if (rc != 0) {
-            return build_response(req, 0xC056, NULL, 0, resp, resp_cap,
+            return build_response(req, SLMP_END_DEVICE, NULL, 0, resp, resp_cap,
                                   resp_len);
         }
         return build_response(req, SLMP_END_OK, payload, plen, resp, resp_cap,
                               resp_len);
     }
 
-    if (cmd == SLMP_CMD_BATCH_WRITE) {
-        const uint8_t *data = req + 21;
-        size_t need = bit_unit ? (size_t)qty : (size_t)qty * 2u;
-        if (req_len < 21 + need) {
-            return -EBADMSG;
+    const uint8_t *data = req + 21;
+    size_t need = bit_unit ? (size_t)qty : (size_t)qty * 2u;
+    if (req_len < 21 + need) {
+        return -EBADMSG;
+    }
+    int rc;
+    if (bit_unit) {
+        rc = slmp_stack_write_bits(s, code, head, data, qty);
+    } else {
+        uint16_t words[SLMP_QTY_WORD_MAX];
+        for (uint16_t i = 0; i < qty; i++) {
+            words[i] = rd_le16(data + i * 2u);
         }
-        int rc;
-        if (bit_unit) {
-            rc = slmp_stack_write_bits(s, code, head, data, qty);
-        } else {
-            uint16_t words[SLMP_PAYLOAD_MAX / 2u];
-            for (uint16_t i = 0; i < qty; i++) {
-                words[i] = rd_le16(data + i * 2u);
-            }
-            rc = slmp_stack_write_words(s, code, head, words, qty);
-        }
-        if (rc != 0) {
-            return build_response(req, 0xC056, NULL, 0, resp, resp_cap,
-                                  resp_len);
-        }
-        return build_response(req, SLMP_END_OK, NULL, 0, resp, resp_cap,
+        rc = slmp_stack_write_words(s, code, head, words, qty);
+    }
+    if (rc != 0) {
+        return build_response(req, SLMP_END_DEVICE, NULL, 0, resp, resp_cap,
                               resp_len);
     }
-
-    return build_response(req, 0xC050, NULL, 0, resp, resp_cap, resp_len);
+    return build_response(req, SLMP_END_OK, NULL, 0, resp, resp_cap, resp_len);
 }
 
 static int tcp_connect_client(slmp_stack_t *s)

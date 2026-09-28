@@ -447,15 +447,20 @@ static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
             }
             uint8_t resp[EIP_TCP_BUF_MAX];
             size_t resp_len = 0;
+            memset(resp, 0, sizeof(resp));
             pthread_mutex_lock(&s->lock);
-            eip_encap_process(s, c->rx, need, resp, sizeof(resp), &resp_len);
-            uint32_t sess = eip_rd_le32(resp + 4);
+            int rc = eip_encap_process(s, c->rx, need, resp, sizeof(resp),
+                                       &resp_len);
+            uint32_t sess = 0;
             uint16_t cmd = eip_rd_le16(c->rx + 0);
-            if (cmd == EIP_CMD_REGISTERSESSION) {
+            if (rc == 0 && resp_len >= 8) {
+                sess = eip_rd_le32(resp + 4);
+            }
+            if (rc == 0 && cmd == EIP_CMD_REGISTERSESSION) {
                 c->session = sess;
             }
             pthread_mutex_unlock(&s->lock);
-            if (resp_len > 0) {
+            if (resp_len > 0 && rc == 0) {
                 if (s->tops_set && s->tops.tcp_send) {
                     s->tops.tcp_send(s->tops.ctx, resp, resp_len);
                 } else {
