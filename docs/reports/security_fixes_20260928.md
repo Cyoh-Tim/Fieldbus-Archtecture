@@ -230,6 +230,7 @@ the block. Regression: `test_ar_block_mac_bounds`; seed
 | Bugbot G5/G4 follow-up: `ctest` 93/93, ASan 84/84, fuzz ~30 s × 6 | pass |
 | AR watchdog after TX (`6609960`): `ctest` 93/93, ASan 84/84, fuzz 20 s × 6 | pass |
 | Connect-before-sec + IOCR data-hold (`027c245`): `ctest` 93/93, ASan 84/84, fuzz 20 s × 6 | pass |
+| G6–G8 (`ccd60e4`): `ctest` 94/94 incl. `soak_ci`; ASan+UBSan 85/85 incl. `soak_ci` | pass |
 
 Unguessable Encaps session handles can contain `0xD4`/`0x00` in the header;
 CTT and unit tests now scan Forward Open replies **after** the 24-byte
