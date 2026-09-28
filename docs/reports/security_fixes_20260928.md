@@ -223,7 +223,7 @@ No other fuzzer crashes in the 180 s runs.
 | libFuzzer 180 s × 6 targets | pass after NDR wrap fix |
 | Bugbot G5/G4 follow-up: `ctest` 93/93, ASan 84/84, fuzz ~30 s × 6 | pass |
 | AR watchdog after TX (`6609960`): `ctest` 93/93, ASan 84/84, fuzz 20 s × 6 | pass |
-| Connect-before-sec + IOCR data-hold (`test_connect_reject_keeps_ar`, `test_data_hold_iocr_cycle`) | see verification below |
+| Connect-before-sec + IOCR data-hold (`027c245`): `ctest` 93/93, ASan 84/84, fuzz 20 s × 6 | pass |
 
 Unguessable Encaps session handles can contain `0xD4`/`0x00` in the header;
 CTT and unit tests now scan Forward Open replies **after** the 24-byte
