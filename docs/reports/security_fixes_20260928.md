@@ -114,7 +114,8 @@ the AR forever. `pn_ar_watchdog()` (from `pn_stack_poll`) keys off
 - After liveness: data-hold on O→T silence. Period is the output CR
   `SendClockFactor × ReductionRatio × 31.25 µs` (not `cfg.cycle_us`).
   Multiplier is IOCR `DataHoldFactor`, else `WatchdogFactor`, else 3.
-  A missing send clock leaves data-hold disarmed.
+  A missing send clock keeps the 2 s CMI window (a received O→T
+  refreshes it) so the AR is still reclaimed.
 - Same-controller Connect (sender IP / CMInitiatorObjectUUID) may replace
   an established AR at any time.
 
@@ -136,6 +137,9 @@ and `prm_end` in place; a later valid same-UUID Connect replaces.
 `test_data_hold_iocr_cycle`: silence of 3×`cycle_us` does not abort when
 the output CR period is longer; expiry uses that negotiated hold. An
 input CR later in the Connect does not replace the output send clock.
+`test_no_iocr_clock_still_reclaims`: Connect with no output CR, after
+PrmEnd and O→T, stays up while O→T is recent and aborts after the 2 s
+CMI window; another IP may then Connect.
 
 **62443.** CR 2.1 (authorization of established AR); CR 3.5; CR 7.1 / 7.2
 (AR reclaim).

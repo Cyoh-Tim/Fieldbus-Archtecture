@@ -39,8 +39,18 @@ void pn_ar_watchdog(pn_stack_t *s)
         return;
     }
 
-    /* O→T period is the negotiated IOCR send clock, not cfg.cycle_us. */
+    /* No output-CR clock: do not disarm the watchdog. Stay on the CMI
+     * window, and let a received O→T refresh it, so a vanished
+     * controller is still reclaimed. cfg.cycle_us is not this period. */
     if (s->ar.send_clock_factor == 0 || s->ar.reduction_ratio == 0) {
+        uint64_t base = s->ar.last_cmi_ns;
+        if (s->ar.saw_rt && s->ar.last_rt_rx_ns > base) {
+            base = s->ar.last_rt_rx_ns;
+        }
+        if (base != 0 && now > base &&
+            (now - base) > PN_CMI_ACTIVITY_TIMEOUT_NS) {
+            pn_ar_abort(s, "CMI activity timeout");
+        }
         return;
     }
     unsigned factor = s->ar.data_hold_factor ? s->ar.data_hold_factor

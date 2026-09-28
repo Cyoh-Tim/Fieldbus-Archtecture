@@ -22,7 +22,8 @@
   activity timeout (2 s until O→T or PrmEnd; our RTC1 TX does not
   count) or RT data-hold after controller liveness. Data-hold uses the
   output IOCR period (`SendClockFactor × ReductionRatio × 31.25 µs`),
-  not `cycle_us`. A rejected Connect (HMAC / ownership) does not clear
+  not `cycle_us`. With no output-CR clock the 2 s CMI window stays
+  armed. A rejected Connect (HMAC / ownership) does not clear
   the current AR (G4); NDR
   `argsLen==UINT32_MAX` no longer wraps `20+n` into an unbounded block
   walk (fuzz SEGV)

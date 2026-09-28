@@ -41,7 +41,8 @@ typedef struct {
  * Period = SendClockFactor × ReductionRatio × 31.25 µs (output CR).
  * Factor is IOCR DataHoldFactor, else WatchdogFactor, else 3.
  * cfg.cycle_us is not used. A zero SendClockFactor or ReductionRatio
- * leaves data-hold disarmed (no negotiated clock). */
+ * keeps the 2 s CMI window (O→T refreshes it) so the AR is still
+ * reclaimed. */
 #define PN_SEND_CLOCK_BASE_NS        31250ull
 #define PN_AR_DATA_HOLD_CYCLES       3
 #define PN_CMI_ACTIVITY_TIMEOUT_NS   2000000000ull

@@ -473,6 +473,44 @@ static void test_data_hold_iocr_cycle(void)
     pn_stack_destroy(s);
 }
 
+static void test_no_iocr_clock_still_reclaims(void)
+{
+    /* Connect with no output IOCR still gets default frame IDs. After
+     * PrmEnd / O→T the AR must not live forever: the 2 s CMI window
+     * stays armed, and a received O→T refreshes it. */
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "noclk create");
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = build_connect(pdu);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "noclk connect");
+    expect(s->ar.send_clock_factor == 0 && s->ar.reduction_ratio == 0,
+           "noclk no negotiated clock");
+    expect(s->ar.out_frame_id == 0x8002, "noclk default out frame");
+    s->ar.prm_end = 1;
+    s->ar.app_ready = 1;
+    s->ar.saw_rt = 1;
+    s->ar.last_rt_rx_ns = pn_now_ns() - 1000000ull;
+    s->ar.last_cmi_ns = pn_now_ns() - (PN_CMI_ACTIVITY_TIMEOUT_NS + 1000000ull);
+    pn_ar_watchdog(s);
+    expect(pn_stack_ar_up(s) == 1, "noclk recent O->T keeps AR");
+
+    s->ar.last_rt_rx_ns = pn_now_ns() - (PN_CMI_ACTIVITY_TIMEOUT_NS + 1000000ull);
+    pn_ar_watchdog(s);
+    expect(pn_stack_ar_up(s) == 0, "noclk CMI abort after silence");
+
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000099) ==
+               0,
+           "noclk other-ip connect");
+    expect(pn_stack_ar_up(s) == 1 && s->ar.owner_ip == 0x0a000099,
+           "noclk new owner");
+    pn_stack_destroy(s);
+}
+
 static void test_cmi_ignores_own_tx(void)
 {
     /* Our RTC1 TX must not suppress CMI. No O→T / PrmEnd => abort, then
@@ -513,6 +551,7 @@ int main(void)
     test_cmi_ignores_own_tx();
     test_connect_reject_keeps_ar();
     test_data_hold_iocr_cycle();
+    test_no_iocr_clock_still_reclaims();
     if (g_fail) {
         fprintf(stderr, "test_pn_rpc: FAILED\n");
         return 1;
