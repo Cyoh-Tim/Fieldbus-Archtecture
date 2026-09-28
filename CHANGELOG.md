@@ -26,7 +26,8 @@
   armed. A rejected Connect (HMAC / ownership) does not clear
   the current AR (G4); NDR
   `argsLen==UINT32_MAX` no longer wraps `20+n` into an unbounded block
-  walk (fuzz SEGV)
+  walk (fuzz SEGV). ARBlockReq MAC is copied only when the body is at
+  least 26 bytes (fuzz heap-buffer-overflow)
 - EtherNet/IP Encaps: reject CIP item length <2; SendRRData /
   UnregisterSession require a session **owned by this TCP/TLS
   connection** (status `0x64`); drop session on disconnect; unguessable
