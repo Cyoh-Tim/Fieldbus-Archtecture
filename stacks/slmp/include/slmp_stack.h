@@ -57,6 +57,8 @@ int slmp_device_code_from_name(const char *name, uint8_t *code_out, int *is_bit)
 const char *slmp_device_name_from_code(uint8_t code);
 /* 1 if manuals typically express head address in hex (X/Y/B/W/SB/SW…). */
 int slmp_device_is_hex_addr(uint8_t code);
+/* 1 if `code` is a built-in Binary 3E device (not a raw unknown). */
+int slmp_device_known(uint8_t code);
 
 /* ---- Local device map (server / client cache) ---- */
 int slmp_stack_map_ensure(slmp_stack_t *s, uint8_t device_code, int is_bit);

@@ -163,6 +163,13 @@ static size_t wr_pn_block(uint8_t *p, uint16_t type, const uint8_t *body,
     return n;
 }
 
+static void fill_connect_aruuid(uint8_t *dst)
+{
+    for (int i = 0; i < 16; i++) {
+        dst[i] = (uint8_t)(0xA0 + i);
+    }
+}
+
 static void pump(ctt_run_t *run, pn_priv_t *priv)
 {
     pn_stack_poll(priv->stack);
@@ -807,9 +814,7 @@ static size_t build_connect_pdu(uint8_t *pdu, size_t cap, int integrity,
     uint8_t ar[2 + 16 + 2 + 6];
     memset(ar, 0, sizeof(ar));
     pn_wr_be16(ar, 0x0001);
-    for (int i = 0; i < 16; i++) {
-        ar[2 + i] = (uint8_t)(0xA0 + i);
-    }
+    fill_connect_aruuid(ar + 2);
     pn_wr_be16(ar + 18, 1);
     memcpy(ar + 20, initiator_mac, 6);
     bn += wr_pn_block(blocks + bn, PN_BLOCK_AR_REQ, ar, sizeof(ar));
@@ -1131,6 +1136,32 @@ static int check_cyclic_expect(ctt_run_t *run, const ctt_metrics_t *before,
     return rc;
 }
 
+/* After PrmEnd the stack's data-hold watches O→T. Mock io_cycle does
+ * not otherwise send cyclic output, so feed one RTC1 per poll. */
+static void inject_ot_rtc1(pn_priv_t *priv)
+{
+    const pn_cfg_t *cfg = pn_stack_cfg(priv->stack);
+    uint16_t dlen = cfg->output_len ? cfg->output_len : 8;
+    if (dlen > 128) {
+        dlen = 128;
+    }
+    uint8_t pay[2 + 128 + 8];
+    pn_wr_be16(pay, 0x8002);
+    memset(pay + 2, 0, dlen);
+    size_t n = 2u + dlen;
+    pay[n++] = 0x80; /* IOPS good */
+    pn_wr_be16(pay + n, 1);
+    n += 2;
+    pay[n++] = 0x35; /* DataStatus */
+    pay[n++] = 0;    /* TransferStatus */
+    uint8_t frame[PN_FRAME_MAX];
+    size_t flen = pn_eth_build(frame, sizeof(frame), cfg->mac, priv->ctl_mac,
+                               PN_ETHTYPE_PN, pay, n);
+    if (flen) {
+        (void)pn_stack_handle_eth(priv->stack, frame, flen);
+    }
+}
+
 static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
                          int idx)
 {
@@ -1187,6 +1218,9 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
             : NULL;
 
     while (ctt_now_ns() < deadline) {
+        if (pn_stack_app_ready(priv->stack)) {
+            inject_ot_rtc1(priv);
+        }
         pump(run, priv);
         drain_io_frames(run, &got, &last_ts, want_et, 0, &harvest, data_len,
                         needle);
@@ -1241,12 +1275,16 @@ static int step_rpc_release(ctt_run_t *run, pn_priv_t *priv,
     const char *action = "rpc_release";
     const yaml_node_t *expect = yaml_map_get(step, "expect");
 
-    uint8_t pdu[128];
+    uint8_t pdu[256];
     memset(pdu, 0, sizeof(pdu));
     pdu[0] = 1;
     pn_wr_le16(pdu + 68, RPC_OP_RELEASE);
-    uint8_t z[4] = {0};
-    size_t stub = ndr_wrap(pdu + 80, z, 4);
+    uint8_t rel[18];
+    memset(rel, 0, sizeof(rel));
+    fill_connect_aruuid(rel + 2);
+    uint8_t blocks[32];
+    size_t bn = wr_pn_block(blocks, PN_BLOCK_AR_REQ, rel, sizeof(rel));
+    size_t stub = ndr_wrap(pdu + 80, blocks, bn);
     pn_wr_le16(pdu + 74, (uint16_t)stub);
 
     uint8_t resp[512];
@@ -1376,6 +1414,7 @@ static int step_rpc_write(ctt_run_t *run, pn_priv_t *priv,
     uint8_t body[34 + 128];
     memset(body, 0, sizeof(body));
     pn_wr_be16(body, 1);
+    fill_connect_aruuid(body + 2);
     pn_wr_be16(body + 22, slot);
     pn_wr_be16(body + 24, subslot);
     pn_wr_be16(body + 28, index);
@@ -1421,6 +1460,7 @@ static int step_rpc_control(ctt_run_t *run, pn_priv_t *priv,
 
     uint8_t body[26];
     memset(body, 0, sizeof(body));
+    fill_connect_aruuid(body + 2);
     pn_wr_be16(body + 22, cmd);
     uint8_t blocks[64];
     size_t bn = wr_pn_block(blocks, PN_BLOCK_CONTROL_REQ, body, sizeof(body));
@@ -1660,6 +1700,7 @@ static int step_record_read(ctt_run_t *run, pn_priv_t *priv,
     uint8_t body[34];
     memset(body, 0, sizeof(body));
     pn_wr_be16(body, 1); /* seqNumber */
+    fill_connect_aruuid(body + 2);
     pn_wr_be16(body + 22, slot);
     pn_wr_be16(body + 24, subslot);
     pn_wr_be16(body + 28, index);
@@ -1816,6 +1857,32 @@ static int step_snmp_get(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
     return out;
 }
 
+/* Mock soak does not send O→T. Refresh CMI with a Read so a 2 s
+ * controller-activity timeout does not drop the AR. Production watchdog
+ * still keys off controller RPC / O→T, not our RTC1 TX. */
+static void soak_refresh_cmi(ctt_run_t *run, pn_priv_t *priv)
+{
+    uint8_t body[34];
+    memset(body, 0, sizeof(body));
+    pn_wr_be16(body, 1);
+    fill_connect_aruuid(body + 2);
+    pn_wr_be16(body + 22, 0);
+    pn_wr_be16(body + 24, 1);
+    pn_wr_be16(body + 28, PN_INDEX_IM0);
+    pn_wr_be32(body + 30, 64);
+    uint8_t blocks[80];
+    size_t bn = wr_pn_block(blocks, PN_BLOCK_IOD_READ_REQ, body, sizeof(body));
+    uint8_t pdu[256];
+    memset(pdu, 0, sizeof(pdu));
+    pdu[0] = 1;
+    pn_wr_le16(pdu + 68, RPC_OP_READ);
+    size_t stub = ndr_wrap(pdu + 80, blocks, bn);
+    pn_wr_le16(pdu + 74, (uint16_t)stub);
+    uint8_t resp[512];
+    size_t rlen = 0;
+    (void)rpc_transact(run, priv, pdu, 80 + stub, resp, sizeof(resp), &rlen);
+}
+
 static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
                      int idx)
 {
@@ -1864,9 +1931,14 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
 
     ctt_cycle_clock_t clk;
     ctt_cycle_clock_init(&clk, (uint64_t)cycle_ms * 1000000ull);
+    uint64_t last_cmi_refresh = start;
     while (ctt_now_ns() < deadline) {
         if (!duration_s && iterations > 0 && got >= iterations) {
             break;
+        }
+        if (ctt_now_ns() - last_cmi_refresh >= 1000000000ull) {
+            soak_refresh_cmi(run, priv);
+            last_cmi_refresh = ctt_now_ns();
         }
         pump(run, priv);
         drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1, NULL,

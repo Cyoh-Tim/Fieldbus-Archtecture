@@ -152,6 +152,30 @@ static size_t append_cpf_item(uint8_t *p, uint16_t type, const uint8_t *data,
 }
 
 static int inject_encap(ctt_run_t *run, eip_priv_t *priv, const uint8_t *req,
+                        size_t req_len);
+
+static int ensure_session(ctt_run_t *run, eip_priv_t *priv)
+{
+    if (priv->session != 0) {
+        return 0;
+    }
+    uint8_t req[EIP_ENCAP_HDR_SIZE + 4];
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req + 0, EIP_CMD_REGISTERSESSION);
+    eip_wr_le16(req + 2, 4);
+    eip_wr_le16(req + 24, 1);
+    int rc = inject_encap(run, priv, req, sizeof(req));
+    if (rc != 0 || priv->last_resp_len < 8) {
+        return rc != 0 ? rc : -EINVAL;
+    }
+    priv->session = eip_rd_le32(priv->last_resp + 4);
+    if (priv->session == 0) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static int inject_encap(ctt_run_t *run, eip_priv_t *priv, const uint8_t *req,
                         size_t req_len)
 {
     size_t n = 0;
@@ -227,6 +251,9 @@ static const uint8_t *cip_data(const uint8_t *cip, size_t cip_len, size_t *n)
 static int sendrr_cip(ctt_run_t *run, eip_priv_t *priv, const uint8_t *cip,
                       size_t cip_len, int integrity, int integrity_bad)
 {
+    if (ensure_session(run, priv) != 0) {
+        return -EINVAL;
+    }
     uint8_t mac[EIP_HMAC_LEN];
     int mac_set = 0;
     if (integrity) {
@@ -383,7 +410,7 @@ static int check_encap_expect(ctt_run_t *run, eip_priv_t *priv, int idx,
     if (expect && yaml_has(expect, "privilege")) {
         int want = yaml_bool(expect, "privilege", 1);
         int saw = 0;
-        for (size_t i = 0; i + 3 < priv->last_resp_len; i++) {
+        for (size_t i = EIP_ENCAP_HDR_SIZE; i + 3 < priv->last_resp_len; i++) {
             uint8_t svc = priv->last_resp[i] & 0x7f;
             if ((svc == CIP_SVC_FORWARD_OPEN ||
                  svc == CIP_SVC_LARGE_FORWARD_OPEN) &&
@@ -606,7 +633,8 @@ static size_t build_forward_open_body(uint8_t *fo, uint16_t serial,
                                       uint32_t o2t_rpi,
                                       uint32_t t2o_rpi, uint16_t o2t_size,
                                       uint16_t t2o_size, uint8_t timeout_mult,
-                                      int large)
+                                      int large, uint16_t cfg_asm,
+                                      uint16_t out_asm, uint16_t in_asm)
 {
     size_t off = 0;
     fo[off++] = 0x0A;
@@ -644,7 +672,15 @@ static size_t build_forward_open_body(uint8_t *fo, uint16_t serial,
         off += 2;
     }
     fo[off++] = 0x01; /* transport class 1 */
-    fo[off++] = 0;    /* path size words */
+    fo[off++] = 4;    /* path size words */
+    fo[off++] = 0x20;
+    fo[off++] = CIP_CLASS_ASSEMBLY;
+    fo[off++] = 0x24;
+    fo[off++] = (uint8_t)cfg_asm;
+    fo[off++] = 0x2C;
+    fo[off++] = (uint8_t)out_asm;
+    fo[off++] = 0x2C;
+    fo[off++] = (uint8_t)in_asm;
     return off;
 }
 
@@ -663,7 +699,8 @@ static int fo_reply_at(const uint8_t *resp, size_t n, size_t i)
 
 static uint32_t parse_fo_o2t(const uint8_t *resp, size_t n)
 {
-    for (size_t i = 0; i + 12 < n; i++) {
+    size_t start = n > EIP_ENCAP_HDR_SIZE ? EIP_ENCAP_HDR_SIZE : n;
+    for (size_t i = start; i + 12 < n; i++) {
         if (fo_reply_at(resp, n, i)) {
             return eip_rd_le32(resp + i + 4);
         }
@@ -673,7 +710,8 @@ static uint32_t parse_fo_o2t(const uint8_t *resp, size_t n)
 
 static uint32_t parse_fo_t2o(const uint8_t *resp, size_t n)
 {
-    for (size_t i = 0; i + 12 < n; i++) {
+    size_t start = n > EIP_ENCAP_HDR_SIZE ? EIP_ENCAP_HDR_SIZE : n;
+    for (size_t i = start; i + 12 < n; i++) {
         if (fo_reply_at(resp, n, i)) {
             return eip_rd_le32(resp + i + 8);
         }
@@ -701,10 +739,13 @@ static int step_forward_open(ctt_run_t *run, eip_priv_t *priv,
     uint8_t tmo = (uint8_t)yaml_ulong(step, "timeout_mult", 0);
     int large = yaml_bool(step, "large", 0);
 
-    uint8_t fo[64];
+    uint8_t fo[80];
+    const eip_cfg_t *cfg = eip_stack_cfg(priv->stack);
     size_t off =
         build_forward_open_body(fo, serial, orig_vendor, orig_serial, rpi, rpi,
-                                o2t_size, t2o_size, tmo, large);
+                                o2t_size, t2o_size, tmo, large,
+                                cfg->config_assembly, cfg->output_assembly,
+                                cfg->input_assembly);
     uint8_t cip[2 + 8 + 64];
     cip[0] = large ? CIP_SVC_LARGE_FORWARD_OPEN : CIP_SVC_FORWARD_OPEN;
     cip[1] = 2;

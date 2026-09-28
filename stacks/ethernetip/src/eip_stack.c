@@ -8,7 +8,9 @@
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <string.h>
+#include <sys/random.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -139,6 +141,13 @@ eip_stack_t *eip_stack_create(const eip_cfg_t *cfg)
         s->tls_clients[i].fd = -1;
     }
     s->next_session = 1;
+    if (getrandom(&s->session_secret, sizeof(s->session_secret), 0) !=
+        (ssize_t)sizeof(s->session_secret)) {
+        s->session_secret = (uint32_t)(eip_now_ns() ^ (uintptr_t)s);
+    }
+    if (s->session_secret == 0) {
+        s->session_secret = 0xA5C311E7u;
+    }
     s->next_conn_id = 0x20000001;
     pthread_mutex_init(&s->lock, NULL);
 
@@ -366,6 +375,9 @@ void eip_stack_stop(eip_stack_t *s)
         close(s->udp_fd);
         s->udp_fd = -1;
     }
+    pthread_mutex_lock(&s->lock);
+    s->n_sessions = 0;
+    pthread_mutex_unlock(&s->lock);
     for (int i = 0; i < EIP_TCP_CLIENTS_MAX; i++) {
         if (s->clients[i].fd >= 0 && s->clients[i].active) {
             if (s->cfg.role == EIP_ROLE_ADAPTER || i > 0) {
@@ -375,6 +387,7 @@ void eip_stack_stop(eip_stack_t *s)
         s->clients[i].active = 0;
         s->clients[i].fd = -1;
         s->clients[i].rx_len = 0;
+        s->clients[i].session = 0;
     }
     if (s->originator_fd >= 0) {
         close(s->originator_fd);
@@ -415,25 +428,44 @@ static void accept_clients(eip_stack_t *s, int budget)
     }
 }
 
+static uint32_t tcp_client_owner(eip_stack_t *s, eip_tcp_client_t *c)
+{
+    ptrdiff_t slot = c - s->clients;
+    if (slot < 0 || slot >= EIP_TCP_CLIENTS_MAX) {
+        return 0;
+    }
+    return eip_tcp_owner_id((int)slot);
+}
+
+static void tcp_client_drop(eip_stack_t *s, eip_tcp_client_t *c)
+{
+    uint32_t owner = tcp_client_owner(s, c);
+    pthread_mutex_lock(&s->lock);
+    eip_encap_drop_owner(s, owner);
+    pthread_mutex_unlock(&s->lock);
+    if (c->fd >= 0) {
+        close(c->fd);
+        c->fd = -1;
+    }
+    c->active = 0;
+    c->rx_len = 0;
+    c->session = 0;
+}
+
 static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
 {
     uint8_t tmp[2048];
+    uint32_t owner = tcp_client_owner(s, c);
     for (;;) {
         ssize_t n = recv(c->fd, tmp, sizeof(tmp), 0);
         if (n <= 0) {
             if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) {
-                close(c->fd);
-                c->fd = -1;
-                c->active = 0;
-                c->rx_len = 0;
+                tcp_client_drop(s, c);
             }
             break;
         }
         if (c->rx_len + (size_t)n > sizeof(c->rx)) {
-            close(c->fd);
-            c->fd = -1;
-            c->active = 0;
-            c->rx_len = 0;
+            tcp_client_drop(s, c);
             break;
         }
         memcpy(c->rx + c->rx_len, tmp, (size_t)n);
@@ -447,15 +479,20 @@ static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
             }
             uint8_t resp[EIP_TCP_BUF_MAX];
             size_t resp_len = 0;
+            memset(resp, 0, sizeof(resp));
             pthread_mutex_lock(&s->lock);
-            eip_encap_process(s, c->rx, need, resp, sizeof(resp), &resp_len);
-            uint32_t sess = eip_rd_le32(resp + 4);
+            int rc = eip_encap_process(s, c->rx, need, resp, sizeof(resp),
+                                       &resp_len, owner);
+            uint32_t sess = 0;
             uint16_t cmd = eip_rd_le16(c->rx + 0);
-            if (cmd == EIP_CMD_REGISTERSESSION) {
+            if (rc == 0 && resp_len >= 8) {
+                sess = eip_rd_le32(resp + 4);
+            }
+            if (rc == 0 && cmd == EIP_CMD_REGISTERSESSION) {
                 c->session = sess;
             }
             pthread_mutex_unlock(&s->lock);
-            if (resp_len > 0) {
+            if (resp_len > 0 && rc == 0) {
                 if (s->tops_set && s->tops.tcp_send) {
                     s->tops.tcp_send(s->tops.ctx, resp, resp_len);
                 } else {
@@ -714,16 +751,44 @@ int eip_stack_write_output(eip_stack_t *s, size_t off, const uint8_t *src,
     return (int)n;
 }
 
-int eip_stack_handle_encap(eip_stack_t *s, const uint8_t *req, size_t req_len,
-                           uint8_t *resp, size_t resp_cap, size_t *resp_len)
+int eip_stack_handle_encap_owned(eip_stack_t *s, uint32_t owner_id,
+                                 const uint8_t *req, size_t req_len,
+                                 uint8_t *resp, size_t resp_cap,
+                                 size_t *resp_len)
 {
     if (!s) {
         return -EINVAL;
     }
+    if (owner_id == 0) {
+        owner_id = EIP_ENCAP_OWNER_MOCK;
+    }
     pthread_mutex_lock(&s->lock);
-    int rc = eip_encap_process(s, req, req_len, resp, resp_cap, resp_len);
+    int rc = eip_encap_process(s, req, req_len, resp, resp_cap, resp_len,
+                               owner_id);
     pthread_mutex_unlock(&s->lock);
     return rc;
+}
+
+int eip_stack_handle_encap(eip_stack_t *s, const uint8_t *req, size_t req_len,
+                           uint8_t *resp, size_t resp_cap, size_t *resp_len)
+{
+    return eip_stack_handle_encap_owned(s, EIP_ENCAP_OWNER_MOCK, req, req_len,
+                                        resp, resp_cap, resp_len);
+}
+
+void eip_stack_drop_encap_owner(eip_stack_t *s, uint32_t owner_id)
+{
+    if (!s) {
+        return;
+    }
+    pthread_mutex_lock(&s->lock);
+    eip_encap_drop_owner(s, owner_id);
+    pthread_mutex_unlock(&s->lock);
+}
+
+int eip_stack_session_count(const eip_stack_t *s)
+{
+    return s ? s->n_sessions : 0;
 }
 
 int eip_stack_handle_io(eip_stack_t *s, const uint8_t *frame, size_t len)

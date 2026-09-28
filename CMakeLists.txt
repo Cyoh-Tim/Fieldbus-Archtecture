@@ -5,6 +5,25 @@ project(multiproto_daemon VERSION 0.1.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 add_definitions(-D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE)
+add_compile_options(-fstack-protector-strong)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+option(ENABLE_SANITIZERS "Address+Undefined sanitizers" OFF)
+option(BUILD_FUZZERS "libFuzzer harnesses (clang -fsanitize=fuzzer)" OFF)
+if(ENABLE_SANITIZERS)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+elseif(BUILD_FUZZERS)
+    # Instrument stack libs for coverage; executables add -fsanitize=fuzzer.
+    add_compile_options(-fsanitize=fuzzer-no-link,address,undefined
+                        -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+elseif(NOT BUILD_FUZZERS)
+    # FORTIFY_SOURCE requires optimization; skip Debug and fuzzer+ASan builds.
+    add_compile_options($<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
+                        $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=2>)
+endif()
 
 option(ENABLE_EIP_TESTS "EtherNet/IP HMAC + residual stack tests" ON)
 option(ENABLE_PN_TESTS "PROFINET HMAC 단위 테스트" ON)
@@ -221,6 +240,9 @@ if(ENABLE_PN_TESTS)
     add_executable(test_pn_crypto tests/test_pn_crypto.c)
     target_include_directories(test_pn_crypto PRIVATE stacks/profinet/include include core)
     target_link_libraries(test_pn_crypto PRIVATE pn_stack)
+    add_executable(test_pn_rpc tests/test_pn_rpc.c)
+    target_include_directories(test_pn_rpc PRIVATE stacks/profinet/include include core)
+    target_link_libraries(test_pn_rpc PRIVATE pn_stack)
 endif()
 
 if(ENABLE_EIP_TESTS)
@@ -264,6 +286,7 @@ enable_testing()
 
 if(ENABLE_PN_TESTS)
     add_test(NAME test_pn_crypto COMMAND test_pn_crypto)
+    add_test(NAME test_pn_rpc COMMAND test_pn_rpc)
 endif()
 
 if(ENABLE_EIP_TESTS)
@@ -456,4 +479,32 @@ if(BUILD_DAEMON AND BUILD_API)
         COMMENT "Software masters vs live loopback DUT (not CODESYS, not certification)"
         USES_TERMINAL
     )
+endif()
+
+if(BUILD_FUZZERS)
+    function(fb_add_fuzzer name src)
+        add_executable(${name} ${src})
+        target_include_directories(${name} PRIVATE include core
+            stacks/modbus/include stacks/slmp/include
+            stacks/ethernetip/include stacks/profinet/include)
+        target_link_libraries(${name} PRIVATE ${ARGN} stdc++)
+        # libFuzzer is C++; clang does not always search gcc's libstdc++ dir.
+        execute_process(COMMAND gcc -print-file-name=libstdc++.so
+            OUTPUT_VARIABLE _fb_stdcxx OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+        get_filename_component(_fb_stdcxx_dir "${_fb_stdcxx}" DIRECTORY)
+        if(_fb_stdcxx_dir)
+            target_link_directories(${name} PRIVATE "${_fb_stdcxx_dir}")
+        endif()
+        target_compile_options(${name} PRIVATE
+            -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
+        target_link_options(${name} PRIVATE
+            -fsanitize=fuzzer,address,undefined)
+    endfunction()
+    fb_add_fuzzer(fuzz_mb_adu tests/fuzz/fuzz_mb_adu.c mb_stack)
+    fb_add_fuzzer(fuzz_slmp_request tests/fuzz/fuzz_slmp_request.c slmp_stack)
+    fb_add_fuzzer(fuzz_eip_encap tests/fuzz/fuzz_eip_encap.c eip_stack)
+    fb_add_fuzzer(fuzz_eip_io tests/fuzz/fuzz_eip_io.c eip_stack)
+    fb_add_fuzzer(fuzz_pn_eth tests/fuzz/fuzz_pn_eth.c pn_stack)
+    fb_add_fuzzer(fuzz_pn_rpc tests/fuzz/fuzz_pn_rpc.c pn_stack)
 endif()

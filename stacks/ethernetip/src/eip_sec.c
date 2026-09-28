@@ -11,6 +11,7 @@
 #include <netinet/in.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+#include <stddef.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -63,7 +64,7 @@ int eip_sec_check_ucmm(eip_stack_t *s, uint32_t session, const uint8_t *cip,
     if (!eip_sec_required(s)) {
         return 0;
     }
-    if (!cip || cip_len < 1) {
+    if (!cip || cip_len < 2) {
         return -EINVAL;
     }
     if (!eip_sec_service_needs_mac(cip[0])) {
@@ -197,6 +198,9 @@ void eip_sec_tls_stop(eip_stack_t *s)
             close(s->tls_clients[i].fd);
             s->tls_clients[i].fd = -1;
         }
+        pthread_mutex_lock(&s->lock);
+        eip_encap_drop_owner(s, eip_tls_owner_id(i));
+        pthread_mutex_unlock(&s->lock);
         s->tls_clients[i].active = 0;
     }
     if (s->tls_listen_fd >= 0) {
@@ -218,8 +222,21 @@ static int tls_set_nonblock(int fd)
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
-static void tls_drop(eip_tls_client_t *c)
+static uint32_t tls_client_owner(eip_stack_t *s, eip_tls_client_t *c)
 {
+    ptrdiff_t slot = c - s->tls_clients;
+    if (slot < 0 || slot >= EIP_TLS_CLIENTS_MAX) {
+        return 0;
+    }
+    return eip_tls_owner_id((int)slot);
+}
+
+static void tls_drop(eip_stack_t *s, eip_tls_client_t *c)
+{
+    uint32_t owner = tls_client_owner(s, c);
+    pthread_mutex_lock(&s->lock);
+    eip_encap_drop_owner(s, owner);
+    pthread_mutex_unlock(&s->lock);
     if (c->ssl) {
         SSL_free(c->ssl);
         c->ssl = NULL;
@@ -276,7 +293,7 @@ static void tls_accept(eip_stack_t *s, int budget)
     }
 }
 
-static int tls_handshake(eip_tls_client_t *c)
+static int tls_handshake(eip_stack_t *s, eip_tls_client_t *c)
 {
     int n = SSL_accept(c->ssl);
     if (n == 1) {
@@ -288,14 +305,14 @@ static int tls_handshake(eip_tls_client_t *c)
     if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
         return 0;
     }
-    tls_drop(c);
+    tls_drop(s, c);
     return -1;
 }
 
 static void tls_service(eip_stack_t *s, eip_tls_client_t *c, int budget)
 {
     if (!c->hs_done) {
-        if (tls_handshake(c) != 0 || !c->hs_done) {
+        if (tls_handshake(s, c) != 0 || !c->hs_done) {
             return;
         }
     }
@@ -307,11 +324,11 @@ static void tls_service(eip_stack_t *s, eip_tls_client_t *c, int budget)
             if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
                 break;
             }
-            tls_drop(c);
+            tls_drop(s, c);
             break;
         }
         if (c->rx_len + (size_t)n > sizeof(c->rx)) {
-            tls_drop(c);
+            tls_drop(s, c);
             break;
         }
         memcpy(c->rx + c->rx_len, tmp, (size_t)n);
@@ -324,16 +341,18 @@ static void tls_service(eip_stack_t *s, eip_tls_client_t *c, int budget)
             }
             uint8_t resp[EIP_TCP_BUF_MAX];
             size_t resp_len = 0;
+            memset(resp, 0, sizeof(resp));
             pthread_mutex_lock(&s->lock);
-            eip_encap_process(s, c->rx, need, resp, sizeof(resp), &resp_len);
+            int rc = eip_encap_process(s, c->rx, need, resp, sizeof(resp),
+                                       &resp_len, tls_client_owner(s, c));
             pthread_mutex_unlock(&s->lock);
-            if (resp_len > 0) {
+            if (rc == 0 && resp_len > 0) {
                 int w = SSL_write(c->ssl, resp, (int)resp_len);
                 if (w <= 0) {
                     int err = SSL_get_error(c->ssl, w);
                     if (err != SSL_ERROR_WANT_READ &&
                         err != SSL_ERROR_WANT_WRITE) {
-                        tls_drop(c);
+                        tls_drop(s, c);
                         return;
                     }
                 }

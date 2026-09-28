@@ -20,13 +20,32 @@ typedef struct {
     uint16_t out_frame_id;
     uint16_t in_data_len;
     uint16_t out_data_len;
-    uint16_t send_clock_factor;
-    uint16_t reduction_ratio;
+    uint16_t send_clock_factor; /* O→T IOCR; 0 = not negotiated */
+    uint16_t reduction_ratio;   /* O→T IOCR; 0 = not negotiated */
     uint8_t initiator_mac[6];
+    uint8_t initiator_uuid[PN_UUID_LEN]; /* CMInitiatorObjectUUID */
+    int have_initiator_uuid;
+    uint32_t owner_ip; /* host-order IPv4 of Connect sender; 0 = unset */
     int established;
     int prm_end;
     int app_ready;
+    int saw_rt; /* at least one matching O→T RTC1 received */
+    uint16_t data_hold_factor; /* 0 = PN_AR_DATA_HOLD_CYCLES */
+    uint64_t last_rt_rx_ns;
+    uint64_t last_cmi_ns;
 } pn_ar_t;
+
+/* CMI activity (2 s) stays armed until the controller shows liveness
+ * (O→T RTC1, or PrmEnd / ApplicationReady). Our own RTC1 TX does not
+ * count. After liveness, data-hold is factor × negotiated O→T period.
+ * Period = SendClockFactor × ReductionRatio × 31.25 µs (output CR).
+ * Factor is IOCR DataHoldFactor, else WatchdogFactor, else 3.
+ * cfg.cycle_us is not used. A zero SendClockFactor or ReductionRatio
+ * keeps the 2 s CMI window (O→T refreshes it) so the AR is still
+ * reclaimed. */
+#define PN_SEND_CLOCK_BASE_NS        31250ull
+#define PN_AR_DATA_HOLD_CYCLES       3
+#define PN_CMI_ACTIVITY_TIMEOUT_NS   2000000000ull
 
 #define PN_IM1_FUNC_LEN 32
 #define PN_IM1_LOC_LEN  22
@@ -91,9 +110,11 @@ void pn_lldp_send(pn_stack_t *s);
 
 void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen);
 void pn_rt_send_if_due(pn_stack_t *s);
+void pn_ar_abort(pn_stack_t *s, const char *why);
+void pn_ar_watchdog(pn_stack_t *s);
 
 int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
-                  size_t cap, size_t *out_len);
+                  size_t cap, size_t *out_len, uint32_t src_ip);
 void pn_rpc_poll(pn_stack_t *s);
 
 void pn_snmp_poll(pn_stack_t *s);

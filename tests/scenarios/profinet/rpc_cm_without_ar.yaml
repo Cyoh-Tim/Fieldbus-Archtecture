@@ -20,13 +20,13 @@ steps:
     subslot: 1
     data: no-ar
     expect:
-      rpc_response: true
+      rpc_response: false
   - action: record_read
     index: 0xAFF1
     slot: 0
     subslot: 1
     expect:
-      contains: no-ar
+      absent: no-ar
   - action: rpc_control
     command: parameter_end
     expect:

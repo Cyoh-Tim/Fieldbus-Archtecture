@@ -48,6 +48,12 @@
 #define EIP_CMD_SENDRRDATA          0x006F
 #define EIP_CMD_SENDUNITDATA        0x0070
 
+/* Encapsulation status (Vol 2) */
+#define EIP_ENCAP_STATUS_SUCCESS          0x0000
+#define EIP_ENCAP_STATUS_INVALID_CMD      0x0001
+#define EIP_ENCAP_STATUS_INVALID_SESSION  0x0064
+#define EIP_ENCAP_STATUS_INVALID_LENGTH   0x0065
+
 /* CPF item types */
 #define EIP_ITEM_NULL_ADDR          0x0000
 #define EIP_ITEM_CONNECTED_ADDR     0x00A1
@@ -70,6 +76,7 @@
 
 /* CIP status */
 #define CIP_STATUS_SUCCESS          0x00
+#define CIP_STATUS_CONN_FAILURE     0x01
 #define CIP_STATUS_PATH_DEST        0x05
 #define CIP_STATUS_PATH_SEGMENT     0x04
 #define CIP_STATUS_SERVICE_NSUP     0x08
@@ -77,6 +84,8 @@
 #define CIP_STATUS_ATTR_READONLY    0x0A
 #define CIP_STATUS_INVALID_PARAM    0x20
 #define CIP_STATUS_RESOURCE         0x02
+#define CIP_EXT_CONN_IN_USE         0x0100
+#define CIP_EXT_CONN_SIZE           0x0109
 
 /* Standard objects */
 #define CIP_CLASS_IDENTITY          0x01

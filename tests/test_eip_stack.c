@@ -3,6 +3,7 @@
 #include "eip_sec.h"
 #include "eip_stack.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -15,6 +16,40 @@ static void expect(int cond, const char *msg)
         fprintf(stderr, "FAIL: %s\n", msg);
         g_fail = 1;
     }
+}
+
+static uint32_t test_register(eip_stack_t *s)
+{
+    uint8_t req[EIP_ENCAP_HDR_SIZE + 4];
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req + 0, EIP_CMD_REGISTERSESSION);
+    eip_wr_le16(req + 2, 4);
+    eip_wr_le16(req + 24, 1);
+    uint8_t resp[64];
+    size_t n = 0;
+    if (eip_stack_handle_encap(s, req, sizeof(req), resp, sizeof(resp), &n) !=
+        0) {
+        return 0;
+    }
+    if (n < 8) {
+        return 0;
+    }
+    return eip_rd_le32(resp + 4);
+}
+
+static size_t fo_append_asm_path(uint8_t *fo, size_t off, uint16_t cfg_asm,
+                                 uint16_t out_asm, uint16_t in_asm)
+{
+    fo[off++] = 4;
+    fo[off++] = 0x20;
+    fo[off++] = CIP_CLASS_ASSEMBLY;
+    fo[off++] = 0x24;
+    fo[off++] = (uint8_t)cfg_asm;
+    fo[off++] = 0x2C;
+    fo[off++] = (uint8_t)out_asm;
+    fo[off++] = 0x2C;
+    fo[off++] = (uint8_t)in_asm;
+    return off;
 }
 
 static void test_identity_get(void)
@@ -74,7 +109,7 @@ static void test_identity_get(void)
     memset(req, 0, sizeof(req));
     eip_wr_le16(req + 0, EIP_CMD_SENDRRDATA);
     eip_wr_le16(req + 2, (uint16_t)boff);
-    eip_wr_le32(req + 4, 1);
+    eip_wr_le32(req + 4, test_register(s));
     memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
 
     uint8_t resp[512];
@@ -152,7 +187,7 @@ static void test_assembly_rw_and_forward_open(void)
     eip_wr_le16(fo + off, 32);
     off += 2; /* T->O params size */
     fo[off++] = 0x01; /* transport class 1 */
-    fo[off++] = 0;    /* path size words */
+    off = fo_append_asm_path(fo, off, 100, 101, 150);
 
     uint8_t path[8];
     size_t pu = 0;
@@ -191,6 +226,7 @@ static void test_assembly_rw_and_forward_open(void)
     memset(req, 0, sizeof(req));
     eip_wr_le16(req + 0, EIP_CMD_SENDRRDATA);
     eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, test_register(s));
     memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
 
     uint8_t resp[512];
@@ -202,7 +238,7 @@ static void test_assembly_rw_and_forward_open(void)
 
     /* Grab O->T conn id from Forward Open reply (service | 0x80 == 0xD4) */
     uint32_t o2t = 0;
-    for (size_t i = 0; i + 12 < resp_len; i++) {
+    for (size_t i = EIP_ENCAP_HDR_SIZE; i + 12 < resp_len; i++) {
         if (resp[i] == (CIP_SVC_FORWARD_OPEN | CIP_SVC_REPLY) &&
             resp[i + 2] == 0) {
             o2t = eip_rd_le32(resp + i + 4);
@@ -281,7 +317,7 @@ static void test_security_integrity(void)
     expect(s != NULL, "sec stack create");
 
     /* Forward Open CIP without MAC must be rejected (privilege) */
-    uint8_t fo[40];
+    uint8_t fo[64];
     size_t off = 0;
     fo[off++] = 0x0A;
     fo[off++] = 0x05;
@@ -306,7 +342,7 @@ static void test_security_integrity(void)
     eip_wr_le16(fo + off, 8);
     off += 2;
     fo[off++] = 1;
-    fo[off++] = 0;
+    off = fo_append_asm_path(fo, off, 100, 101, 150);
 
     uint8_t cip[2 + 4 + 64];
     cip[0] = CIP_SVC_FORWARD_OPEN;
@@ -337,11 +373,14 @@ static void test_security_integrity(void)
     memcpy(body + boff, cip, cip_len);
     boff += cip_len;
 
+    uint32_t sess = test_register(s);
+    expect(sess != 0, "sec register session");
+
     uint8_t req[EIP_ENCAP_HDR_SIZE + 128];
     memset(req, 0, sizeof(req));
     eip_wr_le16(req + 0, EIP_CMD_SENDRRDATA);
     eip_wr_le16(req + 2, (uint16_t)boff);
-    eip_wr_le32(req + 4, 0x42); /* session */
+    eip_wr_le32(req + 4, sess); /* session */
     memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
 
     uint8_t resp[512];
@@ -350,7 +389,7 @@ static void test_security_integrity(void)
                                   sizeof(resp), &resp_len) == 0,
            "sec FO without mac encap");
     int saw_priv = 0;
-    for (size_t i = 0; i + 3 < resp_len; i++) {
+    for (size_t i = EIP_ENCAP_HDR_SIZE; i + 3 < resp_len; i++) {
         if ((resp[i] & 0x7f) == CIP_SVC_FORWARD_OPEN &&
             (resp[i] & 0x80) && resp[i + 2] == CIP_STATUS_PRIVILEGE) {
             saw_priv = 1;
@@ -362,7 +401,7 @@ static void test_security_integrity(void)
 
     /* Same FO with valid integrity item */
     uint8_t material[4 + 128];
-    eip_wr_le32(material, 0x42);
+    eip_wr_le32(material, sess);
     memcpy(material + 4, cip, cip_len);
     uint8_t mac[EIP_HMAC_LEN];
     eip_hmac_sha256(cfg.psk, EIP_PSK_LEN, material, 4 + cip_len, mac);
@@ -394,7 +433,7 @@ static void test_security_integrity(void)
     memset(req, 0, sizeof(req));
     eip_wr_le16(req + 0, EIP_CMD_SENDRRDATA);
     eip_wr_le16(req + 2, (uint16_t)boff);
-    eip_wr_le32(req + 4, 0x42);
+    eip_wr_le32(req + 4, sess);
     memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
     resp_len = 0;
     expect(eip_stack_handle_encap(s, req, EIP_ENCAP_HDR_SIZE + boff, resp,
@@ -432,6 +471,7 @@ static void test_security_integrity(void)
     memset(req, 0, sizeof(req));
     eip_wr_le16(req + 0, EIP_CMD_SENDRRDATA);
     eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, sess);
     memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
     resp_len = 0;
     expect(eip_stack_handle_encap(s, req, EIP_ENCAP_HDR_SIZE + boff, resp,
@@ -502,6 +542,7 @@ static int sendrr_get(eip_stack_t *s, uint16_t class_id, uint16_t inst,
     memset(req, 0, sizeof(req));
     eip_wr_le16(req + 0, EIP_CMD_SENDRRDATA);
     eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, test_register(s));
     memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
     uint8_t resp[256];
     size_t resp_len = 0;
@@ -664,9 +705,10 @@ static void test_class1_watchdog_and_rt_stats(void)
     eip_wr_le16(fo + off, 8);
     off += 2;
     fo[off++] = 1;
-    fo[off++] = 0;
+    off = fo_append_asm_path(fo, off, EIP_ASM_CONFIG_DEFAULT,
+                             EIP_ASM_OUTPUT_DEFAULT, EIP_ASM_INPUT_DEFAULT);
 
-    uint8_t cip[64];
+    uint8_t cip[80];
     cip[0] = CIP_SVC_FORWARD_OPEN;
     cip[1] = 2;
     cip[2] = 0x20;
@@ -697,6 +739,7 @@ static void test_class1_watchdog_and_rt_stats(void)
     memset(req, 0, sizeof(req));
     eip_wr_le16(req, EIP_CMD_SENDRRDATA);
     eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, test_register(s));
     memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
     uint8_t resp[512];
     size_t resp_len = 0;
@@ -706,7 +749,7 @@ static void test_class1_watchdog_and_rt_stats(void)
     expect(eip_stack_class1_up(s) == 1, "class1 after FO");
 
     uint32_t o2t = 0;
-    for (size_t i = 0; i + 12 < resp_len; i++) {
+    for (size_t i = EIP_ENCAP_HDR_SIZE; i + 12 < resp_len; i++) {
         if (resp[i] == (CIP_SVC_FORWARD_OPEN | CIP_SVC_REPLY) &&
             resp[i + 2] == 0) {
             o2t = eip_rd_le32(resp + i + 4);
@@ -788,6 +831,447 @@ static void test_list_identity_and_protection(void)
     eip_stack_destroy(s);
 }
 
+static uint8_t cip_status_from_encap(const uint8_t *resp, size_t n)
+{
+    /* Parse CPF Unconnected Data item; do not scan raw bytes (0x00B2
+     * looks like a CIP reply because bit 0x80 is set). */
+    if (!resp || n < EIP_ENCAP_HDR_SIZE + 8) {
+        return 0xFF;
+    }
+    const uint8_t *b = resp + EIP_ENCAP_HDR_SIZE;
+    size_t bl = n - EIP_ENCAP_HDR_SIZE;
+    if (bl < 8) {
+        return 0xFF;
+    }
+    size_t off = 6;
+    uint16_t items = eip_rd_le16(b + off);
+    off += 2;
+    for (uint16_t i = 0; i < items; i++) {
+        if (off + 4 > bl) {
+            return 0xFF;
+        }
+        uint16_t type = eip_rd_le16(b + off);
+        uint16_t length = eip_rd_le16(b + off + 2);
+        off += 4;
+        if (off + length > bl) {
+            return 0xFF;
+        }
+        if (type == EIP_ITEM_UNCONNECTED_DATA && length >= 3) {
+            return b[off + 2];
+        }
+        off += length;
+    }
+    return 0xFF;
+}
+
+static size_t pack_fo_sendrr(uint8_t *req, size_t req_cap, uint32_t sess,
+                             const uint8_t *fo, size_t fo_len)
+{
+    uint8_t cip[96];
+    if (6 + fo_len > sizeof(cip)) {
+        return 0;
+    }
+    cip[0] = CIP_SVC_FORWARD_OPEN;
+    cip[1] = 2;
+    cip[2] = 0x20;
+    cip[3] = CIP_CLASS_CONN_MANAGER;
+    cip[4] = 0x24;
+    cip[5] = 1;
+    memcpy(cip + 6, fo, fo_len);
+    size_t cip_len = 6 + fo_len;
+    uint8_t body[160];
+    size_t boff = 0;
+    eip_wr_le32(body + boff, 0);
+    boff += 4;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, 2);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_NULL_ADDR);
+    boff += 2;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_UNCONNECTED_DATA);
+    boff += 2;
+    eip_wr_le16(body + boff, (uint16_t)cip_len);
+    boff += 2;
+    memcpy(body + boff, cip, cip_len);
+    boff += cip_len;
+    if (EIP_ENCAP_HDR_SIZE + boff > req_cap) {
+        return 0;
+    }
+    memset(req, 0, EIP_ENCAP_HDR_SIZE + boff);
+    eip_wr_le16(req, EIP_CMD_SENDRRDATA);
+    eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, sess);
+    memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
+    return EIP_ENCAP_HDR_SIZE + boff;
+}
+
+static size_t build_std_fo(uint8_t *fo, uint16_t serial, uint32_t orig_serial,
+                           uint32_t rpi, uint16_t o2t, uint16_t t2o,
+                           uint8_t tmo, uint8_t in_asm)
+{
+    size_t off = 0;
+    fo[off++] = 0x0A;
+    fo[off++] = 0x05;
+    memset(fo + off, 0, 8);
+    off += 8;
+    eip_wr_le16(fo + off, serial);
+    off += 2;
+    eip_wr_le16(fo + off, 1);
+    off += 2;
+    eip_wr_le32(fo + off, orig_serial);
+    off += 4;
+    fo[off++] = tmo;
+    fo[off++] = 0;
+    fo[off++] = 0;
+    fo[off++] = 0;
+    eip_wr_le32(fo + off, rpi);
+    off += 4;
+    eip_wr_le16(fo + off, o2t);
+    off += 2;
+    eip_wr_le32(fo + off, rpi);
+    off += 4;
+    eip_wr_le16(fo + off, t2o);
+    off += 2;
+    fo[off++] = 1;
+    off = fo_append_asm_path(fo, off, 100, 101, in_asm);
+    return off;
+}
+
+static void test_g2_watchdog_dup_path_size(void)
+{
+    eip_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mock = 1;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    cfg.input_assembly = 150;
+    cfg.output_assembly = 101;
+    cfg.config_assembly = 100;
+    cfg.rpi_us = 8000;
+    eip_stack_t *s = eip_stack_create(&cfg);
+    expect(s != NULL, "g2 stack");
+    expect(eip_stack_start(s) == 0, "g2 start");
+    uint32_t sess = test_register(s);
+    expect(sess != 0, "g2 session");
+
+    uint8_t fo[64];
+    uint8_t req[EIP_ENCAP_HDR_SIZE + 160];
+    uint8_t resp[512];
+    size_t resp_len = 0;
+
+    /* Long RPI so watchdog does not fire while we probe rejects. */
+    size_t fo_len = build_std_fo(fo, 0x77, 7, 8000, 8, 8, 4, 150);
+    size_t req_len = pack_fo_sendrr(req, sizeof(req), sess, fo, fo_len);
+    expect(eip_stack_handle_encap(s, req, req_len, resp, sizeof(resp),
+                                  &resp_len) == 0,
+           "g2 FO");
+    expect(cip_status_from_encap(resp, resp_len) == CIP_STATUS_SUCCESS,
+           "g2 FO success");
+    expect(eip_stack_class1_up(s) == 1, "g2 class1 after FO");
+
+    resp_len = 0;
+    expect(eip_stack_handle_encap(s, req, req_len, resp, sizeof(resp),
+                                  &resp_len) == 0,
+           "g2 dup FO encap");
+    expect(cip_status_from_encap(resp, resp_len) == CIP_STATUS_CONN_FAILURE,
+           "g2 dup FO connection failure");
+    expect(eip_stack_class1_up(s) == 1, "g2 still one class1");
+
+    fo_len = build_std_fo(fo, 0x78, 8, 8000, 8, 8, 4, 99);
+    req_len = pack_fo_sendrr(req, sizeof(req), sess, fo, fo_len);
+    resp_len = 0;
+    expect(eip_stack_handle_encap(s, req, req_len, resp, sizeof(resp),
+                                  &resp_len) == 0,
+           "g2 bad path encap");
+    expect(cip_status_from_encap(resp, resp_len) == CIP_STATUS_PATH_DEST,
+           "g2 bad path dest");
+    expect(eip_stack_class1_up(s) == 1, "g2 class1 unchanged after bad path");
+
+    fo_len = build_std_fo(fo, 0x88, 9, 8000, 99, 8, 4, 150);
+    req_len = pack_fo_sendrr(req, sizeof(req), sess, fo, fo_len);
+    resp_len = 0;
+    expect(eip_stack_handle_encap(s, req, req_len, resp, sizeof(resp),
+                                  &resp_len) == 0,
+           "g2 size encap");
+    expect(cip_status_from_encap(resp, resp_len) == CIP_STATUS_INVALID_PARAM,
+           "g2 size mismatch");
+    expect(eip_stack_class1_up(s) == 1, "g2 class1 unchanged after size reject");
+
+    /* Close the long-RPI conn, then FO with tiny RPI and no IO. */
+    uint8_t fc[16];
+    size_t foff = 0;
+    fc[foff++] = 0x0A;
+    fc[foff++] = 0x05;
+    eip_wr_le16(fc + foff, 0x77);
+    foff += 2;
+    eip_wr_le16(fc + foff, 1);
+    foff += 2;
+    eip_wr_le32(fc + foff, 7);
+    foff += 4;
+    fc[foff++] = 0;
+    fc[foff++] = 0;
+    uint8_t fccip[32];
+    fccip[0] = CIP_SVC_FORWARD_CLOSE;
+    fccip[1] = 2;
+    fccip[2] = 0x20;
+    fccip[3] = CIP_CLASS_CONN_MANAGER;
+    fccip[4] = 0x24;
+    fccip[5] = 1;
+    memcpy(fccip + 6, fc, foff);
+    uint8_t body[80];
+    size_t boff = 0;
+    eip_wr_le32(body + boff, 0);
+    boff += 4;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, 2);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_NULL_ADDR);
+    boff += 2;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_UNCONNECTED_DATA);
+    boff += 2;
+    eip_wr_le16(body + boff, (uint16_t)(6 + foff));
+    boff += 2;
+    memcpy(body + boff, fccip, 6 + foff);
+    boff += 6 + foff;
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req, EIP_CMD_SENDRRDATA);
+    eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, sess);
+    memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
+    resp_len = 0;
+    expect(eip_stack_handle_encap(s, req, EIP_ENCAP_HDR_SIZE + boff, resp,
+                                  sizeof(resp), &resp_len) == 0,
+           "g2 close");
+    expect(eip_stack_class1_up(s) == 0, "g2 closed");
+
+    fo_len = build_std_fo(fo, 0x79, 10, 100, 8, 8, 0, 150);
+    req_len = pack_fo_sendrr(req, sizeof(req), sess, fo, fo_len);
+    resp_len = 0;
+    expect(eip_stack_handle_encap(s, req, req_len, resp, sizeof(resp),
+                                  &resp_len) == 0,
+           "g2 tiny FO");
+    expect(eip_stack_class1_up(s) == 1, "g2 class1 after tiny FO");
+    usleep(2000);
+    eip_stack_poll(s);
+    expect(eip_stack_class1_up(s) == 0, "g2 FO without IO timed out");
+    eip_stack_destroy(s);
+}
+
+static void test_g5_encap_session_and_cip_len(void)
+{
+    eip_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mock = 1;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    eip_stack_t *s = eip_stack_create(&cfg);
+    expect(s != NULL, "g5 stack");
+
+    /* SendRRData with no registered session -> 0x64 */
+    uint8_t body[32];
+    size_t boff = 0;
+    eip_wr_le32(body + boff, 0);
+    boff += 4;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, 2);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_NULL_ADDR);
+    boff += 2;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_UNCONNECTED_DATA);
+    boff += 2;
+    eip_wr_le16(body + boff, 2);
+    boff += 2;
+    body[boff++] = CIP_SVC_GET_ATTR_SINGLE;
+    body[boff++] = 0;
+
+    uint8_t req[EIP_ENCAP_HDR_SIZE + 32];
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req, EIP_CMD_SENDRRDATA);
+    eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, 0x11111111);
+    memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
+    uint8_t resp[128];
+    size_t resp_len = 0;
+    expect(eip_stack_handle_encap(s, req, EIP_ENCAP_HDR_SIZE + boff, resp,
+                                  sizeof(resp), &resp_len) == 0,
+           "g5 bad session encap");
+    expect(resp_len >= 12, "g5 hdr");
+    expect(eip_rd_le32(resp + 8) == EIP_ENCAP_STATUS_INVALID_SESSION,
+           "g5 status 0x64");
+
+    uint32_t sess = test_register(s);
+    expect(sess != 0, "g5 register");
+
+    /* CIP item length 0: reject (no cip[0] OOB) */
+    boff = 0;
+    eip_wr_le32(body + boff, 0);
+    boff += 4;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, 2);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_NULL_ADDR);
+    boff += 2;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_UNCONNECTED_DATA);
+    boff += 2;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req, EIP_CMD_SENDRRDATA);
+    eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, sess);
+    memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
+    resp_len = 0;
+    expect(eip_stack_handle_encap(s, req, EIP_ENCAP_HDR_SIZE + boff, resp,
+                                  sizeof(resp), &resp_len) == 0,
+           "g5 empty cip encap");
+    expect(eip_rd_le32(resp + 8) == EIP_ENCAP_STATUS_INVALID_CMD,
+           "g5 empty cip status");
+
+    /* Truncated Encaps: process fails, resp_len stays 0 (no uninit read). */
+    uint8_t short_req[8];
+    memset(short_req, 0xAA, sizeof(short_req));
+    memset(resp, 0xBB, sizeof(resp));
+    resp_len = 99;
+    expect(eip_stack_handle_encap(s, short_req, sizeof(short_req), resp,
+                                  sizeof(resp), &resp_len) == -EINVAL,
+           "g5 short encap");
+    expect(resp_len == 0, "g5 resp_len cleared on failure");
+    eip_stack_destroy(s);
+}
+
+static uint32_t test_register_owned(eip_stack_t *s, uint32_t owner)
+{
+    uint8_t req[EIP_ENCAP_HDR_SIZE + 4];
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req + 0, EIP_CMD_REGISTERSESSION);
+    eip_wr_le16(req + 2, 4);
+    eip_wr_le16(req + 24, 1);
+    uint8_t resp[64];
+    size_t n = 0;
+    if (eip_stack_handle_encap_owned(s, owner, req, sizeof(req), resp,
+                                     sizeof(resp), &n) != 0) {
+        return 0;
+    }
+    if (n < 8) {
+        return 0;
+    }
+    return eip_rd_le32(resp + 4);
+}
+
+static void test_g5_session_owner_and_close(void)
+{
+    eip_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mock = 1;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    eip_stack_t *s = eip_stack_create(&cfg);
+    expect(s != NULL, "g5o stack");
+
+    uint32_t ha = test_register_owned(s, 0xA0000001u);
+    uint32_t hb = test_register_owned(s, 0xA0000002u);
+    expect(ha != 0 && hb != 0 && ha != hb, "g5o distinct handles");
+    expect(!(ha == 1 && hb == 2), "g5o handles not sequential 1,2");
+    expect(eip_stack_session_count(s) == 2, "g5o two sessions");
+
+    uint8_t body[32];
+    size_t boff = 0;
+    eip_wr_le32(body + boff, 0);
+    boff += 4;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, 2);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_NULL_ADDR);
+    boff += 2;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_UNCONNECTED_DATA);
+    boff += 2;
+    eip_wr_le16(body + boff, 2);
+    boff += 2;
+    body[boff++] = CIP_SVC_GET_ATTR_SINGLE;
+    body[boff++] = 0;
+
+    uint8_t req[EIP_ENCAP_HDR_SIZE + 32];
+    uint8_t resp[128];
+    size_t resp_len = 0;
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req, EIP_CMD_SENDRRDATA);
+    eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, ha);
+    memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
+    expect(eip_stack_handle_encap_owned(s, 0xA0000002u, req,
+                                        EIP_ENCAP_HDR_SIZE + boff, resp,
+                                        sizeof(resp), &resp_len) == 0,
+           "g5o foreign SendRR encap");
+    expect(eip_rd_le32(resp + 8) == EIP_ENCAP_STATUS_INVALID_SESSION,
+           "g5o foreign SendRR 0x64");
+
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req, EIP_CMD_UNREGISTERSESSION);
+    eip_wr_le32(req + 4, ha);
+    resp_len = 0;
+    expect(eip_stack_handle_encap_owned(s, 0xA0000002u, req, EIP_ENCAP_HDR_SIZE,
+                                        resp, sizeof(resp), &resp_len) == 0,
+           "g5o foreign Unregister encap");
+    expect(eip_rd_le32(resp + 8) == EIP_ENCAP_STATUS_INVALID_SESSION,
+           "g5o foreign Unregister 0x64");
+    expect(eip_stack_session_count(s) == 2, "g5o session kept");
+
+    eip_stack_drop_encap_owner(s, 0xA0000001u);
+    expect(eip_stack_session_count(s) == 1, "g5o drop owner A");
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req, EIP_CMD_SENDRRDATA);
+    eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, ha);
+    memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
+    resp_len = 0;
+    expect(eip_stack_handle_encap_owned(s, 0xA0000001u, req,
+                                        EIP_ENCAP_HDR_SIZE + boff, resp,
+                                        sizeof(resp), &resp_len) == 0,
+           "g5o SendRR after close");
+    expect(eip_rd_le32(resp + 8) == EIP_ENCAP_STATUS_INVALID_SESSION,
+           "g5o closed session 0x64");
+
+    int filled = 1; /* B still registered */
+    for (uint32_t i = 0; i < (uint32_t)EIP_CLASS3_SESSIONS_MAX; i++) {
+        uint32_t owner = 0xB0000001u + i;
+        if (owner == 0xA0000002u) {
+            continue;
+        }
+        uint32_t h = test_register_owned(s, owner);
+        if (h == 0) {
+            break;
+        }
+        filled++;
+        if (filled >= EIP_CLASS3_SESSIONS_MAX) {
+            break;
+        }
+    }
+    expect(filled == EIP_CLASS3_SESSIONS_MAX, "g5o table full");
+    uint32_t overflow = test_register_owned(s, 0xC0FFEEu);
+    expect(overflow == 0, "g5o 65th Register fails");
+    eip_stack_drop_encap_owner(s, 0xA0000002u);
+    expect(eip_stack_session_count(s) == EIP_CLASS3_SESSIONS_MAX - 1,
+           "g5o slot reclaimed");
+    uint32_t hnew = test_register_owned(s, 0xC0FFEEu);
+    expect(hnew != 0, "g5o Register after reclaim");
+    eip_stack_destroy(s);
+}
+
 int main(void)
 {
     test_register_session();
@@ -799,6 +1283,9 @@ int main(void)
     test_lldp_mgmt_and_frame();
     test_class1_watchdog_and_rt_stats();
     test_list_identity_and_protection();
+    test_g2_watchdog_dup_path_size();
+    test_g5_encap_session_and_cip_len();
+    test_g5_session_owner_and_close();
     if (g_fail) {
         fprintf(stderr, "eip stack tests FAILED\n");
         return 1;
