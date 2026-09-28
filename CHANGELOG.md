@@ -19,7 +19,8 @@
 - PROFINET RPC: IODWriteReq body must be ≥34 bytes before reading record
   length (G3); reject Connect from another controller while AR is up;
   same sender IP / CMInitiatorObjectUUID may replace; abort AR on CMI
-  activity timeout (2 s) or RT data-hold after RTC1 (G4); NDR
+  activity timeout (2 s until O→T or PrmEnd; our RTC1 TX does not
+  count) or RT data-hold after controller liveness (G4); NDR
   `argsLen==UINT32_MAX` no longer wraps `20+n` into an unbounded block
   walk (fuzz SEGV)
 - EtherNet/IP Encaps: reject CIP item length <2; SendRRData /

@@ -14,7 +14,7 @@ SLMP **Binary 3E only**, PREEMPT_RT 없음, 라이선스 Bundle 복제 없음.
 | G1 | HIGH | SLMP batch qty / subcmd / device | Bound qty to Binary 3E max; reject unknown subcommand/device; stack array `SLMP_QTY_WORD_MAX` | `test_slmp_stack` (`test_handle_qty_and_unknown`) | 4-1 SI-2; 4-2 CR 3.5, 7.1, 7.2 |
 | G2 | MED | EIP Forward Open resource | Arm Class1 watchdog at FO; reject duplicate triad; validate assembly path + o2t/t2o size | `test_eip_stack` (`test_g2_watchdog_dup_path_size`); `ctt_eip_class1_watchdog` | 4-1 SI-2; 4-2 CR 3.5, 7.1, 7.2 |
 | G3 | MED | PN IODWriteReq header | `parse_write_req` requires body `blen >= 34` before reading record-data length | `test_pn_rpc` (`test_write_short_block`) | 4-1 SI-2; 4-2 CR 3.5 |
-| G4 | MED | PN RPC AR ownership | Reject Connect from another controller while AR up; same sender IP / CMInitiatorObjectUUID may replace; abort on CMI activity timeout (2 s) or RT data-hold (3×cycle after RTC1) | `test_pn_rpc` (`test_ar_ownership`, `test_ar_timeout_and_replace`); `ctt_pn_rpc_cm_without_ar` | 4-1 SI-2; 4-2 CR 2.1, 3.5, 7.1 |
+| G4 | MED | PN RPC AR ownership | Reject Connect from another controller while AR up; same sender IP / CMInitiatorObjectUUID may replace; CMI timeout until controller liveness (O→T or PrmEnd/ApplReady), then data-hold (IOCR factor or 3×cycle) on O→T | `test_pn_rpc` (`test_ar_ownership`, `test_ar_timeout_and_replace`, `test_cmi_ignores_own_tx`); `ctt_pn_rpc_cm_without_ar` | 4-1 SI-2; 4-2 CR 2.1, 3.5, 7.1 |
 | G5 | MED | EIP Encaps / uninit | `cip_len < 2` reject; SendRR session must be registered **and owned by this TCP/TLS connection** (status `0x64`); drop session on close; unguessable handles; zero-init + check `eip_encap_process` | `test_eip_stack` (`test_g5_encap_session_and_cip_len`, `test_g5_session_owner_and_close`) | 4-1 SI-2; 4-2 CR 2.1, 3.5, 7.2 |
 | G9 | — | Fuzz + hardening | libFuzzer harnesses + seed corpora; clang CI ~60 s/target; `-fstack-protector-strong`; `-D_FORTIFY_SOURCE=2` with opt. Fuzz found PN NDR `UINT32_MAX` wrap (fixed) | `.github/workflows/ci.yml` `fuzz` / `sanitizers`; `test_ndr_huge_args_len` | 4-1 SVV-3; 4-2 CR 3.5, 7.1 |
 
@@ -103,22 +103,29 @@ ARUUID and sender IPv4 (`owner_ip` from Connect).
 Write without AR stays fail-closed (`ctt_pn_rpc_cm_without_ar`).
 
 **Lifetime.** A controller that vanishes without Release no longer holds
-the AR forever. `pn_ar_watchdog()` (from `pn_stack_poll`):
+the AR forever. `pn_ar_watchdog()` (from `pn_stack_poll`) keys off
+**controller** activity, not the device's own RTC1 transmit:
 
-- Before the first RTC1 **transmit**: CMI activity timeout **2 s** without
-  owner RPC (Connect/Control/Read/Write) aborts the AR. 2 s is long
-  enough that CTT `io_cycle` (~64 ms) does not trip. After the device
-  has produced RTC1, CMI does not fire (mock soak has no O→T frames).
-- After at least one RTC1 received (`saw_rt`): data-hold **3 × `cycle_us`**
-  without a further O→T frame aborts the AR.
+- Until the controller shows liveness (O→T RTC1 received, or PrmEnd /
+  ApplicationReady completed): CMI activity timeout **2 s** without owner
+  RPC (Connect/Control/Read/Write) aborts the AR. Device TX does not
+  clear this timer.
+- After liveness: data-hold on O→T silence. Multiplier is IOCR
+  `DataHoldFactor`, else `WatchdogFactor`, else **3 × `cycle_us`**.
 - Same-controller Connect (sender IP / CMInitiatorObjectUUID) may replace
   an established AR at any time.
+
+CTT mock soak does not send O→T. `step_soak` issues a periodic IODRead
+so the 2 s CMI timer stays fresh (`soak_ci` / nightly). That is tester
+traffic, not a stack exception.
 
 **Test.** `test_ar_ownership`: second Connect from another IP, Control/Release
 wrong IP or UUID, matching Control/Write/Release.
 `test_ar_timeout_and_replace`: other-IP Connect while AR is up is rejected;
 after a simulated CMI timeout a new Connect succeeds; data-hold after
 `saw_rt` also aborts.
+`test_cmi_ignores_own_tx`: Connect, device RTC1 TX, no O→T; backdated CMI
+aborts the AR; a different IP may Connect.
 
 **62443.** CR 2.1 (authorization of established AR); CR 3.5; CR 7.1 / 7.2
 (AR reclaim).

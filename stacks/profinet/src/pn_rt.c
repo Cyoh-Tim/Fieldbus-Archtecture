@@ -19,30 +19,38 @@ void pn_ar_abort(pn_stack_t *s, const char *why)
     s->last_rt_ns = 0;
 }
 
+static int ar_controller_live(const pn_ar_t *ar)
+{
+    /* Liveness is the controller, not our RTC1 transmit. */
+    return ar->saw_rt || ar->prm_end || ar->app_ready;
+}
+
 void pn_ar_watchdog(pn_stack_t *s)
 {
     if (!s || !s->ar.established) {
         return;
     }
     uint64_t now = pn_now_ns();
+    if (!ar_controller_live(&s->ar)) {
+        if (s->ar.last_cmi_ns != 0 && now > s->ar.last_cmi_ns &&
+            (now - s->ar.last_cmi_ns) > PN_CMI_ACTIVITY_TIMEOUT_NS) {
+            pn_ar_abort(s, "CMI activity timeout");
+        }
+        return;
+    }
+
     uint64_t cycle_ns = (uint64_t)s->cfg.cycle_us * 1000ull;
     if (cycle_ns == 0) {
         cycle_ns = 8000000ull;
     }
-    uint64_t hold = cycle_ns * (uint64_t)PN_AR_DATA_HOLD_CYCLES;
-
-    if (s->ar.saw_rt && s->ar.last_rt_rx_ns != 0 && now > s->ar.last_rt_rx_ns &&
-        (now - s->ar.last_rt_rx_ns) > hold) {
+    unsigned factor = s->ar.data_hold_factor ? s->ar.data_hold_factor
+                                             : (unsigned)PN_AR_DATA_HOLD_CYCLES;
+    uint64_t hold = cycle_ns * (uint64_t)factor;
+    /* After PrmEnd/ApplReady with no O→T yet, silence is measured from
+     * the last controller RPC. After the first O→T, from that frame. */
+    uint64_t base = s->ar.saw_rt ? s->ar.last_rt_rx_ns : s->ar.last_cmi_ns;
+    if (base != 0 && now > base && (now - base) > hold) {
         pn_ar_abort(s, "RT data-hold timer expired");
-        return;
-    }
-    /* CMI activity: reclaim an AR that never entered cyclic TX (controller
-     * vanished during CM). Once we produce RTC1, mock soak has no O→T so
-     * CMI must not fire; data-hold covers a peer that did send RTC1. */
-    if (!s->ar.saw_rt && !s->ar.produced_rt && s->ar.last_cmi_ns != 0 &&
-        now > s->ar.last_cmi_ns &&
-        (now - s->ar.last_cmi_ns) > PN_CMI_ACTIVITY_TIMEOUT_NS) {
-        pn_ar_abort(s, "CMI activity timeout");
     }
 }
 
@@ -116,7 +124,6 @@ void pn_rt_send_if_due(pn_stack_t *s)
         pn_eth_build(frame, sizeof(frame), dst, s->cfg.mac, PN_ETHTYPE_PN, pay, n);
     if (flen) {
         pn_eth_send(s, frame, flen);
-        s->ar.produced_rt = 1;
     }
     if (s->last_rt_ns == 0) {
         s->last_rt_ns = now + period;

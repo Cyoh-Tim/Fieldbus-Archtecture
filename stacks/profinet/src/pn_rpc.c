@@ -262,6 +262,17 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         uint16_t rr = pn_rd_be16(body + 16);
         s->ar.send_clock_factor = sc;
         s->ar.reduction_ratio = rr;
+        /* IOCRBlockReq: WatchdogFactor @26, DataHoldFactor @28. O→T
+         * (output CR) supplies the data-hold multiplier. */
+        if (iocr_type == PN_IOCR_OUTPUT && blen >= 28) {
+            uint16_t wdog = pn_rd_be16(body + 26);
+            uint16_t dhold = (blen >= 30) ? pn_rd_be16(body + 28) : 0;
+            if (dhold != 0) {
+                s->ar.data_hold_factor = dhold;
+            } else if (wdog != 0) {
+                s->ar.data_hold_factor = wdog;
+            }
+        }
         if (iocr_type == PN_IOCR_INPUT) {
             s->ar.in_frame_id = frame_id;
             s->ar.in_data_len = data_len > 1 ? (uint16_t)(data_len - 1) : 0;

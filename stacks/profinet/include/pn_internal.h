@@ -29,15 +29,16 @@ typedef struct {
     int established;
     int prm_end;
     int app_ready;
-    int saw_rt; /* at least one matching RTC1 received */
-    int produced_rt; /* at least one RTC1 transmitted */
+    int saw_rt; /* at least one matching O→T RTC1 received */
+    uint16_t data_hold_factor; /* 0 = PN_AR_DATA_HOLD_CYCLES */
     uint64_t last_rt_rx_ns;
     uint64_t last_cmi_ns;
 } pn_ar_t;
 
-/* Data hold ≈ 3 × send clock (cycle_us) after the first O→T RTC1.
- * CMI activity (2 s) applies only before the first RTC1 TX so mock soak
- * / CTT io_cycle are not aborted. */
+/* CMI activity (2 s) stays armed until the controller shows liveness
+ * (O→T RTC1, or PrmEnd / ApplicationReady). Our own RTC1 TX does not
+ * count. After liveness, data-hold is factor × cycle_us on O→T silence.
+ * Factor comes from IOCR DataHoldFactor / WatchdogFactor, else 3. */
 #define PN_AR_DATA_HOLD_CYCLES       3
 #define PN_CMI_ACTIVITY_TIMEOUT_NS   2000000000ull
 

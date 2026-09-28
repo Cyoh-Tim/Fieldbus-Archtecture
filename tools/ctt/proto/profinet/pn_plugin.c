@@ -1828,6 +1828,32 @@ static int step_snmp_get(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
     return out;
 }
 
+/* Mock soak does not send O→T. Refresh CMI with a Read so a 2 s
+ * controller-activity timeout does not drop the AR. Production watchdog
+ * still keys off controller RPC / O→T, not our RTC1 TX. */
+static void soak_refresh_cmi(ctt_run_t *run, pn_priv_t *priv)
+{
+    uint8_t body[34];
+    memset(body, 0, sizeof(body));
+    pn_wr_be16(body, 1);
+    fill_connect_aruuid(body + 2);
+    pn_wr_be16(body + 22, 0);
+    pn_wr_be16(body + 24, 1);
+    pn_wr_be16(body + 28, PN_INDEX_IM0);
+    pn_wr_be32(body + 30, 64);
+    uint8_t blocks[80];
+    size_t bn = wr_pn_block(blocks, PN_BLOCK_IOD_READ_REQ, body, sizeof(body));
+    uint8_t pdu[256];
+    memset(pdu, 0, sizeof(pdu));
+    pdu[0] = 1;
+    pn_wr_le16(pdu + 68, RPC_OP_READ);
+    size_t stub = ndr_wrap(pdu + 80, blocks, bn);
+    pn_wr_le16(pdu + 74, (uint16_t)stub);
+    uint8_t resp[512];
+    size_t rlen = 0;
+    (void)rpc_transact(run, priv, pdu, 80 + stub, resp, sizeof(resp), &rlen);
+}
+
 static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
                      int idx)
 {
@@ -1876,9 +1902,14 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
 
     ctt_cycle_clock_t clk;
     ctt_cycle_clock_init(&clk, (uint64_t)cycle_ms * 1000000ull);
+    uint64_t last_cmi_refresh = start;
     while (ctt_now_ns() < deadline) {
         if (!duration_s && iterations > 0 && got >= iterations) {
             break;
+        }
+        if (ctt_now_ns() - last_cmi_refresh >= 1000000000ull) {
+            soak_refresh_cmi(run, priv);
+            last_cmi_refresh = ctt_now_ns();
         }
         pump(run, priv);
         drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1, NULL,

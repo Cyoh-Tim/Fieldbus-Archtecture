@@ -297,12 +297,44 @@ static void test_ar_timeout_and_replace(void)
     pn_stack_destroy(s);
 }
 
+static void test_cmi_ignores_own_tx(void)
+{
+    /* Our RTC1 TX must not suppress CMI. No O→T / PrmEnd => abort, then
+     * a different controller may Connect. */
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "tx create");
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = build_connect(pdu);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "tx connect");
+    expect(pn_stack_ar_up(s) == 1, "tx ar up");
+    pn_rt_send_if_due(s);
+    expect(pn_stack_ar_up(s) == 1, "tx ar still up after our RTC1");
+    expect(s->ar.saw_rt == 0 && s->ar.prm_end == 0, "tx no controller liveness");
+
+    s->ar.last_cmi_ns = pn_now_ns() - (PN_CMI_ACTIVITY_TIMEOUT_NS + 1000000ull);
+    pn_ar_watchdog(s);
+    expect(pn_stack_ar_up(s) == 0, "tx CMI abort after own TX");
+
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000099) ==
+               0,
+           "tx other-ip connect after abort");
+    expect(pn_stack_ar_up(s) == 1, "tx new ar up");
+    expect(s->ar.owner_ip == 0x0a000099, "tx new owner");
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
     test_write_short_block();
     test_ar_ownership();
     test_ndr_huge_args_len();
     test_ar_timeout_and_replace();
+    test_cmi_ignores_own_tx();
     if (g_fail) {
         fprintf(stderr, "test_pn_rpc: FAILED\n");
         return 1;
