@@ -25,7 +25,8 @@
 - EtherNet/IP Encaps: reject CIP item length <2; SendRRData /
   UnregisterSession require a session **owned by this TCP/TLS
   connection** (status `0x64`); drop session on disconnect; unguessable
-  handles (G5)
+  handles (G5). CTT/unit tests parse Forward Open replies after the
+  Encaps header so a `0xD4` byte in the handle is not a false CIP match.
 
 - Config JSON parse error: print `cJSON_GetErrorPtr()` before `free(raw)`
   (heap use-after-free on `fb_reload` of malformed JSON; ASan)

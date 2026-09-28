@@ -204,6 +204,11 @@ No other fuzzer crashes in the 180 s runs.
 | `ctest` daemon+CTT+API (93 tests, incl. `soak_ci`) | pass |
 | ASan+UBSan `ctest` (84 tests, `BUILD_DAEMON=OFF`, incl. `soak_ci`) | pass |
 | libFuzzer 180 s × 6 targets | pass after NDR wrap fix |
+| Bugbot G5/G4 follow-up: `ctest` 93/93, ASan 84/84, fuzz ~30 s × 6 | pass |
+
+Unguessable Encaps session handles can contain `0xD4`/`0x00` in the header;
+CTT and unit tests now scan Forward Open replies **after** the 24-byte
+Encaps header so they do not treat the session field as a CIP reply.
 
 ---
 
