@@ -1,7 +1,12 @@
 #include "mb_stack.h"
 
+#include <arpa/inet.h>
+#include <errno.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 static int g_fail;
 
@@ -206,6 +211,81 @@ static void test_mask_write(void)
     mb_stack_destroy(s);
 }
 
+static int mb_connect(int port)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_port = htons((uint16_t)port);
+    inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
+    if (connect(fd, (struct sockaddr *)&a, sizeof(a)) != 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static void test_g7_mb_idle_and_per_ip(void)
+{
+    mb_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.role = MB_ROLE_SERVER;
+    snprintf(cfg.bind_ip, sizeof(cfg.bind_ip), "127.0.0.1");
+    cfg.port = 16152;
+    cfg.unit_id = 1;
+    cfg.max_clients = 4;
+    cfg.idle_timeout_ms = 200;
+    cfg.max_conn_per_ip = 1;
+    cfg.n_holding = 16;
+    cfg.n_input = 16;
+    cfg.n_coil = 16;
+    cfg.n_discrete = 16;
+    mb_stack_t *s = mb_stack_create(&cfg);
+    expect(s != NULL, "g7 mb create");
+    if (!s) {
+        return;
+    }
+    if (mb_stack_start(s) != 0) {
+        fprintf(stderr, "FAIL: g7 mb start\n");
+        g_fail = 1;
+        mb_stack_destroy(s);
+        return;
+    }
+    int a = mb_connect(16152);
+    expect(a >= 0, "g7 mb connect a");
+    for (int i = 0; i < 20; i++) {
+        mb_stack_poll(s);
+        usleep(1000);
+    }
+    int b = mb_connect(16152);
+    expect(b >= 0, "g7 mb connect b");
+    for (int i = 0; i < 20; i++) {
+        mb_stack_poll(s);
+        usleep(1000);
+    }
+    uint8_t tmp[8];
+    ssize_t n = recv(b, tmp, sizeof(tmp), MSG_DONTWAIT);
+    expect(n == 0 || n < 0, "g7 mb per-ip dropped");
+    if (b >= 0) {
+        close(b);
+    }
+    usleep(250000);
+    for (int i = 0; i < 20; i++) {
+        mb_stack_poll(s);
+        usleep(1000);
+    }
+    n = recv(a, tmp, sizeof(tmp), MSG_DONTWAIT);
+    expect(n == 0 || n < 0, "g7 mb idle dropped");
+    if (a >= 0) {
+        close(a);
+    }
+    mb_stack_destroy(s);
+}
+
 int main(void)
 {
     test_read_holding();
@@ -213,6 +293,7 @@ int main(void)
     test_string_bytes();
     test_exception_illegal_address();
     test_mask_write();
+    test_g7_mb_idle_and_per_ip();
     if (g_fail) {
         fprintf(stderr, "test_mb_stack: FAILED\n");
         return 1;

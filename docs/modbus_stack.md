@@ -209,6 +209,8 @@ PROFINET과 같이:
   "unit_id": 1,
   "unit_id_any": false,
   "max_clients": 4,
+  "idle_timeout_ms": 60000,
+  "max_conn_per_ip": 4,
   "client_timeout_ms": 200
 }
 ```
@@ -222,6 +224,8 @@ PROFINET과 같이:
 | `unit_id` | 슬레이브 번호(보통 1) |
 | `unit_id_any` | true면 아무 unit id 요청에 응답 |
 | `max_clients` | 동시 마스터 수 (1..8) |
+| `idle_timeout_ms` | 유휴 TCP 마스터 해제. 기본 60000. `0` 도 기본값 |
+| `max_conn_per_ip` | 소스 IPv4 당 연결 상한. 기본 4. `0` 도 기본값 |
 | `client_timeout_ms` | client 역할 응답 대기 |
 | `n_holding` 등 | 맵 크기 (생략 시 넉넉한 기본값) |
 

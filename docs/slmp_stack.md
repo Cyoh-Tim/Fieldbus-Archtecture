@@ -217,6 +217,8 @@ stacks/slmp/src/slmp_stack.c   ← TCP, Binary 3E, 디바이스 맵, batch R/W
 | `timeout_ms` | 소켓 I/O 타임아웃 | 기본 1000 |
 | `frame` | 프레임 종류 | `"3E"` 만 동작. 그 외 거절 |
 | `bind_ip` / `max_clients` | server 전용 | 시뮬 리슨 |
+| `idle_timeout_ms` | server 전용 | 유휴 TCP 해제. 기본 60000 |
+| `max_conn_per_ip` | server 전용 | 소스 IPv4 당 상한. 기본 4 |
 | `map_words` / `map_bits` | 로컬 맵 크기 | 서버/캐시 용량 |
 
 ### 6.2 points 예시가 하는 일

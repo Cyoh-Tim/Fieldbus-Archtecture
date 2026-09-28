@@ -1,4 +1,4 @@
-# Internal TC PN-B-NEG-006 — NameOfStation max / oversize truncate.
+# Internal TC PN-B-NEG-006 — NameOfStation DNS/PN rules + max length.
 name: dcp_set_name_boundary
 id: PN-B-NEG-006
 suite: PN-B-v1
@@ -12,6 +12,7 @@ steps:
   - action: dcp_set
     name_len: 240
     name_fill: a
+    name_dns: true
     xid: 0xB0000001
     expect:
       result: accept
@@ -24,7 +25,26 @@ steps:
     name_fill: b
     xid: 0xB0000002
     expect:
-      result: accept
+      result: reject
+      station_name_len: 240
+  - action: dcp_set
+    name_len: 64
+    name_fill: c
+    xid: 0xB0000004
+    expect:
+      result: reject
+      station_name_len: 240
+  - action: dcp_set
+    name_of_station: 192.168.0.1
+    xid: 0xB0000005
+    expect:
+      result: reject
+      station_name_len: 240
+  - action: dcp_set
+    name_of_station: port-abc
+    xid: 0xB0000006
+    expect:
+      result: reject
       station_name_len: 240
   - action: dcp_set
     name_of_station: sensor-line1

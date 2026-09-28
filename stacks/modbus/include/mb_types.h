@@ -14,6 +14,10 @@
 #define MB_PDU_MAX 253
 #define MB_MBAP_LEN 7
 
+#define MB_CLIENTS_MAX 8
+#define MB_IDLE_TIMEOUT_MS_DEFAULT 60000
+#define MB_MAX_CONN_PER_IP_DEFAULT 4
+
 /* Function codes — sensors/PLCs 가 흔히 쓰는 범위 */
 #define MB_FC_READ_COILS 0x01
 #define MB_FC_READ_DISCRETE 0x02

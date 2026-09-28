@@ -216,7 +216,8 @@ int eip_stack_explicit_set(eip_stack_t *s, uint16_t class_id, uint16_t instance,
         uint8_t resp[64];
         size_t resp_len = 0;
         pthread_mutex_lock(&s->lock);
-        eip_cip_route(s, cip, cip_len, resp, sizeof(resp), &resp_len);
+        eip_cip_route_auth(s, EIP_CIP_AUTH_SESSION | EIP_CIP_AUTH_SECURE, cip,
+                           cip_len, resp, sizeof(resp), &resp_len);
         pthread_mutex_unlock(&s->lock);
         return (resp_len >= 4 && resp[2] == CIP_STATUS_SUCCESS) ? 0 : -EIO;
     }
@@ -289,7 +290,8 @@ int eip_stack_tag_write(eip_stack_t *s, const char *tag, const uint8_t *data,
         uint8_t resp[64];
         size_t resp_len = 0;
         pthread_mutex_lock(&s->lock);
-        eip_cip_route(s, cip, cip_len, resp, sizeof(resp), &resp_len);
+        eip_cip_route_auth(s, EIP_CIP_AUTH_SESSION | EIP_CIP_AUTH_SECURE, cip,
+                           cip_len, resp, sizeof(resp), &resp_len);
         pthread_mutex_unlock(&s->lock);
         return (resp_len >= 4 && resp[2] == CIP_STATUS_SUCCESS) ? 0 : -EIO;
     }

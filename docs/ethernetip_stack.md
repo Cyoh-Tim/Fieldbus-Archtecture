@@ -47,8 +47,17 @@ SOC 초안: [`ethernetip_soc.md`](ethernetip_soc.md).
 "acd_enable": true,
 "iface": "eth0",
 "security_class": 1,
-"psk_hex": "…"
+"psk_hex": "…",
+"protection_mode": 0,
+"idle_timeout_ms": 60000,
+"max_conn_per_ip": 4
 ```
+
+| 키 | 기본 | 설명 |
+|----|------|------|
+| `idle_timeout_ms` | 60000 | TCP(및 TLS) 유휴 연결 해제. `0` 도 기본값 |
+| `max_conn_per_ip` | 4 | 소스 IPv4 당 동시 연결 상한. `0` 도 기본값 |
+| `protection_mode` | 0 | Identity attr 17. 비0 이면 Reset/Set_Attribute Privilege `0x0F` |
 
 ## 실행
 

@@ -109,6 +109,12 @@ eip_stack_t *eip_stack_create(const eip_cfg_t *cfg)
     if (s->cfg.serial_number == 0) {
         s->cfg.serial_number = 0x12345678;
     }
+    if (s->cfg.idle_timeout_ms <= 0) {
+        s->cfg.idle_timeout_ms = EIP_IDLE_TIMEOUT_MS_DEFAULT;
+    }
+    if (s->cfg.max_conn_per_ip <= 0) {
+        s->cfg.max_conn_per_ip = EIP_MAX_CONN_PER_IP_DEFAULT;
+    }
     if (s->cfg.input_size > EIP_ASSEMBLY_SIZE_MAX ||
         s->cfg.output_size > EIP_ASSEMBLY_SIZE_MAX ||
         s->cfg.config_size > EIP_ASSEMBLY_SIZE_MAX) {
@@ -388,6 +394,8 @@ void eip_stack_stop(eip_stack_t *s)
         s->clients[i].fd = -1;
         s->clients[i].rx_len = 0;
         s->clients[i].session = 0;
+        s->clients[i].peer_ip = 0;
+        s->clients[i].last_rx_ns = 0;
     }
     if (s->originator_fd >= 0) {
         close(s->originator_fd);
@@ -396,6 +404,17 @@ void eip_stack_stop(eip_stack_t *s)
     for (int i = 0; i < EIP_CLASS1_CONN_MAX; i++) {
         s->class1[i].in_use = 0;
     }
+}
+
+static int eip_count_ip(const eip_stack_t *s, uint32_t ip)
+{
+    int n = 0;
+    for (int i = 0; i < EIP_TCP_CLIENTS_MAX; i++) {
+        if (s->clients[i].active && s->clients[i].peer_ip == ip) {
+            n++;
+        }
+    }
+    return n;
 }
 
 static void accept_clients(eip_stack_t *s, int budget)
@@ -409,6 +428,14 @@ static void accept_clients(eip_stack_t *s, int budget)
         int fd = accept(s->listen_fd, (struct sockaddr *)&peer, &plen);
         if (fd < 0) {
             break;
+        }
+        uint32_t ip = ntohl(peer.sin_addr.s_addr);
+        if (eip_count_ip(s, ip) >= s->cfg.max_conn_per_ip) {
+            LOG_WARN("ethernetip", "per-IP limit %d from %u.%u.%u.%u",
+                     s->cfg.max_conn_per_ip, (ip >> 24) & 0xff,
+                     (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+            close(fd);
+            continue;
         }
         int slot = -1;
         for (int i = 0; i < EIP_TCP_CLIENTS_MAX; i++) {
@@ -425,6 +452,8 @@ static void accept_clients(eip_stack_t *s, int budget)
         memset(&s->clients[slot], 0, sizeof(s->clients[slot]));
         s->clients[slot].fd = fd;
         s->clients[slot].active = 1;
+        s->clients[slot].peer_ip = ip;
+        s->clients[slot].last_rx_ns = eip_now_ns();
     }
 }
 
@@ -450,6 +479,8 @@ static void tcp_client_drop(eip_stack_t *s, eip_tcp_client_t *c)
     c->active = 0;
     c->rx_len = 0;
     c->session = 0;
+    c->peer_ip = 0;
+    c->last_rx_ns = 0;
 }
 
 static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
@@ -470,6 +501,7 @@ static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
         }
         memcpy(c->rx + c->rx_len, tmp, (size_t)n);
         c->rx_len += (size_t)n;
+        c->last_rx_ns = eip_now_ns();
 
         while (c->rx_len >= EIP_ENCAP_HDR_SIZE) {
             uint16_t length = eip_rd_le16(c->rx + 2);
@@ -562,10 +594,20 @@ void eip_stack_poll(eip_stack_t *s)
     } else if (s->cfg.role == EIP_ROLE_ADAPTER) {
         accept_clients(s, EIP_POLL_TCP_BUDGET);
         int tcp_left = EIP_POLL_TCP_BUDGET;
-        for (int i = 0; i < EIP_TCP_CLIENTS_MAX && tcp_left > 0; i++) {
-            if (s->clients[i].active) {
+        for (int i = 0; i < EIP_TCP_CLIENTS_MAX; i++) {
+            if (s->clients[i].active && tcp_left > 0) {
                 service_tcp_client(s, &s->clients[i]);
                 tcp_left--;
+            }
+        }
+        uint64_t now = eip_now_ns();
+        uint64_t idle_ns = (uint64_t)s->cfg.idle_timeout_ms * 1000000ull;
+        for (int i = 0; i < EIP_TCP_CLIENTS_MAX; i++) {
+            uint64_t last = s->clients[i].last_rx_ns;
+            if (s->clients[i].active && idle_ns > 0 && last != 0 && now > last &&
+                now - last > idle_ns) {
+                LOG_INFO("ethernetip", "idle timeout TCP slot %d", i);
+                tcp_client_drop(s, &s->clients[i]);
             }
         }
         service_udp(s, EIP_POLL_UDP_BUDGET);

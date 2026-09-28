@@ -4,7 +4,7 @@
 제품 잠금: PROFINET **CC-B RT Class 1 only** (IRT / CC-C permanent non-goal),
 SLMP **Binary 3E only**, PREEMPT_RT 없음, 라이선스 Bundle 복제 없음.
 
-대상 요구: IEC 62443-4-1 SI-2 / SVV-3; 62443-4-2 CR 3.5, CR 7.1, CR 7.2, CR 2.1.
+대상 요구: IEC 62443-4-1 SI-2 / SVV-3; 62443-4-2 CR 1.2, CR 2.1, CR 3.1, CR 3.5, CR 7.1, CR 7.2.
 위치는 리뷰 리드이며, 각 결함은 코드에서 재확인했다.
 
 ## Summary
@@ -16,15 +16,12 @@ SLMP **Binary 3E only**, PREEMPT_RT 없음, 라이선스 Bundle 복제 없음.
 | G3 | MED | PN IODWriteReq header | `parse_write_req` requires body `blen >= 34` before reading record-data length | `test_pn_rpc` (`test_write_short_block`) | 4-1 SI-2; 4-2 CR 3.5 |
 | G4 | MED | PN RPC AR ownership | Reject Connect from another controller while AR up; same sender IP / CMInitiatorObjectUUID may replace; CMI timeout until controller liveness (O→T or PrmEnd/ApplReady), then data-hold (IOCR factor or 3×cycle) on O→T | `test_pn_rpc` (`test_ar_ownership`, `test_ar_timeout_and_replace`, `test_cmi_ignores_own_tx`); `ctt_pn_rpc_cm_without_ar` | 4-1 SI-2; 4-2 CR 2.1, 3.5, 7.1 |
 | G5 | MED | EIP Encaps / uninit | `cip_len < 2` reject; SendRR session must be registered **and owned by this TCP/TLS connection** (status `0x64`); drop session on close; unguessable handles; zero-init + check `eip_encap_process` | `test_eip_stack` (`test_g5_encap_session_and_cip_len`, `test_g5_session_owner_and_close`) | 4-1 SI-2; 4-2 CR 2.1, 3.5, 7.2 |
+| G6 | MED | EIP CIP Set/Reset | Identity Reset, Identity attr 17, QoS/LLDP/Assembly Set require owned session + `eip_sec` HMAC when class≥1; `protection_mode≠0` → CIP `0x0F` | `test_eip_stack` (`test_g6_cip_set_reset_gates`) | 4-1 SI-2; 4-2 CR 2.1, 3.1, 3.5 |
+| G7 | MED | TCP DoS | Idle timeout (default 60s) + per-IP cap (default 4) on Modbus/EIP/SLMP TCP; SLMP poll uses non-blocking per-client rx buffer | `test_mb_stack` / `test_eip_stack` / `test_slmp_stack` (`test_g7_*`) | 4-1 SI-2; 4-2 CR 7.1, 7.2 |
+| G8 | MED | PN DCP | NameOfStation DNS/PN rules; Identify filter + ResponseDelay; `w.n > cap` in HMAC rebuild; production `PN_ENFORCE_SECURITY_CLASS` / JSON `enforce_security_class` | `test_pn_dcp`; `ctt_pn_dcp_set_name_boundary` | 4-1 SI-2; 4-2 CR 1.2, 2.1, 3.5, 7.1 |
 | G9 | — | Fuzz + hardening | libFuzzer harnesses + seed corpora; clang CI ~60 s/target; `-fstack-protector-strong`; `-D_FORTIFY_SOURCE=2` with opt. Fuzz found PN NDR `UINT32_MAX` wrap (fixed) | `.github/workflows/ci.yml` `fuzz` / `sanitizers`; `test_ndr_huge_args_len` | 4-1 SVV-3; 4-2 CR 3.5, 7.1 |
 
-**Out of scope for this PR** (tracked, not fixed here):
-
-| ID | Topic |
-|----|--------|
-| G6 | Unauthenticated CIP state-changing services (Identity Reset / Set_Attribute without CIP Security Class) |
-| G7 | TCP idle timeouts / per-IP connection limits; SLMP non-blocking recv hardening |
-| G8 | DCP Set hardening (beyond existing ident/Set.Res path) |
+**Previously out of scope, now in this PR:** G6, G7, G8.
 
 ---
 
@@ -233,10 +230,99 @@ the block. Regression: `test_ar_block_mac_bounds`; seed
 | Bugbot G5/G4 follow-up: `ctest` 93/93, ASan 84/84, fuzz ~30 s × 6 | pass |
 | AR watchdog after TX (`6609960`): `ctest` 93/93, ASan 84/84, fuzz 20 s × 6 | pass |
 | Connect-before-sec + IOCR data-hold (`027c245`): `ctest` 93/93, ASan 84/84, fuzz 20 s × 6 | pass |
+| G6–G8 (`ccd60e4`): `ctest` 94/94 incl. `soak_ci`; ASan+UBSan 85/85 incl. `soak_ci` | pass |
 
 Unguessable Encaps session handles can contain `0xD4`/`0x00` in the header;
 CTT and unit tests now scan Forward Open replies **after** the 24-byte
 Encaps header so they do not treat the session field as a CIP reply.
+
+---
+
+## G6 — CIP Set/Reset authorization
+
+**Root cause.** `handle_object()` applied Identity Reset (`0x05`), Identity
+attr 17 (`protection_mode`) write, QoS/LLDP attribute writes, and Assembly
+Set without checking CIP Security / session / protection mode. G5 already
+requires an owned Encaps session for SendRR, but `eip_cip_route()` (auth=0)
+and a class≥1 stack that skipped HMAC could still mutate state. `eip_sec.c`
+already requires HMAC on SET/RESET/FO/FC when `security_class>=1`.
+
+**Fix.** `gate_set_reset()` on every Set_Attribute_Single / Reset:
+
+1. Require `EIP_CIP_AUTH_SESSION` (registered session owned by this
+   connection — SendRR sets this after G5). Direct `eip_cip_route()` stays
+   GET-only.
+2. If `eip_sec_required()` (`security_class>=1`), require
+   `EIP_CIP_AUTH_SECURE` (HMAC verified on the UCMM path, or TLS).
+3. If Identity `protection_mode != 0`, reject with CIP `0x0F`
+   (`PRIVILEGE_VIOLATION`). Forward Open / Close are not gated here
+   (`eip_sec_check_ucmm` still requires HMAC for FO/FC at class≥1).
+
+SendRR calls `eip_cip_route_auth(..., SESSION|SECURE)` after HMAC.
+Originator mock Set/tag-write uses the same flags so local explicit_set
+still works in lab class 0.
+
+**Test.** `test_g6_cip_set_reset_gates`: `eip_cip_route` Reset → `0x0F`, GET
+still OK; SendRR Reset/QoS Set OK when unprotected; protection_mode=1
+blocks Reset / attr17 / QoS / LLDP (IO image unchanged); class 1 unsigned
+Reset → `0x0F`, HMAC Reset succeeds.
+
+**62443.** CR 2.1 (authorization); CR 3.1 (protection mode / use control);
+CR 3.5 (service gating). `eip_sec_check_ucmm` remains the Encaps-layer
+integrity check (CR 3.1).
+
+---
+
+## G7 — TCP idle timeout, per-IP cap, SLMP non-blocking recv
+
+**Root cause.** Modbus/EIP/SLMP TCP servers accepted unlimited connections
+from one source and never dropped idle clients (CR 7.1 / 7.2). SLMP
+`slmp_stack_poll` used blocking `recv_exact` per client, so one slow/partial
+sender stalled every other client.
+
+**Fix.** Configurable `idle_timeout_ms` (default **60000**, `0` → default)
+and `max_conn_per_ip` (default **4**, `0` → default) on Modbus, EIP TCP/TLS,
+and SLMP TCP. Excess per-IP accepts are closed immediately. Idle clients
+are dropped in poll. SLMP server clients now use a non-blocking per-slot
+accumulation buffer (same pattern as Modbus); `recv_exact` remains only on
+the originator/client transact path. JSON keys are in
+`docs/modbus_stack.md`, `docs/ethernetip_stack.md`, `docs/slmp_stack.md`.
+
+**Test.** Idle client dropped after ~200 ms timeout; second connection from
+the same IPv4 is closed when `max_conn_per_ip=1`; SLMP: 4-byte partial
+frame does not block a complete batch-read from another client
+(`poll` < 200 ms, fast client gets a response).
+
+**62443.** CR 7.1 / 7.2 (DoS resource control); SI-2 (non-blocking I/O).
+
+---
+
+## G8 — DCP NameOfStation, Identify filter/delay, HMAC rebuild, production enforce
+
+**Root cause.** DCP Set accepted any NameOfStation bytes (uppercase, IP-like,
+`port-xyz`, oversize labels). Identify answered regardless of filter blocks
+and ignored ResponseDelay (storm amplification). HMAC body rebuild had no
+`w.n > cap` guard. Lab `security_class=0` unsigned Set was also the
+production default.
+
+**Fix.** `pn_dcp_name_ok()`: labels 1–63, total ≤240 (`PN_STATION_NAME_MAX`),
+`[a-z0-9-]`, no leading/trailing `-`, not IPv4-like, reserved
+`port-`+exactly 3 hex (+optional `-rest`) rejected. Invalid name → DCP Set
+not-possible (fail-closed). Identify honors All / NameOfStation / DeviceID /
+DeviceType / Role filters; ResponseDelay is MAC[4:5] modulo factor × 10 ms
+(factor 0 = immediate, CTT path). `extract_hmac_and_body` returns `-EINVAL`
+if `w.n > cap`. Production: CMake `-DPN_ENFORCE_SECURITY_CLASS=ON` (lab
+**default OFF**) or JSON `enforce_security_class` requires
+`security_class>=1` and PSK; unsigned DCP Set is then rejected.
+
+**Test.** `test_pn_dcp`: name rules, Identify match/miss + delay, invalid
+Set names, enforce+class0 create fails, unsigned Set rejected when
+enforce. CTT `dcp_set_name_boundary` (`PN-B-NEG-006`): 240 DNS-label accept;
+260 / 64-label / IP / `port-abc` reject. Fuzz seeds
+`dcp_id.bin`, `dcp_id_name.bin`, `dcp_set_name.bin`.
+
+**62443.** CR 1.2 (communication integrity option); CR 2.1 (unsigned Set);
+CR 3.5 (name/filter validation); CR 7.1 (Identify delay / filter).
 
 ---
 

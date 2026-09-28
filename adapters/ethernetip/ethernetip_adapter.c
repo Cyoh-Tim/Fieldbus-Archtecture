@@ -261,6 +261,15 @@ static int eip_init(protocol_adapter_t *self, const char *protocol_params_json,
         if (cJSON_IsNumber(pm)) {
             cfg.protection_mode = (uint32_t)pm->valuedouble;
         }
+        cJSON *idle = cJSON_GetObjectItemCaseSensitive(params, "idle_timeout_ms");
+        if (cJSON_IsNumber(idle)) {
+            cfg.idle_timeout_ms = idle->valueint;
+        }
+        cJSON *perip =
+            cJSON_GetObjectItemCaseSensitive(params, "max_conn_per_ip");
+        if (cJSON_IsNumber(perip)) {
+            cfg.max_conn_per_ip = perip->valueint;
+        }
         cJSON *sp = cJSON_GetObjectItemCaseSensitive(params, "secure_tcp_port");
         if (cJSON_IsNumber(sp)) {
             cfg.secure_tcp_port = sp->valueint;

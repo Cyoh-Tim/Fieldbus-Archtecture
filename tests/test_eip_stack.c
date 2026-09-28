@@ -1,11 +1,15 @@
 #include "eip_crypto.h"
 #include "eip_endian.h"
+#include "eip_internal.h"
 #include "eip_sec.h"
 #include "eip_stack.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 static int g_fail;
@@ -1272,6 +1276,268 @@ static void test_g5_session_owner_and_close(void)
     eip_stack_destroy(s);
 }
 
+static int sendrr_cip(eip_stack_t *s, uint32_t sess, const uint8_t *cip,
+                      size_t cip_len, const uint8_t *mac, size_t mac_len,
+                      uint8_t *resp, size_t resp_cap, size_t *resp_len)
+{
+    uint8_t body[256];
+    size_t boff = 0;
+    uint16_t items = mac_len ? 3 : 2;
+    eip_wr_le32(body + boff, 0);
+    boff += 4;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, items);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_NULL_ADDR);
+    boff += 2;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_UNCONNECTED_DATA);
+    boff += 2;
+    eip_wr_le16(body + boff, (uint16_t)cip_len);
+    boff += 2;
+    memcpy(body + boff, cip, cip_len);
+    boff += cip_len;
+    if (mac_len) {
+        eip_wr_le16(body + boff, EIP_SEC_ITEM_INTEGRITY);
+        boff += 2;
+        eip_wr_le16(body + boff, (uint16_t)mac_len);
+        boff += 2;
+        memcpy(body + boff, mac, mac_len);
+        boff += mac_len;
+    }
+    uint8_t req[EIP_ENCAP_HDR_SIZE + 256];
+    memset(req, 0, EIP_ENCAP_HDR_SIZE + boff);
+    eip_wr_le16(req, EIP_CMD_SENDRRDATA);
+    eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, sess);
+    memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
+    return eip_stack_handle_encap(s, req, EIP_ENCAP_HDR_SIZE + boff, resp,
+                                  resp_cap, resp_len);
+}
+
+static void test_g6_cip_set_reset_gates(void)
+{
+    eip_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mock = 1;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    cfg.protection_mode = 0;
+    eip_stack_t *s = eip_stack_create(&cfg);
+    expect(s != NULL, "g6 stack");
+    uint8_t seed[8];
+    memset(seed, 0xA5, sizeof(seed));
+    expect(eip_stack_write_input(s, 0, seed, 8) == 8, "g6 seed input");
+
+    uint32_t sess = test_register(s);
+    expect(sess != 0, "g6 session");
+
+    uint8_t reset[6] = {CIP_SVC_RESET, 2, 0x20, CIP_CLASS_IDENTITY, 0x24, 1};
+    uint8_t resp[256];
+    size_t n = 0;
+    expect(eip_cip_route(s, reset, sizeof(reset), resp, sizeof(resp), &n) == 0,
+           "g6 cip_route no session");
+    expect(n >= 3 && resp[2] == CIP_STATUS_PRIVILEGE,
+           "g6 unauthenticated reset -> 0x0F");
+
+    uint8_t getid[8] = {CIP_SVC_GET_ATTR_SINGLE, 3, 0x20, CIP_CLASS_IDENTITY,
+                        0x24, 1, 0x30, 1};
+    n = 0;
+    expect(eip_cip_route(s, getid, sizeof(getid), resp, sizeof(resp), &n) == 0,
+           "g6 get without session");
+    expect(n >= 3 && resp[2] == CIP_STATUS_SUCCESS, "g6 get still allowed");
+
+    n = 0;
+    expect(sendrr_cip(s, sess, reset, sizeof(reset), NULL, 0, resp, sizeof(resp),
+                      &n) == 0,
+           "g6 reset encap");
+    expect(cip_status_from_encap(resp, n) == CIP_STATUS_SUCCESS,
+           "g6 reset ok unprotected");
+    uint8_t in[8];
+    expect(eip_stack_read_input(s, 0, in, 8) == 8, "g6 read after reset");
+    expect(in[0] == 0 && in[7] == 0, "g6 IO cleared");
+
+    uint8_t qos_set[8] = {CIP_SVC_SET_ATTR_SINGLE, 3, 0x20, CIP_CLASS_QOS, 0x24,
+                          1, 0x30, 5};
+    uint8_t qos_body[9];
+    memcpy(qos_body, qos_set, 8);
+    qos_body[8] = 0x11;
+    n = 0;
+    expect(sendrr_cip(s, sess, qos_body, sizeof(qos_body), NULL, 0, resp,
+                      sizeof(resp), &n) == 0,
+           "g6 qos set");
+    expect(cip_status_from_encap(resp, n) == CIP_STATUS_SUCCESS, "g6 qos set ok");
+
+    eip_stack_destroy(s);
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mock = 1;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    cfg.protection_mode = 0x1;
+    s = eip_stack_create(&cfg);
+    expect(s != NULL, "g6 prot stack");
+    memset(seed, 0x5A, sizeof(seed));
+    eip_stack_write_input(s, 0, seed, 8);
+    sess = test_register(s);
+    n = 0;
+    expect(sendrr_cip(s, sess, reset, sizeof(reset), NULL, 0, resp, sizeof(resp),
+                      &n) == 0,
+           "g6 prot reset encap");
+    expect(cip_status_from_encap(resp, n) == CIP_STATUS_PRIVILEGE,
+           "g6 reset protected -> 0x0F");
+    expect(eip_stack_read_input(s, 0, in, 8) == 8, "g6 prot read");
+    expect(in[0] == 0x5A, "g6 protected reset did not clear IO");
+
+    uint8_t pm_set[12] = {CIP_SVC_SET_ATTR_SINGLE, 3, 0x20, CIP_CLASS_IDENTITY,
+                          0x24, 1, 0x30, 17, 0, 0, 0, 0};
+    n = 0;
+    expect(sendrr_cip(s, sess, pm_set, sizeof(pm_set), NULL, 0, resp,
+                      sizeof(resp), &n) == 0,
+           "g6 prot mode write");
+    expect(cip_status_from_encap(resp, n) == CIP_STATUS_PRIVILEGE,
+           "g6 attr17 write protected");
+
+    n = 0;
+    expect(sendrr_cip(s, sess, qos_body, sizeof(qos_body), NULL, 0, resp,
+                      sizeof(resp), &n) == 0,
+           "g6 prot qos");
+    expect(cip_status_from_encap(resp, n) == CIP_STATUS_PRIVILEGE,
+           "g6 qos write protected");
+
+    uint8_t lldp[14];
+    size_t lo = 0;
+    lldp[lo++] = CIP_SVC_SET_ATTR_SINGLE;
+    lldp[lo++] = 4; /* words: 16-bit class + inst + attr = 8 bytes */
+    lldp[lo++] = 0x21;
+    lldp[lo++] = 0x00;
+    eip_wr_le16(lldp + lo, CIP_CLASS_LLDP_MGMT);
+    lo += 2;
+    lldp[lo++] = 0x24;
+    lldp[lo++] = 1;
+    lldp[lo++] = 0x30;
+    lldp[lo++] = 1;
+    eip_wr_le32(lldp + lo, 0);
+    lo += 4;
+    n = 0;
+    expect(sendrr_cip(s, sess, lldp, lo, NULL, 0, resp, sizeof(resp), &n) == 0,
+           "g6 prot lldp");
+    expect(cip_status_from_encap(resp, n) == CIP_STATUS_PRIVILEGE,
+           "g6 lldp write protected");
+    eip_stack_destroy(s);
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mock = 1;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    cfg.security_class = EIP_SECURITY_CLASS_1;
+    memset(cfg.psk, 0x22, EIP_PSK_LEN);
+    cfg.psk_set = 1;
+    s = eip_stack_create(&cfg);
+    expect(s != NULL, "g6 sec stack");
+    sess = test_register(s);
+    n = 0;
+    expect(sendrr_cip(s, sess, reset, sizeof(reset), NULL, 0, resp, sizeof(resp),
+                      &n) == 0,
+           "g6 sec reset no mac");
+    expect(cip_status_from_encap(resp, n) == CIP_STATUS_PRIVILEGE,
+           "g6 reset without HMAC");
+
+    uint8_t material[4 + 16];
+    eip_wr_le32(material, sess);
+    memcpy(material + 4, reset, sizeof(reset));
+    uint8_t mac[EIP_HMAC_LEN];
+    eip_hmac_sha256(cfg.psk, EIP_PSK_LEN, material, 4 + sizeof(reset), mac);
+    n = 0;
+    expect(sendrr_cip(s, sess, reset, sizeof(reset), mac, EIP_HMAC_LEN, resp,
+                      sizeof(resp), &n) == 0,
+           "g6 sec reset mac");
+    expect(cip_status_from_encap(resp, n) == CIP_STATUS_SUCCESS,
+           "g6 reset with HMAC");
+    eip_stack_destroy(s);
+}
+
+static int tcp_connect_local(int port)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_port = htons((uint16_t)port);
+    if (inet_pton(AF_INET, "127.0.0.1", &a.sin_addr) != 1) {
+        close(fd);
+        return -1;
+    }
+    if (connect(fd, (struct sockaddr *)&a, sizeof(a)) != 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static void test_g7_eip_tcp_idle_and_per_ip(void)
+{
+    eip_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.role = EIP_ROLE_ADAPTER;
+    cfg.mock = 0;
+    snprintf(cfg.bind_ip, sizeof(cfg.bind_ip), "127.0.0.1");
+    cfg.tcp_port = 16156;
+    cfg.udp_io_port = 16157;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    cfg.idle_timeout_ms = 200;
+    cfg.max_conn_per_ip = 1;
+    cfg.lldp_enable = 0;
+    cfg.acd_enable = 0;
+    eip_stack_t *s = eip_stack_create(&cfg);
+    expect(s != NULL, "g7 eip create");
+    if (!s) {
+        return;
+    }
+    if (eip_stack_start(s) != 0) {
+        fprintf(stderr, "FAIL: g7 eip start (port busy?)\n");
+        g_fail = 1;
+        eip_stack_destroy(s);
+        return;
+    }
+    int a = tcp_connect_local(16156);
+    expect(a >= 0, "g7 eip connect a");
+    for (int i = 0; i < 30; i++) {
+        eip_stack_poll(s);
+        usleep(1000);
+    }
+    int b = tcp_connect_local(16156);
+    expect(b >= 0, "g7 eip connect b");
+    for (int i = 0; i < 30; i++) {
+        eip_stack_poll(s);
+        usleep(1000);
+    }
+    uint8_t tmp[8];
+    ssize_t nr = recv(b, tmp, sizeof(tmp), MSG_DONTWAIT);
+    expect(nr == 0 || nr < 0, "g7 eip per-ip second dropped");
+    if (b >= 0) {
+        close(b);
+    }
+
+    usleep(250000);
+    for (int i = 0; i < 20; i++) {
+        eip_stack_poll(s);
+        usleep(1000);
+    }
+    nr = recv(a, tmp, sizeof(tmp), MSG_DONTWAIT);
+    expect(nr == 0 || nr < 0, "g7 eip idle dropped");
+    if (a >= 0) {
+        close(a);
+    }
+    eip_stack_destroy(s);
+}
+
 int main(void)
 {
     test_register_session();
@@ -1286,6 +1552,8 @@ int main(void)
     test_g2_watchdog_dup_path_size();
     test_g5_encap_session_and_cip_len();
     test_g5_session_owner_and_close();
+    test_g6_cip_set_reset_gates();
+    test_g7_eip_tcp_idle_and_per_ip();
     if (g_fail) {
         fprintf(stderr, "eip stack tests FAILED\n");
         return 1;
