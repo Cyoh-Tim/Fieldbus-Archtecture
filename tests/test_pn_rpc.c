@@ -5,6 +5,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int g_fail;
@@ -473,6 +474,50 @@ static void test_data_hold_iocr_cycle(void)
     pn_stack_destroy(s);
 }
 
+static void test_ar_block_mac_bounds(void)
+{
+    /* Exact-sized Connect whose AR body is 24 bytes. The old guard
+     * (blen >= 24) memcpy'd a 6-byte MAC at body+20, two bytes past
+     * the block and, here, past the allocation. */
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "mac bounds create");
+    const uint16_t body_len = 24;
+    const uint16_t block_len = (uint16_t)(2 + body_len);
+    size_t blocks_n = 4u + block_len;
+    size_t stub_n = 20 + blocks_n;
+    size_t pdu_n = 80 + stub_n;
+    uint8_t *pdu = calloc(1, pdu_n);
+    expect(pdu != NULL, "mac bounds alloc");
+    pdu[0] = 1;
+    pn_wr_le16(pdu + 68, 0);
+    pn_wr_le16(pdu + 74, (uint16_t)stub_n);
+    pn_wr_le32(pdu + 80, (uint32_t)blocks_n);
+    pn_wr_le32(pdu + 84, (uint32_t)blocks_n);
+    pn_wr_le32(pdu + 88, (uint32_t)blocks_n);
+    pn_wr_le32(pdu + 96, (uint32_t)blocks_n);
+    uint8_t *blk = pdu + 100;
+    pn_wr_be16(blk, PN_BLOCK_AR_REQ);
+    pn_wr_be16(blk + 2, block_len);
+    blk[4] = 1;
+    memset(blk + 6, 0xAB, body_len);
+    uint8_t resp[256];
+    size_t rlen = 0;
+    expect(pn_rpc_handle(s, pdu, pdu_n, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "short ar mac rpc");
+    expect(pn_stack_ar_up(s) == 1, "short ar still connects");
+    int mac_set = 0;
+    for (int i = 0; i < 6; i++) {
+        if (s->ar.initiator_mac[i] != 0) {
+            mac_set = 1;
+        }
+    }
+    expect(!mac_set, "short ar did not copy mac");
+    expect(s->ar.uuid[0] == 0, "short ar did not parse uuid");
+    free(pdu);
+    pn_stack_destroy(s);
+}
+
 static void test_no_iocr_clock_still_reclaims(void)
 {
     /* Connect with no output IOCR still gets default frame IDs. After
@@ -552,6 +597,7 @@ int main(void)
     test_connect_reject_keeps_ar();
     test_data_hold_iocr_cycle();
     test_no_iocr_clock_still_reclaims();
+    test_ar_block_mac_bounds();
     if (g_fail) {
         fprintf(stderr, "test_pn_rpc: FAILED\n");
         return 1;

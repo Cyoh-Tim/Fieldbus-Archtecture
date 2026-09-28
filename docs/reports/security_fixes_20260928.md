@@ -216,7 +216,12 @@ clang 18, `-fsanitize=fuzzer,address,undefined`, stack libs built with
 `test_pn_rpc` / `test_ndr_huge_args_len`; seed
 `tests/fuzz/corpus/pn_rpc/ndr_u32max.bin`.
 
-No other fuzzer crashes in the 180 s runs.
+**Crash found in CI fuzz on `551361b` (fixed):** `fuzz_pn_rpc` ASan
+heap-buffer-overflow in `parse_ar_iocr`. The AR-block guard was
+`blen >= 24`, but `CMInitiatorMacAdd` is 6 bytes at body+20 and needs
+26 (`ARType` + UUID + session + MAC). A 24-byte body read 2 bytes past
+the block. Regression: `test_ar_block_mac_bounds`; seed
+`tests/fuzz/corpus/pn_rpc/ar_mac_short.bin`.
 
 ### Verification (this session)
 

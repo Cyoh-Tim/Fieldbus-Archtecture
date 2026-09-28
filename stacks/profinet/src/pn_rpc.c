@@ -235,7 +235,10 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
                          void *u)
 {
     pn_ar_t *ar = u;
-    if (type == PN_BLOCK_AR_REQ && blen >= 16 + 2 + 6) {
+    /* ARType(2) + ARUUID(16) + SessionKey(2) + CMInitiatorMacAdd(6).
+     * 16+2+6 omitted the ARType and read the MAC 2 bytes past a
+     * 24-byte body (fuzz_pn_rpc heap-buffer-overflow). */
+    if (type == PN_BLOCK_AR_REQ && blen >= 2 + 16 + 2 + 6) {
         memcpy(ar->uuid, body + 2, PN_UUID_LEN);
         ar->session_key = pn_rd_be16(body + 2 + 16);
         memcpy(ar->initiator_mac, body + 2 + 16 + 2, 6);
