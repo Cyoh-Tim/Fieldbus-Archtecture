@@ -1151,6 +1151,127 @@ static void test_g5_encap_session_and_cip_len(void)
     eip_stack_destroy(s);
 }
 
+static uint32_t test_register_owned(eip_stack_t *s, uint32_t owner)
+{
+    uint8_t req[EIP_ENCAP_HDR_SIZE + 4];
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req + 0, EIP_CMD_REGISTERSESSION);
+    eip_wr_le16(req + 2, 4);
+    eip_wr_le16(req + 24, 1);
+    uint8_t resp[64];
+    size_t n = 0;
+    if (eip_stack_handle_encap_owned(s, owner, req, sizeof(req), resp,
+                                     sizeof(resp), &n) != 0) {
+        return 0;
+    }
+    if (n < 8) {
+        return 0;
+    }
+    return eip_rd_le32(resp + 4);
+}
+
+static void test_g5_session_owner_and_close(void)
+{
+    eip_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mock = 1;
+    cfg.input_size = 8;
+    cfg.output_size = 8;
+    eip_stack_t *s = eip_stack_create(&cfg);
+    expect(s != NULL, "g5o stack");
+
+    uint32_t ha = test_register_owned(s, 0xA0000001u);
+    uint32_t hb = test_register_owned(s, 0xA0000002u);
+    expect(ha != 0 && hb != 0 && ha != hb, "g5o distinct handles");
+    expect(!(ha == 1 && hb == 2), "g5o handles not sequential 1,2");
+    expect(eip_stack_session_count(s) == 2, "g5o two sessions");
+
+    uint8_t body[32];
+    size_t boff = 0;
+    eip_wr_le32(body + boff, 0);
+    boff += 4;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, 2);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_NULL_ADDR);
+    boff += 2;
+    eip_wr_le16(body + boff, 0);
+    boff += 2;
+    eip_wr_le16(body + boff, EIP_ITEM_UNCONNECTED_DATA);
+    boff += 2;
+    eip_wr_le16(body + boff, 2);
+    boff += 2;
+    body[boff++] = CIP_SVC_GET_ATTR_SINGLE;
+    body[boff++] = 0;
+
+    uint8_t req[EIP_ENCAP_HDR_SIZE + 32];
+    uint8_t resp[128];
+    size_t resp_len = 0;
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req, EIP_CMD_SENDRRDATA);
+    eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, ha);
+    memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
+    expect(eip_stack_handle_encap_owned(s, 0xA0000002u, req,
+                                        EIP_ENCAP_HDR_SIZE + boff, resp,
+                                        sizeof(resp), &resp_len) == 0,
+           "g5o foreign SendRR encap");
+    expect(eip_rd_le32(resp + 8) == EIP_ENCAP_STATUS_INVALID_SESSION,
+           "g5o foreign SendRR 0x64");
+
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req, EIP_CMD_UNREGISTERSESSION);
+    eip_wr_le32(req + 4, ha);
+    resp_len = 0;
+    expect(eip_stack_handle_encap_owned(s, 0xA0000002u, req, EIP_ENCAP_HDR_SIZE,
+                                        resp, sizeof(resp), &resp_len) == 0,
+           "g5o foreign Unregister encap");
+    expect(eip_rd_le32(resp + 8) == EIP_ENCAP_STATUS_INVALID_SESSION,
+           "g5o foreign Unregister 0x64");
+    expect(eip_stack_session_count(s) == 2, "g5o session kept");
+
+    eip_stack_drop_encap_owner(s, 0xA0000001u);
+    expect(eip_stack_session_count(s) == 1, "g5o drop owner A");
+    memset(req, 0, sizeof(req));
+    eip_wr_le16(req, EIP_CMD_SENDRRDATA);
+    eip_wr_le16(req + 2, (uint16_t)boff);
+    eip_wr_le32(req + 4, ha);
+    memcpy(req + EIP_ENCAP_HDR_SIZE, body, boff);
+    resp_len = 0;
+    expect(eip_stack_handle_encap_owned(s, 0xA0000001u, req,
+                                        EIP_ENCAP_HDR_SIZE + boff, resp,
+                                        sizeof(resp), &resp_len) == 0,
+           "g5o SendRR after close");
+    expect(eip_rd_le32(resp + 8) == EIP_ENCAP_STATUS_INVALID_SESSION,
+           "g5o closed session 0x64");
+
+    int filled = 1; /* B still registered */
+    for (uint32_t i = 0; i < (uint32_t)EIP_CLASS3_SESSIONS_MAX; i++) {
+        uint32_t owner = 0xB0000001u + i;
+        if (owner == 0xA0000002u) {
+            continue;
+        }
+        uint32_t h = test_register_owned(s, owner);
+        if (h == 0) {
+            break;
+        }
+        filled++;
+        if (filled >= EIP_CLASS3_SESSIONS_MAX) {
+            break;
+        }
+    }
+    expect(filled == EIP_CLASS3_SESSIONS_MAX, "g5o table full");
+    uint32_t overflow = test_register_owned(s, 0xC0FFEEu);
+    expect(overflow == 0, "g5o 65th Register fails");
+    eip_stack_drop_encap_owner(s, 0xA0000002u);
+    expect(eip_stack_session_count(s) == EIP_CLASS3_SESSIONS_MAX - 1,
+           "g5o slot reclaimed");
+    uint32_t hnew = test_register_owned(s, 0xC0FFEEu);
+    expect(hnew != 0, "g5o Register after reclaim");
+    eip_stack_destroy(s);
+}
+
 int main(void)
 {
     test_register_session();
@@ -1164,6 +1285,7 @@ int main(void)
     test_list_identity_and_protection();
     test_g2_watchdog_dup_path_size();
     test_g5_encap_session_and_cip_len();
+    test_g5_session_owner_and_close();
     if (g_fail) {
         fprintf(stderr, "eip stack tests FAILED\n");
         return 1;

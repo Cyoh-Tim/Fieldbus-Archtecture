@@ -2,7 +2,45 @@
 
 #include <string.h>
 
+#include "logger.h"
 #include "pn_endian.h"
+
+void pn_ar_abort(pn_stack_t *s, const char *why)
+{
+    if (!s || !s->ar.established) {
+        if (s) {
+            memset(&s->ar, 0, sizeof(s->ar));
+            s->last_rt_ns = 0;
+        }
+        return;
+    }
+    LOG_WARN("pn_rt", "AR aborted: %s", why ? why : "timeout");
+    memset(&s->ar, 0, sizeof(s->ar));
+    s->last_rt_ns = 0;
+}
+
+void pn_ar_watchdog(pn_stack_t *s)
+{
+    if (!s || !s->ar.established) {
+        return;
+    }
+    uint64_t now = pn_now_ns();
+    uint64_t cycle_ns = (uint64_t)s->cfg.cycle_us * 1000ull;
+    if (cycle_ns == 0) {
+        cycle_ns = 8000000ull;
+    }
+    uint64_t hold = cycle_ns * (uint64_t)PN_AR_DATA_HOLD_CYCLES;
+
+    if (s->ar.saw_rt && s->ar.last_rt_rx_ns != 0 && now > s->ar.last_rt_rx_ns &&
+        (now - s->ar.last_rt_rx_ns) > hold) {
+        pn_ar_abort(s, "RT data-hold timer expired");
+        return;
+    }
+    if (!s->ar.saw_rt && s->ar.last_cmi_ns != 0 && now > s->ar.last_cmi_ns &&
+        (now - s->ar.last_cmi_ns) > PN_CMI_ACTIVITY_TIMEOUT_NS) {
+        pn_ar_abort(s, "CMI activity timeout");
+    }
+}
 
 void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen)
 {
@@ -24,6 +62,8 @@ void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen)
     pthread_mutex_lock(&s->io_lock);
     memcpy(s->output_image, payload + 2, data_len);
     pthread_mutex_unlock(&s->io_lock);
+    s->ar.saw_rt = 1;
+    s->ar.last_rt_rx_ns = pn_now_ns();
 }
 
 void pn_rt_send_if_due(pn_stack_t *s)

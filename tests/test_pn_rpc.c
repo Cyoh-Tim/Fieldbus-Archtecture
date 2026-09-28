@@ -258,11 +258,51 @@ static void test_ndr_huge_args_len(void)
     pn_stack_destroy(s);
 }
 
+static void test_ar_timeout_and_replace(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "to create");
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = build_connect(pdu);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "to first connect");
+    expect(pn_stack_ar_up(s) == 1, "to ar up");
+
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000002) ==
+               0,
+           "to other-ip connect rpc");
+    expect(pn_stack_ar_up(s) == 1, "to ar kept vs other IP");
+    expect(s->ar.owner_ip == 0x0a000001, "to owner unchanged");
+
+    s->ar.last_cmi_ns = pn_now_ns() - (PN_CMI_ACTIVITY_TIMEOUT_NS + 1000000ull);
+    pn_ar_watchdog(s);
+    expect(pn_stack_ar_up(s) == 0, "to ar down after CMI timeout");
+
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "to connect after timeout");
+    expect(pn_stack_ar_up(s) == 1, "to ar up after timeout connect");
+    expect(s->ar.owner_ip == 0x0a000001, "to new owner");
+
+    s->ar.saw_rt = 1;
+    s->ar.last_rt_rx_ns =
+        pn_now_ns() - ((uint64_t)s->cfg.cycle_us * 1000ull * 3ull + 1000ull);
+    pn_ar_watchdog(s);
+    expect(pn_stack_ar_up(s) == 0, "to ar down after data-hold");
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
     test_write_short_block();
     test_ar_ownership();
     test_ndr_huge_args_len();
+    test_ar_timeout_and_replace();
     if (g_fail) {
         fprintf(stderr, "test_pn_rpc: FAILED\n");
         return 1;

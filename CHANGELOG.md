@@ -17,12 +17,15 @@
   connection triad; require exclusive-owner assembly path; match o2t/t2o
   sizes to configured assemblies (G2)
 - PROFINET RPC: IODWriteReq body must be ≥34 bytes before reading record
-  length (G3); reject Connect while AR is up; ARUUID + sender IP on
-  Release/Control/Write/Read-with-AR (G4); NDR `argsLen==UINT32_MAX` no
-  longer wraps `20+n` into an unbounded block walk (fuzz SEGV)
-- EtherNet/IP Encaps: reject CIP item length <2; SendRRData requires a
-  registered session (status `0x64`); zero-init / check `eip_encap_process`
-  before reading the response handle (G5)
+  length (G3); reject Connect from another controller while AR is up;
+  same sender IP / CMInitiatorObjectUUID may replace; abort AR on CMI
+  activity timeout (2 s) or RT data-hold after RTC1 (G4); NDR
+  `argsLen==UINT32_MAX` no longer wraps `20+n` into an unbounded block
+  walk (fuzz SEGV)
+- EtherNet/IP Encaps: reject CIP item length <2; SendRRData /
+  UnregisterSession require a session **owned by this TCP/TLS
+  connection** (status `0x64`); drop session on disconnect; unguessable
+  handles (G5)
 
 - Config JSON parse error: print `cJSON_GetErrorPtr()` before `free(raw)`
   (heap use-after-free on `fb_reload` of malformed JSON; ASan)

@@ -1,5 +1,8 @@
-# Internal TC PN-B-CM-005 — second Connect while AR up is rejected (spec).
-# Not PI Bundle text. Keeps the first AR; does not replace it.
+# Internal TC PN-B-CM-005 — second Connect from another controller is
+# rejected while the AR is up. Same-controller replace is a stack path
+# (sender IP / CMInitiatorObjectUUID); this mock injects src_ip=0 so the
+# second Connect is treated as a different peer and does not replace.
+# Not PI Bundle text. Keeps the first AR.
 name: rpc_ar_replace
 id: PN-B-CM-005
 suite: PN-B-v1

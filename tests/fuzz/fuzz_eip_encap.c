@@ -48,5 +48,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     uint8_t resp[EIP_TCP_BUF_MAX];
     size_t resp_len = 0;
     (void)eip_stack_handle_encap(s, buf, n, resp, sizeof(resp), &resp_len);
+    if (n >= 8 && eip_rd_le16(buf) == EIP_CMD_REGISTERSESSION &&
+        resp_len >= 8 && eip_rd_le32(resp + 8) == 0) {
+        uint32_t h = eip_rd_le32(resp + 4);
+        if (h != 0) {
+            session = h;
+        }
+    }
     return 0;
 }

@@ -58,6 +58,11 @@ typedef struct {
     size_t rx_len;
 } eip_tls_client_t;
 
+typedef struct {
+    uint32_t handle;
+    uint32_t owner_id; /* TCP/TLS connection id; never 0 when in use */
+} eip_session_slot_t;
+
 struct eip_stack {
     eip_cfg_t cfg;
     eip_transport_ops_t tops;
@@ -69,7 +74,8 @@ struct eip_stack {
     int running;
 
     uint32_t next_session;
-    uint32_t sessions[EIP_CLASS3_SESSIONS_MAX];
+    uint32_t session_secret; /* per-boot XOR; handles are not sequential */
+    eip_session_slot_t sessions[EIP_CLASS3_SESSIONS_MAX];
     int n_sessions;
     uint32_t next_conn_id;
 
@@ -126,7 +132,23 @@ struct eip_stack {
 };
 
 int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
-                      uint8_t *resp, size_t resp_cap, size_t *resp_len);
+                      uint8_t *resp, size_t resp_cap, size_t *resp_len,
+                      uint32_t owner_id);
+void eip_encap_drop_owner(eip_stack_t *s, uint32_t owner_id);
+
+#define EIP_ENCAP_OWNER_MOCK 0x80000001u
+#define EIP_ENCAP_OWNER_TCP  0x10000000u
+#define EIP_ENCAP_OWNER_TLS  0x20000000u
+
+static inline uint32_t eip_tcp_owner_id(int slot)
+{
+    return EIP_ENCAP_OWNER_TCP | (uint32_t)(slot + 1);
+}
+
+static inline uint32_t eip_tls_owner_id(int slot)
+{
+    return EIP_ENCAP_OWNER_TLS | (uint32_t)(slot + 1);
+}
 
 int eip_cip_route(eip_stack_t *s, const uint8_t *req, size_t req_len,
                   uint8_t *resp, size_t resp_cap, size_t *resp_len);

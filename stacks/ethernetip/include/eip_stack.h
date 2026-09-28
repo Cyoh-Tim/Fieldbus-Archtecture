@@ -103,9 +103,17 @@ const eip_cfg_t *eip_stack_cfg(const eip_stack_t *s);
 
 void eip_stack_set_transport_ops(eip_stack_t *s, eip_transport_ops_t ops);
 
-/* Inject encapsulation PDU (mock / tests). Returns response length or <0. */
+/* Inject encapsulation PDU (mock / tests). Bound to EIP_ENCAP_OWNER_MOCK. */
 int eip_stack_handle_encap(eip_stack_t *s, const uint8_t *req, size_t req_len,
                            uint8_t *resp, size_t resp_cap, size_t *resp_len);
+/* Same, but as if from a distinct TCP/TLS connection (`owner_id` != 0). */
+int eip_stack_handle_encap_owned(eip_stack_t *s, uint32_t owner_id,
+                                 const uint8_t *req, size_t req_len,
+                                 uint8_t *resp, size_t resp_cap,
+                                 size_t *resp_len);
+/* Drop Class3 sessions owned by this connection (TCP/TLS close / tests). */
+void eip_stack_drop_encap_owner(eip_stack_t *s, uint32_t owner_id);
+int eip_stack_session_count(const eip_stack_t *s);
 
 /* Inject Class 1 UDP IO frame (mock / tests). */
 int eip_stack_handle_io(eip_stack_t *s, const uint8_t *frame, size_t len);

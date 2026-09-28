@@ -179,6 +179,40 @@ static int ar_owner_ok(const pn_stack_t *s, uint32_t src_ip)
     return s->ar.owner_ip == src_ip;
 }
 
+typedef struct {
+    uint8_t initiator_uuid[PN_UUID_LEN];
+    int have_initiator_uuid;
+} connect_ident_t;
+
+static int parse_connect_ident(uint16_t type, const uint8_t *body, uint16_t blen,
+                               void *u)
+{
+    connect_ident_t *id = u;
+    if (type == PN_BLOCK_AR_REQ && blen >= 42) {
+        copy_uuid(id->initiator_uuid, body + 26);
+        id->have_initiator_uuid = 1;
+    }
+    return 0;
+}
+
+static int ar_same_controller(const pn_stack_t *s, uint32_t src_ip,
+                              const connect_ident_t *id)
+{
+    if (src_ip != 0 && s->ar.owner_ip == src_ip) {
+        return 1;
+    }
+    if (id && id->have_initiator_uuid && s->ar.have_initiator_uuid &&
+        memcmp(s->ar.initiator_uuid, id->initiator_uuid, PN_UUID_LEN) == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static void ar_touch_cmi(pn_stack_t *s)
+{
+    s->ar.last_cmi_ns = pn_now_ns();
+}
+
 static int ar_uuid_ok(const pn_stack_t *s, int saw_uuid, const uint8_t *uuid)
 {
     if (!s->ar.established) {
@@ -216,6 +250,10 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         memcpy(s->ar.uuid, body + 2, PN_UUID_LEN);
         s->ar.session_key = pn_rd_be16(body + 2 + 16);
         memcpy(s->ar.initiator_mac, body + 2 + 16 + 2, 6);
+        if (blen >= 42) {
+            memcpy(s->ar.initiator_uuid, body + 26, PN_UUID_LEN);
+            s->ar.have_initiator_uuid = 1;
+        }
     } else if (type == PN_BLOCK_IOCR_REQ && blen >= 18) {
         uint16_t iocr_type = pn_rd_be16(body);
         uint16_t data_len = pn_rd_be16(body + 10);
@@ -452,12 +490,20 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
             return -EINVAL;
         }
         if (s->ar.established) {
-            LOG_WARN("pn_rpc", "Connect rejected: AR already established");
-            uint8_t err[4];
-            pn_wr_be32(err, 0x81u << 24);
-            so = ndr_wrap(stub_out, err, 4);
-            *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so);
-            return 0;
+            connect_ident_t ident;
+            memset(&ident, 0, sizeof(ident));
+            walk_blocks(blocks, blen, parse_connect_ident, &ident);
+            if (!ar_same_controller(s, src_ip, &ident)) {
+                LOG_WARN("pn_rpc", "Connect rejected: AR already established");
+                uint8_t err[4];
+                pn_wr_be32(err, 0x81u << 24);
+                so = ndr_wrap(stub_out, err, 4);
+                *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so);
+                return 0;
+            }
+            LOG_INFO("pn_rpc", "same-controller Connect replaces established AR");
+            memset(&s->ar, 0, sizeof(s->ar));
+            s->last_rt_ns = 0;
         }
         if (verify_connect_sec(s, blocks, blen) != 0) {
             uint8_t err[4];
@@ -485,6 +531,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         so = ndr_wrap(stub_out, blocks_res, bn);
         s->ar.established = 1;
         s->ar.owner_ip = src_ip;
+        ar_touch_cmi(s);
         LOG_INFO("pn_rpc",
                  "AR established in_fid=0x%04x out_fid=0x%04x in=%u out=%u",
                  s->ar.in_frame_id, s->ar.out_frame_id, s->ar.in_data_len,
@@ -551,6 +598,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
                              sizeof(cres));
         so = ndr_wrap(stub_out, blocks_res, bn);
         s->ar.established = 1;
+        ar_touch_cmi(s);
         if (cw.command == PN_CONTROL_PRM_END) {
             s->ar.prm_end = 1;
             queue_app_ready(s);
@@ -581,6 +629,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
                 LOG_WARN("pn_rpc", "Read rejected: ARUUID mismatch");
                 return -EPERM;
             }
+            ar_touch_cmi(s);
         }
         pn_record_read(s, rw.slot, rw.subslot, rw.index, rec, sizeof(rec),
                        &rlen);
@@ -607,6 +656,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
             LOG_WARN("pn_rpc", "Write rejected: ARUUID mismatch");
             return -EPERM;
         }
+        ar_touch_cmi(s);
         if (ww.saw) {
             pn_record_write(s, ww.slot, ww.subslot, ww.index, ww.data, ww.dlen);
             LOG_INFO("pn_rpc", "Write index=0x%04x slot=%u sub=%u len=%u",

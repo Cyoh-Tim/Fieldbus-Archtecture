@@ -23,11 +23,21 @@ typedef struct {
     uint16_t send_clock_factor;
     uint16_t reduction_ratio;
     uint8_t initiator_mac[6];
+    uint8_t initiator_uuid[PN_UUID_LEN]; /* CMInitiatorObjectUUID */
+    int have_initiator_uuid;
     uint32_t owner_ip; /* host-order IPv4 of Connect sender; 0 = unset */
     int established;
     int prm_end;
     int app_ready;
+    int saw_rt; /* at least one matching RTC1 received */
+    uint64_t last_rt_rx_ns;
+    uint64_t last_cmi_ns;
 } pn_ar_t;
+
+/* Data hold ≈ 3 × send clock (cycle_us). CMI activity is seconds so a
+ * 64 ms CTT io_cycle does not abort an AR that has not yet seen RTC1. */
+#define PN_AR_DATA_HOLD_CYCLES       3
+#define PN_CMI_ACTIVITY_TIMEOUT_NS   2000000000ull
 
 #define PN_IM1_FUNC_LEN 32
 #define PN_IM1_LOC_LEN  22
@@ -92,6 +102,8 @@ void pn_lldp_send(pn_stack_t *s);
 
 void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen);
 void pn_rt_send_if_due(pn_stack_t *s);
+void pn_ar_abort(pn_stack_t *s, const char *why);
+void pn_ar_watchdog(pn_stack_t *s);
 
 int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
                   size_t cap, size_t *out_len, uint32_t src_ip);

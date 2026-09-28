@@ -14,8 +14,8 @@ SLMP **Binary 3E only**, PREEMPT_RT 없음, 라이선스 Bundle 복제 없음.
 | G1 | HIGH | SLMP batch qty / subcmd / device | Bound qty to Binary 3E max; reject unknown subcommand/device; stack array `SLMP_QTY_WORD_MAX` | `test_slmp_stack` (`test_handle_qty_and_unknown`) | 4-1 SI-2; 4-2 CR 3.5, 7.1, 7.2 |
 | G2 | MED | EIP Forward Open resource | Arm Class1 watchdog at FO; reject duplicate triad; validate assembly path + o2t/t2o size | `test_eip_stack` (`test_g2_watchdog_dup_path_size`); `ctt_eip_class1_watchdog` | 4-1 SI-2; 4-2 CR 3.5, 7.1, 7.2 |
 | G3 | MED | PN IODWriteReq header | `parse_write_req` requires body `blen >= 34` before reading record-data length | `test_pn_rpc` (`test_write_short_block`) | 4-1 SI-2; 4-2 CR 3.5 |
-| G4 | MED | PN RPC AR ownership | Reject Connect while AR established; ARUUID + sender IP on Release/Control/Write/Read | `test_pn_rpc` (`test_ar_ownership`); `ctt_pn_rpc_cm_without_ar` | 4-1 SI-2; 4-2 CR 2.1, 3.5 |
-| G5 | MED | EIP Encaps / uninit | `cip_len < 2` reject; SendRR session must be registered (status `0x64`); zero-init + check `eip_encap_process` | `test_eip_stack` (`test_g5_encap_session_and_cip_len`) | 4-1 SI-2; 4-2 CR 2.1, 3.5, 7.2 |
+| G4 | MED | PN RPC AR ownership | Reject Connect from another controller while AR up; same sender IP / CMInitiatorObjectUUID may replace; abort on CMI activity timeout (2 s) or RT data-hold (3×cycle after RTC1) | `test_pn_rpc` (`test_ar_ownership`, `test_ar_timeout_and_replace`); `ctt_pn_rpc_cm_without_ar` | 4-1 SI-2; 4-2 CR 2.1, 3.5, 7.1 |
+| G5 | MED | EIP Encaps / uninit | `cip_len < 2` reject; SendRR session must be registered **and owned by this TCP/TLS connection** (status `0x64`); drop session on close; unguessable handles; zero-init + check `eip_encap_process` | `test_eip_stack` (`test_g5_encap_session_and_cip_len`, `test_g5_session_owner_and_close`) | 4-1 SI-2; 4-2 CR 2.1, 3.5, 7.2 |
 | G9 | — | Fuzz + hardening | libFuzzer harnesses + seed corpora; clang CI ~60 s/target; `-fstack-protector-strong`; `-D_FORTIFY_SOURCE=2` with opt. Fuzz found PN NDR `UINT32_MAX` wrap (fixed) | `.github/workflows/ci.yml` `fuzz` / `sanitizers`; `test_ndr_huge_args_len` | 4-1 SVV-3; 4-2 CR 3.5, 7.1 |
 
 **Out of scope for this PR** (tracked, not fixed here):
@@ -90,18 +90,35 @@ is rejected; I&M1 record unchanged.
 **Root cause.** Connect overwrote `s->ar` while an AR was established.
 Release / Control / Write / Read did not check ARUUID or the sender.
 
-**Fix.** Connect while `ar.established` returns a PNIO error PDU and keeps the
-existing AR. Subsequent Release/Control/Write (and Read **if** an AR is up)
-require matching ARUUID and sender IPv4 (`owner_ip` from Connect).
+**Fix.** Connect while `ar.established` from a **different** controller
+returns a PNIO error PDU and keeps the existing AR. A Connect from the
+**same** controller (matching sender IPv4, or matching
+`CMInitiatorObjectUUID` when present in ARBlockReq) aborts and replaces
+the AR so a restarted IO controller is not locked out. Subsequent
+Release/Control/Write (and Read **if** an AR is up) require matching
+ARUUID and sender IPv4 (`owner_ip` from Connect).
 `src_ip == 0` or `owner_ip == 0` skips the IP check so CTT mock
 (`pn_stack_handle_rpc` → `src_ip=0`) still works; live UDP `recvfrom` passes
 `ntohl(sin_addr)`. Read without an AR remains allowed (device records).
 Write without AR stays fail-closed (`ctt_pn_rpc_cm_without_ar`).
 
+**Lifetime.** A controller that vanishes without Release no longer holds
+the AR forever. `pn_ar_watchdog()` (from `pn_stack_poll`):
+
+- Before the first matching RTC1: CMI activity timeout **2 s** without
+  owner RPC (Connect/Control/Read/Write) aborts the AR. 2 s is long
+  enough that CTT `io_cycle` (~64 ms) does not trip.
+- After at least one RTC1 (`saw_rt`): data-hold **3 × `cycle_us`** without
+  a further O→T frame aborts the AR.
+
 **Test.** `test_ar_ownership`: second Connect from another IP, Control/Release
 wrong IP or UUID, matching Control/Write/Release.
+`test_ar_timeout_and_replace`: other-IP Connect while AR is up is rejected;
+after a simulated CMI timeout a new Connect succeeds; data-hold after
+`saw_rt` also aborts.
 
-**62443.** CR 2.1 (authorization of established AR); CR 3.5.
+**62443.** CR 2.1 (authorization of established AR); CR 3.5; CR 7.1 / 7.2
+(AR reclaim).
 
 ---
 
@@ -111,15 +128,27 @@ wrong IP or UUID, matching Control/Write/Release.
 Unconnected Data item length was 0. SendRR did not require a registered
 session. `service_tcp_client` read `resp+4` after a failed `eip_encap_process`.
 
-**Fix.** Reject `cip_len < 2`. Unregistered SendRR session → Encaps status
-`0x64` (`EIP_ENCAP_STATUS_INVALID_SESSION`). Session table on Register /
-Unregister. TCP/TLS paths `memset` the response and only parse/send when
-`rc == 0 && resp_len` is sufficient. Failed process clears `*resp_len`.
+**Fix.** Reject `cip_len < 2`. SendRR / UnregisterSession require a session
+that is registered **and bound to this TCP/TLS connection** (`owner_id`);
+mismatch → Encaps status `0x64` (`EIP_ENCAP_STATUS_INVALID_SESSION`).
+RegisterSession stores `(handle, owner_id)`; one session per connection
+(re-Register returns the existing handle). Handles are
+`counter XOR per-boot secret` via `getrandom(2)` (never 0), not a
+predictable 1,2,3 sequence. TCP `service_tcp_client` and TLS `tls_drop`
+call `eip_encap_drop_owner` so a disconnect reclaims the table slot.
+Mock / CTT `eip_stack_handle_encap` uses `EIP_ENCAP_OWNER_MOCK`; tests
+that need a second peer use `eip_stack_handle_encap_owned`. TCP/TLS paths
+`memset` the response and only parse/send when `rc == 0 && resp_len` is
+sufficient. Failed process clears `*resp_len`.
 
 **Test.** `test_g5_encap_session_and_cip_len`: SendRR with handle `0x11111111`
 → `0x64`; empty CIP item; truncated Encaps → `-EINVAL` and `resp_len == 0`.
+`test_g5_session_owner_and_close`: foreign SendRR/Unregister `0x64`; drop
+owner reclaims slot; table full at `EIP_CLASS3_SESSIONS_MAX`; handles not
+sequential 1,2.
 
-**62443.** CR 2.1 (session); CR 3.5; CR 7.2 (no uninit use).
+**62443.** CR 2.1 (session); CR 3.5; CR 7.1 / 7.2 (no uninit use; no
+session-table DoS).
 
 ---
 

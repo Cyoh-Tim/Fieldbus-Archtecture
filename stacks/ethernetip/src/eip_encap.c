@@ -66,52 +66,115 @@ static int build_list_identity(eip_stack_t *s, uint8_t *payload, size_t cap,
     return 0;
 }
 
-static int session_registered(const eip_stack_t *s, uint32_t session)
+static int session_find(const eip_stack_t *s, uint32_t session)
 {
     if (session == 0) {
+        return -1;
+    }
+    for (int i = 0; i < s->n_sessions && i < EIP_CLASS3_SESSIONS_MAX; i++) {
+        if (s->sessions[i].handle == session) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int session_owned(const eip_stack_t *s, uint32_t session,
+                         uint32_t owner_id)
+{
+    int i = session_find(s, session);
+    if (i < 0) {
+        return 0;
+    }
+    return s->sessions[i].owner_id == owner_id;
+}
+
+static uint32_t session_handle_for_owner(const eip_stack_t *s, uint32_t owner_id)
+{
+    if (owner_id == 0) {
         return 0;
     }
     for (int i = 0; i < s->n_sessions && i < EIP_CLASS3_SESSIONS_MAX; i++) {
-        if (s->sessions[i] == session) {
-            return 1;
+        if (s->sessions[i].owner_id == owner_id) {
+            return s->sessions[i].handle;
         }
     }
     return 0;
 }
 
-static uint32_t session_alloc(eip_stack_t *s)
+static uint32_t session_new_handle(eip_stack_t *s)
 {
+    for (int n = 0; n < EIP_CLASS3_SESSIONS_MAX + 8; n++) {
+        uint32_t seq = s->next_session++;
+        if (seq == 0) {
+            seq = s->next_session++;
+        }
+        uint32_t h = seq ^ s->session_secret;
+        if (h != 0 && session_find(s, h) < 0) {
+            return h;
+        }
+    }
+    return 0;
+}
+
+static uint32_t session_alloc(eip_stack_t *s, uint32_t owner_id)
+{
+    if (owner_id == 0) {
+        return 0;
+    }
+    uint32_t existing = session_handle_for_owner(s, owner_id);
+    if (existing != 0) {
+        return existing;
+    }
     if (s->n_sessions >= EIP_CLASS3_SESSIONS_MAX) {
         return 0;
     }
-    uint32_t h = s->next_session++;
+    uint32_t h = session_new_handle(s);
     if (h == 0) {
-        h = s->next_session++;
+        return 0;
     }
-    s->sessions[s->n_sessions++] = h;
+    s->sessions[s->n_sessions].handle = h;
+    s->sessions[s->n_sessions].owner_id = owner_id;
+    s->n_sessions++;
     return h;
 }
 
-static void session_drop(eip_stack_t *s, uint32_t session)
+static void session_drop(eip_stack_t *s, uint32_t session, uint32_t owner_id)
 {
-    for (int i = 0; i < s->n_sessions; i++) {
-        if (s->sessions[i] == session) {
+    int i = session_find(s, session);
+    if (i < 0 || s->sessions[i].owner_id != owner_id) {
+        return;
+    }
+    s->sessions[i] = s->sessions[s->n_sessions - 1];
+    s->n_sessions--;
+}
+
+void eip_encap_drop_owner(eip_stack_t *s, uint32_t owner_id)
+{
+    if (!s || owner_id == 0) {
+        return;
+    }
+    int i = 0;
+    while (i < s->n_sessions) {
+        if (s->sessions[i].owner_id == owner_id) {
             s->sessions[i] = s->sessions[s->n_sessions - 1];
             s->n_sessions--;
-            return;
+            continue;
         }
+        i++;
     }
 }
 
-static int handle_sendrr(eip_stack_t *s, uint32_t session, const uint8_t *body,
-                         size_t body_len, uint8_t *resp_body, size_t resp_cap,
-                         size_t *resp_len, uint32_t *encap_status)
+static int handle_sendrr(eip_stack_t *s, uint32_t session, uint32_t owner_id,
+                         const uint8_t *body, size_t body_len,
+                         uint8_t *resp_body, size_t resp_cap, size_t *resp_len,
+                         uint32_t *encap_status)
 {
     /* interface handle(4) + timeout(2) + CPF */
     if (body_len < 6) {
         return -EINVAL;
     }
-    if (!session_registered(s, session)) {
+    if (!session_owned(s, session, owner_id)) {
         if (encap_status) {
             *encap_status = EIP_ENCAP_STATUS_INVALID_SESSION;
         }
@@ -220,7 +283,8 @@ static int handle_sendrr(eip_stack_t *s, uint32_t session, const uint8_t *body,
 }
 
 int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
-                      uint8_t *resp, size_t resp_cap, size_t *resp_len)
+                      uint8_t *resp, size_t resp_cap, size_t *resp_len,
+                      uint32_t owner_id)
 {
     if (resp_len) {
         *resp_len = 0;
@@ -255,7 +319,7 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
         return 0;
 
     case EIP_CMD_REGISTERSESSION:
-        out_session = session_alloc(s);
+        out_session = session_alloc(s, owner_id);
         if (out_session == 0) {
             status = EIP_ENCAP_STATUS_INVALID_CMD;
             body_len = 0;
@@ -273,7 +337,13 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
         break;
 
     case EIP_CMD_UNREGISTERSESSION:
-        session_drop(s, session);
+        if (!session_owned(s, session, owner_id)) {
+            encap_hdr(resp, cmd, 0, session, EIP_ENCAP_STATUS_INVALID_SESSION,
+                      ctx);
+            *resp_len = EIP_ENCAP_HDR_SIZE;
+            return 0;
+        }
+        session_drop(s, session, owner_id);
         encap_hdr(resp, cmd, 0, session, 0, ctx);
         *resp_len = EIP_ENCAP_HDR_SIZE;
         return 0;
@@ -300,8 +370,8 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
 
     case EIP_CMD_SENDRRDATA: {
         uint32_t sendrr_st = EIP_ENCAP_STATUS_INVALID_CMD;
-        if (handle_sendrr(s, session, body, length, body_resp, sizeof(body_resp),
-                          &body_len, &sendrr_st) != 0) {
+        if (handle_sendrr(s, session, owner_id, body, length, body_resp,
+                          sizeof(body_resp), &body_len, &sendrr_st) != 0) {
             status = sendrr_st;
             body_len = 0;
         }

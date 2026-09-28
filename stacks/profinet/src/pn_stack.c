@@ -242,6 +242,7 @@ void pn_stack_poll(pn_stack_t *s)
     }
     pn_rpc_poll(s);
     pn_snmp_poll(s);
+    pn_ar_watchdog(s);
     pn_rt_send_if_due(s);
 
     uint64_t now = pn_now_ns();
