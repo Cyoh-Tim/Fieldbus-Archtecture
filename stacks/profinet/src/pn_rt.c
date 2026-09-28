@@ -39,13 +39,15 @@ void pn_ar_watchdog(pn_stack_t *s)
         return;
     }
 
-    uint64_t cycle_ns = (uint64_t)s->cfg.cycle_us * 1000ull;
-    if (cycle_ns == 0) {
-        cycle_ns = 8000000ull;
+    /* O→T period is the negotiated IOCR send clock, not cfg.cycle_us. */
+    if (s->ar.send_clock_factor == 0 || s->ar.reduction_ratio == 0) {
+        return;
     }
     unsigned factor = s->ar.data_hold_factor ? s->ar.data_hold_factor
                                              : (unsigned)PN_AR_DATA_HOLD_CYCLES;
-    uint64_t hold = cycle_ns * (uint64_t)factor;
+    uint64_t hold = (uint64_t)s->ar.send_clock_factor *
+                    (uint64_t)s->ar.reduction_ratio * PN_SEND_CLOCK_BASE_NS *
+                    (uint64_t)factor;
     /* After PrmEnd/ApplReady with no O→T yet, silence is measured from
      * the last controller RPC. After the first O→T, from that frame. */
     uint64_t base = s->ar.saw_rt ? s->ar.last_rt_rx_ns : s->ar.last_cmi_ns;

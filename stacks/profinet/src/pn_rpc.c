@@ -184,17 +184,6 @@ typedef struct {
     int have_initiator_uuid;
 } connect_ident_t;
 
-static int parse_connect_ident(uint16_t type, const uint8_t *body, uint16_t blen,
-                               void *u)
-{
-    connect_ident_t *id = u;
-    if (type == PN_BLOCK_AR_REQ && blen >= 42) {
-        copy_uuid(id->initiator_uuid, body + 26);
-        id->have_initiator_uuid = 1;
-    }
-    return 0;
-}
-
 static int ar_same_controller(const pn_stack_t *s, uint32_t src_ip,
                               const connect_ident_t *id)
 {
@@ -245,14 +234,14 @@ static int strip_sec_cb(uint16_t type, const uint8_t *body, uint16_t blen,
 static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
                          void *u)
 {
-    pn_stack_t *s = u;
+    pn_ar_t *ar = u;
     if (type == PN_BLOCK_AR_REQ && blen >= 16 + 2 + 6) {
-        memcpy(s->ar.uuid, body + 2, PN_UUID_LEN);
-        s->ar.session_key = pn_rd_be16(body + 2 + 16);
-        memcpy(s->ar.initiator_mac, body + 2 + 16 + 2, 6);
+        memcpy(ar->uuid, body + 2, PN_UUID_LEN);
+        ar->session_key = pn_rd_be16(body + 2 + 16);
+        memcpy(ar->initiator_mac, body + 2 + 16 + 2, 6);
         if (blen >= 42) {
-            memcpy(s->ar.initiator_uuid, body + 26, PN_UUID_LEN);
-            s->ar.have_initiator_uuid = 1;
+            memcpy(ar->initiator_uuid, body + 26, PN_UUID_LEN);
+            ar->have_initiator_uuid = 1;
         }
     } else if (type == PN_BLOCK_IOCR_REQ && blen >= 18) {
         uint16_t iocr_type = pn_rd_be16(body);
@@ -260,25 +249,26 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         uint16_t frame_id = pn_rd_be16(body + 12);
         uint16_t sc = pn_rd_be16(body + 14);
         uint16_t rr = pn_rd_be16(body + 16);
-        s->ar.send_clock_factor = sc;
-        s->ar.reduction_ratio = rr;
-        /* IOCRBlockReq: WatchdogFactor @26, DataHoldFactor @28. O→T
-         * (output CR) supplies the data-hold multiplier. */
-        if (iocr_type == PN_IOCR_OUTPUT && blen >= 28) {
-            uint16_t wdog = pn_rd_be16(body + 26);
-            uint16_t dhold = (blen >= 30) ? pn_rd_be16(body + 28) : 0;
-            if (dhold != 0) {
-                s->ar.data_hold_factor = dhold;
-            } else if (wdog != 0) {
-                s->ar.data_hold_factor = wdog;
+        /* Data-hold watches O→T, so only the output CR supplies the
+         * negotiated send clock. A following input CR must not clobber it. */
+        if (iocr_type == PN_IOCR_OUTPUT) {
+            ar->send_clock_factor = sc;
+            ar->reduction_ratio = rr;
+            /* IOCRBlockReq: WatchdogFactor @26, DataHoldFactor @28. */
+            if (blen >= 28) {
+                uint16_t wdog = pn_rd_be16(body + 26);
+                uint16_t dhold = (blen >= 30) ? pn_rd_be16(body + 28) : 0;
+                if (dhold != 0) {
+                    ar->data_hold_factor = dhold;
+                } else if (wdog != 0) {
+                    ar->data_hold_factor = wdog;
+                }
             }
-        }
-        if (iocr_type == PN_IOCR_INPUT) {
-            s->ar.in_frame_id = frame_id;
-            s->ar.in_data_len = data_len > 1 ? (uint16_t)(data_len - 1) : 0;
-        } else if (iocr_type == PN_IOCR_OUTPUT) {
-            s->ar.out_frame_id = frame_id;
-            s->ar.out_data_len = data_len > 1 ? (uint16_t)(data_len - 1) : 0;
+            ar->out_frame_id = frame_id;
+            ar->out_data_len = data_len > 1 ? (uint16_t)(data_len - 1) : 0;
+        } else if (iocr_type == PN_IOCR_INPUT) {
+            ar->in_frame_id = frame_id;
+            ar->in_data_len = data_len > 1 ? (uint16_t)(data_len - 1) : 0;
         }
     }
     return 0;
@@ -463,6 +453,16 @@ static void queue_app_ready(pn_stack_t *s)
     LOG_INFO("pn_rpc", "queued ApplicationReady indication");
 }
 
+static int reply_pnio_err(const uint8_t *pdu, uint8_t *resp, size_t cap,
+                          size_t *out_len, uint8_t *stub_out)
+{
+    uint8_t err[4];
+    pn_wr_be32(err, 0x81u << 24);
+    size_t so = ndr_wrap(stub_out, err, 4);
+    *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so);
+    return 0;
+}
+
 static void flush_pending_rpc(pn_stack_t *s)
 {
     if (s->fd_rpc < 0 || !s->rpc_peer_set || s->pending_rpc_tx_len == 0) {
@@ -500,49 +500,49 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         if (!blocks) {
             return -EINVAL;
         }
-        if (s->ar.established) {
-            connect_ident_t ident;
-            memset(&ident, 0, sizeof(ident));
-            walk_blocks(blocks, blen, parse_connect_ident, &ident);
-            if (!ar_same_controller(s, src_ip, &ident)) {
-                LOG_WARN("pn_rpc", "Connect rejected: AR already established");
-                uint8_t err[4];
-                pn_wr_be32(err, 0x81u << 24);
-                so = ndr_wrap(stub_out, err, 4);
-                *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so);
-                return 0;
-            }
-            LOG_INFO("pn_rpc", "same-controller Connect replaces established AR");
-            memset(&s->ar, 0, sizeof(s->ar));
-            s->last_rt_ns = 0;
-        }
+        /* Security, block parse, and ownership all finish against a
+         * temporary AR. A rejected Connect does not touch s->ar. */
         if (verify_connect_sec(s, blocks, blen) != 0) {
-            uint8_t err[4];
-            pn_wr_be32(err, 0x81u << 24); /* generic PNIO error */
-            so = ndr_wrap(stub_out, err, 4);
-            *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so);
-            return 0;
+            return reply_pnio_err(pdu, resp, cap, out_len, stub_out);
         }
-        memset(&s->ar, 0, sizeof(s->ar));
-        walk_blocks(blocks, blen, parse_ar_iocr, s);
-        if (s->ar.in_frame_id == 0) {
-            s->ar.in_frame_id = 0x8001;
+        pn_ar_t parsed;
+        memset(&parsed, 0, sizeof(parsed));
+        if (walk_blocks(blocks, blen, parse_ar_iocr, &parsed) != 0) {
+            return reply_pnio_err(pdu, resp, cap, out_len, stub_out);
         }
-        if (s->ar.out_frame_id == 0) {
-            s->ar.out_frame_id = 0x8002;
+        connect_ident_t ident;
+        memset(&ident, 0, sizeof(ident));
+        ident.have_initiator_uuid = parsed.have_initiator_uuid;
+        if (parsed.have_initiator_uuid) {
+            memcpy(ident.initiator_uuid, parsed.initiator_uuid, PN_UUID_LEN);
         }
-        if (s->ar.in_data_len == 0) {
-            s->ar.in_data_len = s->cfg.input_len;
+        if (s->ar.established && !ar_same_controller(s, src_ip, &ident)) {
+            LOG_WARN("pn_rpc", "Connect rejected: AR already established");
+            return reply_pnio_err(pdu, resp, cap, out_len, stub_out);
         }
-        if (s->ar.out_data_len == 0) {
-            s->ar.out_data_len = s->cfg.output_len;
+        if (parsed.in_frame_id == 0) {
+            parsed.in_frame_id = 0x8001;
         }
+        if (parsed.out_frame_id == 0) {
+            parsed.out_frame_id = 0x8002;
+        }
+        if (parsed.in_data_len == 0) {
+            parsed.in_data_len = s->cfg.input_len;
+        }
+        if (parsed.out_data_len == 0) {
+            parsed.out_data_len = s->cfg.output_len;
+        }
+        parsed.established = 1;
+        parsed.owner_ip = src_ip;
+        parsed.last_cmi_ns = pn_now_ns();
+        if (s->ar.established) {
+            LOG_INFO("pn_rpc", "same-controller Connect replaces established AR");
+        }
+        s->ar = parsed;
+        s->last_rt_ns = 0;
         uint8_t blocks_res[512];
         size_t bn = build_connect_res_blocks(s, blocks_res, sizeof(blocks_res));
         so = ndr_wrap(stub_out, blocks_res, bn);
-        s->ar.established = 1;
-        s->ar.owner_ip = src_ip;
-        ar_touch_cmi(s);
         LOG_INFO("pn_rpc",
                  "AR established in_fid=0x%04x out_fid=0x%04x in=%u out=%u",
                  s->ar.in_frame_id, s->ar.out_frame_id, s->ar.in_data_len,

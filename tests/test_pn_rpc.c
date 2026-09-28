@@ -289,11 +289,187 @@ static void test_ar_timeout_and_replace(void)
     expect(pn_stack_ar_up(s) == 1, "to ar up after timeout connect");
     expect(s->ar.owner_ip == 0x0a000001, "to new owner");
 
+    /* No IOCR in this Connect: arm the negotiated clock explicitly.
+     * 32 × 8 × 31.25 µs = 8 ms, times DataHoldFactor 3. */
+    s->ar.send_clock_factor = 32;
+    s->ar.reduction_ratio = 8;
+    s->ar.data_hold_factor = 3;
     s->ar.saw_rt = 1;
     s->ar.last_rt_rx_ns =
-        pn_now_ns() - ((uint64_t)s->cfg.cycle_us * 1000ull * 3ull + 1000ull);
+        pn_now_ns() -
+        (32ull * 8ull * PN_SEND_CLOCK_BASE_NS * 3ull + 1000ull);
     pn_ar_watchdog(s);
     expect(pn_stack_ar_up(s) == 0, "to ar down after data-hold");
+    pn_stack_destroy(s);
+}
+
+static void fill_init_uuid(uint8_t *dst)
+{
+    for (int i = 0; i < 16; i++) {
+        dst[i] = (uint8_t)(0x40 + i);
+    }
+}
+
+/* session, optional CMInitiatorObjectUUID, optional input FrameID,
+ * optional garbage Security Class 1 block. */
+static size_t build_connect_ex(uint8_t *pdu, uint16_t session, int with_init,
+                               uint16_t in_fid, int bad_sec)
+{
+    uint8_t blocks[256];
+    size_t bn = 0;
+    uint8_t ar[42];
+    memset(ar, 0, sizeof(ar));
+    pn_wr_be16(ar, 0x0001);
+    fill_aruuid(ar + 2);
+    pn_wr_be16(ar + 18, session);
+    ar[20] = 0x02;
+    if (with_init) {
+        fill_init_uuid(ar + 26);
+    }
+    bn += wr_block(blocks + bn, PN_BLOCK_AR_REQ, ar, with_init ? 42 : 26);
+
+    if (in_fid != 0) {
+        uint8_t iocr[18];
+        memset(iocr, 0, sizeof(iocr));
+        pn_wr_be16(iocr, PN_IOCR_INPUT);
+        pn_wr_be16(iocr + 12, in_fid);
+        pn_wr_be16(iocr + 14, 1);
+        pn_wr_be16(iocr + 16, 1);
+        bn += wr_block(blocks + bn, PN_BLOCK_IOCR_REQ, iocr, sizeof(iocr));
+    }
+    if (bad_sec) {
+        uint8_t sec[2 + PN_HMAC_LEN];
+        memset(sec, 0x5A, sizeof(sec));
+        pn_wr_be16(sec, 0x0001);
+        bn += wr_block(blocks + bn, PN_BLOCK_SEC_INT, sec, sizeof(sec));
+    }
+    uint8_t stub[384];
+    size_t sn = ndr_wrap(stub, blocks, bn);
+    return wrap_rpc(pdu, 0, stub, sn);
+}
+
+static void test_connect_reject_keeps_ar(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "keep create");
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = build_connect_ex(pdu, 7, 1, 0, 0);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "keep first connect");
+    expect(pn_stack_ar_up(s) == 1, "keep ar up");
+    expect(s->ar.session_key == 7, "keep session");
+    expect(s->ar.have_initiator_uuid == 1, "keep initiator uuid");
+    s->ar.prm_end = 1;
+    uint16_t fid = s->ar.in_frame_id;
+
+    s->cfg.security_class = PN_SECURITY_CLASS_1;
+    plen = build_connect_ex(pdu, 99, 1, 0x80AA, 0);
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "unsigned same-ip connect rpc");
+    expect(pn_stack_ar_up(s) == 1, "ar kept after unsigned connect");
+    expect(s->ar.session_key == 7, "session kept after unsigned");
+    expect(s->ar.prm_end == 1, "prm_end kept after unsigned");
+    expect(s->ar.owner_ip == 0x0a000001, "owner kept after unsigned");
+    expect(s->ar.in_frame_id == fid, "frame id kept after unsigned");
+
+    memset(s->cfg.psk, 0x11, PN_PSK_LEN);
+    s->cfg.psk_set = 1;
+    plen = build_connect_ex(pdu, 99, 1, 0x80AA, 1);
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000099) ==
+               0,
+           "bad hmac other-ip connect rpc");
+    expect(pn_stack_ar_up(s) == 1, "ar kept after bad hmac");
+    expect(s->ar.session_key == 7 && s->ar.prm_end == 1, "state kept after hmac");
+    expect(s->ar.owner_ip == 0x0a000001, "owner kept after uuid-match hmac fail");
+    expect(s->ar.in_frame_id == fid, "frame id kept after hmac");
+
+    s->cfg.security_class = 0;
+    plen = build_connect_ex(pdu, 99, 1, 0x80AA, 0);
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000099) ==
+               0,
+           "valid same-uuid replace rpc");
+    expect(pn_stack_ar_up(s) == 1, "ar up after replace");
+    expect(s->ar.owner_ip == 0x0a000099, "replaced owner");
+    expect(s->ar.session_key == 99, "replaced session");
+    expect(s->ar.in_frame_id == 0x80AA, "replaced frame id");
+    expect(s->ar.prm_end == 0, "replace cleared old prm_end");
+    pn_stack_destroy(s);
+}
+
+static size_t build_connect_iocr(uint8_t *pdu, uint16_t scf, uint16_t rr,
+                                 uint16_t dhold)
+{
+    uint8_t blocks[256];
+    size_t bn = 0;
+    uint8_t ar[26];
+    memset(ar, 0, sizeof(ar));
+    pn_wr_be16(ar, 0x0001);
+    fill_aruuid(ar + 2);
+    pn_wr_be16(ar + 18, 1);
+    bn += wr_block(blocks + bn, PN_BLOCK_AR_REQ, ar, sizeof(ar));
+
+    uint8_t outb[30];
+    memset(outb, 0, sizeof(outb));
+    pn_wr_be16(outb, PN_IOCR_OUTPUT);
+    pn_wr_be16(outb + 10, 9);
+    pn_wr_be16(outb + 12, 0x8002);
+    pn_wr_be16(outb + 14, scf);
+    pn_wr_be16(outb + 16, rr);
+    pn_wr_be16(outb + 26, 9);
+    pn_wr_be16(outb + 28, dhold);
+    bn += wr_block(blocks + bn, PN_BLOCK_IOCR_REQ, outb, sizeof(outb));
+
+    /* Later input CR with a 31.25 µs clock must not replace the O→T clock. */
+    uint8_t inb[18];
+    memset(inb, 0, sizeof(inb));
+    pn_wr_be16(inb, PN_IOCR_INPUT);
+    pn_wr_be16(inb + 12, 0x8001);
+    pn_wr_be16(inb + 14, 1);
+    pn_wr_be16(inb + 16, 1);
+    bn += wr_block(blocks + bn, PN_BLOCK_IOCR_REQ, inb, sizeof(inb));
+
+    uint8_t stub[384];
+    size_t sn = ndr_wrap(stub, blocks, bn);
+    return wrap_rpc(pdu, 0, stub, sn);
+}
+
+static void test_data_hold_iocr_cycle(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "iocr create");
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    const uint16_t scf = 32;
+    const uint16_t rr = 32;
+    const uint16_t dhold = 3;
+    size_t plen = build_connect_iocr(pdu, scf, rr, dhold);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "iocr connect");
+    expect(s->ar.send_clock_factor == scf, "scf from output cr");
+    expect(s->ar.reduction_ratio == rr, "rr from output cr");
+    expect(s->ar.data_hold_factor == dhold, "data hold not watchdog");
+    uint64_t hold =
+        (uint64_t)scf * (uint64_t)rr * PN_SEND_CLOCK_BASE_NS * (uint64_t)dhold;
+    uint64_t cfg_hold = (uint64_t)s->cfg.cycle_us * 1000ull * 3ull;
+    expect(hold > cfg_hold, "negotiated hold longer than cfg cycle");
+
+    s->ar.saw_rt = 1;
+    s->ar.last_rt_rx_ns = pn_now_ns() - (cfg_hold + 1000000ull);
+    pn_ar_watchdog(s);
+    expect(pn_stack_ar_up(s) == 1, "cfg-cycle silence does not abort");
+
+    s->ar.last_rt_rx_ns = pn_now_ns() - (hold + 1000ull);
+    pn_ar_watchdog(s);
+    expect(pn_stack_ar_up(s) == 0, "negotiated data-hold aborts");
     pn_stack_destroy(s);
 }
 
@@ -335,6 +511,8 @@ int main(void)
     test_ndr_huge_args_len();
     test_ar_timeout_and_replace();
     test_cmi_ignores_own_tx();
+    test_connect_reject_keeps_ar();
+    test_data_hold_iocr_cycle();
     if (g_fail) {
         fprintf(stderr, "test_pn_rpc: FAILED\n");
         return 1;

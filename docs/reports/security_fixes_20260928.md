@@ -93,8 +93,9 @@ Release / Control / Write / Read did not check ARUUID or the sender.
 **Fix.** Connect while `ar.established` from a **different** controller
 returns a PNIO error PDU and keeps the existing AR. A Connect from the
 **same** controller (matching sender IPv4, or matching
-`CMInitiatorObjectUUID` when present in ARBlockReq) aborts and replaces
-the AR so a restarted IO controller is not locked out. Subsequent
+`CMInitiatorObjectUUID` when present in ARBlockReq) replaces the AR
+only after Security Class / HMAC, block parse, and the ownership check
+all succeed. A rejected Connect leaves the current AR intact. Subsequent
 Release/Control/Write (and Read **if** an AR is up) require matching
 ARUUID and sender IPv4 (`owner_ip` from Connect).
 `src_ip == 0` or `owner_ip == 0` skips the IP check so CTT mock
@@ -110,8 +111,10 @@ the AR forever. `pn_ar_watchdog()` (from `pn_stack_poll`) keys off
   ApplicationReady completed): CMI activity timeout **2 s** without owner
   RPC (Connect/Control/Read/Write) aborts the AR. Device TX does not
   clear this timer.
-- After liveness: data-hold on O→T silence. Multiplier is IOCR
-  `DataHoldFactor`, else `WatchdogFactor`, else **3 × `cycle_us`**.
+- After liveness: data-hold on O→T silence. Period is the output CR
+  `SendClockFactor × ReductionRatio × 31.25 µs` (not `cfg.cycle_us`).
+  Multiplier is IOCR `DataHoldFactor`, else `WatchdogFactor`, else 3.
+  A missing send clock leaves data-hold disarmed.
 - Same-controller Connect (sender IP / CMInitiatorObjectUUID) may replace
   an established AR at any time.
 
@@ -127,6 +130,12 @@ after a simulated CMI timeout a new Connect succeeds; data-hold after
 `saw_rt` also aborts.
 `test_cmi_ignores_own_tx`: Connect, device RTC1 TX, no O→T; backdated CMI
 aborts the AR; a different IP may Connect.
+`test_connect_reject_keeps_ar`: unsigned or bad-HMAC Connect (same IP, or
+another IP with the same `CMInitiatorObjectUUID`) leaves session, owner,
+and `prm_end` in place; a later valid same-UUID Connect replaces.
+`test_data_hold_iocr_cycle`: silence of 3×`cycle_us` does not abort when
+the output CR period is longer; expiry uses that negotiated hold. An
+input CR later in the Connect does not replace the output send clock.
 
 **62443.** CR 2.1 (authorization of established AR); CR 3.5; CR 7.1 / 7.2
 (AR reclaim).
@@ -214,6 +223,7 @@ No other fuzzer crashes in the 180 s runs.
 | libFuzzer 180 s × 6 targets | pass after NDR wrap fix |
 | Bugbot G5/G4 follow-up: `ctest` 93/93, ASan 84/84, fuzz ~30 s × 6 | pass |
 | AR watchdog after TX (`6609960`): `ctest` 93/93, ASan 84/84, fuzz 20 s × 6 | pass |
+| Connect-before-sec + IOCR data-hold (`test_connect_reject_keeps_ar`, `test_data_hold_iocr_cycle`) | see verification below |
 
 Unguessable Encaps session handles can contain `0xD4`/`0x00` in the header;
 CTT and unit tests now scan Forward Open replies **after** the 24-byte

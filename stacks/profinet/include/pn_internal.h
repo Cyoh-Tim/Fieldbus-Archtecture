@@ -20,8 +20,8 @@ typedef struct {
     uint16_t out_frame_id;
     uint16_t in_data_len;
     uint16_t out_data_len;
-    uint16_t send_clock_factor;
-    uint16_t reduction_ratio;
+    uint16_t send_clock_factor; /* O→T IOCR; 0 = not negotiated */
+    uint16_t reduction_ratio;   /* O→T IOCR; 0 = not negotiated */
     uint8_t initiator_mac[6];
     uint8_t initiator_uuid[PN_UUID_LEN]; /* CMInitiatorObjectUUID */
     int have_initiator_uuid;
@@ -37,8 +37,12 @@ typedef struct {
 
 /* CMI activity (2 s) stays armed until the controller shows liveness
  * (O→T RTC1, or PrmEnd / ApplicationReady). Our own RTC1 TX does not
- * count. After liveness, data-hold is factor × cycle_us on O→T silence.
- * Factor comes from IOCR DataHoldFactor / WatchdogFactor, else 3. */
+ * count. After liveness, data-hold is factor × negotiated O→T period.
+ * Period = SendClockFactor × ReductionRatio × 31.25 µs (output CR).
+ * Factor is IOCR DataHoldFactor, else WatchdogFactor, else 3.
+ * cfg.cycle_us is not used. A zero SendClockFactor or ReductionRatio
+ * leaves data-hold disarmed (no negotiated clock). */
+#define PN_SEND_CLOCK_BASE_NS        31250ull
 #define PN_AR_DATA_HOLD_CYCLES       3
 #define PN_CMI_ACTIVITY_TIMEOUT_NS   2000000000ull
 
