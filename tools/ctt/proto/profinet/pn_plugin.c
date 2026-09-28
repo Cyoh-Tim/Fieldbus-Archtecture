@@ -1136,6 +1136,32 @@ static int check_cyclic_expect(ctt_run_t *run, const ctt_metrics_t *before,
     return rc;
 }
 
+/* After PrmEnd the stack's data-hold watches O→T. Mock io_cycle does
+ * not otherwise send cyclic output, so feed one RTC1 per poll. */
+static void inject_ot_rtc1(pn_priv_t *priv)
+{
+    const pn_cfg_t *cfg = pn_stack_cfg(priv->stack);
+    uint16_t dlen = cfg->output_len ? cfg->output_len : 8;
+    if (dlen > 128) {
+        dlen = 128;
+    }
+    uint8_t pay[2 + 128 + 8];
+    pn_wr_be16(pay, 0x8002);
+    memset(pay + 2, 0, dlen);
+    size_t n = 2u + dlen;
+    pay[n++] = 0x80; /* IOPS good */
+    pn_wr_be16(pay + n, 1);
+    n += 2;
+    pay[n++] = 0x35; /* DataStatus */
+    pay[n++] = 0;    /* TransferStatus */
+    uint8_t frame[PN_FRAME_MAX];
+    size_t flen = pn_eth_build(frame, sizeof(frame), cfg->mac, priv->ctl_mac,
+                               PN_ETHTYPE_PN, pay, n);
+    if (flen) {
+        (void)pn_stack_handle_eth(priv->stack, frame, flen);
+    }
+}
+
 static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
                          int idx)
 {
@@ -1192,6 +1218,9 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
             : NULL;
 
     while (ctt_now_ns() < deadline) {
+        if (pn_stack_app_ready(priv->stack)) {
+            inject_ot_rtc1(priv);
+        }
         pump(run, priv);
         drain_io_frames(run, &got, &last_ts, want_et, 0, &harvest, data_len,
                         needle);

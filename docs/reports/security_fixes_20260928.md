@@ -116,8 +116,9 @@ the AR forever. `pn_ar_watchdog()` (from `pn_stack_poll`) keys off
   an established AR at any time.
 
 CTT mock soak does not send O→T. `step_soak` issues a periodic IODRead
-so the 2 s CMI timer stays fresh (`soak_ci` / nightly). That is tester
-traffic, not a stack exception.
+so the 2 s CMI timer stays fresh (`soak_ci` / nightly). After PrmEnd,
+`io_cycle` injects an O→T RTC1 each poll so data-hold sees controller IO.
+That is tester traffic, not a stack exception.
 
 **Test.** `test_ar_ownership`: second Connect from another IP, Control/Release
 wrong IP or UUID, matching Control/Write/Release.
