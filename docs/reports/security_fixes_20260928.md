@@ -105,11 +105,14 @@ Write without AR stays fail-closed (`ctt_pn_rpc_cm_without_ar`).
 **Lifetime.** A controller that vanishes without Release no longer holds
 the AR forever. `pn_ar_watchdog()` (from `pn_stack_poll`):
 
-- Before the first matching RTC1: CMI activity timeout **2 s** without
+- Before the first RTC1 **transmit**: CMI activity timeout **2 s** without
   owner RPC (Connect/Control/Read/Write) aborts the AR. 2 s is long
-  enough that CTT `io_cycle` (~64 ms) does not trip.
-- After at least one RTC1 (`saw_rt`): data-hold **3 × `cycle_us`** without
-  a further O→T frame aborts the AR.
+  enough that CTT `io_cycle` (~64 ms) does not trip. After the device
+  has produced RTC1, CMI does not fire (mock soak has no O→T frames).
+- After at least one RTC1 received (`saw_rt`): data-hold **3 × `cycle_us`**
+  without a further O→T frame aborts the AR.
+- Same-controller Connect (sender IP / CMInitiatorObjectUUID) may replace
+  an established AR at any time.
 
 **Test.** `test_ar_ownership`: second Connect from another IP, Control/Release
 wrong IP or UUID, matching Control/Write/Release.

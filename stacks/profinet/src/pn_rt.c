@@ -36,7 +36,11 @@ void pn_ar_watchdog(pn_stack_t *s)
         pn_ar_abort(s, "RT data-hold timer expired");
         return;
     }
-    if (!s->ar.saw_rt && s->ar.last_cmi_ns != 0 && now > s->ar.last_cmi_ns &&
+    /* CMI activity: reclaim an AR that never entered cyclic TX (controller
+     * vanished during CM). Once we produce RTC1, mock soak has no O→T so
+     * CMI must not fire; data-hold covers a peer that did send RTC1. */
+    if (!s->ar.saw_rt && !s->ar.produced_rt && s->ar.last_cmi_ns != 0 &&
+        now > s->ar.last_cmi_ns &&
         (now - s->ar.last_cmi_ns) > PN_CMI_ACTIVITY_TIMEOUT_NS) {
         pn_ar_abort(s, "CMI activity timeout");
     }
@@ -112,6 +116,7 @@ void pn_rt_send_if_due(pn_stack_t *s)
         pn_eth_build(frame, sizeof(frame), dst, s->cfg.mac, PN_ETHTYPE_PN, pay, n);
     if (flen) {
         pn_eth_send(s, frame, flen);
+        s->ar.produced_rt = 1;
     }
     if (s->last_rt_ns == 0) {
         s->last_rt_ns = now + period;

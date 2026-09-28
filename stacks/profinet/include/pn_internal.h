@@ -30,12 +30,14 @@ typedef struct {
     int prm_end;
     int app_ready;
     int saw_rt; /* at least one matching RTC1 received */
+    int produced_rt; /* at least one RTC1 transmitted */
     uint64_t last_rt_rx_ns;
     uint64_t last_cmi_ns;
 } pn_ar_t;
 
-/* Data hold ≈ 3 × send clock (cycle_us). CMI activity is seconds so a
- * 64 ms CTT io_cycle does not abort an AR that has not yet seen RTC1. */
+/* Data hold ≈ 3 × send clock (cycle_us) after the first O→T RTC1.
+ * CMI activity (2 s) applies only before the first RTC1 TX so mock soak
+ * / CTT io_cycle are not aborted. */
 #define PN_AR_DATA_HOLD_CYCLES       3
 #define PN_CMI_ACTIVITY_TIMEOUT_NS   2000000000ull
 
