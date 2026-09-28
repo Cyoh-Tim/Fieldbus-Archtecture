@@ -55,6 +55,10 @@ typedef struct {
     int psk_set;
     uint32_t protection_mode; /* Identity attr 17 */
 
+    /* TCP DoS: idle drop / per-source cap. 0 = use stack defaults. */
+    int idle_timeout_ms;
+    int max_conn_per_ip;
+
     /* Ship / CT extras */
     char iface[32];          /* optional NIC name for LLDP TX */
     int lldp_enable;         /* 1 = TX enabled (default) */

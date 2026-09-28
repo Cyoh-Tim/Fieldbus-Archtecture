@@ -33,6 +33,9 @@ typedef struct {
     uint32_t netmask; /* host order */
     uint32_t gateway; /* host order */
     int security_class; /* 0 = unsigned (lab), 1 = HMAC required */
+    /* 1 = require security_class>=1 (unsigned DCP Set rejected). Lab default 0.
+     * Production builds may also set CMake -DPN_ENFORCE_SECURITY_CLASS=ON. */
+    int enforce_security_class;
     uint8_t psk[PN_PSK_LEN];
     int psk_set;
     uint16_t input_len;  /* device -> controller */

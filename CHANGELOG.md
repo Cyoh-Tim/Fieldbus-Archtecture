@@ -32,7 +32,17 @@
   UnregisterSession require a session **owned by this TCP/TLS
   connection** (status `0x64`); drop session on disconnect; unguessable
   handles (G5). CTT/unit tests parse Forward Open replies after the
-  Encaps header so a `0xD4` byte in the handle is not a false CIP match.
+  Encaps header so a `0xD4` byte in the handle is not a false CIP match
+- EtherNet/IP CIP: Identity Reset / Set_Attribute (attr 17, QoS, LLDP,
+  Assembly) require an owned session; HMAC when `security_class>=1`;
+  `protection_mode≠0` → CIP `0x0F` (G6)
+- Modbus/EIP/SLMP TCP: idle timeout (default 60 s) and per-IP connection
+  cap (default 4). SLMP server poll uses a non-blocking per-client
+  accumulation buffer (G7)
+- PROFINET DCP: NameOfStation DNS/PN rules; Identify filter +
+  ResponseDelay; HMAC rebuild `w.n > cap`; production
+  `-DPN_ENFORCE_SECURITY_CLASS` / `enforce_security_class` (lab default
+  off) (G8)
 
 - Config JSON parse error: print `cJSON_GetErrorPtr()` before `free(raw)`
   (heap use-after-free on `fb_reload` of malformed JSON; ASan)
@@ -59,7 +69,7 @@
 
 - IEC 62443 coding-level 수정 리포트
   [`docs/reports/security_fixes_20260928.md`](docs/reports/security_fixes_20260928.md)
-  (G1–G5 + G9 fuzz/hardening; G6/G7/G8 는 이 PR 범위 밖. **인증 아님**)
+  (G1–G9. **인증 아님**)
 - libFuzzer 하네스 `tests/fuzz/` (`mb_adu`, `slmp_request`, `eip_encap`,
   `eip_io`, `pn_eth`, `pn_rpc`) + CI `fuzz` (~60s/target) +
   `-fstack-protector-strong` / `_FORTIFY_SOURCE=2` (opt)

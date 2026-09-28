@@ -76,10 +76,14 @@ def main() -> None:
     w("eip_io", "seq_data.bin", io)
     w("eip_io", "short.bin", b"\x02\x00")
 
-    # PN eth DCP Identify-ish
+    # PN eth DCP Identify All + name filter + Set
     eth = bytes([0x01, 0x0E, 0xCF, 0, 0, 0, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x88, 0x92])
-    eth += bytes([0xFE, 0xFE, 0x00, 0x00]) + bytes(20)
-    w("pn_eth", "dcp_id.bin", eth)
+    ident = bytes([0xFE, 0xFE, 0x05, 0x00]) + bytes(4) + bytes([0, 0, 0, 4, 0xFF, 0xFF, 0, 0])
+    w("pn_eth", "dcp_id.bin", eth + ident)
+    nam = bytes([0xFE, 0xFE, 0x05, 0x00]) + bytes(4) + bytes([0, 0, 0, 8, 0x02, 0x02, 0, 4]) + b"fuzz"
+    w("pn_eth", "dcp_id_name.bin", eth + nam)
+    setp = bytes([0xFE, 0xFD, 0x04, 0x00]) + bytes(4) + bytes([0, 0, 0, 12, 0x02, 0x02, 0, 8, 0, 1]) + b"bad-name"
+    w("pn_eth", "dcp_set_name.bin", eth[:6] + bytes([0x02, 0xFB, 0, 0, 0, 1]) + eth[12:] + setp)
     w("pn_eth", "short.bin", b"\x00" * 10)
 
     # PN RPC header only

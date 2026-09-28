@@ -45,6 +45,8 @@ typedef struct {
     int fd;
     int active;
     uint32_t session;
+    uint32_t peer_ip; /* host-order IPv4 */
+    uint64_t last_rx_ns;
     uint8_t rx[EIP_TCP_BUF_MAX];
     size_t rx_len;
 } eip_tcp_client_t;
@@ -54,6 +56,8 @@ typedef struct {
     int active;
     int hs_done; /* 0 until SSL_accept completes (non-blocking) */
     SSL *ssl;
+    uint32_t peer_ip;
+    uint64_t last_rx_ns;
     uint8_t rx[EIP_TCP_BUF_MAX];
     size_t rx_len;
 } eip_tls_client_t;
@@ -150,8 +154,15 @@ static inline uint32_t eip_tls_owner_id(int slot)
     return EIP_ENCAP_OWNER_TLS | (uint32_t)(slot + 1);
 }
 
+/* CIP request auth (SendRR fills these; originator mock Set uses both). */
+#define EIP_CIP_AUTH_SESSION 0x01u /* registered session owned by this conn */
+#define EIP_CIP_AUTH_SECURE  0x02u /* HMAC verified, TLS, or lab class 0 */
+
 int eip_cip_route(eip_stack_t *s, const uint8_t *req, size_t req_len,
                   uint8_t *resp, size_t resp_cap, size_t *resp_len);
+int eip_cip_route_auth(eip_stack_t *s, unsigned auth, const uint8_t *req,
+                       size_t req_len, uint8_t *resp, size_t resp_cap,
+                       size_t *resp_len);
 
 int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
                         int large, uint8_t *resp, size_t resp_cap,

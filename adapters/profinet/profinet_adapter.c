@@ -162,6 +162,13 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
         if (cJSON_IsNumber(sc)) {
             cfg.security_class = sc->valueint;
         }
+        cJSON *enf =
+            cJSON_GetObjectItemCaseSensitive(params, "enforce_security_class");
+        if (cJSON_IsBool(enf)) {
+            cfg.enforce_security_class = cJSON_IsTrue(enf);
+        } else if (cJSON_IsNumber(enf)) {
+            cfg.enforce_security_class = enf->valueint != 0;
+        }
         cJSON *psk = cJSON_GetObjectItemCaseSensitive(params, "psk_hex");
         if (cJSON_IsString(psk)) {
             if (parse_psk(psk->valuestring, cfg.psk) == 0) {

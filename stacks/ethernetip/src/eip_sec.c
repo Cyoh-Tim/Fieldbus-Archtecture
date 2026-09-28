@@ -248,6 +248,19 @@ static void tls_drop(eip_stack_t *s, eip_tls_client_t *c)
     c->active = 0;
     c->hs_done = 0;
     c->rx_len = 0;
+    c->peer_ip = 0;
+    c->last_rx_ns = 0;
+}
+
+static int tls_count_ip(const eip_stack_t *s, uint32_t ip)
+{
+    int n = 0;
+    for (int i = 0; i < EIP_TLS_CLIENTS_MAX; i++) {
+        if (s->tls_clients[i].active && s->tls_clients[i].peer_ip == ip) {
+            n++;
+        }
+    }
+    return n;
 }
 
 static void tls_accept(eip_stack_t *s, int budget)
@@ -256,9 +269,19 @@ static void tls_accept(eip_stack_t *s, int budget)
         return;
     }
     while (budget-- > 0) {
-        int fd = accept(s->tls_listen_fd, NULL, NULL);
+        struct sockaddr_in peer;
+        socklen_t plen = sizeof(peer);
+        int fd = accept(s->tls_listen_fd, (struct sockaddr *)&peer, &plen);
         if (fd < 0) {
             break;
+        }
+        uint32_t ip = ntohl(peer.sin_addr.s_addr);
+        if (tls_count_ip(s, ip) >= s->cfg.max_conn_per_ip) {
+            LOG_WARN("ethernetip", "TLS per-IP limit %d from %u.%u.%u.%u",
+                     s->cfg.max_conn_per_ip, (ip >> 24) & 0xff,
+                     (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+            close(fd);
+            continue;
         }
         int slot = -1;
         for (int i = 0; i < EIP_TLS_CLIENTS_MAX; i++) {
@@ -290,6 +313,8 @@ static void tls_accept(eip_stack_t *s, int budget)
         s->tls_clients[slot].ssl = ssl;
         s->tls_clients[slot].active = 1;
         s->tls_clients[slot].hs_done = 0;
+        s->tls_clients[slot].peer_ip = ip;
+        s->tls_clients[slot].last_rx_ns = eip_now_ns();
     }
 }
 
@@ -327,6 +352,7 @@ static void tls_service(eip_stack_t *s, eip_tls_client_t *c, int budget)
             tls_drop(s, c);
             break;
         }
+        c->last_rx_ns = eip_now_ns();
         if (c->rx_len + (size_t)n > sizeof(c->rx)) {
             tls_drop(s, c);
             break;
@@ -370,10 +396,20 @@ void eip_sec_tls_poll(eip_stack_t *s)
     }
     int budget = EIP_POLL_TLS_BUDGET;
     tls_accept(s, budget);
-    for (int i = 0; i < EIP_TLS_CLIENTS_MAX && budget > 0; i++) {
-        if (s->tls_clients[i].active) {
+    for (int i = 0; i < EIP_TLS_CLIENTS_MAX; i++) {
+        if (s->tls_clients[i].active && budget > 0) {
             tls_service(s, &s->tls_clients[i], budget);
             budget--;
+        }
+    }
+    uint64_t now = eip_now_ns();
+    uint64_t idle_ns = (uint64_t)s->cfg.idle_timeout_ms * 1000000ull;
+    for (int i = 0; i < EIP_TLS_CLIENTS_MAX; i++) {
+        uint64_t last = s->tls_clients[i].last_rx_ns;
+        if (s->tls_clients[i].active && idle_ns > 0 && last != 0 && now > last &&
+            now - last > idle_ns) {
+            LOG_INFO("ethernetip", "idle timeout TLS slot %d", i);
+            tls_drop(s, &s->tls_clients[i]);
         }
     }
 }

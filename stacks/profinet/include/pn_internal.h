@@ -86,6 +86,12 @@ struct pn_stack {
     size_t pending_rpc_tx_len;
 
     pthread_mutex_t io_lock;
+
+    /* Delayed DCP Identify.Res (ResponseDelay, 10 ms units). */
+    int dcp_ident_pending;
+    uint8_t dcp_ident_dst[6];
+    uint32_t dcp_ident_xid;
+    uint64_t dcp_ident_due_ns;
 };
 
 uint64_t pn_now_ns(void);
@@ -105,6 +111,10 @@ void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
                      size_t plen);
 int pn_dcp_verify_set(const pn_stack_t *s, const uint8_t *payload, size_t plen);
 void pn_dcp_send_hello(pn_stack_t *s);
+void pn_dcp_poll(pn_stack_t *s);
+/* PROFINET/DNS NameOfStation: labels 1–63, total ≤240, [a-z0-9-], no
+ * leading/trailing '-', not IPv4-like, not reserved port-xyz. */
+int pn_dcp_name_ok(const uint8_t *name, size_t n);
 
 void pn_lldp_send(pn_stack_t *s);
 

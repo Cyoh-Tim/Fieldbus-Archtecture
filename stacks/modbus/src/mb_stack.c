@@ -13,11 +13,14 @@
 
 #include "logger.h"
 
-#define MB_CLIENTS_MAX 8
+#include <time.h>
+
 #define MB_RX_CAP (MB_ADU_MAX * 2)
 
 struct mb_client {
     int fd;
+    uint32_t peer_ip;
+    uint64_t last_rx_ns;
     uint8_t rx[MB_RX_CAP];
     size_t rx_len;
 };
@@ -55,6 +58,13 @@ static void wr_be16(uint8_t *p, uint16_t v)
 static int send_all(int fd, const uint8_t *buf, size_t len);
 static int client_recv_adu(mb_stack_t *s, uint16_t expect_tid, uint8_t *resp,
                            size_t resp_cap, size_t *resp_len);
+
+static uint64_t mb_now_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
 
 static int set_nonblock(int fd)
 {
@@ -385,6 +395,12 @@ mb_stack_t *mb_stack_create(const mb_cfg_t *cfg)
     if (s->max_clients > MB_CLIENTS_MAX) {
         s->max_clients = MB_CLIENTS_MAX;
     }
+    if (s->cfg.idle_timeout_ms <= 0) {
+        s->cfg.idle_timeout_ms = MB_IDLE_TIMEOUT_MS_DEFAULT;
+    }
+    if (s->cfg.max_conn_per_ip <= 0) {
+        s->cfg.max_conn_per_ip = MB_MAX_CONN_PER_IP_DEFAULT;
+    }
     s->n_holding = cfg->n_holding ? cfg->n_holding : MB_MAP_REGS_MAX;
     s->n_input = cfg->n_input ? cfg->n_input : MB_MAP_REGS_MAX;
     s->n_coil = cfg->n_coil ? cfg->n_coil : MB_MAP_BITS_MAX;
@@ -410,6 +426,9 @@ mb_stack_t *mb_stack_create(const mb_cfg_t *cfg)
     s->client_fd = -1;
     for (int i = 0; i < MB_CLIENTS_MAX; i++) {
         s->clients[i].fd = -1;
+        s->clients[i].peer_ip = 0;
+        s->clients[i].last_rx_ns = 0;
+        s->clients[i].rx_len = 0;
     }
     if (!s->holding || !s->input || !s->coils || !s->discrete) {
         mb_stack_destroy(s);
@@ -532,6 +551,8 @@ void mb_stack_stop(mb_stack_t *s)
             close(s->clients[i].fd);
             s->clients[i].fd = -1;
             s->clients[i].rx_len = 0;
+            s->clients[i].peer_ip = 0;
+            s->clients[i].last_rx_ns = 0;
         }
     }
     if (s->listen_fd >= 0) {
@@ -552,16 +573,39 @@ static void close_client(struct mb_client *c)
     }
     c->fd = -1;
     c->rx_len = 0;
+    c->peer_ip = 0;
+    c->last_rx_ns = 0;
+}
+
+static int mb_count_ip(const mb_stack_t *s, uint32_t ip)
+{
+    int n = 0;
+    for (int i = 0; i < MB_CLIENTS_MAX; i++) {
+        if (s->clients[i].fd >= 0 && s->clients[i].peer_ip == ip) {
+            n++;
+        }
+    }
+    return n;
 }
 
 static void accept_clients(mb_stack_t *s)
 {
     for (;;) {
-        int fd = accept(s->listen_fd, NULL, NULL);
+        struct sockaddr_in peer;
+        socklen_t plen = sizeof(peer);
+        int fd = accept(s->listen_fd, (struct sockaddr *)&peer, &plen);
         if (fd < 0) {
             break;
         }
         set_nonblock(fd);
+        uint32_t ip = ntohl(peer.sin_addr.s_addr);
+        if (mb_count_ip(s, ip) >= s->cfg.max_conn_per_ip) {
+            LOG_WARN("modbus-stack", "per-IP limit %d from %u.%u.%u.%u",
+                     s->cfg.max_conn_per_ip, (ip >> 24) & 0xff,
+                     (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+            close(fd);
+            continue;
+        }
         int slot = -1;
         for (int i = 0; i < s->max_clients; i++) {
             if (s->clients[i].fd < 0) {
@@ -575,6 +619,8 @@ static void accept_clients(mb_stack_t *s)
         }
         s->clients[slot].fd = fd;
         s->clients[slot].rx_len = 0;
+        s->clients[slot].peer_ip = ip;
+        s->clients[slot].last_rx_ns = mb_now_ns();
         LOG_INFO("modbus-stack", "master connected (slot %d)", slot);
     }
 }
@@ -599,6 +645,7 @@ static void serve_client(mb_stack_t *s, struct mb_client *c)
             return;
         }
         c->rx_len += (size_t)n;
+        c->last_rx_ns = mb_now_ns();
 
         while (c->rx_len >= MB_MBAP_LEN) {
             uint16_t len = rd_be16(c->rx + 4);
@@ -978,6 +1025,17 @@ void mb_stack_poll(mb_stack_t *s)
         for (int i = 0; i < MB_CLIENTS_MAX; i++) {
             if (s->clients[i].fd >= 0) {
                 serve_client(s, &s->clients[i]);
+            }
+        }
+        uint64_t now = mb_now_ns();
+        uint64_t idle_ns =
+            (uint64_t)s->cfg.idle_timeout_ms * 1000000ull;
+        for (int i = 0; i < MB_CLIENTS_MAX; i++) {
+            uint64_t last = s->clients[i].last_rx_ns;
+            if (s->clients[i].fd >= 0 && idle_ns > 0 && last != 0 &&
+                now > last && now - last > idle_ns) {
+                LOG_INFO("modbus-stack", "idle timeout slot %d", i);
+                close_client(&s->clients[i]);
             }
         }
         return;

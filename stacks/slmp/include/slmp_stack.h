@@ -26,6 +26,8 @@ typedef struct {
     uint16_t monitoring_timer; /* units of 250 ms; 0 = wait forever */
     int timeout_ms;
     int max_clients; /* server role */
+    int idle_timeout_ms; /* drop idle TCP clients; 0 = 60000 */
+    int max_conn_per_ip; /* per-source IPv4 cap; 0 = 4 */
     uint32_t map_words; /* per word-device map capacity */
     uint32_t map_bits;  /* per bit-device map capacity (bits) */
 } slmp_cfg_t;

@@ -1,8 +1,11 @@
 #include "eip_endian.h"
 #include "eip_internal.h"
+#include "eip_sec.h"
 
 #include <errno.h>
 #include <string.h>
+
+#include "logger.h"
 
 static size_t cip_error(uint8_t *resp, size_t cap, uint8_t service,
                         uint8_t status, uint8_t ext)
@@ -201,11 +204,50 @@ static int assembly_set_attr(eip_stack_t *s, uint16_t instance, uint16_t attr,
     return eip_assembly_write(s, instance, data, len);
 }
 
-static int handle_object(eip_stack_t *s, uint8_t service, uint16_t class_id,
-                         uint16_t instance, uint16_t attribute,
-                         const uint8_t *data, size_t data_len, uint8_t *resp,
-                         size_t resp_cap, size_t *resp_len)
+static int cip_is_set_or_reset(uint8_t service)
 {
+    return service == CIP_SVC_SET_ATTR_SINGLE || service == CIP_SVC_RESET;
+}
+
+/* Identity Reset, Identity attr 17, QoS/LLDP writes, Assembly Set, … */
+static int gate_set_reset(eip_stack_t *s, unsigned auth, uint8_t service,
+                          uint8_t *resp, size_t resp_cap, size_t *resp_len)
+{
+    if (!cip_is_set_or_reset(service)) {
+        return 0;
+    }
+    if (!(auth & EIP_CIP_AUTH_SESSION)) {
+        LOG_WARN("ethernetip", "CIP Set/Reset without owned session — 거부");
+        *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_PRIVILEGE, 0);
+        return -1;
+    }
+    if (eip_sec_required(s) && !(auth & EIP_CIP_AUTH_SECURE)) {
+        LOG_WARN("ethernetip",
+                 "CIP Set/Reset without authenticated channel (sec class %d)",
+                 s->cfg.security_class);
+        *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_PRIVILEGE, 0);
+        return -1;
+    }
+    if (s->cfg.protection_mode != 0) {
+        LOG_WARN("ethernetip",
+                 "CIP Set/Reset rejected: protection_mode=0x%x",
+                 s->cfg.protection_mode);
+        *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_PRIVILEGE, 0);
+        return -1;
+    }
+    return 0;
+}
+
+static int handle_object(eip_stack_t *s, unsigned auth, uint8_t service,
+                         uint16_t class_id, uint16_t instance,
+                         uint16_t attribute, const uint8_t *data,
+                         size_t data_len, uint8_t *resp, size_t resp_cap,
+                         size_t *resp_len)
+{
+    if (gate_set_reset(s, auth, service, resp, resp_cap, resp_len) != 0) {
+        return 0;
+    }
+
     if (class_id == CIP_CLASS_CONN_MANAGER && instance == 1) {
         if (service == CIP_SVC_FORWARD_OPEN) {
             return eip_cm_forward_open(s, data, data_len, 0, resp, resp_cap,
@@ -575,8 +617,9 @@ static int handle_object(eip_stack_t *s, uint8_t service, uint16_t class_id,
     return 0;
 }
 
-int eip_cip_route(eip_stack_t *s, const uint8_t *req, size_t req_len,
-                  uint8_t *resp, size_t resp_cap, size_t *resp_len)
+int eip_cip_route_auth(eip_stack_t *s, unsigned auth, const uint8_t *req,
+                       size_t req_len, uint8_t *resp, size_t resp_cap,
+                       size_t *resp_len)
 {
     if (!req || req_len < 2 || !resp || !resp_len) {
         return -EINVAL;
@@ -614,6 +657,12 @@ int eip_cip_route(eip_stack_t *s, const uint8_t *req, size_t req_len,
         }
     }
 
-    return handle_object(s, service, class_id, instance, attribute, data,
+    return handle_object(s, auth, service, class_id, instance, attribute, data,
                          data_len, resp, resp_cap, resp_len);
+}
+
+int eip_cip_route(eip_stack_t *s, const uint8_t *req, size_t req_len,
+                  uint8_t *resp, size_t resp_cap, size_t *resp_len)
+{
+    return eip_cip_route_auth(s, 0, req, req_len, resp, resp_cap, resp_len);
 }

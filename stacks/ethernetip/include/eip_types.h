@@ -114,6 +114,10 @@
 #define EIP_POLL_UDP_BUDGET         64
 #define EIP_POLL_TLS_BUDGET         4
 
+/* TCP DoS limits (lab-overridable via protocol_params) */
+#define EIP_IDLE_TIMEOUT_MS_DEFAULT 60000
+#define EIP_MAX_CONN_PER_IP_DEFAULT 4
+
 /* Class1 watchdog: close if no O->T for 4*RPI*2^timeout_multiplier (CIP) */
 #define EIP_CLASS1_TIMEOUT_MULT_DEFAULT 4
 

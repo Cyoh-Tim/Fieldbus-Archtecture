@@ -243,7 +243,10 @@ static int handle_sendrr(eip_stack_t *s, uint32_t session, uint32_t owner_id,
 
     uint8_t cip_resp[EIP_EXPLICIT_DATA_MAX + 64];
     size_t cip_resp_len = 0;
-    eip_cip_route(s, cip, cip_len, cip_resp, sizeof(cip_resp), &cip_resp_len);
+    /* Session ownership was checked above. Class 0 is lab-open; class ≥1
+     * mutating UCMM already passed eip_sec_check_ucmm (HMAC). */
+    eip_cip_route_auth(s, EIP_CIP_AUTH_SESSION | EIP_CIP_AUTH_SECURE, cip,
+                       cip_len, cip_resp, sizeof(cip_resp), &cip_resp_len);
 
     size_t mac_item_len = 0;
     uint8_t mac_item[4 + EIP_HMAC_LEN];

@@ -1,9 +1,14 @@
 #include "slmp_stack.h"
 
+#include <arpa/inet.h>
+#include <errno.h>
+#include <netinet/in.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 static int g_fail;
@@ -400,6 +405,143 @@ static void test_handle_qty_and_unknown(void)
     slmp_stack_destroy(s);
 }
 
+static int slmp_connect(int port)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_port = htons((uint16_t)port);
+    inet_pton(AF_INET, "127.0.0.1", &a.sin_addr);
+    if (connect(fd, (struct sockaddr *)&a, sizeof(a)) != 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static void test_g7_slmp_idle_per_ip_and_slow(void)
+{
+    slmp_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.role = SLMP_ROLE_SERVER;
+    cfg.frame = SLMP_FRAME_3E_BINARY;
+    snprintf(cfg.bind_ip, sizeof(cfg.bind_ip), "127.0.0.1");
+    cfg.port = 16153;
+    cfg.pc_no = 0xFF;
+    cfg.dest_module_io = 0x03FF;
+    cfg.timeout_ms = 1000;
+    cfg.max_clients = 4;
+    cfg.idle_timeout_ms = 200;
+    cfg.max_conn_per_ip = 1;
+    slmp_stack_t *s = slmp_stack_create(&cfg);
+    expect(s != NULL, "g7 slmp create");
+    if (!s) {
+        return;
+    }
+    if (slmp_stack_start(s) != 0) {
+        fprintf(stderr, "FAIL: g7 slmp start\n");
+        g_fail = 1;
+        slmp_stack_destroy(s);
+        return;
+    }
+    int a = slmp_connect(16153);
+    expect(a >= 0, "g7 slmp connect a");
+    for (int i = 0; i < 20; i++) {
+        slmp_stack_poll(s);
+        usleep(1000);
+    }
+    int b = slmp_connect(16153);
+    expect(b >= 0, "g7 slmp connect b");
+    for (int i = 0; i < 20; i++) {
+        slmp_stack_poll(s);
+        usleep(1000);
+    }
+    uint8_t tmp[8];
+    ssize_t n = recv(b, tmp, sizeof(tmp), MSG_DONTWAIT);
+    expect(n == 0 || n < 0, "g7 slmp per-ip dropped");
+    if (b >= 0) {
+        close(b);
+    }
+    usleep(250000);
+    for (int i = 0; i < 20; i++) {
+        slmp_stack_poll(s);
+        usleep(1000);
+    }
+    n = recv(a, tmp, sizeof(tmp), MSG_DONTWAIT);
+    expect(n == 0 || n < 0, "g7 slmp idle dropped");
+    if (a >= 0) {
+        close(a);
+    }
+    slmp_stack_destroy(s);
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.role = SLMP_ROLE_SERVER;
+    cfg.frame = SLMP_FRAME_3E_BINARY;
+    snprintf(cfg.bind_ip, sizeof(cfg.bind_ip), "127.0.0.1");
+    cfg.port = 16154;
+    cfg.pc_no = 0xFF;
+    cfg.dest_module_io = 0x03FF;
+    cfg.timeout_ms = 1000;
+    cfg.max_clients = 4;
+    cfg.idle_timeout_ms = 60000;
+    cfg.max_conn_per_ip = 8;
+    s = slmp_stack_create(&cfg);
+    expect(s != NULL, "g7 slmp slow create");
+    if (!s || slmp_stack_start(s) != 0) {
+        fprintf(stderr, "FAIL: g7 slmp slow start\n");
+        g_fail = 1;
+        if (s) {
+            slmp_stack_destroy(s);
+        }
+        return;
+    }
+    int slow = slmp_connect(16154);
+    int fast = slmp_connect(16154);
+    expect(slow >= 0 && fast >= 0, "g7 slmp slow/fast connect");
+    for (int i = 0; i < 20; i++) {
+        slmp_stack_poll(s);
+        usleep(1000);
+    }
+    uint8_t partial[4] = {0x50, 0x00, 0x00, 0xFF};
+    expect(send(slow, partial, sizeof(partial), MSG_NOSIGNAL) == 4,
+           "g7 slmp partial send");
+    slmp_range_t range;
+    memset(&range, 0, sizeof(range));
+    range.addr.device_code = SLMP_DEV_D;
+    range.addr.head = 0;
+    range.addr.unit = SLMP_ACCESS_WORD;
+    range.quantity = 1;
+    uint8_t req[64];
+    size_t req_len = 0;
+    expect(slmp_encode_batch_read(&cfg, &range, req, sizeof(req), &req_len) == 0,
+           "g7 encode");
+    expect(send(fast, req, req_len, MSG_NOSIGNAL) == (ssize_t)req_len,
+           "g7 fast send");
+
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    slmp_stack_poll(s);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    long ms = (long)((t1.tv_sec - t0.tv_sec) * 1000 +
+                     (t1.tv_nsec - t0.tv_nsec) / 1000000);
+    expect(ms < 200, "g7 slmp poll not blocked by slow client");
+
+    uint8_t rbuf[64];
+    ssize_t rn = recv(fast, rbuf, sizeof(rbuf), MSG_DONTWAIT);
+    expect(rn > 0, "g7 fast client got response while slow partial");
+    if (slow >= 0) {
+        close(slow);
+    }
+    if (fast >= 0) {
+        close(fast);
+    }
+    slmp_stack_destroy(s);
+}
+
 int main(void)
 {
     test_device_table();
@@ -408,6 +550,7 @@ int main(void)
     test_handle_read_write();
     test_handle_qty_and_unknown();
     test_client_server_loopback();
+    test_g7_slmp_idle_per_ip_and_slow();
     if (g_fail) {
         fprintf(stderr, "test_slmp_stack: FAILED\n");
         return 1;

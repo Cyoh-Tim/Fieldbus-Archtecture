@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include <arpa/inet.h>
+#include <time.h>
 
 #include "logger.h"
 
@@ -23,11 +24,18 @@ typedef struct {
     uint32_t bit_capacity;
 } slmp_dev_slot_t;
 
+typedef struct {
+    int fd;
+    uint32_t peer_ip;
+    uint64_t last_rx_ns;
+    uint8_t rx[SLMP_FRAME_MAX];
+    size_t rx_len;
+} slmp_client_t;
+
 struct slmp_stack {
     slmp_cfg_t cfg;
     int sockfd; /* client: connected fd; server: listen fd */
-    int client_fds[8];
-    int n_clients;
+    slmp_client_t clients[SLMP_CLIENTS_MAX];
     int connected;
     slmp_dev_slot_t maps[SLMP_DEV_MAP_MAX];
     int map_count;
@@ -238,8 +246,8 @@ slmp_stack_t *slmp_stack_create(const slmp_cfg_t *cfg)
     }
     s->cfg = *cfg;
     s->sockfd = -1;
-    for (int i = 0; i < 8; i++) {
-        s->client_fds[i] = -1;
+    for (int i = 0; i < SLMP_CLIENTS_MAX; i++) {
+        s->clients[i].fd = -1;
     }
     if (s->cfg.port <= 0) {
         s->cfg.port = SLMP_TCP_DEFAULT_PORT;
@@ -254,8 +262,14 @@ slmp_stack_t *slmp_stack_create(const slmp_cfg_t *cfg)
     if (s->cfg.timeout_ms <= 0) {
         s->cfg.timeout_ms = 1000;
     }
-    if (s->cfg.max_clients <= 0 || s->cfg.max_clients > 8) {
+    if (s->cfg.max_clients <= 0 || s->cfg.max_clients > SLMP_CLIENTS_MAX) {
         s->cfg.max_clients = 4;
+    }
+    if (s->cfg.idle_timeout_ms <= 0) {
+        s->cfg.idle_timeout_ms = SLMP_IDLE_TIMEOUT_MS_DEFAULT;
+    }
+    if (s->cfg.max_conn_per_ip <= 0) {
+        s->cfg.max_conn_per_ip = SLMP_MAX_CONN_PER_IP_DEFAULT;
     }
     if (s->cfg.monitoring_timer == 0) {
         s->cfg.monitoring_timer = 0x0010; /* 4s */
@@ -565,6 +579,13 @@ static int set_nonblock(int fd, int on)
         flags &= ~O_NONBLOCK;
     }
     return fcntl(fd, F_SETFL, flags);
+}
+
+static uint64_t slmp_now_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
 static int wait_fd(int fd, int write, int timeout_ms)
@@ -1036,13 +1057,15 @@ void slmp_stack_stop(slmp_stack_t *s)
     if (!s) {
         return;
     }
-    for (int i = 0; i < s->n_clients; i++) {
-        if (s->client_fds[i] >= 0) {
-            close(s->client_fds[i]);
-            s->client_fds[i] = -1;
+    for (int i = 0; i < SLMP_CLIENTS_MAX; i++) {
+        if (s->clients[i].fd >= 0) {
+            close(s->clients[i].fd);
+            s->clients[i].fd = -1;
+            s->clients[i].rx_len = 0;
+            s->clients[i].peer_ip = 0;
+            s->clients[i].last_rx_ns = 0;
         }
     }
-    s->n_clients = 0;
     if (s->sockfd >= 0) {
         close(s->sockfd);
         s->sockfd = -1;
@@ -1050,20 +1073,127 @@ void slmp_stack_stop(slmp_stack_t *s)
     s->connected = 0;
 }
 
+static void slmp_close_client(slmp_client_t *c)
+{
+    if (c->fd >= 0) {
+        close(c->fd);
+    }
+    c->fd = -1;
+    c->rx_len = 0;
+    c->peer_ip = 0;
+    c->last_rx_ns = 0;
+}
+
+static int slmp_count_active(const slmp_stack_t *s)
+{
+    int n = 0;
+    for (int i = 0; i < SLMP_CLIENTS_MAX; i++) {
+        if (s->clients[i].fd >= 0) {
+            n++;
+        }
+    }
+    return n;
+}
+
+static int slmp_count_ip(const slmp_stack_t *s, uint32_t ip)
+{
+    int n = 0;
+    for (int i = 0; i < SLMP_CLIENTS_MAX; i++) {
+        if (s->clients[i].fd >= 0 && s->clients[i].peer_ip == ip) {
+            n++;
+        }
+    }
+    return n;
+}
+
 static void server_accept(slmp_stack_t *s)
 {
-    while (s->n_clients < s->cfg.max_clients) {
+    for (;;) {
+        if (slmp_count_active(s) >= s->cfg.max_clients) {
+            break;
+        }
         struct sockaddr_in peer;
         socklen_t pl = sizeof(peer);
         int cfd = accept(s->sockfd, (struct sockaddr *)&peer, &pl);
         if (cfd < 0) {
             break;
         }
+        uint32_t ip = ntohl(peer.sin_addr.s_addr);
+        if (slmp_count_ip(s, ip) >= s->cfg.max_conn_per_ip) {
+            LOG_WARN("slmp", "per-IP limit %d from %u.%u.%u.%u",
+                     s->cfg.max_conn_per_ip, (ip >> 24) & 0xff,
+                     (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+            close(cfd);
+            continue;
+        }
         int one = 1;
         setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
         set_nonblock(cfd, 1);
-        s->client_fds[s->n_clients++] = cfd;
-        LOG_INFO("slmp", "server accept client fd=%d", cfd);
+        int slot = -1;
+        for (int i = 0; i < SLMP_CLIENTS_MAX; i++) {
+            if (s->clients[i].fd < 0) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) {
+            close(cfd);
+            continue;
+        }
+        s->clients[slot].fd = cfd;
+        s->clients[slot].peer_ip = ip;
+        s->clients[slot].rx_len = 0;
+        s->clients[slot].last_rx_ns = slmp_now_ns();
+        LOG_INFO("slmp", "server accept client fd=%d slot=%d", cfd, slot);
+    }
+}
+
+static void serve_client(slmp_stack_t *s, slmp_client_t *c)
+{
+    for (;;) {
+        if (c->rx_len >= SLMP_FRAME_MAX) {
+            slmp_close_client(c);
+            return;
+        }
+        ssize_t n = recv(c->fd, c->rx + c->rx_len, SLMP_FRAME_MAX - c->rx_len, 0);
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                break;
+            }
+            slmp_close_client(c);
+            return;
+        }
+        if (n == 0) {
+            slmp_close_client(c);
+            return;
+        }
+        c->rx_len += (size_t)n;
+        c->last_rx_ns = slmp_now_ns();
+
+        while (c->rx_len >= 9) {
+            uint16_t data_len = rd_le16(c->rx + 7);
+            size_t need = 9u + (size_t)data_len;
+            if (need < 9 || need > SLMP_FRAME_MAX) {
+                slmp_close_client(c);
+                return;
+            }
+            if (c->rx_len < need) {
+                break;
+            }
+            uint8_t resp[SLMP_FRAME_MAX];
+            size_t resp_len = 0;
+            if (slmp_stack_handle_request(s, c->rx, need, resp, sizeof(resp),
+                                          &resp_len) == 0 &&
+                resp_len > 0) {
+                ssize_t w = send(c->fd, resp, resp_len, MSG_NOSIGNAL);
+                if (w != (ssize_t)resp_len) {
+                    slmp_close_client(c);
+                    return;
+                }
+            }
+            memmove(c->rx, c->rx + need, c->rx_len - need);
+            c->rx_len -= need;
+        }
     }
 }
 
@@ -1073,78 +1203,19 @@ void slmp_stack_poll(slmp_stack_t *s)
         return;
     }
     server_accept(s);
-
-    struct pollfd pfds[9];
-    int n = 0;
-    for (int i = 0; i < s->n_clients; i++) {
-        pfds[n].fd = s->client_fds[i];
-        pfds[n].events = POLLIN;
-        pfds[n].revents = 0;
-        n++;
+    for (int i = 0; i < SLMP_CLIENTS_MAX; i++) {
+        if (s->clients[i].fd >= 0) {
+            serve_client(s, &s->clients[i]);
+        }
     }
-    if (n == 0) {
-        return;
-    }
-    if (poll(pfds, (nfds_t)n, 0) <= 0) {
-        return;
-    }
-    for (int i = n - 1; i >= 0; i--) {
-        if (pfds[i].revents & (POLLIN | POLLHUP | POLLERR)) {
-            /* map poll index back — client_fds may shrink */
-            int fd = pfds[i].fd;
-            int idx = -1;
-            for (int j = 0; j < s->n_clients; j++) {
-                if (s->client_fds[j] == fd) {
-                    idx = j;
-                    break;
-                }
-            }
-            if (idx >= 0) {
-                if (pfds[i].revents & POLLIN) {
-                    /* Peek header with blocking wait since poll said ready */
-                    uint8_t hdr[9];
-                    int rc = recv_exact(fd, hdr, sizeof(hdr), s->cfg.timeout_ms);
-                    if (rc != 0) {
-                        close(fd);
-                        s->client_fds[idx] = s->client_fds[s->n_clients - 1];
-                        s->client_fds[s->n_clients - 1] = -1;
-                        s->n_clients--;
-                        continue;
-                    }
-                    uint16_t data_len = rd_le16(hdr + 7);
-                    size_t total = 9u + data_len;
-                    uint8_t req[SLMP_FRAME_MAX];
-                    if (total > sizeof(req)) {
-                        close(fd);
-                        s->client_fds[idx] = s->client_fds[s->n_clients - 1];
-                        s->client_fds[s->n_clients - 1] = -1;
-                        s->n_clients--;
-                        continue;
-                    }
-                    memcpy(req, hdr, 9);
-                    if (data_len &&
-                        recv_exact(fd, req + 9, data_len, s->cfg.timeout_ms) !=
-                            0) {
-                        close(fd);
-                        s->client_fds[idx] = s->client_fds[s->n_clients - 1];
-                        s->client_fds[s->n_clients - 1] = -1;
-                        s->n_clients--;
-                        continue;
-                    }
-                    uint8_t resp[SLMP_FRAME_MAX];
-                    size_t resp_len = 0;
-                    if (slmp_stack_handle_request(s, req, total, resp,
-                                                  sizeof(resp),
-                                                  &resp_len) == 0) {
-                        send_all(fd, resp, resp_len, s->cfg.timeout_ms);
-                    }
-                } else {
-                    close(fd);
-                    s->client_fds[idx] = s->client_fds[s->n_clients - 1];
-                    s->client_fds[s->n_clients - 1] = -1;
-                    s->n_clients--;
-                }
-            }
+    uint64_t now = slmp_now_ns();
+    uint64_t idle_ns = (uint64_t)s->cfg.idle_timeout_ms * 1000000ull;
+    for (int i = 0; i < SLMP_CLIENTS_MAX; i++) {
+        uint64_t last = s->clients[i].last_rx_ns;
+        if (s->clients[i].fd >= 0 && idle_ns > 0 && last != 0 && now > last &&
+            now - last > idle_ns) {
+            LOG_INFO("slmp", "idle timeout slot %d", i);
+            slmp_close_client(&s->clients[i]);
         }
     }
 }

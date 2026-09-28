@@ -25,6 +25,14 @@ PI 옵션 코드를 사칭하지 않는다. 이 저장소 프로파일이다.
 
 `security_class: 0` 은 랩 전용 unsigned 모드다.
 
+생산 빌드는 CMake `-DPN_ENFORCE_SECURITY_CLASS=ON` 또는
+`protocol_params.enforce_security_class: true` 로 class 1(HMAC)을 강제한다.
+그때 unsigned DCP Set 은 거부된다. 랩 기본은 둘 다 끔.
+
+NameOfStation 은 PROFINET/DNS 규칙이다: 라벨 1–63, 전체 ≤240, 소문자 `a-z`/`0-9`/`-`,
+라벨 앞뒤 `-` 금지, IPv4 형태 금지, 예약 `port-xyz`(3 hex) 금지. Identify 는
+필터 블록과 `ResponseDelay`(10 ms 단위, MAC 하위 16비트 modulo)를 따른다.
+
 ## 실행
 
 실제 NIC:

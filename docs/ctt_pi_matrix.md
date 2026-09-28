@@ -49,7 +49,7 @@
 | `record_read_im0.yaml` | Record / I&M0 | mock | UDP | `PN-B-REC-001`. index `0xAFF0` |
 | `record_read_im1_4.yaml` | Record / I&M1–4 | mock | UDP | `PN-B-REC-002`. `0xAFF1`–`0xAFF4` |
 | `record_unknown_index.yaml` | Record unknown index | mock | UDP | `PN-B-NEG-005`. empty, not I&M0 leak |
-| `dcp_set_name_boundary.yaml` | DCP NameOfStation boundary | mock | — | `PN-B-NEG-006`. 240 accept, oversize truncate |
+| `dcp_set_name_boundary.yaml` | DCP NameOfStation boundary | mock | — | `PN-B-NEG-006`. 240 DNS-label accept; oversize / IP / `port-xyz` reject |
 | `dcp_malformed.yaml` | DCP truncated / unknown option | mock | — | `PN-B-NEG-007`. name unchanged |
 | `rpc_cm_without_ar.yaml` | CM/Alarm/output without AR | mock | — | `PN-B-NEG-008`. Control fail-closed |
 | `lldp.yaml` | LLDP (CC-B) | mock | veth 가능 | `PN-B-NBR-001`. ethertype `0x88CC` |

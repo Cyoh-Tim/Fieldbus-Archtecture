@@ -475,6 +475,11 @@ static int slmp_init(protocol_adapter_t *self, const char *protocol_params_json,
                                       "client_timeout_ms", cfg.timeout_ms, &f);
         cfg.max_clients =
             json_get_int(params, "max_clients", NULL, NULL, cfg.max_clients, &f);
+        cfg.idle_timeout_ms = json_get_int(params, "idle_timeout_ms",
+                                           "idle_timeout", NULL, 0, &f);
+        cfg.max_conn_per_ip = json_get_int(params, "max_conn_per_ip",
+                                           "max_connections_per_ip", NULL, 0,
+                                           &f);
         cfg.map_words = (uint32_t)json_get_int(params, "map_words",
                                                "word_map_size", NULL, 0, &f);
         cfg.map_bits = (uint32_t)json_get_int(params, "map_bits",

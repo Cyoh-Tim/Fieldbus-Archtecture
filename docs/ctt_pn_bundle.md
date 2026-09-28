@@ -89,7 +89,7 @@ protocol: profinet
 | PN-B-NEG-003 | `rpc_malformed.yaml` | **NEG** | pass | truncated / unknown op | **new** |
 | PN-B-NEG-004 | `io_without_ar.yaml` | **NEG** | pass | no AR ⇒ no RTC1 | **new** |
 | PN-B-NEG-005 | `record_unknown_index.yaml` | **NEG** | pass | unknown record empty | wave 1 |
-| PN-B-NEG-006 | `dcp_set_name_boundary.yaml` | **NEG** | pass | NameOfStation max/oversize | **wave 2** 240 accept, 260 truncate |
+| PN-B-NEG-006 | `dcp_set_name_boundary.yaml` | **NEG** | pass | NameOfStation DNS/PN rules | **wave 2** 240 DNS-label accept; 260 / 64-label / IP / `port-xyz` reject |
 | PN-B-NEG-007 | `dcp_malformed.yaml` | **NEG** | pass | truncated / unknown DCP | **wave 2** name unchanged |
 | PN-B-NEG-008 | `rpc_cm_without_ar.yaml` | **NEG** | pass | CM/Alarm/output without AR | **wave 2** Control fail-closed |
 | PN-B-ALM-001 | `alarm_tx.yaml` | catalog | pass | Alarm High | ID only |
@@ -112,7 +112,7 @@ Wave 2 (이 PR) 가 메운 갭:
 
 - 단일 AR 재 Connect / 전체 CM 경로 lifetime (`PN-B-CM-005`, `PN-B-CM-006`)
 - RTC1 **payload + cycle_counter + output consume** (`PN-B-CYC-003`) 과 **4 ms** 메트릭 (`PN-B-CYC-004`)
-- DCP 이름 길이 경계 / truncated DCP / AR 없이 Control·Alarm·output (`PN-B-NEG-006`–`008`). Control without AR 는 DUT 가 AR 을 올리지 않도록 fail-closed
+- DCP 이름 DNS/PN 규칙 경계 / truncated DCP / AR 없이 Control·Alarm·output (`PN-B-NEG-006`–`008`). Control without AR 는 DUT 가 AR 을 올리지 않도록 fail-closed
 
 아직 얇음 (다음 wave, 가짜 pass 하지 않음):
 

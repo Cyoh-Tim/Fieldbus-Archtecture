@@ -476,6 +476,11 @@ static int mb_init(protocol_adapter_t *self, const char *protocol_params_json,
                                              "timeout_ms", "timeout", 200, &f);
         cfg.max_clients =
             json_get_int(params, "max_clients", "max_masters", NULL, 4, &f);
+        cfg.idle_timeout_ms = json_get_int(params, "idle_timeout_ms",
+                                           "idle_timeout", NULL, 0, &f);
+        cfg.max_conn_per_ip = json_get_int(params, "max_conn_per_ip",
+                                           "max_connections_per_ip", NULL, 0,
+                                           &f);
         cfg.n_holding =
             (uint16_t)json_get_int(params, "n_holding", "holding_count", NULL,
                                    0, &f);

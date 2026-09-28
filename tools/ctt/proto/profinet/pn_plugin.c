@@ -396,8 +396,33 @@ static int step_dcp_set(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step
         }
         const char *fill_s = yaml_cstr(step, "name_fill", "a");
         char fill = (fill_s && fill_s[0]) ? fill_s[0] : 'a';
-        memset(generated, fill, (size_t)nwant);
-        generated[nwant] = '\0';
+        if (yaml_bool(step, "name_dns", 0)) {
+            int pos = 0;
+            while (pos < nwant) {
+                int remain = nwant - pos;
+                if (pos > 0) {
+                    generated[pos++] = '.';
+                    remain = nwant - pos;
+                }
+                int lab = remain;
+                if (lab > 63) {
+                    lab = 63;
+                    if (remain - 63 == 1) {
+                        lab = 62; /* avoid a 1-byte leftover that becomes '.' */
+                    }
+                }
+                for (int i = 0; i < lab && pos < nwant; i++) {
+                    generated[pos++] = fill;
+                }
+            }
+            generated[nwant] = '\0';
+            if (nwant > 0 && generated[nwant - 1] == '.') {
+                generated[nwant - 1] = fill;
+            }
+        } else {
+            memset(generated, fill, (size_t)nwant);
+            generated[nwant] = '\0';
+        }
         new_name = generated;
     }
     if (!new_name) {

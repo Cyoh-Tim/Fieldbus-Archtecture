@@ -22,6 +22,8 @@ typedef struct {
     int unit_id_any;       /* 1: respond to any unit id */
     int client_timeout_ms; /* client role response wait (default 200) */
     int max_clients;       /* server concurrent masters (1..8, default 4) */
+    int idle_timeout_ms;   /* drop idle TCP masters; 0 = 60000 */
+    int max_conn_per_ip;   /* per-source IPv4 cap; 0 = 4 */
     uint16_t n_holding;
     uint16_t n_input;
     uint16_t n_coil;
