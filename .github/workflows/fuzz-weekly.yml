@@ -1,0 +1,105 @@
+# Weekly (and manual) libFuzzer campaign.
+#
+# Per-PR CI still runs each target for ~60s in .github/workflows/ci.yml.
+# This workflow is *not* on pull_request — it must not gate or slow PRs.
+#
+# Sunday 23:00 KST = Sunday 14:00 UTC.
+name: Fuzz weekly
+
+on:
+  schedule:
+    - cron: "0 14 * * 0"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "libFuzzer -max_total_time per target (seconds)"
+        required: false
+        default: "3600"
+      timeout:
+        description: "libFuzzer -timeout (seconds)"
+        required: false
+        default: "25"
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: fuzz_mb_adu
+            corpus: mb_adu
+          - target: fuzz_slmp_request
+            corpus: slmp_request
+          - target: fuzz_eip_encap
+            corpus: eip_encap
+          - target: fuzz_eip_io
+            corpus: eip_io
+          - target: fuzz_pn_eth
+            corpus: pn_eth
+          - target: fuzz_pn_rpc
+            corpus: pn_rpc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang g++ cmake libssl-dev libclang-rt-18-dev
+
+      - name: Configure fuzzers
+        run: |
+          cmake -S . -B build-fuzz -DCMAKE_C_COMPILER=clang \
+            -DBUILD_DAEMON=OFF -DBUILD_CTT=OFF -DBUILD_FUZZERS=ON \
+            -DENABLE_PN_TESTS=OFF -DENABLE_EIP_TESTS=OFF \
+            -DENABLE_MB_TESTS=OFF -DENABLE_SLMP_TESTS=OFF
+
+      - name: Build ${{ matrix.target }}
+        run: cmake --build build-fuzz --target ${{ matrix.target }}
+
+      - name: Seed corpora
+        run: python3 tests/fuzz/gen_corpus.py
+
+      - name: Fuzz ${{ matrix.target }} (~1h)
+        env:
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          SECONDS_N="${{ github.event.inputs.seconds || '3600' }}"
+          TIMEOUT_N="${{ github.event.inputs.timeout || '25' }}"
+          mkdir -p artifacts
+          extra=()
+          dict="tests/fuzz/dict/${{ matrix.corpus }}.dict"
+          if [[ -f "$dict" ]]; then
+            extra+=(-dict="$dict")
+          fi
+          echo "==> ${{ matrix.target }} ${SECONDS_N}s corpus=tests/fuzz/corpus/${{ matrix.corpus }}"
+          "./build-fuzz/${{ matrix.target }}" \
+            -max_total_time="$SECONDS_N" \
+            -timeout="$TIMEOUT_N" \
+            -rss_limit_mb=2048 \
+            -print_final_stats=1 \
+            -artifact_prefix=artifacts/ \
+            "${extra[@]}" \
+            "tests/fuzz/corpus/${{ matrix.corpus }}"
+
+      - name: Upload grown corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-${{ matrix.target }}
+          path: tests/fuzz/corpus/${{ matrix.corpus }}
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload crash / timeout / OOM artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crashes-${{ matrix.target }}
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 30
