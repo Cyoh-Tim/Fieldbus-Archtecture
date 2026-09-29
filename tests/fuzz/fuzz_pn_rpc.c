@@ -19,6 +19,7 @@
 #include "pn_endian.h"
 #include "pn_stack.h"
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
