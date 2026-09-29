@@ -220,6 +220,15 @@ heap-buffer-overflow in `parse_ar_iocr`. The AR-block guard was
 the block. Regression: `test_ar_block_mac_bounds`; seed
 `tests/fuzz/corpus/pn_rpc/ar_mac_short.bin`.
 
+### Long-run fuzz (2026-09-29, `v0.2.0` / `93ce7ec`)
+
+clang 18, same ASan/UBSan libFuzzer setup as CI, **3600 s × 6** in
+parallel. **No crash / timeout / OOM.** Edge coverage grew on
+`eip_encap` (160→320), `pn_eth` (248→386), `pn_rpc` (415→464);
+`mb_adu` / `slmp_request` / `eip_io` plateaued. Minimized extra seeds
+are in `tests/fuzz/corpus/`. Full table:
+[`docs/reports/fuzz_longrun_20260929.md`](fuzz_longrun_20260929.md).
+
 ### Verification (this session)
 
 | Gate | Result |
