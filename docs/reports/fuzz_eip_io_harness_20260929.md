@@ -33,14 +33,20 @@ Dictionary: `tests/fuzz/dict/eip_io.dict`.
 ## Local run (ASan/UBSan libFuzzer)
 
 clang 18, `-fsanitize=fuzzer,address,undefined`, `-dict=tests/fuzz/dict/eip_io.dict`.
+45 min campaign: 2026-09-29 04:59:19–05:44:20 UTC. **No crash / timeout / OOM.**
 
 | | Time | execs | cov | ft | crashes |
 |--|------|------:|----:|---:|--------:|
 | before (v0.2.0 1h) | 3600 s | 1.277e9 | 38 | 154 | 0 |
-| after 20 s smoke | 20 s | 2.58e6 | **1147** | **2704** | 0 |
-| after 45 min | *running* | | | | |
+| after 20 s smoke | 20 s | 2.58e6 | 1147 | 2704 | 0 |
+| after 45 min | 2701 s | 1.797e8 | **1192** | **2896** | 0 |
 
-20 s already leaves the 38-edge plateau (FO + consume + poll/produce).
+Merge onto committed seeds: 66 extra `*.bin` (189 new files / 503 edges vs the
+pre-campaign corpus). Watchdog path is reached (`Class1 watchdog … timed out
+after 4us` on the 1 µs RPI mode).
+
+Local gates this session: `ctest` 93/93 (`-LE soak_ci`); ASan+UBSan 85/85
+incl. `soak_ci`.
 
 ## Weekly CI
 
