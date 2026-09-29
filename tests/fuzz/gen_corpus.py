@@ -167,6 +167,31 @@ def main() -> None:
     rpc[1] = 0
     w("pn_rpc", "hdr.bin", bytes(rpc))
     w("pn_rpc", "short.bin", b"\x01\x00")
+    # Stateful harness: byte0 = mode (see fuzz_pn_rpc.c / fuzz_pn_eth.c).
+    w("pn_rpc", "mode0_raw.bin", bytes([0]) + bytes(rpc))
+    w("pn_rpc", "mode1_next.bin", bytes([1]) + bytes(rpc) + bytes(16))
+    w("pn_rpc", "mode2_write.bin", bytes([2, 0]) + b"line-Axx")
+    w("pn_rpc", "mode3_read.bin", bytes([3, 0]))
+    w("pn_rpc", "mode4_prmend.bin", bytes([4]) + b"prm")
+    w("pn_rpc", "mode5_appready.bin", bytes([5]) + bytes(rpc))
+    w("pn_rpc", "mode6_release.bin", bytes([6, 0x80, 0x02, 0x80, 0x01, 32, 8, 3]))
+    w("pn_rpc", "mode7_hmac_miss.bin", bytes([7, 0]))
+    w("pn_rpc", "mode7_hmac_bad.bin", bytes([7, 1]))
+    w("pn_rpc", "mode7_hmac_ok.bin", bytes([7, 2, 0]))
+    w("pn_rpc", "mode7_enforce.bin", bytes([7, 2, 1]))
+
+    w("pn_eth", "mode0_stitch.bin", bytes([0]) + eth + ident)
+    w("pn_eth", "mode1_idall.bin", bytes([1]))
+    w("pn_eth", "mode2_getset.bin", bytes([2]))
+    w("pn_eth", "mode3_hmac_miss.bin", bytes([3, 0]))
+    w("pn_eth", "mode3_hmac_bad.bin", bytes([3, 1]))
+    w("pn_eth", "mode3_hmac_ok.bin", bytes([3, 2]))
+    w("pn_eth", "mode3_enforce.bin", bytes([3, 2, 1]))
+    w("pn_eth", "mode4_rtc1.bin", bytes([4, 0x5A, 0x5A, 0x5A, 0x5A, 0x5A, 0x5A, 0x5A, 0x5A]))
+    w("pn_eth", "mode5_prmend_rtc.bin", bytes([5, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]))
+    w("pn_eth", "mode6_alarm.bin", bytes([6, 0]))
+    w("pn_eth", "mode6_alarm_low.bin", bytes([6, 1]))
+    w("pn_eth", "mode7_stitch_rtc.bin", bytes([7]) + eth + ident)
     print("wrote", ROOT)
 
 

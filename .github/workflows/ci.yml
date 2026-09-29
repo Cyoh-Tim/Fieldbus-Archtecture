@@ -89,8 +89,8 @@ jobs:
           run_one fuzz_slmp_request tests/fuzz/corpus/slmp_request -dict=tests/fuzz/dict/slmp_request.dict
           run_one fuzz_eip_encap tests/fuzz/corpus/eip_encap -dict=tests/fuzz/dict/eip_encap.dict
           run_one fuzz_eip_io tests/fuzz/corpus/eip_io -dict=tests/fuzz/dict/eip_io.dict
-          run_one fuzz_pn_eth tests/fuzz/corpus/pn_eth
-          run_one fuzz_pn_rpc tests/fuzz/corpus/pn_rpc
+          run_one fuzz_pn_eth tests/fuzz/corpus/pn_eth -dict=tests/fuzz/dict/pn_eth.dict
+          run_one fuzz_pn_rpc tests/fuzz/corpus/pn_rpc -dict=tests/fuzz/dict/pn_rpc.dict
 
 
   daemon:
