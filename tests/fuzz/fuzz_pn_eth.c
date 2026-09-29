@@ -7,6 +7,10 @@
  *
  * Byte 0 selects a mode. Connect (via handle_rpc) establishes the AR, then
  * ETH frames use the station MAC / DCP multicast and the live O→T FrameID.
+ *
+ * Each input restores NameOfStation "fuzz" and a zero IP on g_open. Mode 2
+ * (and a stitched DCP Set) otherwise latches the name, and the next
+ * Identify-by-name matches nothing.
  */
 #include "pn_crypto.h"
 #include "pn_endian.h"
@@ -334,6 +338,39 @@ static pn_stack_t *make_stack(int sec, int enforce)
     return s;
 }
 
+static void restore_open_cfg(void)
+{
+    const pn_cfg_t *c;
+    if (!g_open) {
+        return;
+    }
+    c = pn_stack_cfg(g_open);
+    if (!c) {
+        return;
+    }
+    if (strcmp(c->station_name, "fuzz") != 0) {
+        uint8_t sblk[2 + 8];
+        uint8_t blocks[24];
+        size_t bn;
+        memset(sblk, 0, sizeof(sblk));
+        pn_wr_be16(sblk, 1);
+        memcpy(sblk + 2, "fuzz", 4);
+        bn = dcp_block(blocks, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, sblk, 6);
+        inject_dcp(g_open, k_mac_dev, PN_FRAMEID_DCP_GETSET, PN_DCP_SET, blocks,
+                   bn);
+    }
+    if (c->ip || c->netmask || c->gateway) {
+        uint8_t ipblk[14];
+        uint8_t blocks[24];
+        size_t bn;
+        memset(ipblk, 0, sizeof(ipblk));
+        pn_wr_be16(ipblk, 1);
+        bn = dcp_block(blocks, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ipblk, 14);
+        inject_dcp(g_open, k_mac_dev, PN_FRAMEID_DCP_GETSET, PN_DCP_SET, blocks,
+                   bn);
+    }
+}
+
 static int fuzz_init(void)
 {
     g_open = make_stack(0, 0);
@@ -347,6 +384,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     if (!g_open && fuzz_init() != 0) {
         return 0;
     }
+    restore_open_cfg();
     if (size == 0) {
         ensure_ar(g_open, 0);
         return 0;
