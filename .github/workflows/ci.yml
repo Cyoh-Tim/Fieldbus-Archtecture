@@ -85,9 +85,9 @@ jobs:
             echo "==> $bin"
             "./build-fuzz/$bin" -max_total_time=60 -timeout=5 "$@" "$corpus"
           }
-          run_one fuzz_mb_adu tests/fuzz/corpus/mb_adu
-          run_one fuzz_slmp_request tests/fuzz/corpus/slmp_request
-          run_one fuzz_eip_encap tests/fuzz/corpus/eip_encap
+          run_one fuzz_mb_adu tests/fuzz/corpus/mb_adu -dict=tests/fuzz/dict/mb_adu.dict
+          run_one fuzz_slmp_request tests/fuzz/corpus/slmp_request -dict=tests/fuzz/dict/slmp_request.dict
+          run_one fuzz_eip_encap tests/fuzz/corpus/eip_encap -dict=tests/fuzz/dict/eip_encap.dict
           run_one fuzz_eip_io tests/fuzz/corpus/eip_io -dict=tests/fuzz/dict/eip_io.dict
           run_one fuzz_pn_eth tests/fuzz/corpus/pn_eth
           run_one fuzz_pn_rpc tests/fuzz/corpus/pn_rpc
