@@ -58,6 +58,8 @@ jobs:
           export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
           ctest --test-dir build-san --output-on-failure
 
+  # Long (~1h/target) campaigns live in fuzz-weekly.yml (cron + dispatch).
+  # Keep this job at ~60s/target so PRs stay fast.
   fuzz:
     runs-on: ubuntu-latest
     steps:
@@ -79,13 +81,14 @@ jobs:
           run_one() {
             local bin="$1"
             local corpus="$2"
+            shift 2
             echo "==> $bin"
-            "./build-fuzz/$bin" -max_total_time=60 -timeout=5 "$corpus"
+            "./build-fuzz/$bin" -max_total_time=60 -timeout=5 "$@" "$corpus"
           }
           run_one fuzz_mb_adu tests/fuzz/corpus/mb_adu
           run_one fuzz_slmp_request tests/fuzz/corpus/slmp_request
           run_one fuzz_eip_encap tests/fuzz/corpus/eip_encap
-          run_one fuzz_eip_io tests/fuzz/corpus/eip_io
+          run_one fuzz_eip_io tests/fuzz/corpus/eip_io -dict=tests/fuzz/dict/eip_io.dict
           run_one fuzz_pn_eth tests/fuzz/corpus/pn_eth
           run_one fuzz_pn_rpc tests/fuzz/corpus/pn_rpc
 

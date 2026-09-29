@@ -69,12 +69,27 @@ def main() -> None:
     w("eip_encap", "sendrr_empty_cip.bin", bytes(srr) + bytes(body))
     w("eip_encap", "short.bin", b"\x6f\x00")
 
-    # EIP IO two items
+    # EIP IO two items (raw CPF, harness mode 2)
     io = le16(2)
     io += le16(0x8002) + le16(8) + bytes(8)
     io += le16(0x00B1) + le16(4) + bytes(4)
     w("eip_io", "seq_data.bin", io)
     w("eip_io", "short.bin", b"\x02\x00")
+    # Stateful harness: byte0 = mode. Mode 0 stitches live O->T conn id.
+    cpf = le16(2)
+    cpf += le16(0x8002) + le16(8) + bytes(4) + le16(1) + le16(0)
+    cpf += le16(0x00B1) + le16(10) + le16(1) + bytes([0x5A] * 8)
+    w("eip_io", "mode0_stitch.bin", bytes([0]) + cpf)
+    w("eip_io", "mode1_wrap.bin", bytes([1, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]))
+    w("eip_io", "mode4_close.bin", bytes([4]))
+    w("eip_io", "mode5_poll.bin", bytes([5]))
+    w("eip_io", "mode5_watchdog.bin", bytes([5, 0xFF]))
+    w("eip_io", "mode7_large_fo.bin", bytes([7, 0xA5, 0x5A]))
+    # Connected data with 4-byte header (seq + run/idle-ish) + 8-byte image
+    ri = le16(2)
+    ri += le16(0x8002) + le16(8) + bytes(8)
+    ri += le16(0x00B1) + le16(12) + bytes([1, 0, 1, 0]) + bytes([0x5A] * 8)
+    w("eip_io", "mode0_runidle.bin", bytes([0]) + ri)
 
     # PN eth DCP Identify All + name filter + Set
     eth = bytes([0x01, 0x0E, 0xCF, 0, 0, 0, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x88, 0x92])

@@ -57,3 +57,7 @@ are SHA-named `*.bin` (gitignore keeps only `*.bin`). Original named seeds
 
 `v0.2.0` remains `93ce7ec`. No stack fix in this follow-up (nothing to
 promote to v0.2.1).
+
+`fuzz_eip_io` stayed at cov=38 because the harness never Forward-Opened a
+Class 1 connection (every UDP frame missed the O→T conn-id table). Follow-up
+harness + weekly CI: [`fuzz_eip_io_harness_20260929.md`](fuzz_eip_io_harness_20260929.md).

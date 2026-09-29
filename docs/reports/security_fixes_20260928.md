@@ -182,7 +182,7 @@ Harnesses (clang `-fsanitize=fuzzer,address,undefined`):
 | `fuzz_mb_adu` | `mb_stack_handle_adu` |
 | `fuzz_slmp_request` | `slmp_stack_handle_request` |
 | `fuzz_eip_encap` | `eip_stack_handle_encap` (stitches registered session onto SendRR) |
-| `fuzz_eip_io` | `eip_stack_handle_io` |
+| `fuzz_eip_io` | `eip_stack_handle_io` + RegisterSession/FO/FC/poll (live O→T conn id) |
 | `fuzz_pn_eth` | `pn_stack_handle_eth` |
 | `fuzz_pn_rpc` | `pn_stack_handle_rpc` |
 
@@ -354,5 +354,7 @@ cmake -S . -B build-fuzz -DCMAKE_C_COMPILER=clang \
   -DENABLE_MB_TESTS=OFF -DENABLE_SLMP_TESTS=OFF
 cmake --build build-fuzz
 python3 tests/fuzz/gen_corpus.py
-# each target a few minutes locally; CI uses 60s
+# each target a few minutes locally; PR CI uses 60s
+# weekly 1h/target (not a PR gate): .github/workflows/fuzz-weekly.yml
+#   Sunday 23:00 KST; fuzz_eip_io uses tests/fuzz/dict/eip_io.dict
 ```
