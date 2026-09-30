@@ -28,14 +28,14 @@
 | 06 | T2 (PN) | PROFINET 포인트 scale/offset | `adapters/profinet/`, `tests/` | 없음 | T0 A안 |
 | 07 | T12-1 | PN RPC 응답 NDR 첫 워드 = PNIOStatus | `stacks/profinet/`, `tests/`, `tools/ctt/`, `tests/golden/` | T12-1 | |
 | 08 | T12-2 | PN DCP 응답 블록 BlockInfo | `stacks/profinet/`, `tests/`, `tools/ctt/`, `tests/golden/` | T12-2 | T12-22 테스트는 이 수정 뒤에야 블록 해석 가능 |
-| 09 | T12-3 | PN Read/Write 응답 헤더 블록, I&M BlockHeader, Write 데이터 위치 | `stacks/profinet/`, `tests/`, `tools/ctt/` | 없음 | |
-| 10 | T12-5 | PN PrmEnd 응답 0x8110/Done, ApplicationReady 형식 | `stacks/profinet/`, `tests/`, `tools/ctt/` | 없음 | |
-| 11 | T12-4 | PN IOCR 프레임 오프셋·ExpectedSubmodule·ModuleDiff/ARServer 블록 | `stacks/profinet/`, `tests/`, `tools/ctt/` | 없음 | 큰 작업 |
+| 09 | T12-3 | PN Read/Write 응답 헤더 블록, I&M BlockHeader, Write 데이터 위치 | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-3 ×2 | T12-1 이후 (응답 NDR 해석이 전제) |
+| 10 | T12-5 | PN PrmEnd 응답 0x8110/Done, ApplicationReady 형식 | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-5 ×2 | T12-1 이후 |
+| 11 | T12-4 | PN IOCR 프레임 오프셋·ExpectedSubmodule·ModuleDiff/ARServer 블록 | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-4 ×3 | 큰 작업. T12-1 이후. IOCR `DataLength` 를 따르면 C_SDU 가 40바이트가 되어 T12-7 테스트도 통과할 수 있다. 그러면 T12-7 표시도 이 PR 에서 지운다 (허용) |
 | 12 | T12-6 | PN DataStatus 0x35 | `stacks/profinet/`, `tests/`, `tests/golden/` | T12-6 | |
 | 13 | T12-7 | PN RTC1 최소 길이 패딩 | `stacks/profinet/`, `tests/` | T12-7 | |
-| 14 | T12-8 | PN RTC1·알람 VLAN 태그 | `stacks/profinet/`, `tests/` | 없음 | |
-| 15 | T4 + T12-15 | PN RT 송신 주기 = 협상값, CycleCounter 증가량 | `stacks/profinet/`, `tests/` | 없음 | |
-| 16 | T5 (PN) + T12-13 | PN 최소 주기 거부(`DB 81 02 0E`)와 GSDML 정리 | `stacks/profinet/`, `stacks/profinet/gsdml/`, `tests/` | 없음 | |
+| 14 | T12-8 | PN RTC1·알람 VLAN 태그 | `stacks/profinet/`, `tests/` | T12-8 | 오라클은 RTC1 만 본다 (알람은 PR 테스트로) |
+| 15 | T4 + T12-15 | PN RT 송신 주기 = 협상값, CycleCounter 증가량 | `stacks/profinet/`, `tests/` | T4, T12-15 | |
+| 16 | T5 (PN) + T12-13 | PN 최소 주기 거부(`DB 81 02 0E`)와 GSDML 정리 | `stacks/profinet/`, `stacks/profinet/gsdml/`, `tests/` | T5 (PN) ×2, T12-13 | T12-1 이후 |
 | 17 | T11-1 | EIP O→T 32-bit Run/Idle 헤더 | `stacks/ethernetip/`, `tests/`, `tools/ctt/` | T11-1 | |
 | 18 | T11-2 | EIP EDS 재작성, minor_rev | `stacks/ethernetip/eds/`, `adapters/ethernetip/` | 없음 | 어댑터 부분은 별도 PR 가능 |
 | 19 | T11-3 | EIP Forward Open/Close 실패 응답 형식 | `stacks/ethernetip/`, `tests/`, `tools/ctt/` | T11-3 | |
@@ -97,6 +97,7 @@ main 최신 기준으로 새 브랜치를 만들어 작업한다. 이 이슈 하
 3. 코드를 고치기 전에 결함을 재현하는 테스트를 먼저 추가하고, 그 테스트가 실패하는 것을 확인한다.
    PR 설명에 수정 전 실패 출력을 붙인다.
 4. 오라클 표시: <`tests/oracle/` 의 `@known_defect("<T 항목>", …)` 줄을 지운다 | 이 항목은 오라클 표시가 없다>.
+   큐 표 "비고" 에 이 PR 에서 함께 지워도 된다고 적힌 다른 표시가 있으면, 그 테스트가 실제로 통과할 때만 같이 지운다.
    `tests/oracle/` 의 다른 내용(기대값, 요청 인코더, requirements)은 바꾸지 않는다.
 5. 기존 CTT 시나리오·golden 이 잘못된 동작을 정답으로 고정하고 있으면 같은 PR 에서 고치고, 바꾼 기대값을 PR 설명에 모두 적는다.
 6. 줄번호가 문서와 다르면 함수 이름으로 찾는다.
