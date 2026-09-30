@@ -99,6 +99,130 @@ static void test_offset_scale_endian_aliases(void)
     a->destroy(a);
 }
 
+/* T9-3: a leading zero is decimal padding (Modicon "00010", "040001"),
+ * not an octal prefix. "0x" remains hexadecimal. */
+static int read_bytes(protocol_adapter_t *a, const char *name, uint8_t *dst,
+                      size_t n)
+{
+    point_value_t rv = {0};
+    int rc = a->read_point(a, name, &rv);
+    if (rc != 0 || !rv.data || rv.len < n) {
+        free(rv.data);
+        return -1;
+    }
+    memcpy(dst, rv.data, n);
+    free(rv.data);
+    return 0;
+}
+
+static void test_leading_zero_address_is_decimal(void)
+{
+    const char *params =
+        "{\"role\":\"server\",\"ip\":\"127.0.0.1\",\"port\":15753,"
+        "\"unit_id\":1,\"max_clients\":2}";
+    /* Probes are numeric addresses, which are unaffected by strtol base.
+     * coil N (1-based) is PDU N-1. holding 40001 is PDU 0; holding 16 is PDU 16. */
+    const char *points =
+        "["
+        "{\"name\":\"coil_00010\",\"data_type\":\"bool\","
+        "\"address\":{\"modbus\":{\"type\":\"coil\",\"start\":\"00010\"}}},"
+        "{\"name\":\"coil_pdu7\",\"data_type\":\"bool\","
+        "\"address\":{\"modbus\":{\"type\":\"coil\",\"start\":8}}},"
+        "{\"name\":\"coil_pdu9\",\"data_type\":\"bool\","
+        "\"address\":{\"modbus\":{\"type\":\"coil\",\"start\":10}}},"
+        "{\"name\":\"coil_00009\",\"data_type\":\"bool\","
+        "\"address\":{\"modbus\":{\"type\":\"coil\",\"start\":\"00009\"}}},"
+        "{\"name\":\"coil_pdu0\",\"data_type\":\"bool\","
+        "\"address\":{\"modbus\":{\"type\":\"coil\",\"start\":1}}},"
+        "{\"name\":\"coil_pdu8\",\"data_type\":\"bool\","
+        "\"address\":{\"modbus\":{\"type\":\"coil\",\"start\":9}}},"
+        "{\"name\":\"hr_040001\",\"data_type\":\"u16\","
+        "\"address\":{\"modbus\":{\"type\":\"holding\",\"start\":\"040001\"}}},"
+        "{\"name\":\"hr_pdu0\",\"data_type\":\"u16\","
+        "\"address\":{\"modbus\":{\"type\":\"holding\",\"start\":40001}}},"
+        "{\"name\":\"hr_0x10\",\"data_type\":\"u16\","
+        "\"address\":{\"modbus\":{\"type\":\"holding\",\"start\":\"0x10\"}}},"
+        "{\"name\":\"hr_pdu16\",\"data_type\":\"u16\","
+        "\"address\":{\"modbus\":{\"type\":\"holding\",\"start\":16}}}"
+        "]";
+
+    protocol_adapter_t *a = modbus_adapter_create();
+    if (!a) {
+        expect(0, "T9-3 create");
+        return;
+    }
+    int irc = a->init(a, params, points);
+    expect(irc == 0, "T9-3 init");
+    if (irc != 0) {
+        a->destroy(a);
+        return;
+    }
+    expect(a->connect(a) == 0, "T9-3 connect");
+
+    uint8_t one = 1;
+    point_value_t on = {.data = &one, .len = 1};
+    expect(a->write_point(a, "coil_00010", &on) == 0, "write coil \"00010\"");
+    uint8_t b9 = 0xFF, b7 = 0xFF;
+    int rc9 = read_bytes(a, "coil_pdu9", &b9, 1);
+    int rc7 = read_bytes(a, "coil_pdu7", &b7, 1);
+    if (rc9 != 0 || b9 != 1 || rc7 != 0 || b7 != 0) {
+        fprintf(stderr,
+                "FAIL: coil \"00010\" PDU (decimal 10 → 9, not octal 8 → 7): "
+                "pdu9 rc=%d val=%u, pdu7 rc=%d val=%u\n",
+                rc9, b9, rc7, b7);
+        g_fail = 1;
+    }
+
+    expect(a->write_point(a, "coil_00009", &on) == 0, "write coil \"00009\"");
+    uint8_t b8 = 0xFF, b0 = 0xFF;
+    int rc8 = read_bytes(a, "coil_pdu8", &b8, 1);
+    int rc0 = read_bytes(a, "coil_pdu0", &b0, 1);
+    if (rc8 != 0 || b8 != 1 || rc0 != 0 || b0 != 0) {
+        fprintf(stderr,
+                "FAIL: coil \"00009\" PDU (decimal 9 → 8, not truncated octal 0): "
+                "pdu8 rc=%d val=%u, pdu0 rc=%d val=%u\n",
+                rc8, b8, rc0, b0);
+        g_fail = 1;
+    }
+
+    /* Sentinel at PDU 0, then "0x10" must land on PDU 16 and leave it alone.
+     * strtol base 0 already accepts 0x; base 10 without an explicit prefix
+     * would parse "0x10" as 0 and overwrite this register. */
+    uint8_t sentinel[2] = {0x11, 0x11};
+    point_value_t sv = {.data = sentinel, .len = 2};
+    expect(a->write_point(a, "hr_pdu0", &sv) == 0, "seed holding PDU 0");
+    uint8_t hexv[2] = {0x00, 0x10};
+    point_value_t hv = {.data = hexv, .len = 2};
+    expect(a->write_point(a, "hr_0x10", &hv) == 0, "write holding \"0x10\"");
+    uint8_t hr16[2] = {0xFF, 0xFF};
+    uint8_t hr0[2] = {0xFF, 0xFF};
+    int r16 = read_bytes(a, "hr_pdu16", hr16, 2);
+    int rhr = read_bytes(a, "hr_pdu0", hr0, 2);
+    if (r16 != 0 || hr16[0] != 0x00 || hr16[1] != 0x10 || rhr != 0 ||
+        hr0[0] != 0x11 || hr0[1] != 0x11) {
+        fprintf(stderr,
+                "FAIL: holding \"0x10\" must be hex PDU 16 (pdu16 rc=%d "
+                "val=%02x%02x, pdu0 rc=%d val=%02x%02x)\n",
+                r16, hr16[0], hr16[1], rhr, hr0[0], hr0[1]);
+        g_fail = 1;
+    }
+
+    uint8_t beef[2] = {0xBE, 0xEF};
+    point_value_t wv = {.data = beef, .len = 2};
+    int wrc = a->write_point(a, "hr_040001", &wv);
+    rhr = read_bytes(a, "hr_pdu0", hr0, 2);
+    if (wrc != 0 || rhr != 0 || hr0[0] != 0xBE || hr0[1] != 0xEF) {
+        fprintf(stderr,
+                "FAIL: holding \"040001\" PDU (decimal 40001 → 0, not octal "
+                "16385): write rc=%d, pdu0 rc=%d val=%02x%02x\n",
+                wrc, rhr, hr0[0], hr0[1]);
+        g_fail = 1;
+    }
+
+    a->disconnect(a);
+    a->destroy(a);
+}
+
 static void test_endian_helpers(void)
 {
     uint8_t b[4] = {0x12, 0x34, 0x56, 0x78};
@@ -114,6 +238,7 @@ int main(void)
 {
     test_endian_helpers();
     test_offset_scale_endian_aliases();
+    test_leading_zero_address_is_decimal();
     if (g_fail) {
         fprintf(stderr, "test_mb_adapter: FAILED\n");
         return 1;

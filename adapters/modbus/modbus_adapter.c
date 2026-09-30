@@ -109,9 +109,22 @@ static int json_get_int(const cJSON *obj, const char *k1, const char *k2,
             return it->valueint;
         }
         if (cJSON_IsString(it) && it->valuestring) {
+            const char *s = it->valuestring;
+            const char *body = s;
+            int base = 10;
+            if (*body == '+' || *body == '-') {
+                body++;
+            }
+            /* Decimal by default. strtol(..., 0) treats a leading 0 as octal
+             * ("00010" → 8, "00009" → 0, "040001" → 16385). Hex only with
+             * an explicit 0x/0X prefix. */
+            if (body[0] == '0' && (body[1] == 'x' || body[1] == 'X') &&
+                isxdigit((unsigned char)body[2])) {
+                base = 16;
+            }
             char *end = NULL;
-            long v = strtol(it->valuestring, &end, 0);
-            if (end != it->valuestring) {
+            long v = strtol(s, &end, base);
+            if (end != s && *end == '\0') {
                 if (found) {
                     *found = 1;
                 }
