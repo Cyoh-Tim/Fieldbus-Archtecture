@@ -47,10 +47,20 @@ description: 코딩 에이전트(Grok 등)가 올린 PR 을 구현자와 독립�
 
 위반은 FAIL 사유다. 단, T 항목이 그 범위를 명시적으로 허용했으면 예외.
 
-## 3. 전체 회귀 — 기존 CI 결과를 먼저 읽는다
+## 3. 전체 회귀 — 로컬 CI (기본) 또는 GitHub Actions
 
-전체 회귀(빌드, ctest, golden, sanitizers, fuzz 60s, mock-flow, sw-master-soak, codesys-dut)는
-**기존 GitHub Actions CI(`.github/workflows/ci.yml`)가 PR 마다 이미 돌린다.** 같은 것을 다시 돌리지 않는다.
+**2026-09-30 부터 이 저장소의 GitHub Actions 는 꺼져 있다** (비공개 저장소 사용 시간·결제 문제로 저장소 담당자가 끔).
+그래서 **기본은 로컬 CI** 다. `.github/workflows/ci.yml` 은 CI 정의로 그대로 두고, 로컬 CI 가 그 파일을 읽어 같은 job 을 돌린다.
+
+```bash
+git fetch origin pull/<N>/head:pr<N>
+python3 tools/ci/local_ci.py --ref pr<N> --out <스크래치>/localci-pr<N>   # 처음이면 --install-deps
+```
+
+결과 `summary.md` 표를 검증 코멘트의 "전체 회귀" 근거로 넣는다. 로컬 CI 가 실패하면 FAIL 이다.
+실패하면 같은 job 을 `main` 에서도 돌려 PR 이 만든 실패인지 가린다.
+
+나중에 Actions 가 다시 켜져서 PR head 에 check run 이 있으면, 아래처럼 그 결과를 먼저 읽고 같은 것을 다시 돌리지 않는다.
 
 1. PR head SHA 의 check run 을 읽는다.
    - 진행 중이면 이번 실행에서는 "CI 진행 중 — 다음 주기에 재검증" 으로 적고 코멘트를 달지 않는다.

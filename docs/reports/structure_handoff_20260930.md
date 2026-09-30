@@ -11,7 +11,7 @@
 
 - **오라클 CI (`tests/oracle/`, 2026-09-30 추가):** 이 문서의 결함 16개(테스트 18개)가 독립 구현체(pymodbus, pymcprotocol,
   pycomm3, scapy) 테스트에 `@known_defect("T..")` strict xfail 로 걸려 있다. 결함을 고치면 그 테스트가 통과(XPASS)해서
-  CI `oracle` job 이 빨간색이 된다. **수정 PR 은 해당 `@known_defect` 줄을 지워야 한다.** 지웠는데 결함이 남아 있으면
+  `oracle` job 이 실패한다 (GitHub Actions 는 2026-09-30 부터 꺼져 있고, 검증 담당이 `tools/ci/local_ci.py` 로 같은 job 을 돌린다). **수정 PR 은 해당 `@known_defect` 줄을 지워야 한다.** 지웠는데 결함이 남아 있으면
   테스트가 실패한다. `tests/oracle/` 의 판정 로직은 검증 담당(Claude)이 관리하므로, 구현 PR 은 표시 제거 외에는
   이 폴더를 고치지 않는다. 현재 걸려 있는 항목: T9-4, T9-6, T10-1, T10-5, T10-6, T11-1, T11-3, T11-5, T11-7, T11-9,
   T12-1, T12-2, T12-6, T12-7, T12-11, T12-22.
