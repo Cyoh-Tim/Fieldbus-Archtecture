@@ -210,7 +210,7 @@ Modbus 처럼 "줘 → 여기" 를 반복하면 PLC 가 장비 수만큼 요청�
 | **EtherNet/IP** | CIP 를 TCP/UDP/IP 위에 올리는 방법(적응층). Encapsulation + CPF | 5장 |
 | **ODVA** | CIP 사양 관리 단체 | 1.2 |
 | **Object / Class / Instance / Attribute** | 객체 타입 / 그 개체 / 필드 | 0.6, 4장 |
-| **Service** | 객체에 대한 연산 코드(1바이트). 응답은 `service | 0x80` | 4.2 |
+| **Service** | 객체에 대한 연산 코드(1바이트). 응답은 `service OR 0x80` | 4.2 |
 | **EPATH** | CIP 경로 인코딩. 세그먼트(segment)의 나열 | 5.4 |
 | **Segment** | EPATH 의 한 조각. 첫 바이트 상위 3비트가 종류 (logical/port/symbolic/data) | 5.4 |
 | **Padded EPATH** | 16비트 이상 값 앞에 패딩 바이트를 넣어 워드 정렬한 EPATH. EtherNet/IP 는 padded 를 씀 | 5.4.2 |
@@ -2277,3 +2277,473 @@ Connection1 =
 | LLDP 실제 송신/수신, 실제 ACD(ARP) | 없음 |
 | 공식 ODVA CT / DoC | 제품 프로세스 (13장) |
 
+---
+
+## 11. 테스트와 디버깅
+
+### 11.1 빌드와 한 번에 돌리기
+
+```bash
+cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON      # libssl-dev 필요 (OpenSSL HMAC/TLS)
+cmake --build build -j
+ctest --test-dir build --output-on-failure -L ethernetip    # CTT EIP 시나리오 19개
+./build/test_eip_stack                                      # C 단위 테스트
+./build/test_eip_crypto                                     # HMAC-SHA256 RFC 4231 case 1
+```
+
+이 문서 작성 시 위 명령으로 19/19 통과, `test_eip_stack` "eip stack tests OK", `test_eip_crypto` OK 를 확인했다.
+
+### 11.2 C 단위 테스트 — [`tests/test_eip_stack.c`](../../tests/test_eip_stack.c)
+
+| 함수 | 줄 | 무엇을 지키나 |
+|---|---|---|
+| `test_identity_get` | 59 | Identity 속성 |
+| `test_assembly_rw_and_forward_open` | 140 | Assembly Get/Set, FO, Class 1 I/O |
+| `test_register_session` | 283 | 세션 발급 |
+| `test_security_integrity` | 307 | Class 1 HMAC 거부/수락, 응답 MAC |
+| `test_qos_dscp_ct_defaults` | 590 | DSCP 기본값 |
+| `test_acd_identity_state` | 609 | ACD → Identity/TCPIP 상태 |
+| `test_lldp_mgmt_and_frame` | 634 | 0x109, LLDP 프레임 |
+| `test_class1_watchdog_and_rt_stats` | 674 | 워치독, RT 통계 |
+| `test_list_identity_and_protection` | 799 | ListIdentity, protection_mode |
+| `test_g2_watchdog_dup_path_size` | 947 | FO 슬롯 회수, 중복 triad, 경로/크기 거절 (보안 수정 G2) |
+| `test_g5_encap_session_and_cip_len` | 1070 | Encap 길이 fail-closed, 세션 |
+| `test_g5_session_owner_and_close` | 1177 | 세션 소유권, 연결 종료 시 정리 |
+| `test_g6_cip_set_reset_gates` | 1320 | Set/Reset 권한 게이트 |
+| `test_g7_eip_tcp_idle_and_per_ip` | 1483 | 실제 소켓: 유휴 종료, IP 당 제한 |
+
+### 11.3 CTT 시나리오 — [`tests/scenarios/ethernetip/`](../../tests/scenarios/ethernetip/)
+
+CTT(Controller Test Tool)는 PLC(Originator) 역할의 스텁이 **스택을 in-process 로** (`eip_stack_handle_encap()`,
+`eip_stack_handle_io()`) 두드리는 내부 회귀 하네스다. DUT 는 `stacks/ethernetip/` 이며 데몬 어댑터가 아니다
+([`tools/ctt/proto/ethernetip/README.md`](../../tools/ctt/proto/ethernetip/README.md)).
+
+```bash
+./build/ctt --scenario tests/scenarios/ethernetip/assembly_fo_io.yaml
+./build/ctt --scenario tests/scenarios/ethernetip/class1_cyclic_metrics.yaml --report /tmp/eip.json
+tests/run_mock_soak.sh --protocol ethernetip --seconds 30
+```
+
+YAML 스텝 action (플러그인 `eip_step()`, `tools/ctt/proto/ethernetip/eip_plugin.c:1324-`):
+`register_session, list_identity, list_services, get_attr, write_input, read_input, read_output, forward_open,
+forward_close, encap_inject, class1_io, io_cycle, soak, watchdog, acd_conflict, lldp, poll`.
+`forward_open` 은 `integrity: true` 면 0x00C1 MAC 을 붙이고 `large: true` 면 0x5B 를 쓴다.
+플러그인의 FO 는 NCP 에 **크기만** (플래그 비트 0) 넣고, O→T 크기 기본값 = output_size (seq 미포함) 다
+(`build_forward_open_body()`, `eip_plugin.c:631-685`) — 즉 CTT 자체가 저장소 형식에 맞춰져 있어 5.6.4 의 상호운용 문제를
+잡지 못한다.
+
+예 — [`assembly_fo_io.yaml`](../../tests/scenarios/ethernetip/assembly_fo_io.yaml) (EIP-A-CM-001):
+
+```yaml
+steps:
+  - action: write_input          # 앱이 입력 이미지에 씀
+    data: "BARCODE-1234567890"
+  - action: forward_open         # FO: RPI 8ms, o2t 8, t2o 32
+    serial: 0x1234
+    rpi_us: 8000
+    o2t_size: 8
+    t2o_size: 32
+    expect: { cip_status: 0, class1: up }
+  - action: class1_io            # O→T 8바이트 0x5A
+    fill: 0x5A
+    length: 8
+    expect: { u8: 0x5A, class1: up }
+```
+
+시나리오 카탈로그(`EIP-A-*`)와 커버리지 갭은 [`docs/ctt_eip_bundle.md`](../ctt_eip_bundle.md),
+[`docs/ctt_odva_matrix.md`](../ctt_odva_matrix.md) 가 정본이다. 갭으로 명시된 것: ListInterfaces, Originator 태그 R/W,
+TLS Class 2, Ethernet Link/Port 시나리오.
+
+### 11.4 퍼징
+
+| 하네스 | 대상 | 요지 |
+|---|---|---|
+| [`tests/fuzz/fuzz_eip_encap.c`](../../tests/fuzz/fuzz_eip_encap.c) | Encap + UCMM + CM | 첫 바이트로 모드 선택. open / protection_mode=1 / security_class=1 세 스택에 세션을 유지하고 GetAttr·Set·FO/FC·List*·HMAC 경로를 두드림 |
+| [`tests/fuzz/fuzz_eip_io.c`](../../tests/fuzz/fuzz_eip_io.c) | Class 1 I/O | 세션+FO 를 살려 둔 채 살아 있는 O→T ID 를 끼운 CPF, 정상 I/O, raw 프레임, FO/FC 재개, poll |
+
+```bash
+cmake -S . -B build-fuzz -DCMAKE_C_COMPILER=clang -DBUILD_DAEMON=OFF -DBUILD_CTT=OFF -DBUILD_FUZZERS=ON
+cmake --build build-fuzz --target fuzz_eip_encap fuzz_eip_io
+python3 tests/fuzz/gen_corpus.py
+./build-fuzz/fuzz_eip_io -max_total_time=60 -dict=tests/fuzz/dict/eip_io.dict tests/fuzz/corpus/eip_io
+```
+
+PR CI 는 타깃당 60초(`.github/workflows/ci.yml`), 주간 1시간 캠페인(`.github/workflows/fuzz-weekly.yml`).
+하네스 설계 배경: [`docs/reports/fuzz_harness_audit_20260929.md`](../reports/fuzz_harness_audit_20260929.md).
+
+### 11.5 Wireshark
+
+| 필터 | 보는 것 |
+|---|---|
+| `enip` | 모든 Encapsulation (TCP/UDP 44818) |
+| `cip` | CIP 메시지 |
+| `cipcm` | Connection Manager (FO/FC) |
+| `enip.command == 0x006f` | SendRRData 만 |
+| `cip.genstat != 0` | 에러 응답만 (필드명은 Wireshark 버전에 따라 확인) |
+| `udp.port == 2222` | Class 1 I/O |
+| `tcp.port == 44818 && tcp.len > 0` | explicit 트래픽 |
+
+요령:
+- **Class 1 I/O 는 FO 를 같이 캡처해야** "CIP I/O" 로 해석된다 (연결 ID ↔ 경로 매핑을 FO 에서 배움).
+- 비표준 포트(저장소 sw_master 예제 15562/15563)는 *Decode As…* 로 ENIP/CIP I/O 를 지정.
+- FO 응답의 Extended status 는 트리의 "Additional Status" 에 나온다. 5.6.4 의 `0x0109` 를 여기서 바로 볼 수 있다.
+- Statistics → I/O Graph 로 T→O 간격을 그리면 6.5 의 사이클 양자화가 보인다.
+
+### 11.6 상용 스캐너로 상호운용 확인
+
+**Rockwell Studio 5000 (Logix)** — "Generic Ethernet Module" 로 추가 (사양/제품 문서 기준, 실기 미검증):
+
+| 항목 | 값 |
+|---|---|
+| Comm Format | Data - SINT (바이트 단위) |
+| Input Assembly Instance / Size | 150 / input_size |
+| Output Assembly Instance / Size | 101 / output_size |
+| Configuration Instance / Size | 100 / 0 |
+| RPI | cycle_ms 의 배수 (예: 8 ms) |
+
+예상 결과: Generic Module 은 O→T 에 Run/Idle 헤더를 붙이므로 FO 가 `0x0109`(연결 크기) 로 거절될 가능성이 높다 (5.6.4).
+입력이 511바이트를 넘으면 Large FO 가 필요하다. Security Class ≥1 이면 MAC 이 없어 `0x0F`.
+
+**CODESYS EtherNet/IP Scanner** — EDS 를 디바이스 저장소에 설치하고 스캐너 아래에 추가. 저장소 절차:
+[`docs/codesys_master_io.md`](../codesys_master_io.md) 4장, 설정 [`config/example.codesys.ethernetip.json`](../../config/example.codesys.ethernetip.json).
+같은 Run/Idle·EDS 문제(10.6)를 먼저 해결해야 할 것으로 보인다. 저장소 문서상 현재 CODESYS 경로는 RegisterSession 프로브
+("stand-in") 수준이다 ([`docs/sw_master_io.md`](../sw_master_io.md)).
+
+**저장소 자체 소프트웨어 마스터** — [`examples/sw_master.py`](../../examples/sw_master.py) `--protocol ethernetip`:
+RegisterSession → FO → Class 1 루프(저장소 형식). 라이브 소켓으로 도는 유일한 실제 네트워크 경로다.
+
+### 11.7 문서의 hex 를 직접 재현하는 하네스 골격
+
+```c
+/* 저장소 밖에서: gcc -I stacks/ethernetip/include -I include -I core h.c build/libeip_stack.a -lssl -lcrypto -lpthread */
+#include "eip_internal.h"   /* session_secret 고정용 (재현성) */
+#include "eip_stack.h"
+eip_cfg_t c = {0};
+c.mock = 1; c.input_size = 4; c.output_size = 2;           /* 나머지는 스택 기본값 */
+eip_stack_t *s = eip_stack_create(&c);
+s->session_secret = 0x0A0B0C0C;                             /* 첫 핸들 = 0x0A0B0C0D */
+eip_stack_start(s);
+uint8_t req[] = { /* 5장 hex */ }, resp[1024]; size_t n;
+eip_stack_handle_encap(s, req, sizeof req, resp, sizeof resp, &n);   /* TCP 메시지 */
+eip_stack_handle_io(s, io, io_len);                                    /* UDP O→T */
+eip_transport_ops_t ops = { .udp_send = my_capture };                  /* T→O 캡처 */
+eip_stack_set_transport_ops(s, ops); eip_stack_poll(s);
+```
+
+---
+
+## 12. 흔한 함정과 보안 고려사항
+
+### 12.1 구현 함정
+
+| # | 함정 | 증상 | 대책 |
+|---|---|---|---|
+| 1 | 헤더 Length 에 24바이트를 포함 | 모든 응답이 잘림/붙음 | Length = 헤더 **뒤** 바이트 수 |
+| 2 | Sockaddr 를 LE 로 | 스캐너가 이상한 IP/포트 표시 | 이 필드만 빅 엔디안 |
+| 3 | Path Size 를 바이트로 | 0x04 경로 에러 | **워드 수** |
+| 4 | 16비트 세그먼트에 패드 누락 | 경로 해석 어긋남 | `21 00 LL HH` |
+| 5 | Class 1 크기에서 seq(2)/Run-Idle(4) 누락 | 0x0109 | 5.6.4 공식 |
+| 6 | O→T ID 를 Originator 값으로 | 여러 스캐너 충돌 | Target 이 고유 ID 선택 |
+| 7 | T→O 를 첫 O→T 까지 보류 | 스캐너 T→O 워치독 만료 | 연결 직후 생산 시작 |
+| 8 | 워치독을 FO 즉시 짧게 | 연결 직후 끊김 | 초기 여유(사양서 확인) |
+| 9 | 생산 주기를 루프 주기로 양자화 | 지터, API 위반 | timerfd/deadline 기반 |
+| 10 | CIP 순번 중복 체크 없음 | 같은 데이터 재적용 | 5.8.1 규칙 |
+| 11 | 출발지 IP 미검사 | 스푸핑/목적지 탈취 | 연결의 Originator IP 고정 |
+| 12 | FO 실패 응답에 triad/remaining path 누락 | 스캐너가 에러 해석 실패 | 5.6.7 |
+| 13 | `NOP`/`UnRegisterSession` 에 응답 | 드물게 Originator 파서 혼란 | 무응답 |
+| 14 | TCP 한 번 recv = 한 메시지 가정 | 조각난 메시지에서 오동작 | 스트림 조립 (저장소 Adapter 는 OK, Originator 는 ⚠) |
+| 15 | GAA 에 비표준 속성 포함 | 툴이 Identity 를 잘못 표시 | 객체 정의대로 |
+| 16 | EDS 와 스택 불일치 | 설정 툴에서는 OK, 연결 시 실패 | EDS 를 스택 사실에 맞춤 (10.6) |
+| 17 | 511바이트 초과를 일반 FO 로 | 크기 필드 9비트 넘침 | Large FO |
+| 18 | Vendor ID 임의 값 | 인증 불가, 실제 벤더와 충돌 | ODVA 할당 ID |
+
+### 12.2 보안 고려사항
+
+EtherNet/IP 기본 프로토콜(CIP Security 없이)은 **인증·암호화가 없다**. 네트워크에 닿는 누구나:
+
+- ListIdentity 로 장치를 찾고, Identity/Assembly 를 읽고,
+- RegisterSession 후 Set/Reset/Forward Open 을 보낼 수 있고 (저장소는 Class 0 에서 Set/Reset 에 "세션" 만 요구),
+- UDP I/O 를 위조할 수 있다.
+
+따라서 현장 방어는 **네트워크 분리(셀/존, IEC 62443 zones & conduits), 방화벽에서 44818/2222 제한** 이 기본이고,
+장치 측으로는 CIP Security 가 정석이다. 이 저장소가 제공하는 방어와 한계:
+
+| 방어 | 저장소 | 한계 |
+|---|---|---|
+| 세션 핸들 추측 방지 | XOR 난수 핸들 + TCP 결속 | |
+| DoS: 연결 수/유휴 | IP 당 4, 유휴 60 s, poll 예산 | UDP 플러딩 방어 없음 |
+| FO 슬롯 고갈 | 즉시 워치독, 경로/크기/중복 검사 | 다른 triad 로 32개 채우기는 가능 (RPI×배수 동안) |
+| 쓰기 보호 | `protection_mode`, 세션 요구, Class≥1 HMAC | Get 은 무보호 |
+| I/O | 없음 | 연결 ID 순차 + 출발지 무검사 → 출력 위조·T→O 탈취 (7.5) |
+| 기밀성 | Class 2 TLS-PSK (옵션) | 평문 포트 병존, UDP 평문 |
+
+저장소 보안 수정 이력과 62443 매핑: [`docs/reports/security_fixes_20260928.md`](../reports/security_fixes_20260928.md).
+
+---
+
+## 13. 인증/적합성
+
+- **ODVA Conformance Test (CT)**: ODVA 가 제공하는 시험 소프트웨어/절차로 장치를 시험한다. 공식 **Declaration of Conformity
+  (DoC)** 는 ODVA 회원 가입(Vendor ID 할당) + 공인 테스트 서비스(ODVA 시험소 등)에서 CT 통과 후 발급된다.
+  제품 공개 전 EDS 검사, 상호운용 테스트(plugfest)도 과정에 포함된다 (사양서/ODVA 안내 확인 필요: 현행 CT 버전·절차).
+- CIP Security 를 주장하려면 별도의 CIP Security CT 가 있다.
+- **이 저장소의 CTT green 은 인증이 아니다.** 저장소 문서가 반복해 못 박는다: "CTT green 을 ODVA 인증서 대신 제출하지 말 것"
+  ([`docs/ctt_odva_matrix.md`](../ctt_odva_matrix.md)), "내부 bundle-grade 게이트 ≠ ODVA 인증"
+  ([`docs/ctt_eip_bundle.md`](../ctt_eip_bundle.md)).
+- SOC(Statement of Compliance) 초안: [`docs/ethernetip_soc.md`](../ethernetip_soc.md). 이 초안의 객체 표는 **저장소 구현 설명** 이며,
+  4장·부록 D 의 불일치(QoS 속성 번호, TCP/IP attr 10/11, Identity attr 17 등)가 CT 에서 지적될 수 있는 항목이다.
+- 인증을 목표로 한다면 최소한 부록 D 의 "상호운용" 항목(Run/Idle, UDP ListIdentity, T→O 즉시 생산, FO 에러 형식, Forward Close
+  not found, NOP/Unregister 무응답, ListInterfaces)을 먼저 정리해야 한다.
+
+---
+
+## 14. 참고 사양 문헌
+
+| 문헌 | 내용 | 비고 |
+|---|---|---|
+| ODVA, *The CIP Networks Library, Volume 1: Common Industrial Protocol (CIP)* | 객체 모델, 데이터 타입, EPATH, 서비스, 연결(Connection Manager/Connection 객체), 상태 코드, EDS | 이 문서 4·5.4·5.6·6장의 근거 |
+| ODVA, *Volume 2: EtherNet/IP Adaptation of CIP* | Encapsulation, CPF, TCP/UDP 사용, TCP/IP·Ethernet Link·QoS 객체, ACD, Class 0/1 UDP 포맷 | 5.1~5.3, 5.8 |
+| ODVA, *Volume 8: CIP Security* | TLS/DTLS, 보안 객체 0x5D/0x5E/0x5F, 프로파일 | 7장 |
+| ODVA, *Volume 5: CIP Safety* / *Volume 7: CIP Motion* 등 | 범위 밖 | |
+| ODVA 기술 문서/가이드 (EtherNet/IP 개요, "Recommended Functionality for EtherNet/IP Devices", QoS/DLR/LLDP 관련 문서) | 권장 구현 사항 | 명칭·판은 ODVA 사이트 확인 |
+| Rockwell Automation, *Logix5000 Controllers Data Access* (Programming Manual) | Read/Write Tag(0x4C/0x4D) 등 Logix 전용 서비스 | 9.5 |
+| IETF RFC 5227 | IPv4 Address Conflict Detection | ACD |
+| IEEE 802.1AB | LLDP | 4.11 |
+| RFC 4279 / RFC 5487 | TLS-PSK cipher suites | 7.3 |
+| RFC 2104 / RFC 4231 | HMAC / HMAC-SHA256 테스트 벡터 | `tests/test_eip_crypto.c` |
+| OpENer (github.com/EIPStackGroup/OpENer) | 오픈소스 EtherNet/IP Adapter 스택 | 구현 비교용 (사양 아님) |
+
+사양서는 ODVA 에서 구매/회원 제공된다. 판(edition)에 따라 속성·코드가 추가되므로 "사양서 확인 필요" 표시 항목은 반드시 현행
+판으로 확인할 것.
+
+---
+
+## 부록 A. 구현 체크리스트
+
+**Encapsulation**
+- [ ] 24바이트 헤더, Length = 뒤 바이트 수, Sender Context 에코, Options ≠ 0 처리
+- [ ] TCP 스트림 조립, 최대 길이 정책
+- [ ] NOP 무응답
+- [ ] ListIdentity (TCP + **UDP 44818 브로드캐스트**), Socket Address 빅 엔디안, Status/State 실제 값
+- [ ] ListServices (0x0100, flags 0x0120)
+- [ ] ListInterfaces (아이템 0개)
+- [ ] RegisterSession 버전 검사(0x0069), TCP 당 1세션, 추측 불가 핸들
+- [ ] UnRegisterSession 무응답 + TCP 종료
+- [ ] SendRRData: 세션 검사(0x0064), CPF 경계 검사, Null + 0x00B2
+- [ ] (선택) SendUnitData / Class 3
+- [ ] 유휴 타임아웃 = TCP/IP attr 13
+
+**CIP / 객체**
+- [ ] EPATH: 8/16비트 logical, padded, port, symbolic, data 세그먼트 (모르면 0x04)
+- [ ] 서비스 미지원 0x08, 속성 없음 0x14, 쓰기 불가 0x0E, 길이 0x13/0x15, 경로 없음 0x05
+- [ ] 클래스 레벨(instance 0) 속성 (Revision 등)
+- [ ] Identity 1~7(+8,9 권장), Status 비트 정확히(Owned=bit0), Reset 타입
+- [ ] Message Router Object_List
+- [ ] Assembly 3/4, Set 길이·소유 검사
+- [ ] TCP/IP 1~6, 8~13 (특히 5 Interface Configuration, 13 타임아웃), ACD 속성 정확히
+- [ ] Ethernet Link 실제 속도/플래그/MAC, 카운터
+- [ ] QoS 1~8 번호대로, DSCP 를 소켓에 적용
+- [ ] (신규 CT) LLDP Management + 실제 LLDP 송신
+
+**연결**
+- [ ] FO/Large FO 모든 필드 파싱, 실패 응답에 triad + remaining path size
+- [ ] transport class/trigger 검사(0x0103), NCP type/priority/fixed 검사(0x0108)
+- [ ] Electronic key 검사(0x0114~0x0116)
+- [ ] 크기 = 데이터 + 2 + (Run/Idle 4) (0x0109)
+- [ ] RPI 범위(0x0111), API 반환
+- [ ] Exclusive Owner 중복(0x0106), Input Only / Listen Only / 멀티캐스트
+- [ ] Target 이 O→T ID 선택(예측 어려운 값)
+- [ ] 연결 직후 T→O 생산, 목적지 = Originator IP:2222 또는 Sockaddr
+- [ ] 워치독 RPI×4×2^N (+초기 여유), 만료 시 출력 안전값
+- [ ] O→T: 출발지 IP 확인, encap 순번/CIP 순번 규칙, Run/Idle
+- [ ] Forward Close: 없으면 0x0107
+
+**운영/품질**
+- [ ] EDS 가 스택 동작과 일치, EDS 검사 도구 통과
+- [ ] Wireshark 로 모든 메시지 디코드 정상
+- [ ] 퍼저 (encap, CIP, FO, I/O)
+- [ ] 상용 스캐너 2종 이상과 연결
+- [ ] (보안) CIP Security 또는 네트워크 분리 가이드
+
+---
+
+## 부록 B. Hex 예제 모음 (검증됨)
+
+전제: 0.2 의 하네스 설정 (세션 0x0A0B0C0D, vendor 0xABCD, serial 0x12345678, "FieldbusSensor", in 150/4B, out 101/2B, cfg 100).
+"SRR(n, cip)" = 5.5 의 공통 40바이트 앞부분(Length = 16 + n, Unconnected Data 길이 n) + CIP n바이트.
+
+| # | 요청 | [저장소] 응답 | 절 |
+|---|---|---|---|
+| B1 | `63 00 00 00` + 0×4 + 0×4 + ctx `01..08` + 0×4 | `63 00 36 00 … 01 00 0C 00 30 00 01 00 [0×16] CD AB 0C 00 01 00 01 00 00 00 78 56 34 12 0E "FieldbusSensor" FF` | 5.2.3 |
+| B2 | `04 00 00 00` + 0×20 | `04 00 1A 00 … 01 00 00 01 14 00 01 00 20 01 "Communications" 00 00` | 5.2.2 |
+| B3 | `64 00 00 00` + 0×20 | 헤더만, status `01 00 00 00` | 5.2.4 |
+| B4 | `00 00 00 00` + 0×20 (NOP) | 같은 24바이트 에코 | 5.2.1 |
+| B5 | `65 00 04 00` + 0×20 + `01 00 00 00` | `65 00 04 00 0D 0C 0B 0A 00…00 01 00 00 00` | 5.2.5 |
+| B6 | SRR(8, `0E 03 20 01 24 01 30 01`) | CIP `8E 00 00 00 CD AB` | 5.5.1 |
+| B7 | SRR(8, `0E 03 20 01 24 01 30 07`) | CIP `8E 00 00 00 0E 46 69 65 6C 64 62 75 73 53 65 6E 73 6F 72` | |
+| B8 | SRR(6, `01 02 20 01 24 01`) | CIP `81 00 00 00 CD AB 0C 00 01 00 01 00 00 00 78 56 34 12 0E …72 03 01 00 00 00 00 00 00` | 5.5.2 |
+| B9 | SRR(8, `0E 03 20 99 24 01 30 01`) | CIP `8E 00 05 00` | 5.5.4 |
+| B10 | SRR(8, `0E 03 20 01 24 01 30 63`) | CIP `8E 00 14 00` | |
+| B11 | SRR(10, `10 03 20 01 24 01 30 01 34 12`) | CIP `90 00 05 00` | |
+| B12 | SRR(6, `52 02 20 06 24 01`) | CIP `D2 00 08 00` | |
+| B13 | SRR with session `EF BE AD DE` | 헤더만, status `64 00 00 00` | |
+| B14 | `FF 00 00 00 0D 0C 0B 0A` + 0×16 | 헤더만, status `01 00 00 00` | |
+| B15 | `70 00 00 00 0D 0C 0B 0A` + 0×16 (SendUnitData) | 헤더만, status `01 00 00 00` | 5.2.8 |
+| B16 | `6F 00 18 00 0D 0C 0B 0A` + 0×16 (본문 없음) | 응답 없음 (`-EINVAL`) | 5.1 |
+| B17 | SRR(8, `0E 03 20 04 24 96 30 03`) | CIP `8E 00 00 00 00 00 00 00` | 5.5.3 |
+| B18 | SRR(50, FO 5.6.8, O→T NCP `08 48`) | CIP `D4 00 20 01 09 01` | 5.6.4 |
+| B19 | SRR(50, FO 5.6.8) | CIP `D4 00 00 00 01 00 00 20 11 22 33 44 34 12 01 00 99 00 00 00 40 1F 00 00 40 1F 00 00 00 00` | 5.6.8 |
+| B20 | B19 재전송 | CIP `D4 00 01 01 00 01` | |
+| B21 | SRR(8, `0E 03 20 01 24 01 30 05`) (FO 후) | CIP `8E 00 00 00 04 00` | 4.3 |
+| B22 | UDP `02 00 02 80 08 00 01 00 00 20 01 00 00 00 B1 00 04 00 01 00 AA 55` | 출력 이미지 = `AA 55` | 5.8.2 |
+| B23 | (poll, 입력 `DE AD BE EF`) | UDP `02 00 02 80 08 00 11 22 33 44 01 00 00 00 B1 00 06 00 01 00 DE AD BE EF` | 5.8.3 |
+| B24 | SRR(26, FC 5.7) | CIP `CE 00 00 00 34 12 01 00 99 00 00 00 00 00` (두 번째도 동일) | 5.7 |
+| B25 | `66 00 00 00 0D 0C 0B 0A` + 0×16 | 같은 헤더, status 0 (에코) | 5.2.6 |
+| B26 | SRR(54, Large FO 5.6.8) | CIP `DB 00 00 00 01 00 00 20 …` | 5.6.8 |
+| B27 | SRR(50, FO 경로 `20 04 24 64 2C C6 2C 96`) | CIP `D4 00 05 01 00 00` | 6.6 |
+| B28 | SRR(50, FO transport `A3`) | 성공 (Class 1 슬롯 점유) | 5.6.5 |
+| B29 | SRR(60, FO 경로 앞에 `34 04 CD AB 0C 00 01 00 01 00`) | 성공 (키 검사 안 함) | 5.6.6 |
+| B30 | SRR(12, `10 03 20 04 24 96 30 03 01 02 03 04`) | CIP `90 00 00 00`, 입력 이미지 변경 | 4.5 |
+| B31 | SRR(12, `0E 05 91 07 53 65 6E 73 6F 72 31 00`) | CIP `8E 00 00 00` + 입력 이미지 4바이트 | 10.7 |
+| B32 | SRR(10, `0E 04 21 00 09 01 24 01 30 01`) (LLDP 0x109) | CIP `8E 00 00 00 00 00 00 00` (lldp_enable=0 설정) | 4.11 |
+| B33 | Sec1: SRR(10, `10 03 20 04 24 65 30 03 AA 55`) MAC 없음 | CIP `90 00 0F 00` | 7.3 |
+| B34 | Sec1: 같은 요청 + `C1 00 20 00 C3 83 52 6A … 17 3E` | CIP `90 00 00 00` + `C1 00 20 00 03 5B B8 1E … DB D1` | 7.3 |
+
+---
+
+## 부록 C. 상태 코드 표
+
+### C.1 CIP General Status [사양]
+
+| 코드 | 이름 |
+|---|---|
+| 0x00 | Success |
+| 0x01 | Connection failure (extended status 필수) |
+| 0x02 | Resource unavailable |
+| 0x03 | Invalid parameter value |
+| 0x04 | Path segment error |
+| 0x05 | Path destination unknown |
+| 0x06 | Partial transfer |
+| 0x07 | Connection lost |
+| 0x08 | Service not supported |
+| 0x09 | Invalid attribute value |
+| 0x0A | Attribute list error |
+| 0x0B | Already in requested mode/state |
+| 0x0C | Object state conflict |
+| 0x0D | Object already exists |
+| 0x0E | Attribute not settable |
+| 0x0F | Privilege violation |
+| 0x10 | Device state conflict |
+| 0x11 | Reply data too large |
+| 0x12 | Fragmentation of a primitive value |
+| 0x13 | Not enough data |
+| 0x14 | Attribute not supported |
+| 0x15 | Too much data |
+| 0x16 | Object does not exist |
+| 0x17 | Service fragmentation sequence not in progress |
+| 0x18 | No stored attribute data |
+| 0x19 | Store operation failure |
+| 0x1A | Routing failure, request packet too large |
+| 0x1B | Routing failure, response packet too large |
+| 0x1C | Missing attribute list entry data |
+| 0x1D | Invalid attribute value list |
+| 0x1E | Embedded service error |
+| 0x1F | Vendor specific error |
+| 0x20 | Invalid parameter |
+| 0x21 | Write-once value or medium already written |
+| 0x22 | Invalid reply received |
+| 0x25 | Key failure in path |
+| 0x26 | Path size invalid |
+| 0x27 | Unexpected attribute in list |
+| 0x28 | Invalid Member ID |
+| 0x29 | Member not settable |
+
+(0x23~0x24, 0x2A 이후는 판에 따라 추가 — 사양서 확인 필요.)
+
+### C.2 Connection Manager Extended Status (General 0x01 과 함께) [사양 — 드문 코드는 사양서 확인 필요]
+
+| 코드 | 의미 |
+|---|---|
+| 0x0100 | Connection in use or duplicate Forward Open |
+| 0x0103 | Transport class and trigger combination not supported |
+| 0x0106 | Ownership conflict |
+| 0x0107 | Target connection not found |
+| 0x0108 | Invalid network connection parameter |
+| 0x0109 | Invalid connection size |
+| 0x0110 | Target for connection not configured |
+| 0x0111 | RPI not supported |
+| 0x0113 | Out of connections |
+| 0x0114 | Vendor ID or product code mismatch |
+| 0x0115 | Device type mismatch |
+| 0x0116 | Revision mismatch |
+| 0x0117 | Invalid produced or consumed application path |
+| 0x0118 | Invalid or inconsistent configuration application path |
+| 0x0119 | Non-listen only connection not opened |
+| 0x011A | Target object out of connections |
+| 0x011B | RPI is smaller than the production inhibit time |
+| 0x0127 | Invalid O→T network connection size (사양서 확인 필요) |
+| 0x0128 | Invalid T→O network connection size (사양서 확인 필요) |
+| 0x0203 | Connection timed out |
+| 0x0204 | Unconnected request timed out |
+| 0x0205 | Parameter error in unconnected request |
+| 0x0301 | No buffer memory available |
+| 0x0311 | Invalid port |
+| 0x0312 | Invalid link address |
+| 0x0315 | Invalid segment in connection path |
+
+[저장소] 가 실제로 쓰는 조합: `0x01/0x0100` (중복), `0x20/0x0109` (크기, ⚠ general 이 0x01 이 아님), `0x05/0x0000` (경로),
+`0x20/0x0000` (짧은 요청), `0x04/0x0000` (path size), `0x02/0x0000` (슬롯 없음) — `eip_cm.c` 전체, 상수 `eip_types.h:78-88`.
+
+### C.3 Encapsulation Status
+
+5.1 표 참고.
+
+---
+
+## 부록 D. 사양 ↔ 저장소 불일치 목록
+
+모두 **기록** 이며 이 문서는 코드를 수정하지 않는다. "영향" 은 상용 장비와의 상호운용(I), 적합성 시험(C), 보안(S) 관점.
+
+| # | 항목 | 사양 | 저장소 | 근거 | 영향 |
+|---|---|---|---|---|---|
+| D1 | O→T Run/Idle 32비트 헤더 | Class 1 O→T 관례 형식, 크기에 +4 | 미지원: 크기 asm 또는 asm+2 만 허용, payload 에서 헤더 미제거 | `eip_cm.c:42-45`, `eip_io.c:62-74` | **I 높음** |
+| D2 | EDS vs 스택 | EDS 가 장치 동작과 일치해야 | EDS 는 O→T 32bit header 선언, Connection 필드 정렬 이상, MinRev 1 vs Identity 0 | `FieldbusSensor.eds` | I, C |
+| D3 | T→O 생산 시작/목적지 | 연결 직후, Originator IP:2222/Sockaddr/멀티캐스트 | 첫 O→T 수신 후, 마지막 O→T 출발지로 | `eip_io.c:57-58,111` | I, S |
+| D4 | O→T 연결 ID 선택 | Target 선택 | 요청값 ≠0 이면 에코, 아니면 순차 | `eip_cm.c:228-233` | I, S |
+| D5 | FO 실패 응답 형식 | general 0x01 + ext, 데이터에 triad + remaining path size | general 0x20/0x05/0x02 사용, 데이터 없음 | `eip_cm.c:8-20,136,194,207` | I, C |
+| D6 | FO 검사 항목 | transport/trigger, NCP, e-key, RPI, 소유권 | 미검사 | `eip_cm.c:127-250` | C |
+| D7 | Input Only / Listen Only / 멀티캐스트 | 지원 권장 | 미지원 | `eip_cm.c:106-125` | I |
+| D8 | Forward Close not found | 0x01/0x0107 | 성공 | `eip_cm.c:297-327` | C |
+| D9 | 초기 워치독 | 첫 패킷 전 여유(구현 관례, 사양서 확인) | FO 즉시 RPI×배수 | `eip_cm.c:248-249` | I |
+| D10 | Class 1 순번 규칙 | encap 순번/CIP 순번으로 중복·역순 폐기 | 미검사 | `eip_io.c:59-67` | C |
+| D11 | UDP I/O 출발지 | Originator IP 와 일치 확인 (권장) | 미검사, 매 패킷 목적지 갱신 | `eip_io.c:57-58` | S |
+| D12 | UDP 44818 ListIdentity | 필수(발견) | 소켓 없음 | `eip_stack.c:193-215` | I, C |
+| D13 | ListIdentity 필드 | Socket Address, Status, State 실제 값 | 0 / 0 / 0xFF 고정 | `eip_encap.c:40-62` | C |
+| D14 | NOP | 응답 없음 | 응답 | `eip_encap.c:319-322` | C |
+| D15 | UnRegisterSession | 응답 없이 TCP 종료 | 응답, TCP 유지 | `eip_encap.c:342-352` | C |
+| D16 | RegisterSession 버전 | 1 아니면 0x0069 | 검사 없이 에코 | `eip_encap.c:331-339` | C |
+| D17 | ListInterfaces | 아이템 0 응답 | 0x0001 | `eip_encap.c:384-387` | C |
+| D18 | SendUnitData / Class 3 | 지원(대부분 장치) | 미지원, 그런데 Class 3 FO 는 수락 | `eip_encap.c`, `eip_cm.c:176` | I, C |
+| D19 | Identity Status | Owned=bit0, Ext. device status | 연결 시 0x0004(Configured) | `eip_cip.c:78` | C |
+| D20 | Identity State (ACD) | 2 = Standby | ACD 시 2 를 "Minor Recoverable Fault" 로 사용 | `eip_cip.c:110-111` | C |
+| D21 | Identity Protection Mode 속성 번호 | attr 19 WORD (사양서 확인 필요) | attr 17 UDINT | `eip_cip.c:131-137` | C |
+| D22 | Identity GAA 구성 | 객체 정의대로 (1~7 흔함, 사양서 확인) | 1~10 + 17 | `eip_cip.c:143-170` | C |
+| D23 | 지원 객체의 미지원 서비스/쓰기 불가 속성 | 0x08 / 0x0E | 0x05 | `eip_cip.c:616` | C |
+| D24 | Message Router attr 1 | 개수 + 클래스 목록 | 개수 8 만 | `eip_cip.c:324-327` | C |
+| D25 | TCP/IP attr 2 ACD capable | bit 7 (사양서 확인) | bit 2 (DHCP) 사용 | `eip_cip.c:388` | C |
+| D26 | TCP/IP attr 10/11 | Select ACD(BOOL) / Last Conflict(STRUCT) | ACD Status / Activity (UDINT) | `eip_cip.c:402-411` | C |
+| D27 | TCP/IP attr 5/6/13 등 | 필수/권장 | 없음 | `eip_cip.c:375-414` | C |
+| D28 | Ethernet Link 값 | 실제 링크/MAC | 100 Mbps / 0x0F / 02:02:… 고정 | `eip_cip.c:416-436` | C |
+| D29 | QoS 속성 번호 | 1 Tag enable, 2-3 PTP, 4-8 DSCP (사양서 확인) | 1~5 = Urgent~Explicit | `eip_cip.c:448-468` | C |
+| D30 | QoS 적용 | 소켓 DSCP 설정 | 저장만 | (IP_TOS 없음) | I |
+| D31 | Port attr 1 | Port Type (TCP/IP = 4, 사양서 확인) | 0 | `eip_cip.c:504-507` | C |
+| D32 | 0x5E 보안 객체 | Vol 8 속성 | 저장소 고유 속성 | `eip_cip.c:519-546` | I, C |
+| D33 | CIP Security | TLS/DTLS 전체 세션 | HMAC CPF 0x00C1 + TLS-PSK(평문 병존), I/O 무보호, replay 방지 없음 | `eip_sec.c` | S, I |
+| D34 | Assembly Set | 길이 정확히, 소유 연결 시 거부 | 절단/부분 쓰기, 입력 Assembly 도 허용 | `eip_path_asm.c:271-283` | C, S |
+| D35 | FO 응답 API | 실제 지킬 주기 | RPI 에코 (사이클 양자화 무시) | `eip_cm.c:274-277`, 6.5 | I |
+| D36 | Encapsulation 최대 길이 | 65511 | 8192 초과 시 연결 끊음 | `eip_stack.c:498-501` | C |
+| D37 | Originator 태그 R/W | Logix 는 0x4C/0x4D | Get/Set_Attribute_Single + 심볼 경로 | `eip_client.c:229-301` | I |
+| D38 | Originator 보안/수신 | — | MAC 미부착, 응답 1회 recv | `eip_client.c:48-140` | I |
+| D39 | LLDP | 실제 송신 | 메모리에만 생성, 고정 MAC | `eip_lldp.c:40,96-100` | C |
+| D40 | Identity Reset | 타입 파라미터, 응답 후 리셋 | 타입 무시, 이미지/연결만 초기화 | `eip_cip.c:298-308` | C |
+| D41 | TCP 유휴 타임아웃 | TCP/IP attr 13 (기본 120 s) | 60 s, 객체로 노출 안 함 | `eip_types.h:118` | C |
