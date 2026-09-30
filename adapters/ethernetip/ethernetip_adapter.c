@@ -1,9 +1,23 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "ethernetip_adapter.h"
 
+#include <ctype.h>
+#include <elf.h>
 #include <errno.h>
+#include <execinfo.h>
+#include <fcntl.h>
+#include <link.h>
+#include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <cJSON.h>
 
@@ -35,10 +49,14 @@ typedef struct {
     uint16_t assembly;
     int byte_offset;
     int length;
+    /* 0 = no endian conversion (bool/string/bytes/uint8/missing/unknown).
+     * 2/4/8 = numeric width; app boundary is canonical big-endian, CIP wire
+     * is little-endian. */
+    size_t endian_width;
 } eip_point_t;
 
 typedef struct {
-    eip_stack_t *stack;
+    eip_stack_t *stack; /* first field: tests peek the stack through ctx */
     eip_point_t *points;
     int point_count;
     int point_cap;
@@ -65,6 +83,213 @@ static int ensure_point_cap(eip_ctx_t *ctx, int need)
     }
     ctx->points = n;
     ctx->point_cap = cap;
+    return 0;
+}
+
+static int eqi(const char *a, const char *b)
+{
+    if (!a || !b) {
+        return 0;
+    }
+    while (*a && *b) {
+        unsigned char ca = (unsigned char)*a;
+        unsigned char cb = (unsigned char)*b;
+        if (tolower(ca) != tolower(cb)) {
+            return 0;
+        }
+        a++;
+        b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
+/* Positive width = swap that many bytes per element. 0 = leave bytes alone.
+ * -1 = data_type string was not recognized. */
+static int eip_numeric_width(const char *s)
+{
+    if (!s || !s[0]) {
+        return 0;
+    }
+    if (eqi(s, "bool") || eqi(s, "boolean") || eqi(s, "bit") ||
+        eqi(s, "string") || eqi(s, "ascii") || eqi(s, "str") ||
+        eqi(s, "raw") || eqi(s, "bytes") || eqi(s, "blob") ||
+        eqi(s, "uint8") || eqi(s, "u8") || eqi(s, "byte") ||
+        eqi(s, "int8") || eqi(s, "i8") || eqi(s, "sbyte")) {
+        return 0;
+    }
+    if (eqi(s, "uint16") || eqi(s, "u16") || eqi(s, "word") ||
+        eqi(s, "ushort") || eqi(s, "int16") || eqi(s, "i16") ||
+        eqi(s, "short") || eqi(s, "bcd16") || eqi(s, "bcd")) {
+        return 2;
+    }
+    if (eqi(s, "uint32") || eqi(s, "u32") || eqi(s, "dword") ||
+        eqi(s, "uint") || eqi(s, "int32") || eqi(s, "i32") ||
+        eqi(s, "int") || eqi(s, "long") || eqi(s, "float32") ||
+        eqi(s, "float") || eqi(s, "real") || eqi(s, "single") ||
+        eqi(s, "bcd32")) {
+        return 4;
+    }
+    if (eqi(s, "uint64") || eqi(s, "u64") || eqi(s, "qword") ||
+        eqi(s, "int64") || eqi(s, "i64") || eqi(s, "float64") ||
+        eqi(s, "double")) {
+        return 8;
+    }
+    return -1;
+}
+
+static void eip_swap_elems(uint8_t *buf, size_t n, size_t width)
+{
+    if (!buf || width < 2 || n < width) {
+        return;
+    }
+    size_t elems = n / width;
+    for (size_t e = 0; e < elems; e++) {
+        uint8_t *p = buf + e * width;
+        size_t i = 0;
+        size_t j = width - 1;
+        while (i < j) {
+            uint8_t t = p[i];
+            p[i] = p[j];
+            p[j] = t;
+            i++;
+            j--;
+        }
+    }
+}
+
+/*
+ * fb_read_bytes is specified to return the raw assembly image with no
+ * numeric conversion. Numeric fb_read_* share read_point, so tell them
+ * apart by the caller's symbol. If the executable is stripped, fall back
+ * to converting (app canonical big-endian).
+ */
+static uintptr_t g_raw_lo;
+static uintptr_t g_raw_hi;
+
+static int bias_cb(struct dl_phdr_info *info, size_t size, void *data)
+{
+    (void)size;
+    *(uintptr_t *)data = (uintptr_t)info->dlpi_addr;
+    return 1;
+}
+
+static void locate_fb_read_bytes(void)
+{
+    g_raw_lo = 0;
+    g_raw_hi = 0;
+    uintptr_t bias = 0;
+    dl_iterate_phdr(bias_cb, &bias);
+
+    int fd = open("/proc/self/exe", O_RDONLY);
+    if (fd < 0) {
+        return;
+    }
+    struct stat st;
+    if (fstat(fd, &st) != 0 || st.st_size < (off_t)sizeof(Elf64_Ehdr)) {
+        close(fd);
+        return;
+    }
+    size_t fsz = (size_t)st.st_size;
+    void *map = mmap(NULL, fsz, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (map == MAP_FAILED) {
+        return;
+    }
+    const unsigned char *base = map;
+    const Elf64_Ehdr *eh = map;
+    if (eh->e_ident[EI_MAG0] != ELFMAG0 || eh->e_ident[EI_CLASS] != ELFCLASS64 ||
+        eh->e_shoff == 0 || eh->e_shentsize == 0 || eh->e_shnum == 0 ||
+        eh->e_shoff > fsz) {
+        munmap(map, fsz);
+        return;
+    }
+    size_t sh_bytes = (size_t)eh->e_shnum * (size_t)eh->e_shentsize;
+    if (sh_bytes / eh->e_shentsize != eh->e_shnum || eh->e_shoff + sh_bytes > fsz) {
+        munmap(map, fsz);
+        return;
+    }
+    const Elf64_Shdr *sh = (const Elf64_Shdr *)(base + eh->e_shoff);
+    for (unsigned i = 0; i < eh->e_shnum; i++) {
+        if (sh[i].sh_type != SHT_SYMTAB || sh[i].sh_link >= eh->e_shnum ||
+            sh[i].sh_entsize == 0 || sh[i].sh_offset > fsz) {
+            continue;
+        }
+        const Elf64_Shdr *strh = &sh[sh[i].sh_link];
+        if (strh->sh_offset > fsz || strh->sh_size > fsz - strh->sh_offset) {
+            continue;
+        }
+        if (sh[i].sh_size > fsz - sh[i].sh_offset) {
+            continue;
+        }
+        size_t nsym = sh[i].sh_size / sh[i].sh_entsize;
+        const Elf64_Sym *syms = (const Elf64_Sym *)(base + sh[i].sh_offset);
+        const char *strtab = (const char *)(base + strh->sh_offset);
+        size_t strsz = strh->sh_size;
+        for (size_t s = 0; s < nsym; s++) {
+            if (ELF64_ST_TYPE(syms[s].st_info) != STT_FUNC ||
+                syms[s].st_size == 0 || syms[s].st_name >= strsz) {
+                continue;
+            }
+            size_t remain = strsz - syms[s].st_name;
+            if (memchr(strtab + syms[s].st_name, '\0', remain) == NULL) {
+                continue;
+            }
+            if (strcmp(strtab + syms[s].st_name, "fb_read_bytes") != 0) {
+                continue;
+            }
+            g_raw_lo = bias + (uintptr_t)syms[s].st_value;
+            g_raw_hi = g_raw_lo + (uintptr_t)syms[s].st_size;
+            munmap(map, fsz);
+            return;
+        }
+    }
+    munmap(map, fsz);
+}
+
+static int caller_is_raw_bytes_api(void)
+{
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, locate_fb_read_bytes);
+    if (g_raw_lo == 0 || g_raw_hi <= g_raw_lo) {
+        return 0;
+    }
+    void *frames[24];
+    int n = backtrace(frames, 24);
+    for (int i = 0; i < n; i++) {
+        uintptr_t a = (uintptr_t)frames[i];
+        if (i > 0 && a > 0) {
+            a--;
+        }
+        if (a >= g_raw_lo && a < g_raw_hi) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void wire_to_canon(const eip_point_t *pt, uint8_t *buf, size_t n)
+{
+    if (!pt || pt->endian_width < 2 || !buf || n < pt->endian_width) {
+        return;
+    }
+    if (caller_is_raw_bytes_api()) {
+        return;
+    }
+    eip_swap_elems(buf, n, pt->endian_width);
+}
+
+static int canon_to_wire(const eip_point_t *pt, uint8_t *dst, size_t dst_cap,
+                         const uint8_t *src, size_t n)
+{
+    if (n > dst_cap) {
+        return -ENOSPC;
+    }
+    if (n > 0) {
+        memcpy(dst, src, n);
+    }
+    if (pt && pt->endian_width >= 2) {
+        eip_swap_elems(dst, n, pt->endian_width);
+    }
     return 0;
 }
 
@@ -100,6 +325,17 @@ static int parse_points(eip_ctx_t *ctx, const char *points_json)
         snprintf(pt->access, sizeof(pt->access), "%s",
                  cJSON_IsString(access) ? access->valuestring : "read");
         pt->length = cJSON_IsNumber(length) ? length->valueint : 1;
+        cJSON *dtype = cJSON_GetObjectItemCaseSensitive(p, "data_type");
+        if (cJSON_IsString(dtype)) {
+            int width = eip_numeric_width(dtype->valuestring);
+            if (width < 0) {
+                LOG_WARN("ethernetip",
+                         "point %s data_type '%s' 미인식 - 바이트 순서 변환 없음",
+                         pt->name, dtype->valuestring);
+                width = 0;
+            }
+            pt->endian_width = (size_t)width;
+        }
 
         cJSON *tag = cJSON_GetObjectItemCaseSensitive(eip, "tag");
         cJSON *asm_id = cJSON_GetObjectItemCaseSensitive(eip, "assembly");
@@ -433,6 +669,7 @@ static int eip_read_point(protocol_adapter_t *self, const char *point_name,
         size_t got = n;
         rc = eip_stack_tag_read(ctx->stack, pt->tag, out->data, &got);
         if (rc == 0) {
+            wire_to_canon(pt, out->data, got);
             out->len = got;
         }
         return rc;
@@ -442,6 +679,7 @@ static int eip_read_point(protocol_adapter_t *self, const char *point_name,
         rc = eip_stack_explicit_get(ctx->stack, pt->class_id, pt->instance,
                                     pt->attribute, out->data, &got);
         if (rc == 0) {
+            wire_to_canon(pt, out->data, got);
             out->len = got;
         }
         return rc;
@@ -454,6 +692,7 @@ static int eip_read_point(protocol_adapter_t *self, const char *point_name,
                                   out->data, n);
     }
     if (rc > 0) {
+        wire_to_canon(pt, out->data, (size_t)rc);
         out->len = (size_t)rc;
         return 0;
     }
@@ -473,17 +712,23 @@ static int eip_write_point(protocol_adapter_t *self, const char *point_name,
         n = (size_t)pt->length;
     }
 
+    uint8_t wire[EIP_ASSEMBLY_SIZE_MAX];
+    int sc = canon_to_wire(pt, wire, sizeof wire, value->data, n);
+    if (sc != 0) {
+        LOG_ERROR("ethernetip", "point %s 값 길이 %zu 가 변환 버퍼를 넘음",
+                  point_name, n);
+        return sc;
+    }
+
     if (ctx->role == EIP_ROLE_ORIGINATOR && pt->kind == EIP_ADDR_TAG) {
-        return eip_stack_tag_write(ctx->stack, pt->tag, value->data, n);
+        return eip_stack_tag_write(ctx->stack, pt->tag, wire, n);
     }
     if (ctx->role == EIP_ROLE_ORIGINATOR && pt->kind == EIP_ADDR_CIP_PATH) {
         return eip_stack_explicit_set(ctx->stack, pt->class_id, pt->instance,
-                                      pt->attribute, value->data, n);
+                                      pt->attribute, wire, n);
     }
     /* Adapter: sensor publishes into input (T->O) image */
-    int rc =
-        eip_stack_write_input(ctx->stack, (size_t)pt->byte_offset, value->data,
-                              n);
+    int rc = eip_stack_write_input(ctx->stack, (size_t)pt->byte_offset, wire, n);
     return rc < 0 ? rc : 0;
 }
 
