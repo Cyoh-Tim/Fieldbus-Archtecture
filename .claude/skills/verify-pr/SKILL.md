@@ -46,20 +46,29 @@ description: 코딩 에이전트(Grok 등)가 올린 PR 을 구현자와 독립�
 
 위반은 FAIL 사유다. 단, T 항목이 그 범위를 명시적으로 허용했으면 예외.
 
-## 3. 빌드와 전체 회귀
+## 3. 전체 회귀 — 기존 CI 결과를 먼저 읽는다
 
-PR head 를 별도 worktree(스크래치 디렉토리)에 체크아웃해서 CI 와 같은 구성으로 빌드한다.
+전체 회귀(빌드, ctest, golden, sanitizers, fuzz 60s, mock-flow, sw-master-soak, codesys-dut)는
+**기존 GitHub Actions CI(`.github/workflows/ci.yml`)가 PR 마다 이미 돌린다.** 같은 것을 다시 돌리지 않는다.
+
+1. PR head SHA 의 check run 을 읽는다.
+   - 진행 중이면 이번 실행에서는 "CI 진행 중 — 다음 주기에 재검증" 으로 적고 코멘트를 달지 않는다.
+   - 실패가 있으면 그 job 로그를 읽고, base(`main`)에서도 실패하는지 확인한다. PR 이 만든 실패면
+     그것만으로 **FAIL** 이다 (4·5단계는 생략 가능, 코멘트에 실패 job 과 원인 요약).
+   - Cursor Bugbot 처럼 사용량 한도로 실행되지 못한 봇 체크(neutral)는 판정에 넣지 않는다.
+2. CI 가 green 이면, 4·5단계를 위해 PR head 를 별도 worktree(스크래치 디렉토리)에 체크아웃해서
+   로컬로 빌드한다. CI 에 없는 `-Werror` 를 추가해 경고 회귀도 본다.
 
 ```bash
 cmake -S <wt> -B <wt>/build -DBUILD_DAEMON=ON -DBUILD_CTT=ON -DBUILD_API=ON \
       -DENABLE_PN_TESTS=ON -DENABLE_EIP_TESTS=ON -DENABLE_MB_TESTS=ON -DENABLE_SLMP_TESTS=ON \
       -DCMAKE_C_FLAGS="-Wall -Wextra -Werror"
 cmake --build <wt>/build -j
-ctest --test-dir <wt>/build --output-on-failure -LE soak_ci
 ```
 
-ASan/UBSan 빌드도 한 번 돌린다 (`.github/workflows/ci.yml` 의 `sanitizers` job 과 같은 플래그).
-실패하면 base(`origin/main`)에서도 실패하는지 확인해서, PR 이 만든 실패인지 구분한다.
+CI 가 하지 못하는 것만 로컬에서 한다: **base 에서 실패/head 에서 통과 비교(4단계)** 와 **독립 오라클(5단계)**.
+T11-0·T12-0 으로 오라클 테스트가 저장소 CI 에 들어오면, 5단계는 그 CI job 결과 확인 + 오라클 테스트
+자체가 스택과 가정을 공유하지 않는지 검토하는 것으로 줄인다.
 
 ## 4. 재현 테스트: 수정 전 실패, 수정 후 통과
 
