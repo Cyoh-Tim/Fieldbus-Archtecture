@@ -1458,3 +1458,373 @@ Encap: 70 00 LL LL | Session | 00000000 | Context | 00000000
 Target 응답은 T→O Connection ID 와 **같은 순번** 을 담은 SendUnitData 다. 같은 순번이 다시 오면 재전송이므로
 처리하지 말고 이전 응답을 재전송한다 (사양서 확인 필요: 세부 규칙).
 
+---
+
+## 6. 동작과 상태
+
+### 6.1 세션 관리
+
+```
+TCP accept ──▶ [세션 없음] ──RegisterSession──▶ [세션 H 등록] ──UnRegisterSession / TCP 종료 / 유휴──▶ [폐기]
+                  │                                  │
+                  └─ SendRRData 등 → status 0x64     └─ SendRRData(H) 허용 (H 가 이 TCP 연결 소유일 때만)
+```
+
+[사양] 세션 핸들은 **TCP 연결 하나에 하나** 다. 다른 TCP 연결에서 같은 핸들을 쓰면 안 된다.
+TCP/IP 객체 attr 13 (Encapsulation Inactivity Timeout, 기본 120초) 동안 아무것도 안 오면 Target 이 TCP 를 닫는다.
+
+[저장소]:
+
+| 항목 | 동작 | 근거 |
+|---|---|---|
+| 핸들 소유권 | 세션 슬롯에 `owner_id` (TCP 슬롯 번호 기반) 저장, 요청마다 대조 | `eip_encap.c:82-90`, `eip_internal.h:65-68`, `143-155` |
+| 핸들 값 | `seq XOR 부팅별 난수` | `eip_encap.c:105-118`, `eip_stack.c:149-156` |
+| 세션 상한 | 64 | `eip_types.h:26` |
+| TCP 연결 상한 | 32, **IP 당 4** (`max_conn_per_ip`) | `eip_types.h:27`, `eip_stack.c:433-439` |
+| 유휴 종료 | `idle_timeout_ms` 기본 **60초** (사양 attr 13 기본 120초와 다름, attr 13 으로 노출되지도 않음) | `eip_types.h:118`, `eip_stack.c:603-612` |
+| TCP 종료 시 | 그 연결 소유 세션 전부 삭제 | `tcp_client_drop()` `eip_stack.c:469-484` |
+| TLS 연결 | 별도 owner 네임스페이스 (`EIP_ENCAP_OWNER_TLS`) | `eip_internal.h:144-155` |
+
+### 6.2 TCP 스트림에서 메시지 자르기
+
+```c
+/* stacks/ethernetip/src/eip_stack.c:506-536 요지 */
+while (rx_len >= 24) {
+    need = 24 + le16(rx + 2);          /* Length 필드 */
+    if (rx_len < need) break;          /* 아직 덜 옴 → 다음 recv 까지 대기 */
+    eip_encap_process(rx, need, ...);  /* 한 메시지 처리 */
+    memmove(rx, rx + need, rx_len - need);
+    rx_len -= need;
+}
+```
+
+수신 버퍼는 연결당 8192바이트 (`EIP_TCP_BUF_MAX`, `eip_types.h:20`). 버퍼를 넘치면 **연결을 끊는다**
+(`eip_stack.c:498-501`). 사양상 Encapsulation Length 최대는 65511 이지만, 이 저장소는 사실상 ~8KB 메시지까지만 받는다.
+처리 결과가 `rc != 0` (길이 불일치 등) 이면 응답 없이 그 메시지를 버리고 다음으로 간다.
+
+### 6.3 연결 상태 기계와 Forward Open 검증 절차
+
+[사양] 연결 객체 상태 (단순화):
+
+```
+            Forward Open 수락
+ Non-existent ─────────────────▶ Established ──── 워치독 만료 ────▶ Timed Out ──▶ (삭제)
+      ▲                              │  │
+      │                              │  └── Forward Close ──────────────────────▶ (삭제)
+      └──────────────────────────────┘
+      (Configuring / Waiting-for-connection-ID 같은 중간 상태도 사양에 있다 — 사양서 확인 필요)
+```
+
+**사양상 Target 이 Forward Open 에서 하는 검사(권장 순서, 요약)**:
+
+1. 요청 길이/형식 (→ 0x01 + 0x0205 등, 사양서 확인 필요)
+2. 중복 triad? → 0x01/0x0100. 단, 크기 0 "null FO" 는 재설정 의미 (사양서 확인 필요)
+3. Transport class/trigger 지원? → 0x01/0x0103
+4. Electronic key → 0x01/0x0114·0x0115·0x0116
+5. 경로의 Assembly/connection point 유효? → 0x01/0x0315, 0x0117
+6. RPI 범위 → 0x01/0x0111 (+ 허용 범위 반환)
+7. NCP(Type/Priority/Fixed) 지원? → 0x01/0x0108
+8. 크기 → 0x01/0x0109 (또는 0x0127/0x0128 — 사양서 확인 필요)
+9. 소유권: 이미 Exclusive Owner 가 있으면 → 0x01/0x0106
+10. 자원 → 0x01/0x0113 (Out of connections)
+11. 연결 ID 할당, 워치독 장전, 응답
+
+[저장소] `eip_cm_forward_open()` 실제 순서 (`eip_cm.c:127-282`):
+
+```
+1. len < 36(40)                   → 0x20 (ext 0)
+2. path size 넘침                  → 0x04
+3. 경로에 output 과 input 인스턴스가 모두 있나 → 아니면 0x05 (ext 0)
+4. o2t/t2o 크기 == asm 또는 asm+2 → 아니면 0x20 + ext 0x0109
+5. triad 중복                      → 0x01 + ext 0x0100
+6. 빈 슬롯 (최대 32)               → 없으면 0x02 (ext 0)
+7. 연결 ID: 요청값≠0 이면 에코, 0 이면 0x2000000n
+8. watchdog_us = eip_class1_watchdog_us(O→T RPI 또는 cfg.rpi_us, multiplier)
+9. last_rx_ns = now  (워치독 즉시 장전)
+10. 성공 응답 (API = RPI 에코)
+```
+
+검사하지 않는 것: transport class/trigger, electronic key, RPI 범위, NCP type/priority/fixed-variable, 소유권(Exclusive
+Owner 중복 — 다른 triad 면 같은 Assembly 로 연결이 여러 개 생긴다; `class1_lifetime_dual.yaml` 이 이 동작을 고정),
+config 데이터.
+
+### 6.4 연결 타임아웃 계산
+
+[사양] Timeout Multiplier 필드 값 N(0..7) 은 배수 4 × 2^N 를 뜻한다.
+
+| N | 배수 | RPI 8 ms 일 때 타임아웃 |
+|---|---|---|
+| 0 | ×4 | 32 ms |
+| 1 | ×8 | 64 ms |
+| 2 | ×16 | 128 ms |
+| 3 | ×32 | 256 ms |
+| 4 | ×64 | 512 ms |
+| 5 | ×128 | 1.024 s |
+| 6 | ×256 | 2.048 s |
+| 7 | ×512 | 4.096 s |
+
+Target 의 O→T 소비 워치독 = **O→T RPI × 배수**, Originator 의 T→O 워치독 = **T→O RPI × 배수**.
+
+[저장소] `eip_class1_watchdog_us()` (`stacks/ethernetip/include/eip_internal.h:199-212`) 가 정확히
+`rpi_us × 4 × 2^min(N,7)` 을 계산한다 (RPI 0 이면 8000 으로 대체). 검증: (8000,0)=32000, (8000,1)=64000,
+(8000,4)=512000, (10000,7)=5120000 µs.
+
+**초기 워치독** — (사양서 확인 필요) 여러 구현(OpENer 등)은 연결 직후 첫 패킷이 오기 전에는 최소 **10초** 의 넉넉한
+초기 타임아웃을 둔다. [저장소] 는 FO 순간부터 RPI×배수 로 바로 장전한다 (`eip_cm.c:248-249`). 그래서 RPI 8 ms, N=0 이면
+FO 응답 후 32 ms 안에 첫 O→T 가 와야 한다. 상용 스캐너는 보통 곧바로 보내지만, 느린 Originator 에서는 연결 직후
+끊기는 원인이 될 수 있다. 이 조기 장전은 "I/O 없이 FO 만 반복해 슬롯을 고갈시키는" 공격을 막으려고 넣은 것이다
+(`docs/reports/security_fixes_20260928.md` G2).
+
+`eip_io_watchdog()` (`eip_io.c:78-104`) 는 매 poll 마다 `now - last_rx_ns > watchdog` 인 슬롯을 비우고
+`class1_timeouts` 를 올린다. 연결이 끊겨도 **output 이미지는 마지막 값 그대로** 남는다 (6.7).
+
+### 6.5 I/O 송신 스케줄링 — RPI, API, COS
+
+- **Cyclic**: RPI 마다 생산. 가장 흔함.
+- **Change of State (COS)**: 데이터가 바뀔 때 생산 + RPI 마다 하트비트. Production Inhibit Time(최소 간격)을 둔다 (사양서 확인 필요: 세그먼트/파라미터 위치).
+- **Application triggered**: 애플리케이션이 생산 시점을 결정.
+
+[저장소] 는 cyclic 만 한다. `eip_io_produce()` (`eip_io.c:106-181`):
+
+```c
+if (last_tx_ns != 0 && now < last_tx_ns) continue;   /* 아직 차례 아님 */
+... 프레임 작성 ...
+if (last_tx_ns == 0) last_tx_ns = now + period;       /* 첫 송신 */
+else {
+    last_tx_ns += period;                              /* 위상 유지: 절대시각 누적 */
+    if (last_tx_ns <= now) last_tx_ns = now + period;  /* 밀렸으면 재정렬(버스트 방지) */
+}
+```
+
+**중요한 한계**: 이 함수는 **데몬 사이클(`cycle_ms`, 기본 8 ms)마다 한 번** 불린다 (`eip_stack_poll()` →
+`eip_stack.c:614-619`, 호출자는 `core/fb_api.c:739` `run_cycle_loop()`). 따라서:
+
+- 실효 최소 주기 = `cycle_ms`. RPI 가 사이클보다 짧으면(예: RPI 2 ms, cycle 8 ms) 8 ms 마다 1개만 나간다.
+- RPI 가 사이클의 배수가 아니면 송신 간격이 사이클 단위로 **양자화** 되어 흔들린다 (예: RPI 10 ms, cycle 8 ms → 8/16 ms 간격 혼재).
+- 저장소 에이징 결과(8 ms 사이클 편차 0.1 ms, `CLAUDE.md`) 는 **RPI = cycle 배수** 일 때의 이야기다.
+- FO 응답의 API 는 RPI 를 그대로 돌려준다 — 실제로 지킬 수 없는 RPI 도 "수락" 한다. 사양은 지원 못 하는 RPI 에 0x0111 을
+  주거나 API 로 실제 값을 알려 주게 되어 있다.
+
+같은 poll 안에서 순서는 `accept → TCP → UDP 수신 → 워치독 → 생산 → 송신(flush) → LLDP → TLS` 다 (`eip_stack.c:594-620`).
+
+### 6.6 연결 종류: Exclusive Owner / Input Only / Listen Only
+
+| 종류 | O→T | T→O | 소유 | 조건 |
+|---|---|---|---|---|
+| **Exclusive Owner** | 출력 데이터(보통 Run/Idle 포함) | 입력 데이터 | 출력의 **유일한** 주인 | 같은 출력 Assembly 에 EO 는 하나만 (0x0106) |
+| **Input Only** | 하트비트(데이터 0바이트, 별도 "heartbeat" connection point) | 입력 데이터 (멀티캐스트 가능) | 없음 | 여러 개 가능 |
+| **Listen Only** | 하트비트 | **이미 있는** 멀티캐스트 T→O 를 공유 | 없음 | 다른 비-listen-only 연결이 있어야 함 (없으면 0x0119) |
+| Redundant Owner | | | 여러 PLC 가 공동 소유 | NCP bit 15 |
+
+Input Only/Listen Only 의 O→T 경로에는 입력 Assembly 대신 **벤더가 정한 heartbeat connection point 번호** 가 들어간다
+(예: OpENer 샘플은 이를 위한 별도 인스턴스를 둔다; 번호 관례는 벤더마다 다름). EDS 의 Connection 항목에 선언한다.
+
+[저장소] 는 경로에 output **과** input 인스턴스가 **둘 다** 있어야 통과하므로 Input Only / Listen Only 를 **지원하지 않는다**
+(검증: O→T 자리에 198 → `D4 00 05 01 00 00`). 멀티캐스트 T→O 도 없다 (NCP type 무시, 목적지는 항상 유니캐스트).
+
+### 6.7 중복 Forward Open, Forward Close, 해제 시 동작
+
+- **중복 FO** (같은 triad): [사양·저장소 모두] 0x01/0x0100. 단 사양에는 "같은 triad 로 크기 0 을 보내 연결 파라미터를
+  재설정" 하는 null/matching FO 개념도 있다 (사양서 확인 필요). 저장소는 없음.
+- **Forward Close**: triad 로 찾아 해제. [저장소] 는 없어도 성공 (5.7).
+- **연결이 사라질 때 출력은?** [사양/관례] 장치는 "연결 끊김 시 출력 동작"(0으로, 마지막 값 유지, fault 값 등)을
+  제품 사양으로 정한다. [저장소] 는 출력 이미지를 **건드리지 않는다** (watchdog·FC 모두 `in_use = 0` 만,
+  `eip_io.c:100`, `eip_cm.c:304`). 애플리케이션은 `health()` 의 `connected` 로 끊김을 알아야 한다
+  (`adapters/ethernetip/ethernetip_adapter.c:490-498` — 단 TCP 세션만 있어도 connected=1 이라 I/O 끊김과 구분되지 않는다).
+- **Identity Reset**: 모든 Class 1 슬롯을 즉시 비움. Originator 에게는 FC 가 아니라 **워치독 타임아웃** 으로 보인다.
+
+### 6.8 Run/Idle 의미
+
+O→T 32비트 헤더의 bit 0 이 1 이면 Run — PLC 가 RUN 모드라 출력이 유효. 0 이면 Idle — PLC 가 PROGRAM 모드 등이라
+장치는 출력을 "Idle 상태 값" 으로 둬야 한다 [사양]. 헤더가 없는 연결(modeless)은 데이터가 오면 곧 Run 으로 간주
+(사양서 확인 필요). **[저장소] 는 Run/Idle 개념이 없다** — 받은 데이터를 무조건 출력 이미지에 쓴다.
+센서처럼 출력이 "트리거" 정도인 장치에서도, PLC 가 PROGRAM 모드로 가면 Idle 로 알려 주는 정보를 잃는 셈이다.
+
+### 6.9 [저장소] 스레드와 락
+
+- 스택은 **자체 스레드가 없다.** 모든 작업은 `eip_stack_poll()` 한 번 안에서 일어나고, 이 함수는 데몬의 단일 사이클
+  루프가 부른다.
+- `pthread_mutex_t lock` (`eip_internal.h:134`) 은 프로토콜 처리(encap, UDP, produce)와 애플리케이션 API
+  (`eip_stack_read_input/write_input/...`, `eip_stack.c:718-794`) 사이의 **I/O 이미지 보호** 용이다.
+  `fb_start()` 로 별도 스레드에서 사이클을 돌리는 경우를 대비한 것.
+- poll 안의 작업량에는 **예산** 이 있다: TCP accept 8, TCP 클라이언트 8, UDP 64, TLS 4 (`eip_types.h:113-115`).
+  poll 이 7 ms 를 넘으면 경고 로그 (`eip_stack.c:627-631`).
+
+---
+
+## 7. CIP Security — 사양과 이 저장소 구현
+
+### 7.1 먼저 결론
+
+| | ODVA CIP Security (Volume 8) | 이 저장소 "Security Class" |
+|---|---|---|
+| 정체 | TLS(TCP)/DTLS(UDP) 기반 표준 보안 | **저장소 자체 프로파일** (HMAC CPF 아이템 + TLS-PSK 리스너) |
+| 이름 | "Profiles" (Confidentiality, Integrity(사양서 확인 필요), Authorization, User Authentication, Resource-Constrained …) | Class 0 / 1 / 2 (PROFINET 의 Security Class 명명을 빌린 내부 용어) |
+| 상호운용 | 표준 준수 스캐너/툴과 동작 | **이 저장소 CTT/자체 Originator 외에는 동작하지 않음** |
+| 인증 | ODVA CIP Security CT | 해당 없음 |
+
+저장소 문서도 이 점을 명시한다: "ODVA CIP Security 할당 item 코드를 사칭하지 않는다" (`docs/ctt_odva_matrix.md`),
+`0x00C1` 은 "vendor-profile integrity item" (`stacks/ethernetip/include/eip_sec.h:21`).
+
+### 7.2 실제 ODVA CIP Security 개요 [사양 — 세부는 사양서 확인 필요]
+
+- 문서: The CIP Networks Library **Volume 8: CIP Security**.
+- 기본 아이디어: explicit 메시지는 **TLS** (TCP 2221), I/O 는 **DTLS** (UDP 2221) 로 감싼다. CIP 메시지 포맷 자체는 바꾸지 않는다.
+- 자격 증명: X.509 인증서(장치 인증서, CA) 또는 **PSK**(사전 공유 키).
+- 무결성만/기밀성까지: 암호화 없는(NULL) cipher suite 로 무결성만, AES 계열로 기밀성까지.
+- 객체:
+  - **CIP Security Object (0x5D)** — 장치 전체 보안 상태/설정
+  - **EtherNet/IP Security Object (0x5E)** — TLS/DTLS 설정, 허용 cipher suite, PSK, 인증서 참조, "보안 연결만 허용" 등
+  - **Certificate Management Object (0x5F)** — 인증서/CSR 관리
+- 설정 도구(예: Rockwell FactoryTalk Policy Manager 류)가 "pull/push" 로 장치에 정책·인증서를 내려준다.
+- I/O 연결: Originator 가 TLS 세션 위에서 Forward Open 을 보내고, 합의된 DTLS 세션으로 Class 1 패킷을 보호한다.
+- 이후 판에서 사용자 인증(User Authentication), 권한(Authorization), 자원 제약 장치용 프로파일이 추가되었다.
+
+### 7.3 [저장소] Security Class 0/1/2 — 코드 기준 정확한 동작
+
+설정: `protocol_params.security_class` (0/1/2), `psk_hex` (64 hex = 32바이트), `secure_tcp_port` (기본 2221).
+Class ≥1 인데 PSK 가 없으면 어댑터 init 실패 (`adapters/ethernetip/ethernetip_adapter.c:327-332`)와 스택 생성 실패
+(`stacks/ethernetip/src/eip_stack.c:89-92`) 두 겹으로 막는다.
+
+**Class 0 (open)**: 보안 없음. 단 Set/Reset 은 여전히 "등록된 세션" 과 `protection_mode == 0` 을 요구 (`gate_set_reset()`).
+
+**Class 1 (integrity)** — `eip_sec.c`:
+
+1. **어떤 요청에 MAC 이 필요한가** — `eip_sec_service_needs_mac()` (`eip_sec.c:29-41`):
+   Set_Attribute_Single(0x10), Reset(0x05), Forward_Open(0x54), Large_Forward_Open(0x5B), Forward_Close(0x4E).
+   **Get 류는 MAC 없이 허용**.
+2. **MAC 위치** — SendRRData CPF 에 세 번째 아이템 `Type 0x00C1, Length 32, HMAC 32바이트` 를 붙인다.
+3. **MAC 계산** — `HMAC-SHA256(key = PSK 32바이트, msg = SessionHandle(LE 4바이트) ‖ CIP 요청 전체)`
+   (`mac_input()` `eip_sec.c:43-59`, OpenSSL `HMAC()` `eip_crypto.c:7-12`).
+4. **검증** — 상수 시간 비교 (`eip_hmac_verify()`, `eip_crypto.c:14-24`). 실패/부재 → CIP 응답 `svc|0x80, 00, 0F, 00`
+   (Privilege violation), MAC 없이 (`eip_encap.c:216-242`).
+5. **응답 MAC** — 요청 서비스가 MAC 필요 대상이면, 응답에도 `0x00C1` 아이템을 붙인다:
+   `HMAC(PSK, SessionHandle ‖ CIP 응답)` (`eip_encap.c:251-257`, `eip_sec.c:95-112`).
+
+**검증된 예** (PSK = `11`×32, 세션 0x0A0B0C0D, Assembly 101 에 `AA 55` 쓰기):
+
+```
+MAC 입력 (14바이트):  0D 0C 0B 0A | 10 03 20 04 24 65 30 03 AA 55
+                      └session LE┘ └──────── CIP 요청 ────────┘
+HMAC-SHA256 =
+  C3 83 52 6A 82 21 9D 33 09 A5 FE C2 67 D5 AF C7
+  BD 8F 09 5C D8 53 CF BA F2 70 DC 77 4B F9 17 3E
+
+요청 (86바이트):
+6F 00 3E 00  0D 0C 0B 0A  00×4  00×8  00×4
+00 00 00 00  00 00  03 00                      Item count = 3
+00 00 00 00                                    Null Address
+B2 00 0A 00  10 03 20 04 24 65 30 03 AA 55     Unconnected Data (CIP)
+C1 00 20 00  C3 83 52 6A ... 4B F9 17 3E       저장소 무결성 아이템 (32바이트 MAC)
+
+응답 (80바이트):
+6F 00 38 00  0D 0C 0B 0A  00×4  00×8  00×4
+00 00 00 00  00 00  03 00
+00 00 00 00
+B2 00 04 00  90 00 00 00                       Set 성공
+C1 00 20 00  03 5B B8 1E A4 4C 25 CA FB F0 7B BD F7 A1 92 B6
+             A3 97 0D 86 C0 1F A6 2F 73 7B 83 5C 55 B9 DB D1
+             = HMAC(PSK, 0D 0C 0B 0A ‖ 90 00 00 00)  (하네스로 재계산해 일치 확인)
+```
+
+같은 요청을 MAC 없이 보내면 `B2 00 04 00 90 00 0F 00` (Privilege violation).
+
+**Class 2 (TLS)** — `eip_sec_tls_start()` / `eip_sec_tls_poll()` (`eip_sec.c:128-184`, `392-415`):
+
+- OpenSSL `TLS_server_method`, 최소 TLS 1.2, cipher `PSK-AES128-CBC-SHA256:PSK-AES128-CBC-SHA` (`eip_sec.c:146-151`).
+- PSK 콜백은 **identity 를 무시** 하고 항상 같은 PSK 를 준다 (`psk_server_cb()`, `eip_sec.c:116-126`).
+- TCP `secure_tcp_port`(2221) 에서 비차단 accept/handshake, 이후 **평문 44818 과 똑같은 `eip_encap_process()`** 를 태운다.
+- **Class 1 의 HMAC 규칙이 TLS 위에서도 그대로 적용** 된다 (TLS 여부를 구분하는 코드가 없다). 즉 Class 2 에서도 mutating
+  요청엔 0x00C1 MAC 이 필요하다.
+- **평문 44818 리스너도 계속 열려 있다** — Class 2 는 "TLS 를 추가로 제공" 할 뿐 강제하지 않는다.
+- UDP I/O 에는 DTLS 가 없다.
+
+### 7.4 사양 대비 차이 요약
+
+| 항목 | ODVA CIP Security | [저장소] |
+|---|---|---|
+| explicit 보호 | TLS 세션 전체 | Class 1: 선택된 서비스만 HMAC, Get 은 평문·무인증 |
+| I/O 보호 | DTLS | **없음** (UDP 평문, 무인증) |
+| 메시지 포맷 변경 | 없음 (전송층에서 보호) | CPF 에 비표준 아이템 0x00C1 추가 |
+| 키 | 인증서 또는 PSK, 객체로 관리 | config 파일의 PSK 하나 (`psk_hex`) |
+| 재전송(replay) 방지 | TLS/DTLS 레코드 순번 | **없음** — 같은 세션 안에서 같은 요청+MAC 재전송 가능 |
+| 보안 객체 | 0x5D/0x5E/0x5F 표준 속성 | 0x5E 에 저장소 고유 속성 3개 |
+| 평문 포트 | 정책으로 차단 가능 | 항상 열림 |
+| 식별 | 인증서 주체 / PSK identity | identity 무시 |
+
+### 7.5 이 설계의 위협 분석 (구현자가 알아야 할 것)
+
+1. **Replay**: MAC 입력에 순번/난수가 없다. 공격자가 한 번 캡처한 Set 요청+MAC 을 **같은 TCP 세션 안에서** 다시 보낼
+   수는 없다(세션 소유권 검사) — 그러나 세션 핸들은 평문 헤더에 있고, 소유권은 TCP 연결에 묶여 있으므로 공격자가 그
+   TCP 연결에 끼어들 수 있는 위치(MITM)라면 재전송이 가능하다.
+2. **UDP I/O 스푸핑**: O→T 연결 ID 는 0x20000001 부터 순차이고, 출발지 IP 검사도 없다. 연결 ID 를 맞힌 아무 호스트가
+   출력 이미지를 덮어쓰고, **T→O 목적지를 자기 주소로 바꿀 수 있다** (`eip_io.c:57-58`). 저장소 Security Class 는 이것을 막지 않는다.
+3. **Get 은 무인증**: 입력 Assembly(센서값)·Identity 는 누구나 읽는다. Class 2 여도 평문 포트로 읽힌다.
+4. **Cipher**: PSK CBC 계열(비 PFS). PSK 가 유출되면 과거 TLS 트래픽도 복호화 가능.
+5. **PSK 관리**: config JSON 평문. 예제 PSK(`11…11`)를 제품에 두지 말 것 (`docs/ethernetip_stack.md`).
+
+---
+
+## 8. 에러 처리, 타이밍, 제한값
+
+### 8.1 세 층의 에러
+
+| 층 | 어디에 | 예 |
+|---|---|---|
+| Encapsulation | 헤더 Status 필드 | 0x0064 잘못된 세션 |
+| CIP General/Extended | CIP 응답 byte 2, 추가 상태 | 0x05, 0x01/0x0109 |
+| 무응답 | 아무것도 안 보냄 | UDP I/O 오류, 길이 불일치 |
+
+원칙 [사양]: Encapsulation 이 성공(0)이면 CIP 에러는 **CIP 응답 안에** 담는다. 즉 "없는 클래스" 는 Encap status 0 +
+CIP status 0x05 다 (검증 5.5.4).
+
+### 8.2 [저장소] 에러 처리 매트릭스 (검증 기반)
+
+| 입력 | 결과 |
+|---|---|
+| Encap Length > 실제 바이트 | 응답 없음 (`-EINVAL`) |
+| 모르는 Encap 명령 / ListInterfaces / SendUnitData | Encap status 0x0001 |
+| 세션 없이/남의 세션으로 SendRRData | Encap status 0x0064 |
+| CPF 아이템 길이 넘침, CIP 없음 | Encap status 0x0001 (데이터 없음) |
+| CIP path size 넘침 / 모르는 세그먼트 | CIP 0x04 |
+| 없는 클래스·인스턴스 / 지원 안 하는 서비스 조합 | CIP 0x05 |
+| 지원 객체의 모르는 서비스 (CM) | CIP 0x08 |
+| 없는 속성 | CIP 0x14 |
+| 응답 버퍼 부족 | CIP 0x02 |
+| Set/Reset 권한 | CIP 0x0F |
+| UDP I/O: 모르는 연결 ID / 형식 오류 | 조용히 드롭 |
+| TCP 수신 버퍼 8KB 초과 | TCP 연결 종료 |
+
+로그는 `LOG_WARN("ethernetip", ...)` / `LOG_ERROR` (`core/logger.h`) 로 남긴다 — 저장소 규칙상 `printf` 금지 (`CLAUDE.md`).
+
+### 8.3 제한값
+
+| 상수 | 값 | 의미 | 위치 |
+|---|---|---|---|
+| `EIP_ENCAP_HDR_SIZE` | 24 | | `eip_types.h:17` |
+| `EIP_TCP_BUF_MAX` | 8192 | TCP 수신 버퍼/응답 버퍼 | `eip_types.h:20` |
+| `EIP_ASSEMBLY_INSTANCES_MAX` | 64 | (실사용 3) | `eip_types.h:23` |
+| `EIP_ASSEMBLY_SIZE_MAX` | 2048 | Assembly 최대 바이트 | `eip_types.h:24` |
+| `EIP_CLASS1_CONN_MAX` | 32 | 동시 I/O 연결 | `eip_types.h:25` |
+| `EIP_CLASS3_SESSIONS_MAX` | 64 | 세션 | `eip_types.h:26` |
+| `EIP_TCP_CLIENTS_MAX` | 32 | TCP 연결 | `eip_types.h:27` |
+| `EIP_TLS_CLIENTS_MAX` | 16 | TLS 연결 | `eip_types.h:28` |
+| `EIP_PRODUCT_NAME_MAX` | 32 | 제품명 | `eip_types.h:30` |
+| `EIP_EXPLICIT_DATA_MAX` | 504 | UCMM CIP 데이터 (사양의 전통적 504바이트 한계와 같음) | `eip_types.h:32` |
+| `EIP_PSK_LEN` / `EIP_HMAC_LEN` | 32 / 32 | | `eip_types.h:33-34` |
+| `EIP_IDLE_TIMEOUT_MS_DEFAULT` | 60000 | TCP 유휴 종료 | `eip_types.h:118` |
+| `EIP_MAX_CONN_PER_IP_DEFAULT` | 4 | IP 당 TCP 연결 | `eip_types.h:119` |
+| poll 예산 | TCP 8 / UDP 64 / TLS 4 | 한 poll 에서 처리량 | `eip_types.h:113-115` |
+| 16비트 NCP 크기 | 511 | 사양 (Large FO 로 65535) | `eip_cm.c:39` |
+
+### 8.4 타이밍 요약
+
+| 무엇 | 값 |
+|---|---|
+| 데몬 사이클 | `cycle_ms` (예제 8 ms) |
+| Class 1 최소 실효 주기 | `cycle_ms` |
+| 워치독 | O→T RPI × 4 × 2^N, FO 순간부터 |
+| 기본 RPI (FO 에 0 이 왔을 때) | `rpi_us` (기본 8000) |
+| TCP 유휴 | 60 s |
+| LLDP TX 주기 | 30 s (메모리에만 생성) |
+
