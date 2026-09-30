@@ -29,6 +29,16 @@
 | [`ethernetip_stack.md`](ethernetip_stack.md) · [`ethernetip_guide.md`](ethernetip_guide.md) | EtherNet/IP Adapter |
 | [`profinet_stack.md`](profinet_stack.md) | PROFINET CC-B + RT Class 1 (IRT/CC-C 없음) |
 
+## 프로토콜 입문 (처음 보는 사람용, 바이트 단위)
+
+| 문서 | 내용 |
+|------|------|
+| [`protocols/README.md`](protocols/README.md) | 산업 프로토콜 0단계 입문 + 이 저장소 구조 분석 |
+| [`protocols/modbus.md`](protocols/modbus.md) | Modbus TCP — 데이터 모델, 프레임, 직접 구현, 저장소 지도 |
+| [`protocols/slmp.md`](protocols/slmp.md) | SLMP Binary 3E — 디바이스 메모리, 프레임, 직접 구현, 저장소 지도 |
+| [`protocols/ethernetip.md`](protocols/ethernetip.md) | EtherNet/IP — CIP 객체, Forward Open, Class 1 I/O, 직접 구현 |
+| [`protocols/profinet.md`](protocols/profinet.md) | PROFINET IO Device — DCP, RPC Connect, RT Class 1, 직접 구현 |
+
 ## CTT (내부 게이트, 인증 아님)
 
 | 문서 | 내용 |
@@ -42,4 +52,5 @@
 | [`ctt_lab.md`](ctt_lab.md) | 랩 / AF_PACKET / Windows CODESYS PN (기본 데모 아님) |
 | [`soak_report_20260909.md`](soak_report_20260909.md) | 2026-09-09 장비 없는 mock soak (5min×4; **인증 아님**) |
 | [`reports/analysis_20260910.md`](reports/analysis_20260910.md) | 2026-09-10 정적+동적 분석 (ASan/UBSan, clang-tidy, cppcheck; **인증 아님**) |
+| [`reports/structure_handoff_20260930.md`](reports/structure_handoff_20260930.md) | 2026-09-30 구조 분석·사양 적합성 결함 → 수정 작업 목록 (T0–T13; **인증 아님**) |
 | [`reports/full_test_20260910.md`](reports/full_test_20260910.md) | 2026-09-10 풀테스트 (daemon+API+CTT `ctest` 포함 soak_ci, mock/sw-master/stand-in, ASan; **인증 아님**) |

@@ -1,6 +1,6 @@
 # 구조 분석 결과 — 수정 작업 인수인계 (2026-09-30)
 
-내부 문서. **인증이 아니다.** 대상: `claude/nice-galileo-8l3hc2` @ `c10f32e` 이후.
+내부 문서. **인증이 아니다.** 대상: `main` @ `c10f32e` 기준 코드 (이 문서는 `claude/nice-galileo-8l3hc2` 에서 작성).
 배경 설명은 [`../protocols/README.md`](../protocols/README.md) 4.6절에 있다.
 
 이 문서는 **수정 작업을 맡을 코딩 에이전트에게 넘기는 작업 목록**이다. 각 작업은
@@ -52,6 +52,7 @@ T12-0 (PN 독립 오라클) ──▶ T12-1…22 ──▶ T4 ──▶ T5
 | T10 | **치명**~낮음 | SLMP 사양 차이·결함 7건 (비트 단위 니블 형식, 타임아웃 후 stale 응답 등) | T10-7 만 사양 확인 |
 | T11 | **치명**~낮음 | EtherNet/IP 가 표준 스캐너와 연결되지 않는 결함 14건 (Run/Idle 헤더, EDS, FO 오류 형식 등). **T11-0(독립 오라클)부터** | 아니오 |
 | T12 | **치명**~낮음 | PROFINET 이 실제 컨트롤러와 연결되지 않는 결함 23건. **T12-0(독립 오라클)부터** | 아니오 |
+| T13 | 정리 | 닫힌 PR 의 원격 브랜치 46개 정리 (삭제 43, 태그 보관 3 — 목록 확인 완료) | 아니오 |
 
 ---
 
@@ -474,6 +475,53 @@ IOCR 블록 없는 Connect, BlockInfo 없는 DCP). 즉 "거울 구현" 상태라
 **완료 조건:** T12-0 의 독립 오라클 테스트가 각 항목의 수정 전 실패와 수정 후 통과를 보여 준다.
 최종 확인은 실 컨트롤러(TIA Portal 또는 CODESYS Control) 연결이다 (`docs/ctt_lab.md` 절차).
 
+## T13. 저장소 정리 — 남아 있는 원격 브랜치 삭제
+
+**문제:** 원격 브랜치가 48개다. `main` 과 이 문서의 브랜치를 빼면 46개 모두 이미 닫힌 PR 의 브랜치다.
+(2026-09-30 확인. Claude 세션은 작업 브랜치 외에는 푸시 권한이 없어 직접 삭제하지 못했다.)
+
+**확인 결과 (이 목록 그대로 써도 된다):**
+- **삭제 가능 — 병합된 PR 브랜치 32개.** 브랜치 끝 커밋이 병합된 PR 의 head SHA 와 모두 일치해, 병합 후 추가 작업이 없다.
+- **삭제 가능 — 병합 없이 닫혔지만 내용이 `main` 에 흡수된 11개.** 이 브랜치들이 추가·수정한 파일이 모두 `main` 에 있다
+  (#14 `ctt-unify-main`, #15 `merge-product-stacks` 로 통합된 것으로 보인다).
+- **보관 (태그로 옮긴 뒤 브랜치만 삭제) — 3개.** `main` 에 없는 파일이 있다.
+  - `cursor/profinet-cm-rtc1-dcp-eff7` (#1), `cursor/codesys-protocol-pooltest-e12b` (#6):
+    `stacks/profinet/src/pn_alarm.c`, `tests/pn_controller_sim.c`, `tests/test_pn_adapter.c`, CODESYS 풀테스트 스크립트 등.
+    `pn_controller_sim.c` 는 T12-0 참고 자료가 될 수 있으나 현재 스택과 같은 가정을 공유할 수 있으니 오라클로 그대로 쓰지 말 것.
+  - `cursor/skip-ethercat-no-asic-ee42` (#5): EtherCAT 스텁 어댑터 (`main` 에서 의도적으로 뺀 것으로 보임).
+
+**명령 (`git fetch origin` 후 실행):**
+
+```bash
+# 1) 삭제 43개
+git push origin --delete \
+  cursor/pn-fuzz-state-leak-8d74 cursor/eip-encap-fuzz-conn-leak-8e7a cursor/fuzz-pn-harness-8326 \
+  cursor/fuzz-harness-audit-8326 cursor/eip-io-stateful-fuzz-8326 cursor/fuzz-longrun-v020-8326 \
+  cursor/iec62443-g6-g8-6610 cursor/iec62443-security-fixes-5975 cursor/full-test-report-9a08 \
+  cursor/static-dynamic-analysis-b4a9 cursor/wizard-howto-guide cursor/runtime-storyboard-b8ec \
+  cursor/config-wizard-2778 cursor/sw-master-soak-8e09 cursor/codesys-master-io-b3ab \
+  cursor/soak-abs-jitter-4215 cursor/mock-soak-report-90be cursor/demo-ctt-gaps-6170 \
+  cursor/v0.1.0-snapshot-5750 cursor/demo-package-polish-7aa2 cursor/ctt-board-pn-gaps-39a9 \
+  cursor/multi-protocol-fake-sensor-eb43 cursor/fake-sensor-ctt-demo-f7c5 cursor/mb-slmp-ctt-bundle-0e3a \
+  cursor/eip-ctt-bundle-grade-0e3a cursor/pn-ctt-bundle-grade-896f cursor/ctt-board-matrix-keys-9b1f \
+  cursor/ctt-test-board-9b1f cursor/app-facing-fb-api-09b2 docs/json-config-flow-demo \
+  cursor/merge-product-stacks-bd6a cursor/ctt-unify-main-2a6d \
+  cursor/config-json-viz-bd6a cursor/ctt-fill-pn-gaps-c145 cursor/eip-ctt-plugin-a0b6 \
+  cursor/ctt-modbus-slmp-plugins-56eb cursor/ctt-phase3-5427 cursor/ctt-phase2-ad45 \
+  cursor/ctt-phase1-e0d7 cursor/docs-ctt-design-8843 cursor/ethernetip-self-stack-5148 \
+  cursor/slmp-stack-extensible-c5ee cursor/modbus-stack-server-ed82
+
+# 2) 보관 3개: 태그로 옮기고 브랜치 삭제
+for b in profinet-cm-rtc1-dcp-eff7 codesys-protocol-pooltest-e12b skip-ethercat-no-asic-ee42; do
+  git push origin "origin/cursor/$b:refs/tags/archive/$b" && git push origin --delete "cursor/$b"
+done
+```
+
+**재발 방지:** GitHub 저장소 Settings → General → Pull Requests → "Automatically delete head branches" 를 켠다
+(저장소 관리자 작업; 켠 뒤 병합되는 PR 부터 적용). 코딩 에이전트는 작업이 끝나 PR 이 병합되면 브랜치를 남기지 않는다.
+
+**완료 조건:** `git ls-remote --heads origin` 에 `main` 과 진행 중인 작업 브랜치만 남고, `archive/*` 태그 3개가 있다.
+
 ## 이후 추가될 항목
 
-네 프로토콜 모두 반영 완료. 새로 발견되는 항목은 T13 이후로 덧붙인다.
+네 프로토콜 모두 반영 완료. 새로 발견되는 항목은 T14 이후로 덧붙인다.
