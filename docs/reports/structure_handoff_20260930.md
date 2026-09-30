@@ -9,6 +9,13 @@
 
 ## 공통 규칙 (반드시 먼저 읽을 것)
 
+- **오라클 CI (`tests/oracle/`, 2026-09-30 추가):** 이 문서의 결함 16개(테스트 18개)가 독립 구현체(pymodbus, pymcprotocol,
+  pycomm3, scapy) 테스트에 `@known_defect("T..")` strict xfail 로 걸려 있다. 결함을 고치면 그 테스트가 통과(XPASS)해서
+  CI `oracle` job 이 빨간색이 된다. **수정 PR 은 해당 `@known_defect` 줄을 지워야 한다.** 지웠는데 결함이 남아 있으면
+  테스트가 실패한다. `tests/oracle/` 의 판정 로직은 검증 담당(Claude)이 관리하므로, 구현 PR 은 표시 제거 외에는
+  이 폴더를 고치지 않는다. 현재 걸려 있는 항목: T9-4, T9-6, T10-1, T10-5, T10-6, T11-1, T11-3, T11-5, T11-7, T11-9,
+  T12-1, T12-2, T12-6, T12-7, T12-11, T12-22.
+
 - [`../../CLAUDE.md`](../../CLAUDE.md) 를 따른다. 특히:
   - 어댑터 작업은 해당 `adapters/<name>/` 안에서만 한다. 다른 어댑터 디렉토리는 건드리지 않는다.
   - `core/*.c` 에 `if (protocol == ...)` 식 분기를 넣지 않는다. 코어에 프로토콜별
@@ -52,7 +59,7 @@ T12-0 (PN 독립 오라클) ──▶ T12-1…22 ──▶ T4 ──▶ T5
 | T10 | **치명**~낮음 | SLMP 사양 차이·결함 7건 (비트 단위 니블 형식, 타임아웃 후 stale 응답 등) | T10-7 만 사양 확인 |
 | T11 | **치명**~낮음 | EtherNet/IP 가 표준 스캐너와 연결되지 않는 결함 14건 (Run/Idle 헤더, EDS, FO 오류 형식 등). **T11-0(독립 오라클)부터** | 아니오 |
 | T12 | **치명**~낮음 | PROFINET 이 실제 컨트롤러와 연결되지 않는 결함 23건. **T12-0(독립 오라클)부터** | 아니오 |
-| T13 | 정리 | 닫힌 PR 의 원격 브랜치 46개 정리 (삭제 43, 태그 보관 3 — 목록 확인 완료) | 아니오 |
+| T13 | 정리 | **완료 (2026-09-30).** 원격에는 `main` 과 작업 브랜치만 남음. 보관 대상 3개는 태그 대신 PR ref 로 남아 있다 (`refs/pull/1/head`, `refs/pull/5/head`, `refs/pull/6/head`) | — |
 
 ---
 
@@ -402,7 +409,7 @@ T12-0 과 같은 원칙으로, 스택과 가정을 공유하지 않는 기준(Wi
 
 | ID | 우선순위 | 문제 | 근거 | 교차 |
 |---|---|---|---|---|
-| T11-0 | **선행** | 독립 오라클이 없다. CTT 의 Forward Open 을 Logix 기본 형식(O→T 32-bit Run/Idle 헤더, 0x8001 sockaddr, 전자 키 포함)으로 만들고, 응답을 독립 디섹터로 파싱하는 테스트를 추가한다 | `tools/ctt/proto/ethernetip/` | 교차 |
+| T11-0 | **선행** | **오라클 부분 완료 (2026-09-30, CI `oracle` job, [`tests/oracle/`](../../tests/oracle/README.md)).** 남은 일(구현 에이전트): CTT 의 Forward Open 을 Logix 기본 형식(O→T 32-bit Run/Idle 헤더, 0x8001 sockaddr, 전자 키 포함)으로 고친다 | `tools/ctt/proto/ethernetip/` | 교차 |
 | T11-1 | **치명** | **O→T 32-bit Run/Idle 헤더 형식을 거부한다.** 표준 O→T 크기는 `data + 2(seq) + 4(Run/Idle)` 인데 `asm` 또는 `asm+2` 만 받는다 → 응답 `D4 00 20 01 09 01`. 받아도 헤더를 벗기지 않아 output 이미지에 헤더 바이트가 들어가고, Run/Idle 비트를 해석하지 않아 **PLC 가 PROGRAM(Idle) 모드여도 출력이 유지된다(안전 문제).** 저장소 EDS(`0x44640405`)는 오히려 32-bit 헤더를 선언해 스택과 모순. **Studio 5000 Generic Ethernet Module / 이 EDS 로 만든 모듈의 Exclusive Owner 연결이 열리지 않는다** | `stacks/ethernetip/src/eip_cm.c:42-45`, `:198-210`; `eip_io.c:64-74`; `eds/FieldbusSensor.eds:58` | 교차 |
 | T11-2 | **치명** | **EDS 가 문법·내용 모두 틀렸다.** Connection1 의 RPI 칸에 값 2개(`1000000,8000,`)를 넣어 이후 필드가 모두 밀렸고, 연결 경로 문자열이 없다. Param1 은 타입 0xC1(BOOL)인데 크기 2, `MinRev = 1` 인데 Identity 는 1.0 (전자 키 불일치), Port1 필드 구성 비표준. 어댑터는 `minor_rev = 0` 고정 | `eds/FieldbusSensor.eds:17`, `:25-37`, `:56-66`, `:68-75`; `adapters/ethernetip/ethernetip_adapter.c:161-162` | Fable 단독 (문서는 EDS 해설만) |
 | T11-3 | 높음 | **Forward Open/Close 실패 응답 형식이 틀렸다.** General Status 로 0x20/0x05/0x04/0x02 를 쓴다 (CM 오류는 0x01 + Extended). 응답 뒤 Connection Serial·Vendor·Originator Serial·Remaining Path Size 10바이트가 없다. 없는 연결의 Forward Close 가 성공한다 (사양 0x01/0x0107) | `eip_cm.c:8-20`(`cm_err`), `:136`, `:178`, `:184`, `:194`, `:207`, `:224`, `:297-307` | 교차 |
@@ -442,7 +449,7 @@ IOCR 블록 없는 Connect, BlockInfo 없는 DCP). 즉 "거울 구현" 상태라
 
 | ID | 우선순위 | 문제 | 근거 | 교차 |
 |---|---|---|---|---|
-| T12-0 | **선행** | **독립 오라클이 없다.** 스택과 가정을 공유하지 않는 기준으로 응답을 검증해야 한다. scapy `contrib/pnio*` 나 Wireshark(tshark) 디섹터로 스택 응답을 파싱하는 테스트를 추가하고, CTT 하네스의 Connect/DCP 요청을 사양 형태(rpc_vers=4, IOCRBlockReq·ExpectedSubmoduleBlockReq 포함, BlockInfo 포함)로 고친다. golden(`tests/golden/profinet/`)은 수정 후 재생성한다 | `pn_plugin.c:813-865` | 교차 |
+| T12-0 | **선행** | **오라클 부분 완료 (2026-09-30, CI `oracle` job, scapy 기반 [`tests/oracle/`](../../tests/oracle/README.md)).** 남은 일(구현 에이전트): CTT 하네스의 Connect/DCP 요청을 사양 형태(rpc_vers=4, IOCRBlockReq·ExpectedSubmoduleBlockReq 포함, BlockInfo 포함)로 고치고, golden(`tests/golden/profinet/`)은 수정 후 재생성한다 | `pn_plugin.c:813-865` | 교차 |
 | T12-1 | 치명 | **RPC 응답 NDR 의 첫 워드가 PNIOStatus 가 아니라 길이다.** 응답은 `PNIOStatus · ArgsLength · MaxCount · Offset · ActualCount · Blocks` 인데 요청 레이아웃을 그대로 써서 Connect.rsp 첫 워드가 `0x00000048`. 컨트롤러는 Connect/Control/Read/Write 를 모두 실패로 처리해 **AR 이 성립하지 않는다.** 에러 응답(`reply_pnio_err`)도 같은 문제 | `stacks/profinet/src/pn_rpc.c:415-424`(`ndr_wrap`), 사용처 `:548,:579,:613,:650,:680`, `:459-467` | 교차 |
 | T12-2 | 치명 | **DCP Identify/Get 응답 블록에 BlockInfo(2바이트)가 없다.** 표준 도구가 이름 앞 2글자를 잃고("nsor-line1"), IP 가 2바이트 밀려 보인다. TIA/PRONETA 탐색·이름 설정 실패 가능 | `stacks/profinet/src/pn_dcp.c:55-63`(`wr_block`), `:381-409`, `:520-525` | 교차 |
 | T12-3 | 치명 | **Read/Write 응답에 IODReadResHeader(0x8009)/IODWriteResHeader(0x8008) 64바이트 블록이 없고, I&M 레코드에 BlockHeader(0x0020~0x0024)가 없다.** 또한 Write 요청의 데이터를 64바이트 헤더 뒤가 아니라 패딩 위치에서 읽어 I&M1 을 0으로 덮어쓴다. TIA 는 Connect 직후 Write 를 보내므로 파라미터화 실패 → AR abort | `pn_rpc.c:648-650`, `:679-680`; `pn_record.c:97-155` | 교차 |
@@ -476,6 +483,10 @@ IOCR 블록 없는 Connect, BlockInfo 없는 DCP). 즉 "거울 구현" 상태라
 최종 확인은 실 컨트롤러(TIA Portal 또는 CODESYS Control) 연결이다 (`docs/ctt_lab.md` 절차).
 
 ## T13. 저장소 정리 — 남아 있는 원격 브랜치 삭제
+
+> **완료 (2026-09-30).** 원격 브랜치가 `main` 과 작업 브랜치만 남도록 정리됐다. `archive/*` 태그는 만들어지지 않았지만,
+> 보관 대상 3개 브랜치의 커밋은 GitHub 이 PR 마다 유지하는 ref 로 남아 있다:
+> `git fetch origin refs/pull/1/head` (profinet-cm-rtc1-dcp), `refs/pull/5/head` (skip-ethercat), `refs/pull/6/head` (codesys-pooltest).
 
 **문제:** 원격 브랜치가 48개다. `main` 과 이 문서의 브랜치를 빼면 46개 모두 이미 닫힌 PR 의 브랜치다.
 (2026-09-30 확인. Claude 세션은 작업 브랜치 외에는 푸시 권한이 없어 직접 삭제하지 못했다.)

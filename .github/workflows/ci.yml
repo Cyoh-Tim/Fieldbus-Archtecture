@@ -40,6 +40,53 @@ jobs:
       - name: EtherNet/IP mock scenarios (no NIC)
         run: ctest --test-dir build --output-on-failure -L ethernetip
 
+  # 경고 회귀 차단: daemon + CTT + 테스트 전체를 -Werror 로 빌드 (빌드만, 테스트는 test/daemon job).
+  werror:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake libssl-dev libcjson-dev
+      - name: Configure (-Wall -Wextra -Werror, ${{ matrix.cc }})
+        run: >
+          cmake -S . -B build-werror -DCMAKE_C_COMPILER=${{ matrix.cc }}
+          -DBUILD_DAEMON=ON -DBUILD_CTT=ON -DBUILD_API=ON
+          -DENABLE_PN_TESTS=ON -DENABLE_EIP_TESTS=ON -DENABLE_MB_TESTS=ON -DENABLE_SLMP_TESTS=ON
+          -DCMAKE_C_FLAGS="-Wall -Wextra -Werror"
+      - name: Build
+        run: cmake --build build-werror -j
+
+  # 독립 구현체 오라클 (tests/oracle). 스택은 DUT 로만 띄우고 판정은
+  # pymodbus / pymcprotocol / pycomm3 / scapy 가 한다. 알려진 결함은 strict xfail.
+  oracle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssl-dev
+      - name: Build oracle DUTs
+        run: |
+          cmake -S . -B build-oracle -DBUILD_DAEMON=OFF -DBUILD_CTT=OFF -DBUILD_PN_LAB_TOOLS=OFF \
+                -DENABLE_PN_TESTS=OFF -DENABLE_EIP_TESTS=OFF -DENABLE_MB_TESTS=OFF -DENABLE_SLMP_TESTS=OFF
+          cmake --build build-oracle -j --target mb_seeded_server slmp_oracle_server eip_oracle_adapter pn_oracle_pipe
+      - name: Install oracles (pinned)
+        run: python -m pip install -r tests/oracle/requirements.txt
+      - name: Oracle cross-check
+        env:
+          ORACLE_BUILD_DIR: build-oracle
+        run: python -m pytest tests/oracle -v
+
   sanitizers:
     runs-on: ubuntu-latest
     steps:
