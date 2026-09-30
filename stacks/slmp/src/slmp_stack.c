@@ -16,6 +16,11 @@
 
 #include "logger.h"
 
+/* Binary 3E has no request id. After a send/recv error or timeout the socket
+ * is closed; the next transaction reconnects only after this backoff. */
+#define SLMP_RECONNECT_BACKOFF_MIN_MS 100
+#define SLMP_RECONNECT_BACKOFF_MAX_MS 2000
+
 typedef struct {
     uint8_t code;
     int is_bit;
@@ -37,6 +42,8 @@ struct slmp_stack {
     int sockfd; /* client: connected fd; server: listen fd */
     slmp_client_t clients[SLMP_CLIENTS_MAX];
     int connected;
+    int reconnect_backoff_ms;
+    uint64_t reconnect_not_before_ns;
     slmp_dev_slot_t maps[SLMP_DEV_MAP_MAX];
     int map_count;
     char last_error[128];
@@ -273,6 +280,18 @@ slmp_stack_t *slmp_stack_create(const slmp_cfg_t *cfg)
     }
     if (s->cfg.monitoring_timer == 0) {
         s->cfg.monitoring_timer = 0x0010; /* 4s */
+    }
+    /* PLC monitoring timer is in 250 ms units. The socket wait must not be
+     * shorter, or the client gives up before the PLC's own timeout reply. */
+    if (s->cfg.role == SLMP_ROLE_CLIENT) {
+        int monitor_ms = (int)s->cfg.monitoring_timer * 250;
+        if (monitor_ms > 0 && s->cfg.timeout_ms < monitor_ms) {
+            LOG_WARN("slmp",
+                     "timeout_ms %d is shorter than monitoring timer %d ms; "
+                     "using %d ms",
+                     s->cfg.timeout_ms, monitor_ms, monitor_ms);
+            s->cfg.timeout_ms = monitor_ms;
+        }
     }
     /* Pre-seed common maps for server/sim convenience */
     slmp_stack_map_ensure(s, SLMP_DEV_D, 0);
@@ -641,41 +660,118 @@ static int recv_exact(int fd, uint8_t *buf, size_t len, int timeout_ms)
     return 0;
 }
 
+/* Returns the delay just armed. The stored backoff doubles up to the cap. */
+static int client_arm_backoff(slmp_stack_t *s)
+{
+    int wait_ms = s->reconnect_backoff_ms;
+    if (wait_ms < SLMP_RECONNECT_BACKOFF_MIN_MS) {
+        wait_ms = SLMP_RECONNECT_BACKOFF_MIN_MS;
+    }
+    if (wait_ms > SLMP_RECONNECT_BACKOFF_MAX_MS) {
+        wait_ms = SLMP_RECONNECT_BACKOFF_MAX_MS;
+    }
+    s->reconnect_not_before_ns =
+        slmp_now_ns() + (uint64_t)wait_ms * 1000000ull;
+    int next = wait_ms * 2;
+    if (next > SLMP_RECONNECT_BACKOFF_MAX_MS) {
+        next = SLMP_RECONNECT_BACKOFF_MAX_MS;
+    }
+    s->reconnect_backoff_ms = next;
+    return wait_ms;
+}
+
+static void client_drop(slmp_stack_t *s, int err)
+{
+    if (s->sockfd >= 0) {
+        close(s->sockfd);
+        s->sockfd = -1;
+    }
+    s->connected = 0;
+    int wait_ms = client_arm_backoff(s);
+    LOG_WARN("slmp",
+             "closed client socket after error %d; reconnect in %d ms", err,
+             wait_ms);
+}
+
+static void client_note_success(slmp_stack_t *s)
+{
+    s->reconnect_backoff_ms = SLMP_RECONNECT_BACKOFF_MIN_MS;
+    s->reconnect_not_before_ns = 0;
+}
+
+static int tcp_connect_client(slmp_stack_t *s);
+
+static int client_ensure_connected(slmp_stack_t *s)
+{
+    if (s->cfg.role != SLMP_ROLE_CLIENT) {
+        return s->sockfd >= 0 ? 0 : -ENOTCONN;
+    }
+    if (s->sockfd >= 0 && s->connected) {
+        return 0;
+    }
+    if (s->sockfd >= 0) {
+        close(s->sockfd);
+        s->sockfd = -1;
+        s->connected = 0;
+    }
+    uint64_t now = slmp_now_ns();
+    if (s->reconnect_not_before_ns != 0 && now < s->reconnect_not_before_ns) {
+        return -EAGAIN;
+    }
+    int rc = tcp_connect_client(s);
+    if (rc != 0) {
+        int wait_ms = client_arm_backoff(s);
+        LOG_WARN("slmp", "reconnect %s:%d failed (%d); retry in %d ms",
+                 s->cfg.plc_ip, s->cfg.port, rc, wait_ms);
+        return rc;
+    }
+    LOG_INFO("slmp", "connected to %s:%d", s->cfg.plc_ip, s->cfg.port);
+    return 0;
+}
+
 static int client_transact(slmp_stack_t *s, const uint8_t *req, size_t req_len,
                            uint8_t *resp, size_t resp_cap, size_t *resp_len)
 {
-    if (!s || s->sockfd < 0) {
+    if (!s) {
         return -ENOTCONN;
     }
-    int rc = send_all(s->sockfd, req, req_len, s->cfg.timeout_ms);
+    int rc = client_ensure_connected(s);
     if (rc != 0) {
-        s->connected = 0;
+        return rc;
+    }
+    rc = send_all(s->sockfd, req, req_len, s->cfg.timeout_ms);
+    if (rc != 0) {
+        client_drop(s, rc);
         return rc;
     }
     uint8_t hdr[9];
     rc = recv_exact(s->sockfd, hdr, sizeof(hdr), s->cfg.timeout_ms);
     if (rc != 0) {
-        s->connected = 0;
+        client_drop(s, rc);
         return rc;
     }
     if (rd_le16(hdr) != SLMP_SUBHEADER_RES_3E) {
-        s->connected = 0;
+        client_drop(s, -EBADMSG);
         return -EBADMSG;
     }
     uint16_t data_len = rd_le16(hdr + 7);
-    size_t total = 9u + data_len;
+    size_t total = 9u + (size_t)data_len;
     if (total > resp_cap) {
+        /* Header is consumed; the body is still on the socket. Closing is
+         * the only way to avoid feeding those bytes to the next request. */
+        client_drop(s, -ENOSPC);
         return -ENOSPC;
     }
     memcpy(resp, hdr, 9);
     if (data_len > 0) {
         rc = recv_exact(s->sockfd, resp + 9, data_len, s->cfg.timeout_ms);
         if (rc != 0) {
-            s->connected = 0;
+            client_drop(s, rc);
             return rc;
         }
     }
     *resp_len = total;
+    client_note_success(s);
     return 0;
 }
 
@@ -1033,8 +1129,9 @@ int slmp_stack_start(slmp_stack_t *s)
         }
         int rc = tcp_connect_client(s);
         if (rc != 0) {
-            LOG_ERROR("slmp", "connect %s:%d failed (%d)", s->cfg.plc_ip,
-                      s->cfg.port, rc);
+            int wait_ms = client_arm_backoff(s);
+            LOG_ERROR("slmp", "connect %s:%d failed (%d); retry in %d ms",
+                      s->cfg.plc_ip, s->cfg.port, rc, wait_ms);
             snprintf(s->last_error, sizeof(s->last_error), "connect failed %d",
                      rc);
         } else {
