@@ -79,6 +79,10 @@ int slmp_stack_read_bytes(slmp_stack_t *s, uint8_t device_code, uint32_t head,
 int slmp_stack_write_bytes(slmp_stack_t *s, uint8_t device_code, uint32_t head,
                            const uint8_t *src, size_t len);
 
+/* Bit-unit caller buffers are one byte per point (0 = OFF, 1 = ON).
+ * Binary 3E subcommand 0001 packs two points per byte on the wire
+ * (earlier point in the high nibble). Client batch and encode/decode
+ * convert between those two forms. */
 /* ---- Client: remote PLC I/O (also refreshes local cache) ---- */
 int slmp_stack_client_batch_read(slmp_stack_t *s, const slmp_range_t *range,
                                  uint8_t *raw_out, size_t raw_cap,

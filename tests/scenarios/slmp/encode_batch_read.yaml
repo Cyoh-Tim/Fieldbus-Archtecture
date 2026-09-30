@@ -32,4 +32,4 @@ steps:
     bits: [1, 0, 1, 1]
     expect:
       cmd: 0x1401
-      length: 25
+      length: 23

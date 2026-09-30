@@ -877,6 +877,359 @@ static void test_t10_2_timeout_not_shorter_than_monitor(void)
     slmp_stack_destroy(s);
 }
 
+static void expect_mem(const char *msg, const uint8_t *got, size_t glen,
+                       const uint8_t *want, size_t wlen)
+{
+    if (glen == wlen && (wlen == 0 || memcmp(got, want, wlen) == 0)) {
+        return;
+    }
+    fprintf(stderr, "FAIL: %s\n  got (%zu):", msg, glen);
+    for (size_t i = 0; i < glen; i++) {
+        fprintf(stderr, " %02X", got[i]);
+    }
+    fprintf(stderr, "\n  want (%zu):", wlen);
+    for (size_t i = 0; i < wlen; i++) {
+        fprintf(stderr, " %02X", want[i]);
+    }
+    fprintf(stderr, "\n");
+    g_fail = 1;
+}
+
+static int write_full(int fd, const uint8_t *buf, size_t len)
+{
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = send(fd, buf + off, len - off, MSG_NOSIGNAL);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (n == 0) {
+            return -1;
+        }
+        off += (size_t)n;
+    }
+    return 0;
+}
+
+/* Answers Binary 3E with spec nibble payloads (slmp.md 5.7). */
+typedef struct {
+    int lfd;
+    uint8_t last_req[64];
+    size_t last_req_len;
+} spec_peer_t;
+
+static void *spec_peer_main(void *arg)
+{
+    spec_peer_t *peer = arg;
+    int fd = accept(peer->lfd, NULL, NULL);
+    if (fd < 0) {
+        return NULL;
+    }
+    for (;;) {
+        uint8_t hdr[9];
+        if (read_full(fd, hdr, sizeof(hdr)) != 0) {
+            break;
+        }
+        uint16_t body_len = rd_le16(hdr + 7);
+        uint8_t body[64];
+        if (body_len > sizeof(body) || read_full(fd, body, body_len) != 0) {
+            break;
+        }
+        size_t total = 9u + body_len;
+        if (total <= sizeof(peer->last_req)) {
+            memcpy(peer->last_req, hdr, 9);
+            memcpy(peer->last_req + 9, body, body_len);
+            peer->last_req_len = total;
+        }
+        uint16_t cmd = rd_le16(body + 2);
+        uint16_t qty = rd_le16(body + 10);
+        uint8_t resp[16];
+        memset(resp, 0, sizeof(resp));
+        wr_le16(resp, SLMP_SUBHEADER_RES_3E);
+        memcpy(resp + 2, hdr + 2, 5);
+        if (cmd == SLMP_CMD_BATCH_WRITE) {
+            wr_le16(resp + 7, 2);
+            wr_le16(resp + 9, SLMP_END_OK);
+            if (write_full(fd, resp, 11) != 0) {
+                break;
+            }
+            continue;
+        }
+        uint8_t data[2] = {0, 0};
+        size_t n = 0;
+        if (qty == 4) {
+            data[0] = 0x10;
+            data[1] = 0x11;
+            n = 2;
+        } else if (qty == 3) {
+            data[0] = 0x11;
+            data[1] = 0x10;
+            n = 2;
+        } else if (qty == 1) {
+            data[0] = 0x10;
+            n = 1;
+        }
+        wr_le16(resp + 7, (uint16_t)(2 + n));
+        wr_le16(resp + 9, SLMP_END_OK);
+        memcpy(resp + 11, data, n);
+        if (write_full(fd, resp, 11 + n) != 0) {
+            break;
+        }
+    }
+    close(fd);
+    return NULL;
+}
+
+static void fill_spec_cfg(slmp_cfg_t *cfg)
+{
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->network_no = 0;
+    cfg->pc_no = 0xFF;
+    cfg->dest_module_io = 0x03FF;
+    cfg->dest_multidrop = 0;
+    cfg->monitoring_timer = 0x0010;
+    cfg->frame = SLMP_FRAME_3E_BINARY;
+    cfg->timeout_ms = 1000;
+}
+
+/* T10-1: bit-unit wire data is nibble-packed (slmp.md 5.7).
+ * Caller buffers stay 1 byte per point (0/1). */
+static void test_t10_1_bit_nibble_format(void)
+{
+    static const uint8_t write_m0_4[23] = {
+        0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0E, 0x00, 0x10, 0x00,
+        0x01, 0x14, 0x01, 0x00, 0x00, 0x00, 0x00, 0x90, 0x04, 0x00, 0x10,
+        0x11};
+    static const uint8_t read_m0_4[13] = {
+        0xD0, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x04, 0x00, 0x00, 0x00,
+        0x10, 0x11};
+    static const uint8_t write_m0_3[23] = {
+        0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0E, 0x00, 0x10, 0x00,
+        0x01, 0x14, 0x01, 0x00, 0x00, 0x00, 0x00, 0x90, 0x03, 0x00, 0x11,
+        0x10};
+    static const uint8_t read_m0_3[13] = {
+        0xD0, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x04, 0x00, 0x00, 0x00,
+        0x11, 0x10};
+    static const uint8_t write_m0_1[22] = {
+        0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0D, 0x00, 0x10, 0x00,
+        0x01, 0x14, 0x01, 0x00, 0x00, 0x00, 0x00, 0x90, 0x01, 0x00, 0x10};
+    static const uint8_t read_m0_1[12] = {
+        0xD0, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x03, 0x00, 0x00, 0x00,
+        0x10};
+
+    slmp_cfg_t cfg;
+    fill_spec_cfg(&cfg);
+    slmp_range_t range;
+    memset(&range, 0, sizeof(range));
+    range.addr.device_code = SLMP_DEV_M;
+    range.addr.head = 0;
+    range.addr.unit = SLMP_ACCESS_BIT;
+
+    uint8_t frame[64];
+    size_t len = 0;
+    uint8_t bits4[4] = {1, 0, 1, 1};
+    range.quantity = 4;
+    expect(slmp_encode_batch_write(&cfg, &range, bits4, 4, frame, sizeof(frame),
+                                   &len) == 0,
+           "encode M0..M3");
+    expect_mem("encode M0..M3 = 1,0,1,1", frame, len, write_m0_4,
+               sizeof(write_m0_4));
+
+    uint8_t bits3[3] = {1, 1, 1};
+    range.quantity = 3;
+    len = 0;
+    expect(slmp_encode_batch_write(&cfg, &range, bits3, 3, frame, sizeof(frame),
+                                   &len) == 0,
+           "encode 3 points");
+    expect_mem("encode 3 points 1,1,1", frame, len, write_m0_3,
+               sizeof(write_m0_3));
+
+    uint8_t bit1[1] = {1};
+    range.quantity = 1;
+    len = 0;
+    expect(slmp_encode_batch_write(&cfg, &range, bit1, 1, frame, sizeof(frame),
+                                   &len) == 0,
+           "encode 1 point");
+    expect_mem("encode 1 point ON", frame, len, write_m0_1, sizeof(write_m0_1));
+
+    struct {
+        const char *name;
+        const uint8_t *req;
+        size_t req_len;
+        uint16_t qty;
+        const uint8_t *points;
+        const uint8_t *resp;
+        size_t resp_len;
+    } cases[] = {
+        {"M0..M3", write_m0_4, sizeof(write_m0_4), 4, bits4, read_m0_4,
+         sizeof(read_m0_4)},
+        {"3 points", write_m0_3, sizeof(write_m0_3), 3, bits3, read_m0_3,
+         sizeof(read_m0_3)},
+        {"1 point", write_m0_1, sizeof(write_m0_1), 1, bit1, read_m0_1,
+         sizeof(read_m0_1)},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        slmp_stack_t *s = make_server();
+        expect(s != NULL, "t10-1 server");
+        if (!s) {
+            return;
+        }
+        uint8_t resp[64];
+        size_t resp_len = 0;
+        int rc = slmp_stack_handle_request(s, cases[i].req, cases[i].req_len,
+                                           resp, sizeof(resp), &resp_len);
+        if (rc != 0) {
+            fprintf(stderr, "FAIL: %s spec write handle rc=%d want 0\n",
+                    cases[i].name, rc);
+            g_fail = 1;
+            slmp_stack_destroy(s);
+            continue;
+        }
+        uint16_t end = 0xFFFF;
+        const uint8_t *data = NULL;
+        size_t dlen = 0;
+        expect(slmp_decode_response(resp, resp_len, &end, &data, &dlen) == 0,
+               "spec write decode");
+        expect(end == SLMP_END_OK && dlen == 0, "spec write end 0");
+        uint8_t map[8] = {0};
+        expect(slmp_stack_read_bits(s, SLMP_DEV_M, 0, map, cases[i].qty) == 0,
+               "spec map read");
+        expect_mem(cases[i].name, map, cases[i].qty, cases[i].points,
+                   cases[i].qty);
+        uint8_t rreq[32];
+        size_t rn = build_batch_req(rreq, SLMP_CMD_BATCH_READ, SLMP_SUB_BIT,
+                                    SLMP_DEV_M, 0, cases[i].qty, NULL, 0);
+        resp_len = 0;
+        rc = slmp_stack_handle_request(s, rreq, rn, resp, sizeof(resp),
+                                       &resp_len);
+        expect(rc == 0, "spec bit read handle");
+        expect_mem(cases[i].name, resp, resp_len, cases[i].resp,
+                   cases[i].resp_len);
+        slmp_stack_destroy(s);
+    }
+
+    spec_peer_t peer;
+    memset(&peer, 0, sizeof(peer));
+    peer.lfd = socket(AF_INET, SOCK_STREAM, 0);
+    expect(peer.lfd >= 0, "spec peer socket");
+    if (peer.lfd < 0) {
+        return;
+    }
+    int one = 1;
+    setsockopt(peer.lfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+    expect(bind(peer.lfd, (struct sockaddr *)&addr, sizeof(addr)) == 0,
+           "spec peer bind");
+    expect(listen(peer.lfd, 1) == 0, "spec peer listen");
+    socklen_t alen = sizeof(addr);
+    expect(getsockname(peer.lfd, (struct sockaddr *)&addr, &alen) == 0,
+           "spec peer port");
+    pthread_t peer_th;
+    expect(pthread_create(&peer_th, NULL, spec_peer_main, &peer) == 0,
+           "spec peer thread");
+
+    slmp_cfg_t ccfg;
+    fill_spec_cfg(&ccfg);
+    ccfg.role = SLMP_ROLE_CLIENT;
+    ccfg.port = ntohs(addr.sin_port);
+    snprintf(ccfg.plc_ip, sizeof(ccfg.plc_ip), "127.0.0.1");
+    slmp_stack_t *client = slmp_stack_create(&ccfg);
+    expect(client != NULL && slmp_stack_start(client) == 0, "spec client");
+    if (client && slmp_stack_connected(client)) {
+        range.quantity = 4;
+        int rc = slmp_stack_client_batch_write(client, &range, bits4, 4);
+        expect(rc == 0, "client bit write to spec peer");
+        expect_mem("client write wire M0..M3", peer.last_req, peer.last_req_len,
+                   write_m0_4, sizeof(write_m0_4));
+
+        uint8_t out[4] = {0};
+        size_t out_len = 0;
+        rc = slmp_stack_client_batch_read(client, &range, out, sizeof(out),
+                                          &out_len);
+        if (rc != 0) {
+            fprintf(stderr, "FAIL: client bit read rc=%d want 0 (nibble unpack)\n",
+                    rc);
+            g_fail = 1;
+        } else {
+            expect(out_len == 4, "client bit read len");
+            expect_mem("client unpacked M0..M3", out, out_len, bits4, 4);
+        }
+
+        range.quantity = 3;
+        out_len = 0;
+        rc = slmp_stack_client_batch_read(client, &range, out, sizeof(out),
+                                          &out_len);
+        if (rc != 0) {
+            fprintf(stderr, "FAIL: client 3-point read rc=%d want 0\n", rc);
+            g_fail = 1;
+        } else {
+            expect_mem("client unpacked 1,1,1", out, out_len, bits3, 3);
+        }
+
+        range.quantity = 1;
+        out_len = 0;
+        rc = slmp_stack_client_batch_read(client, &range, out, sizeof(out),
+                                          &out_len);
+        if (rc != 0) {
+            fprintf(stderr, "FAIL: client 1-point read rc=%d want 0\n", rc);
+            g_fail = 1;
+        } else {
+            expect_mem("client unpacked ON", out, 1, bit1, 1);
+        }
+    }
+    if (client) {
+        slmp_stack_destroy(client);
+    }
+    pthread_join(peer_th, NULL);
+    close(peer.lfd);
+
+    /* Public API across our server stays 1 byte per point. */
+    slmp_cfg_t scfg;
+    fill_spec_cfg(&scfg);
+    scfg.role = SLMP_ROLE_SERVER;
+    scfg.port = 15559;
+    snprintf(scfg.bind_ip, sizeof(scfg.bind_ip), "127.0.0.1");
+    scfg.max_clients = 2;
+    slmp_stack_t *server = slmp_stack_create(&scfg);
+    expect(server != NULL && slmp_stack_start(server) == 0, "api server");
+    if (!server) {
+        return;
+    }
+    g_serve = 1;
+    pthread_t sth;
+    expect(pthread_create(&sth, NULL, serve_thread, server) == 0, "api thread");
+    ccfg.port = 15559;
+    slmp_stack_t *api = slmp_stack_create(&ccfg);
+    expect(api != NULL && slmp_stack_start(api) == 0, "api client");
+    usleep(50000);
+    if (api) {
+        range.quantity = 4;
+        expect(slmp_stack_client_batch_write(api, &range, bits4, 4) == 0,
+               "api bit write");
+        uint8_t map[4] = {0};
+        expect(slmp_stack_read_bits(server, SLMP_DEV_M, 0, map, 4) == 0,
+               "api server map");
+        expect_mem("api map 1,0,1,1", map, 4, bits4, 4);
+        uint8_t out[4] = {0};
+        size_t out_len = 0;
+        expect(slmp_stack_client_batch_read(api, &range, out, sizeof(out),
+                                            &out_len) == 0,
+               "api bit read");
+        expect_mem("api read 1,0,1,1", out, out_len, bits4, 4);
+        slmp_stack_destroy(api);
+    }
+    g_serve = 0;
+    pthread_join(sth, NULL);
+    slmp_stack_destroy(server);
+}
+
 int main(void)
 {
     test_device_table();
@@ -888,6 +1241,7 @@ int main(void)
     test_g7_slmp_idle_per_ip_and_slow();
     test_t10_2_stale_response_after_timeout();
     test_t10_2_timeout_not_shorter_than_monitor();
+    test_t10_1_bit_nibble_format();
     if (g_fail) {
         fprintf(stderr, "test_slmp_stack: FAILED\n");
         return 1;

@@ -173,13 +173,19 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         uint8_t code = pick_bit_dev(p, plen);
         uint16_t bqty = (uint16_t)(1u + (u8_at(p, plen, 2, 8) % 32u));
         if (u8_at(p, plen, 1, 0) & 1) {
-            uint8_t bits[32];
+            /* Wire data is nibble-packed: ceil(points / 2) bytes. */
+            size_t wire = ((size_t)bqty + 1u) / 2u;
+            uint8_t bits[16];
             memset(bits, 0xA5, sizeof(bits));
             if (plen > 2) {
-                memcpy(bits, p + 2, (plen - 2) < bqty ? (plen - 2) : bqty);
+                size_t copy = plen - 2;
+                if (copy > wire) {
+                    copy = wire;
+                }
+                memcpy(bits, p + 2, copy);
             }
             feed_3e(SLMP_CMD_BATCH_WRITE, SLMP_SUB_BIT, head, code, bqty, bits,
-                    bqty);
+                    wire);
         } else {
             feed_3e(SLMP_CMD_BATCH_READ, SLMP_SUB_BIT, head, code, bqty, NULL,
                     0);

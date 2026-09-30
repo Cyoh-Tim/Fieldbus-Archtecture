@@ -64,13 +64,11 @@ def test_hex_numbered_device_word(plc):
     assert plc.batchread_wordunits(headdevice="W10", readsize=11)[10] == 0x55AA
 
 
-@known_defect("T10-1", "비트 단위(서브커맨드 0001)를 1점=1바이트로 처리한다. 사양은 1점=니블")
 def test_bit_batch_write_then_read(plc):
     plc.batchwrite_bitunits(headdevice="M0", values=[1, 0, 1, 1])
     assert plc.batchread_bitunits(headdevice="M0", readsize=4) == [1, 0, 1, 1]
 
 
-@known_defect("T10-1", "비트 단위 읽기 응답을 1점=1바이트(ON=01)로 보낸다. 사양은 상위 니블 (ON=10)")
 def test_single_bit_read_format(plc):
     # 워드 단위로 M0..M15 = 0x0002 (M1 만 ON) 을 쓰고, 비트 단위로 M1 1점을 읽는다.
     plc.batchwrite_wordunits(headdevice="M0", values=[0x0002])
