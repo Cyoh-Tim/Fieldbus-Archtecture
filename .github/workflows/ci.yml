@@ -79,7 +79,7 @@ jobs:
         run: |
           cmake -S . -B build-oracle -DBUILD_DAEMON=OFF -DBUILD_CTT=OFF -DBUILD_PN_LAB_TOOLS=OFF \
                 -DENABLE_PN_TESTS=OFF -DENABLE_EIP_TESTS=OFF -DENABLE_MB_TESTS=OFF -DENABLE_SLMP_TESTS=OFF
-          cmake --build build-oracle -j --target mb_seeded_server slmp_oracle_server eip_oracle_adapter pn_oracle_pipe
+          cmake --build build-oracle -j --target mb_seeded_server slmp_oracle_server slmp_oracle_client eip_oracle_adapter pn_oracle_pipe
       - name: Install oracles (pinned)
         run: python -m pip install -r tests/oracle/requirements.txt
       - name: Oracle cross-check
