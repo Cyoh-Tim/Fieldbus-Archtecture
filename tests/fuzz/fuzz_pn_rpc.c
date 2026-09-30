@@ -8,11 +8,18 @@
  * Byte 0 selects a mode. A live AR is kept via a valid Connect (AR + IOCR
  * input/output + AlarmCR + ExpectedSubmodule). A second stack runs
  * security_class=1 + PSK so pn_sec.c is exercised.
+ *
+ * Mode 0 (raw) uses a scratch stack. A Connect with a different
+ * CMInitiatorObjectUUID cannot be Released: handle_rpc passes src_ip 0, so
+ * sameness is only that UUID. Leaving that AR on g_open makes every later
+ * Write/PrmEnd hit ARUUID mismatch. Stateful modes re-Connect the canonical
+ * AR and recreate the stack if that Connect is rejected.
  */
 #include "pn_crypto.h"
 #include "pn_endian.h"
 #include "pn_stack.h"
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -98,11 +105,67 @@ static size_t wrap_rpc(uint8_t *out, size_t cap, uint16_t op, const uint8_t *stu
     return 80 + slen;
 }
 
+static int g_rpc_rc;
+static size_t g_rpc_rlen;
+static uint8_t g_rpc_head[128];
+
 static void feed_rpc(pn_stack_t *s, const uint8_t *pdu, size_t n)
 {
     uint8_t resp[2048];
     size_t rlen = 0;
-    (void)pn_stack_handle_rpc(s, pdu, n, resp, sizeof(resp), &rlen);
+    if (!s) {
+        g_rpc_rc = -EINVAL;
+        g_rpc_rlen = 0;
+        return;
+    }
+    g_rpc_rc = pn_stack_handle_rpc(s, pdu, n, resp, sizeof(resp), &rlen);
+    g_rpc_rlen = rlen;
+    memset(g_rpc_head, 0, sizeof(g_rpc_head));
+    if (rlen) {
+        size_t c = rlen < sizeof(g_rpc_head) ? rlen : sizeof(g_rpc_head);
+        memcpy(g_rpc_head, resp, c);
+    }
+}
+
+/* reply_pnio_err is 80-byte RPC + 24-byte NDR carrying 0x81000000. */
+static int last_connect_rejected(void)
+{
+    if (g_rpc_rc != 0) {
+        return 1;
+    }
+    if (g_rpc_rlen != 104) {
+        return 0;
+    }
+    return pn_rd_be32(g_rpc_head + 100) == (0x81u << 24);
+}
+
+static void do_connect(pn_stack_t *s, int hmac, int hmac_bad,
+                       const uint8_t *mut, size_t mlen);
+static void do_write(pn_stack_t *s, uint16_t index, const uint8_t *data,
+                     size_t dlen);
+static pn_stack_t *make_stack(int sec, int enforce);
+
+/* Write fails closed on a missing or foreign ARUUID. A same-initiator
+ * Connect can replace that AR; a different CMInitiatorObjectUUID cannot
+ * (src_ip is 0), so the stack is recreated. A healthy AR is left alone. */
+static void heal_stack(pn_stack_t **slot, int sec, int enforce, int hmac)
+{
+    if (!slot || !*slot) {
+        return;
+    }
+    do_write(*slot, PN_INDEX_IM0, NULL, 0);
+    if (g_rpc_rc == 0) {
+        return;
+    }
+    do_connect(*slot, hmac, 0, NULL, 0);
+    if (!last_connect_rejected()) {
+        return;
+    }
+    pn_stack_destroy(*slot);
+    *slot = make_stack(sec, enforce);
+    if (*slot) {
+        do_connect(*slot, hmac, 0, NULL, 0);
+    }
 }
 
 static size_t build_connect_blocks(uint8_t *blocks, size_t cap, int with_hmac,
@@ -234,9 +297,10 @@ static void do_connect(pn_stack_t *s, int hmac, int hmac_bad, const uint8_t *mut
 
 static void ensure_ar(pn_stack_t *s, int hmac)
 {
-    if (!pn_stack_ar_up(s)) {
-        do_connect(s, hmac, 0, NULL, 0);
+    if (!s || pn_stack_ar_up(s)) {
+        return;
     }
+    do_connect(s, hmac, 0, NULL, 0);
 }
 
 static void do_write(pn_stack_t *s, uint16_t index, const uint8_t *data,
@@ -360,9 +424,15 @@ static pn_stack_t *make_stack(int sec, int enforce)
 
 static int fuzz_init(void)
 {
-    g_open = make_stack(0, 0);
-    g_sec = make_stack(1, 0);
-    g_enf = make_stack(1, 1);
+    if (!g_open) {
+        g_open = make_stack(0, 0);
+    }
+    if (!g_sec) {
+        g_sec = make_stack(1, 0);
+    }
+    if (!g_enf) {
+        g_enf = make_stack(1, 1);
+    }
     return (g_open && g_sec && g_enf) ? 0 : -1;
 }
 
@@ -371,11 +441,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     static const uint16_t k_idx[] = {PN_INDEX_IM0, PN_INDEX_IM1, PN_INDEX_IM2,
                                      PN_INDEX_IM3, PN_INDEX_IM4, 0x8000};
 
-    if (!g_open && fuzz_init() != 0) {
+    if ((!g_open || !g_sec || !g_enf) && fuzz_init() != 0) {
         return 0;
     }
     if (size == 0) {
-        ensure_ar(g_open, 0);
+        heal_stack(&g_open, 0, 0, 0);
         return 0;
     }
 
@@ -385,10 +455,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     uint8_t pdu[2048];
 
     switch (mode) {
-    case 0: /* raw (legacy corpus) */
-        feed_rpc(g_open, p, plen);
+    case 0: { /* raw on a scratch stack — must not capture g_open's AR */
+        pn_stack_t *scratch = make_stack(0, 0);
+        if (scratch) {
+            feed_rpc(scratch, p, plen);
+            pn_stack_destroy(scratch);
+        }
         break;
+    }
     case 1: /* valid Connect (mutated IOCR) then remaining bytes as the next RPC */
+        heal_stack(&g_open, 0, 0, 0);
         ensure_ar(g_open, 0);
         do_connect(g_open, 0, 0, p, plen);
         if (plen >= 80) {
@@ -402,19 +478,23 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         }
         break;
     case 2: /* Write parameter record */
+        heal_stack(&g_open, 0, 0, 0);
         ensure_ar(g_open, 0);
         do_write(g_open, k_idx[u8_at(p, plen, 0, 1) % 6u], p, plen);
         break;
     case 3: /* Read I&M */
+        heal_stack(&g_open, 0, 0, 0);
         ensure_ar(g_open, 0);
         do_read(g_open, k_idx[u8_at(p, plen, 0, 0) % 6u]);
         break;
     case 4: /* PrmEnd → ApplicationReady indication */
+        heal_stack(&g_open, 0, 0, 0);
         ensure_ar(g_open, 0);
         do_write(g_open, PN_INDEX_IM1, p, plen > 8 ? 8 : plen);
         do_control(g_open, PN_CONTROL_PRM_END);
         break;
     case 5: /* AppReady control + raw follow-up */
+        heal_stack(&g_open, 0, 0, 0);
         ensure_ar(g_open, 0);
         do_control(g_open, PN_CONTROL_PRM_END);
         do_control(g_open, PN_CONTROL_APP_READY);
@@ -423,12 +503,19 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         }
         break;
     case 6: /* Release then re-Connect */
+        heal_stack(&g_open, 0, 0, 0);
         ensure_ar(g_open, 0);
         do_release(g_open);
         do_connect(g_open, 0, 0, p, plen);
         break;
     default: { /* security_class=1 / enforce_security_class HMAC Connect */
-        pn_stack_t *st = (u8_at(p, plen, 1, 0) & 1u) ? g_enf : g_sec;
+        int enf = (u8_at(p, plen, 1, 0) & 1u) ? 1 : 0;
+        pn_stack_t **slot = enf ? &g_enf : &g_sec;
+        heal_stack(slot, 1, enf, 1);
+        pn_stack_t *st = *slot;
+        if (!st) {
+            break;
+        }
         switch (u8_at(p, plen, 0, 0) & 3u) {
         case 0:
             do_connect(st, 0, 0, NULL, 0); /* missing HMAC → reject */
