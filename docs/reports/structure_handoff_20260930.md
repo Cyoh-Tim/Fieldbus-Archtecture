@@ -32,6 +32,8 @@ T3 (클라이언트 모드 블로킹)          ─ 독립
 T4 (PN RT 송신 주기) ──▶ T5 (최소 주기 제한)
 T6 (scheduler 중복 정리) ──▶ T7 (µs 지연 측정)
 T8 (config_loader 정리)              ─ 독립
+T9 (Modbus 결함) · T10 (SLMP 결함)   ─ T9-5/T10-2 는 T3 과 함께
+T12-0 (PN 독립 오라클) ──▶ T12-1…22 ──▶ T4 ──▶ T5
 ```
 
 | ID | 우선순위 | 요약 | 결정 필요 |
@@ -45,6 +47,10 @@ T8 (config_loader 정리)              ─ 독립
 | T6 | 낮음 | `core/scheduler.c` 가 쓰이지 않고 루프가 중복됨 | 아니오 |
 | T7 | 낮음 | 사이클 지연을 ms 로 잘라서 측정함 | 아니오 |
 | T8 | 낮음 | `config_loader.c` 가 `LOG_*` 대신 `fprintf` 를 씀 (사전 검증 완료, 패치 포함) | 아니오 |
+| T9 | 높음~낮음 | Modbus 사양 차이·결함 11건 (클라이언트 TID 영구 불일치, 8진 주소 파싱 등) | T9-11 만 예 |
+| T10 | **치명**~낮음 | SLMP 사양 차이·결함 7건 (비트 단위 니블 형식, 타임아웃 후 stale 응답 등) | T10-7 만 사양 확인 |
+| T11 | (작성 예정) | EtherNet/IP 사양 차이 — Fable 검토와 대조 후 | — |
+| T12 | **치명**~낮음 | PROFINET 이 실제 컨트롤러와 연결되지 않는 결함 23건. **T12-0(독립 오라클)부터** | 아니오 |
 
 ---
 
@@ -191,6 +197,10 @@ Connect 에서 파싱한 `send_clock_factor`/`reduction_ratio` (`stacks/profinet
 - AR 이 수립되면 입력 IOCR 의 협상 주기를 송신 주기로 쓴다. `cfg.cycle_us` 는 AR 이 없을 때의 기본값이나 상한으로만 쓴다.
 - 입력 CR 과 출력 CR 의 주기가 다를 수 있으니 CR 별로 저장한다.
 
+**검증 (2026-09-30, Fable 사양 검토):** 사실이며 사양 위반이 맞다. 실측으로 SCF=32, RR=16(16ms)로
+Connect 한 뒤에도 약 8ms 주기로 송신했다. 입력 CR 의 SCF/RR 은 저장조차 되지 않는다 (`pn_rpc.c:272-275`).
+CycleCounter 도 프레임마다 +1 이 아니라 `SCF×RR` 씩 증가해야 한다 (T12-15).
+
 **완료 조건:** CTT PROFINET 시나리오에서 협상 주기 16ms 로 Connect 하면 RT 송신 간격이
 약 16ms 인지 검증하는 시나리오를 추가한다. `tests/golden/profinet/` 은 필요할 때만 재생성한다.
 
@@ -211,6 +221,21 @@ PN RT (`pn_rt.c:93`)와 EIP Class 1 (`stacks/ethernetip/src/eip_io.c:105`) 모�
   `SendClock`/`ReductionRatio` 목록에서 지원하지 않는 값을 뺀다 (`stacks/profinet/gsdml/`).
 - 최소 주기를 스택에 알려 줄 config 필드가 필요하면 `protocol_params` 에 추가하고
   `config/config.schema.json` 에도 반영한다.
+
+**PROFINET 쪽 정확한 값 (Fable 사양 검토, 확신 높음, 조항 번호는 사양서 확인 필요):**
+- 거부 응답은 Connect.rsp 스텁 `PNIOStatus(4) ArgsLength=0 MaxCount=0 Offset=0 ActualCount=0` (블록 없음).
+  **T12-1(응답 NDR 레이아웃) 수정이 전제다.**
+- PNIOStatus: ErrorCode `0xDB`(IODConnectRes), ErrorDecode `0x81`(PNIO), ErrorCode1 `0x02`(Faulty IOCRBlockReq),
+  ErrorCode2 `0x0D`(SendClockFactor 오류: 지원하지 않는 SendClock) 또는 `0x0E`(ReductionRatio 오류:
+  SCF×RR 이 최소 주기 미만). 예: 8ms 장치에 4ms(SCF=32, RR=4) 요청 → `DB 81 02 0E`.
+  Wireshark `pn_io_error_code2_pnio_2` 표, p-net `PNET_ERROR_CODE_2_IOCR_SEND_CLOCK_FACTOR/REDUCTION_RATIO` 와 일치.
+- 현재 `reply_pnio_err` 의 `0x81<<24` 는 LE drep 에서 ErrorCode=0x00 으로 읽혀 어떤 경우에도 올바른 거부가 아니다.
+- GSDML: DAP `MinDeviceInterval="256"` (256×31.25µs = 8ms; 현재 32 = 1ms 로 틀림),
+  `InterfaceSubmoduleItem/ApplicationRelations/TimingProperties SendClock="32" ReductionRatio="8 16 32 64 128 256 512"`.
+  `cycle_ms` 를 바꾸면 GSDML 도 같이 바꿔야 하므로 GSDML 생성·검증 스크립트를 두는 편이 안전하다.
+- RR 은 2의 거듭제곱만 받는다 (상한은 사양서 확인 필요).
+
+**EtherNet/IP 쪽 값:** T11 에서 Fable 검토 결과로 채운다.
 
 **완료 조건:** 짧은 RPI/주기 요청이 거부되는 CTT 시나리오를 추가한다.
 
@@ -350,7 +375,55 @@ T10-1 과 T10-2 는 이 세션에서 코드를 읽어 다시 확인했다.
 **완료 조건 (공통):** 항목마다 재현 테스트를 `tests/test_slmp_stack.c` 나 `tests/test_slmp_adapter.c` 에 추가하고,
 `ctest -R slmp -LE soak_ci` 가 통과한다. T10-1 은 가능하면 실 MELSEC PLC(또는 GX Simulator3)로 확인한다.
 
+## T12. PROFINET — 실제 컨트롤러와 연결되지 않는 결함들
+
+**출처와 신뢰도:** 두 개의 독립 분석이 같은 결론을 냈다.
+(1) [`../protocols/profinet.md`](../protocols/profinet.md) 11장 D1–D31 — 하네스 실행과 scapy 2.7.0 디섹터로 교차 검증.
+(2) Fable 사양 검토 (PN-S1–S20) — 스택에 링크한 프로브로 실제 응답 바이트를 덤프해 확인.
+아래 표의 "교차" 는 두 분석이 모두 지적한 항목이다. 실제 PLC 로는 아직 확인하지 않았다.
+
+**가장 중요한 전제 — 먼저 읽을 것:**
+현재 스택은 PN 테스트 34개를 모두 통과하지만, **CTT 하네스(`tools/ctt/proto/profinet/pn_plugin.c:813-865`)와
+단위 테스트·퍼저·golden 이 스택과 같은 잘못된 가정을 공유한다** (rpc_vers=1, 응답 NDR 첫 워드=길이,
+IOCR 블록 없는 Connect, BlockInfo 없는 DCP). 즉 "거울 구현" 상태라서 CTT green 은 사양 적합성의 증거가 아니다.
+따라서 **T12-0 을 가장 먼저** 해야 이후 수정을 검증할 수 있다.
+
+| ID | 우선순위 | 문제 | 근거 | 교차 |
+|---|---|---|---|---|
+| T12-0 | **선행** | **독립 오라클이 없다.** 스택과 가정을 공유하지 않는 기준으로 응답을 검증해야 한다. scapy `contrib/pnio*` 나 Wireshark(tshark) 디섹터로 스택 응답을 파싱하는 테스트를 추가하고, CTT 하네스의 Connect/DCP 요청을 사양 형태(rpc_vers=4, IOCRBlockReq·ExpectedSubmoduleBlockReq 포함, BlockInfo 포함)로 고친다. golden(`tests/golden/profinet/`)은 수정 후 재생성한다 | `pn_plugin.c:813-865` | 교차 |
+| T12-1 | 치명 | **RPC 응답 NDR 의 첫 워드가 PNIOStatus 가 아니라 길이다.** 응답은 `PNIOStatus · ArgsLength · MaxCount · Offset · ActualCount · Blocks` 인데 요청 레이아웃을 그대로 써서 Connect.rsp 첫 워드가 `0x00000048`. 컨트롤러는 Connect/Control/Read/Write 를 모두 실패로 처리해 **AR 이 성립하지 않는다.** 에러 응답(`reply_pnio_err`)도 같은 문제 | `stacks/profinet/src/pn_rpc.c:415-424`(`ndr_wrap`), 사용처 `:548,:579,:613,:650,:680`, `:459-467` | 교차 |
+| T12-2 | 치명 | **DCP Identify/Get 응답 블록에 BlockInfo(2바이트)가 없다.** 표준 도구가 이름 앞 2글자를 잃고("nsor-line1"), IP 가 2바이트 밀려 보인다. TIA/PRONETA 탐색·이름 설정 실패 가능 | `stacks/profinet/src/pn_dcp.c:55-63`(`wr_block`), `:381-409`, `:520-525` | 교차 |
+| T12-3 | 치명 | **Read/Write 응답에 IODReadResHeader(0x8009)/IODWriteResHeader(0x8008) 64바이트 블록이 없고, I&M 레코드에 BlockHeader(0x0020~0x0024)가 없다.** 또한 Write 요청의 데이터를 64바이트 헤더 뒤가 아니라 패딩 위치에서 읽어 I&M1 을 0으로 덮어쓴다. TIA 는 Connect 직후 Write 를 보내므로 파라미터화 실패 → AR abort | `pn_rpc.c:648-650`, `:679-680`; `pn_record.c:97-155` | 교차 |
+| T12-4 | 치명 | **IOCRBlockReq 의 프레임 오프셋·ExpectedSubmoduleBlockReq 를 무시하고 고정 레이아웃으로 송수신한다.** IODataObject/IOCS 의 FrameOffset 에 따라 DAP·인터페이스·포트 서브모듈의 IOPS 와 출력 서브모듈의 IOCS 를 배치해야 한다. ModuleDiffBlock(0x8104)과 ARServerBlock(0x8106)도 없다. T12-1 을 고쳐도 IO 교환은 되지 않는다 | `pn_rpc.c:249-276`, `:344-382`; `pn_rt.c:78-88`, `:109-130` | 교차 |
+| T12-5 | 높음 | **PrmEnd 응답이 0x0111 + 커맨드 echo 다** (사양 0x8110 + Done 0x0008). **ApplicationReady 는 형식이 틀렸다:** rpc_vers=1, UUID 전부 0, 블록 0x0110 (사양: rpc_vers=4, 객체 UUID=CMInitiatorObjectUUID, 인터페이스 UUID=PNIO Controller, 블록 0x0112, `CMInitiatorUDPRTPort` 로 전송, 0x8112 응답 대기와 재전송). Siemens 는 AppReady 를 받기 전까지 출력을 보내지 않는다 | `pn_types.h:56-57`, `pn_rpc.c:426-457`, `:469-477`, `:605-613` | 교차 |
+| T12-6 | 높음 | **DataStatus 가 0x25 로 나간다** (정상 0x35). `PN_DATASTATUS_RUN 0x20` 은 실제로 StationProblemIndicator 비트이고, ProviderState(Run)는 0x10 이다. 컨트롤러는 장치를 STOP 으로 본다 | `pn_types.h:76-78`, `pn_rt.c:128-129` | 교차 |
+| T12-7 | 높음 | **RTC1 프레임에 최소 길이 패딩이 없다.** C_SDU 최소 40옥텟(VLAN 태그 시 36)으로 IOData 와 APDUStatus 사이를 패딩해야 한다. 지금은 53바이트라 NIC 가 끝에 0을 붙이면 컨트롤러가 끝 4바이트(APDUStatus)를 `00 00 00 00` 으로 읽는다. mock 에서는 재현되지 않는다 | `pn_rt.c:117-138`, `pn_eth.c:490-502` | 교차 |
+| T12-8 | 높음 | RTC1·알람 프레임에 802.1Q VLAN 태그(PCP 6, 알람 Low 5)가 없다. IOCRTagHeader 도 파싱하지 않는다 | `pn_rt.c:135-136`, `pn_sec.c:408-409` | 교차 |
+| T12-9 | 높음 | **어댑터 기본값이 자체 HMAC "Security Class 1" 을 강제한다** (`cfg.security_class = 1`). PI 의 Security Class 1 은 하드닝(DCP Set 제한, SNMP 쓰기 금지 등)이고 프레임에 HMAC 을 넣지 않는다. 기본 설정으로는 **어떤 표준 컨트롤러도 Connect·이름 설정을 할 수 없다** (CODESYS 예제 config 가 class 0 을 쓰는 이유). 이름을 "vendor integrity extension" 등으로 바꾸고 기본값을 끈다 | `adapters/profinet/profinet_adapter.c:124`, `pn_rpc.c:280-326`, `:508-510`, `pn_dcp.c:227-249` | 교차 |
+| T12-10 | 높음 | 알람 RTA-PDU 가 형식상 무효다 (PDUType 버전 0, AddFlags 0, BlockHeader 없음, Endpoint 1 고정, ACK/재전송 없음). AlarmCRBlockReq 를 파싱하지 않는다. AR abort 시 컨트롤러 통지와 출력 안전값 처리도 없다 | `pn_sec.c:384-418`, `pn_rpc.c:234-278` | 교차 |
+| T12-11 | 높음 | LLDP: PNO OUI 가 `00-0C-CF` 로 오기 (정답 `00-0E-CF`). PortID 가 MAC (정답 `port-001`), PortStatus·MAC/PHY·MgmtAddr TLV 없음. 토폴로지 검출 불가 | `pn_lldp.c:34-52` | 교차 |
+| T12-12 | 높음 | AlarmCRBlockRes 바디가 8바이트 (사양 6). ARBlockRes 의 UDP 포트 값도 확인 필요 (문서 에이전트는 0x8894 → 0x8892 를 지적, Fable 은 언급 없음) | `pn_rpc.c:344-382` | AlarmCR 는 교차, 포트는 **단독** |
+| T12-13 | 높음 | GSDML 이 스키마 필수 요소를 갖추지 못했다 (DAP VirtualSubmoduleItem, InterfaceSubmoduleItem 32768, PortSubmoduleItem 32769, TimingProperties, CertificationInfo). `MinDeviceInterval="32"`(1ms) 는 8ms 구현과 모순. GSDML Checker·TIA import 실패 가능. T5 와 같이 처리 | `stacks/profinet/gsdml/GSDML-V2.35-Fieldbus-PN-Device.xml:30-50` | 교차 |
+| T12-14 | 중간 | DCE/RPC 헤더: drep 무시(LE 고정), rpc_vers·인터페이스 UUID·객체 UUID 미검사, 단편화 미지원, EPM(UDP 135) 없음, activity timeout 2s 고정 | `pn_rpc.c:384-395`, `:479-495`, `:694` | 교차 |
+| T12-15 | 중간 | CycleCounter 가 프레임당 +1 (사양: 프레임마다 SCF×RR 증가). T4 와 같이 처리 | `pn_rt.c:126` | 교차 |
+| T12-16 | 중간 | DCP Set: 블록마다 응답하지 않음, 적용 안 된 블록도 OK, AR 중 이름/IP Set 거부(0x06) 없음, ResetToFactory 없음, 오류 시 ServiceType 0x05 오용 | `pn_dcp.c:480-494`, `:528-568` | 교차 |
+| T12-17 | 중간 | 표준 Release(0x0114)를 무시해 연결이 타임아웃까지 유지된다 (CTT 의 0x0101 형태만 동작) | `pn_rpc.c` Release 처리 | **단독** (문서) |
+| T12-18 | 중간 | 미지원 레코드 index 에 빈 데이터 응답 (사양: PNIORW 에러 `DE 80 B0 00` / `DF 80 B0 00`). 진단·식별 레코드 부재 | `pn_record.c:157-163`, `:225-226` | 교차 |
+| T12-19 | 중간 | SNMP 가 요청과 무관하게 고정 sysName 을 request-id 1 로 응답한다 | `pn_snmp.c:280-333` | 교차 |
+| T12-20 | 중간 | DCP 로 받은 IP 가 OS 에 적용되지 않고(`apply_os_ip` 선언만), 이름·I&M 이 재시작 시 사라진다(비휘발 저장 없음) | `pn_dcp.c`, `pn_stack.c` | **단독** (문서) |
+| T12-21 | 낮음 | 어댑터가 config 의 slot/subslot/index 를 무시하고 `byte_offset` 만 쓴다. CODESYS·fake-sensor 예제는 입력 40바이트, GSDML 은 32바이트로 불일치 | `adapters/profinet/profinet_adapter.c`, `config/example.*profinet*.json` | **단독** (문서) |
+| T12-22 | 낮음 | IOCRBlockRes 의 IOCRReference 1/2 고정, DCP Identify 지연 응답 슬롯 1개, DeviceRole 0x02 (IO-Controller) 로 응답 | `pn_rpc.c:358,364`; `pn_dcp.c:401-404`, `:454-478` | 부분 교차 |
+
+**권장 순서 (Fable 제안):** T12-0 → T12-1 → T12-2 → T12-3 → T12-5 → T12-4 → T12-6/7/8 → T4 → T5(+T12-13) → 나머지.
+실제 컨트롤러가 겪는 순서도 DCP(T12-2) → RPC 응답(T12-1) → Write/PrmEnd/AppReady(T12-3, T12-5) → RTC1(T12-4, 6, 7) 이다.
+
+**범위 주의:** 대부분 `stacks/profinet/` 안에서 끝나지만 T12-0 은 `tools/ctt/`·`tests/`, T12-9 와 T12-21 은
+`adapters/profinet/`, T12-13 은 GSDML 이다. PR 을 디렉토리별로 나눈다. IRT·CC-C 는 켜지 않는다.
+
+**완료 조건:** T12-0 의 독립 오라클 테스트가 각 항목의 수정 전 실패와 수정 후 통과를 보여 준다.
+최종 확인은 실 컨트롤러(TIA Portal 또는 CODESYS Control) 연결이다 (`docs/ctt_lab.md` 절차).
+
 ## 이후 추가될 항목
 
-EtherNet/IP / PROFINET 문서의 사양 차이와, Fable 사양 검토(PROFINET·EtherNet/IP)
-결과가 확인되면 T11 이후로 덧붙인다.
+EtherNet/IP 문서의 사양 차이(`docs/protocols/ethernetip.md` 부록 D, 41건)는 Fable 사양 검토 결과와 대조한 뒤
+T11 로 덧붙인다.
