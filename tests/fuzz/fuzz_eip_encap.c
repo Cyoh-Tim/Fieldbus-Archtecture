@@ -13,6 +13,10 @@
  * ListInterfaces and SendUnitData are not implemented (invalid-cmd). CIP
  * Multiple Service Packet is not a service here (0x0A = ATTR_READONLY status).
  * Unconnected Send 0x52 is defined but not handled (service not supported).
+ *
+ * Forward Open takes a Class 1 slot (EIP_CLASS1_CONN_MAX). Modes that open
+ * one also Forward Close it before returning. On security_class=1 the close
+ * must be HMAC'd; otherwise the stack rejects it and the slot stays taken.
  */
 #include "eip_endian.h"
 #include "eip_sec.h"
@@ -270,7 +274,7 @@ static int forward_open(fuzz_eip_t *st, int large, int hmac)
     return parse_fo_o2t(resp, n) ? 0 : -1;
 }
 
-static void forward_close(fuzz_eip_t *st)
+static void forward_close(fuzz_eip_t *st, int hmac)
 {
     uint8_t fc[12];
     memset(fc, 0, sizeof(fc));
@@ -289,7 +293,7 @@ static void forward_close(fuzz_eip_t *st)
     memcpy(cip + 6, fc, 12);
     uint8_t resp[128];
     size_t n = 0;
-    (void)send_cip(st, cip, 6 + 12, 0, resp, sizeof(resp), &n);
+    (void)send_cip(st, cip, 6 + 12, hmac, resp, sizeof(resp), &n);
 }
 
 static eip_stack_t *make_stack(int security_class, uint32_t protection_mode)
@@ -527,16 +531,17 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         }
         break;
     }
-    case 4: /* Forward Open / Large / Close */
+    case 4: /* Forward Open / Large / Close. Drop the slot before return. */
         if (u8_at(p, plen, 0, 0) & 1) {
             (void)forward_open(&g_open, 1, 0);
         } else {
             (void)forward_open(&g_open, 0, 0);
         }
         if (plen >= 1 && p[0] == 0xFF) {
-            forward_close(&g_open);
+            forward_close(&g_open, 0);
             (void)forward_open(&g_open, 0, 0);
         }
+        forward_close(&g_open, 0);
         break;
     case 5: { /* ListIdentity / ListServices / ListInterfaces / NOP */
         uint16_t cmds[] = {EIP_CMD_LISTIDENTITY, EIP_CMD_LISTSERVICES,
@@ -581,6 +586,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         }
         (void)forward_open(&g_sec, 0, 0); /* missing HMAC → privilege */
         (void)forward_open(&g_sec, 0, 1); /* HMAC'd FO */
+        forward_close(&g_sec, 1); /* HMAC'd close, else the slot sticks */
         break;
     }
     }
