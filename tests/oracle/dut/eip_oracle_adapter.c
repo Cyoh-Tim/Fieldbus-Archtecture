@@ -2,10 +2,13 @@
  * EtherNet/IP oracle DUT (tests/oracle): Adapter on loopback, real sockets.
  *
  *   eip_oracle_adapter --tcp-port N --udp-port M [--seconds S]
+ *                      [--input-size B] [--config-size B] [--acd]
  *
- * Assemblies: input 150 (8 bytes, seeded 01..08), output 101 (4 bytes),
- * config 100. Security class 0. Independent clients (pycomm3, raw spec
- * encoders in Python) drive it. Not a product binary.
+ * Assemblies: input 150 (8 bytes by default, seeded 01 02 03 ...; byte i =
+ * (i+1) & 0xFF), output 101 (4 bytes), config 100 (0 bytes by default).
+ * rpi_us = 8000 (the device's minimum RPI for T5 tests). Security class 0.
+ * --acd arms ACD (acd_enable = 1; default off). Independent clients
+ * (pycomm3, raw spec encoders in Python) drive it. Not a product binary.
  */
 #define _POSIX_C_SOURCE 200809L
 
@@ -30,6 +33,9 @@ int main(int argc, char **argv)
     int tcp_port = 15644;
     int udp_port = 15622;
     int seconds = 0;
+    int input_size = 8;
+    int config_size = 0;
+    int acd = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--tcp-port") == 0 && i + 1 < argc) {
             tcp_port = atoi(argv[++i]);
@@ -37,6 +43,12 @@ int main(int argc, char **argv)
             udp_port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) {
             seconds = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--input-size") == 0 && i + 1 < argc) {
+            input_size = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--config-size") == 0 && i + 1 < argc) {
+            config_size = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--acd") == 0) {
+            acd = 1;
         }
     }
 
@@ -56,13 +68,13 @@ int main(int argc, char **argv)
     cfg.input_assembly = 150;
     cfg.output_assembly = 101;
     cfg.config_assembly = 100;
-    cfg.input_size = 8;
+    cfg.input_size = (uint16_t)input_size;
     cfg.output_size = 4;
-    cfg.config_size = 0;
+    cfg.config_size = (uint16_t)config_size;
     cfg.rpi_us = 8000;
     cfg.security_class = 0;
     cfg.lldp_enable = 0;
-    cfg.acd_enable = 0;
+    cfg.acd_enable = acd;
 
     eip_stack_t *s = eip_stack_create(&cfg);
     if (!s) {
@@ -74,8 +86,10 @@ int main(int argc, char **argv)
         eip_stack_destroy(s);
         return 1;
     }
-    const uint8_t seed[8] = {1, 2, 3, 4, 5, 6, 7, 8};
-    eip_stack_write_input(s, 0, seed, sizeof(seed));
+    for (int i = 0; i < input_size; i++) {
+        const uint8_t b = (uint8_t)((i + 1) & 0xFF);
+        eip_stack_write_input(s, (size_t)i, &b, 1);
+    }
     fprintf(stderr, "eip_oracle_adapter ready tcp=%d udp=%d\n", tcp_port,
             udp_port);
     signal(SIGINT, on_sig);

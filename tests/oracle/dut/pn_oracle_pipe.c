@@ -10,11 +10,13 @@
  *   POLL <ms>    poll for <ms> milliseconds
  *   TAKE         pull a Device-originated RPC (ApplicationReady)
  *   INPUT <hex>  write the input image from offset 0
+ *   SNMP <hex>   inject one SNMP UDP payload (port 161)
+ *   ALARM <fid>  send one alarm (hex FrameID FC01 High / FE01 Low)
  *   QUIT
  *
  * Every command answers with zero or more lines, then "END":
  *   TX <hex>     Ethernet frame the stack sent
- *   RSP <hex>    RPC response payload (RPC command)
+ *   RSP <hex>    RPC / SNMP response payload (RPC, SNMP command)
  *   RPCTX <hex>  Device-originated RPC payload (TAKE command)
  *   ERR <rc>     negative return code from the stack call
  */
@@ -154,6 +156,21 @@ int main(int argc, char **argv)
         } else if (strncmp(line, "INPUT ", 6) == 0) {
             size_t n = unhex(line + 6, buf, sizeof(buf));
             int rc = pn_stack_write_input(s, 0, buf, n);
+            if (rc < 0) {
+                printf("ERR %d\n", rc);
+            }
+        } else if (strncmp(line, "SNMP ", 5) == 0) {
+            size_t n = unhex(line + 5, buf, sizeof(buf));
+            size_t rlen = 0;
+            int rc = pn_stack_handle_snmp(s, buf, n, resp, sizeof(resp), &rlen);
+            if (rc < 0) {
+                printf("ERR %d\n", rc);
+            } else if (rlen > 0) {
+                print_hex("RSP", resp, rlen);
+            }
+        } else if (strncmp(line, "ALARM ", 6) == 0) {
+            unsigned long fid = strtoul(line + 6, NULL, 16);
+            int rc = pn_stack_send_alarm_ex(s, (uint16_t)fid);
             if (rc < 0) {
                 printf("ERR %d\n", rc);
             }

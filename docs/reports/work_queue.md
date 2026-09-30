@@ -20,12 +20,12 @@
 |---|---|---|---|---|---|
 | — | T10-2 | SLMP 타임아웃 후 stale 응답 | — | — | 완료 (#49) |
 | — | T10-1 | SLMP 비트 단위 니블 형식 | — | T10-1 ×2 | 이슈 없이 진행 중 (2026-09-30) |
-| 01 | T9-1 | Modbus 클라이언트 타임아웃 후 영구 TID 불일치 | `stacks/modbus/`, `tests/` | 없음 | |
-| 02 | T9-3 | Modbus 주소 문자열 앞자리 0 이 8진수로 파싱됨 | `adapters/modbus/`, `tests/` | 없음 | |
-| 03 | T9-2 | Modbus 비트필드 + 2바이트 타입 쓰기·읽기 깨짐 | `adapters/modbus/`, `tests/` | 없음 | |
-| 04 | T1 | EtherNet/IP 숫자 포인트 바이트 순서 (BE→LE) | `adapters/ethernetip/`, `tests/` | 없음 | T0 A안 |
-| 05 | T2 (EIP) | EtherNet/IP 포인트 scale/offset | `adapters/ethernetip/`, `tests/` | 없음 | T1 이후, T0 A안 |
-| 06 | T2 (PN) | PROFINET 포인트 scale/offset | `adapters/profinet/`, `tests/` | 없음 | T0 A안 |
+| 01 | T9-1 | Modbus 클라이언트 타임아웃 후 영구 TID 불일치 | `stacks/modbus/`, `tests/` | T9-1 | |
+| 02 | T9-3 | Modbus 주소 문자열 앞자리 0 이 8진수로 파싱됨 | `adapters/modbus/`, `tests/` | T9-3 (테스트 2개) | |
+| 03 | T9-2 | Modbus 비트필드 + 2바이트 타입 쓰기·읽기 깨짐 | `adapters/modbus/`, `tests/` | T9-2 ×2 | |
+| 04 | T1 | EtherNet/IP 숫자 포인트 바이트 순서 (BE→LE) | `adapters/ethernetip/`, `tests/` | T1 ×2 (테스트 4개) | T0 A안 |
+| 05 | T2 (EIP) | EtherNet/IP 포인트 scale/offset | `adapters/ethernetip/`, `tests/` | T2 (EIP) ×2 | T1 이후, T0 A안 |
+| 06 | T2 (PN) | PROFINET 포인트 scale/offset | `adapters/profinet/`, `tests/` | T2 (PN) ×2 | T0 A안 |
 | 07 | T12-1 | PN RPC 응답 NDR 첫 워드 = PNIOStatus | `stacks/profinet/`, `tests/`, `tools/ctt/`, `tests/golden/` | T12-1 | |
 | 08 | T12-2 | PN DCP 응답 블록 BlockInfo | `stacks/profinet/`, `tests/`, `tools/ctt/`, `tests/golden/` | T12-2 | T12-22 테스트는 이 수정 뒤에야 블록 해석 가능 |
 | 09 | T12-3 | PN Read/Write 응답 헤더 블록, I&M BlockHeader, Write 데이터 위치 | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-3 ×2 | T12-1 이후 (응답 NDR 해석이 전제) |
@@ -37,43 +37,43 @@
 | 15 | T4 + T12-15 | PN RT 송신 주기 = 협상값, CycleCounter 증가량 | `stacks/profinet/`, `tests/` | T4, T12-15 | |
 | 16 | T5 (PN) + T12-13 | PN 최소 주기 거부(`DB 81 02 0E`)와 GSDML 정리 | `stacks/profinet/`, `stacks/profinet/gsdml/`, `tests/` | T5 (PN) ×2, T12-13 | T12-1 이후 |
 | 17 | T11-1 | EIP O→T 32-bit Run/Idle 헤더 | `stacks/ethernetip/`, `tests/`, `tools/ctt/` | T11-1 | |
-| 18 | T11-2 | EIP EDS 재작성, minor_rev | `stacks/ethernetip/eds/`, `adapters/ethernetip/` | 없음 | 어댑터 부분은 별도 PR 가능 |
+| 18 | T11-2 | EIP EDS 재작성, minor_rev | `stacks/ethernetip/eds/`, `adapters/ethernetip/` | T11-2 ×5 | 어댑터 부분은 별도 PR 가능 |
 | 19 | T11-3 | EIP Forward Open/Close 실패 응답 형식 | `stacks/ethernetip/`, `tests/`, `tools/ctt/` | T11-3 | |
-| 20 | T11-4 | EIP UDP 44818 ListIdentity 등 | `stacks/ethernetip/`, `tests/` | 없음 | |
+| 20 | T11-4 | EIP UDP 44818 ListIdentity 등 | `stacks/ethernetip/`, `tests/` | T11-4 ×4 | ListInterfaces 는 T11-9 에도 있다. T11-9 PR 이 구현하면 `test_list_interfaces_supported` 의 T11-4 표시도 그 PR 에서 지운다 (허용) |
 | 21 | T11-5 | EIP Exclusive Owner 소유권, Input Only, 멀티캐스트 | `stacks/ethernetip/`, `tests/` | T11-5 | |
-| 22 | T11-6 | EIP Connection ID 선택·생산 목적지·출발지 검증 | `stacks/ethernetip/`, `tests/` | 없음 | 보안 |
+| 22 | T11-6 | EIP Connection ID 선택·생산 목적지·출발지 검증 | `stacks/ethernetip/`, `tests/` | T11-6 ×4 | 보안 |
 | 23 | T11-7 | EIP transport class/trigger 검사 | `stacks/ethernetip/`, `tests/` | T11-7 | |
-| 24 | T5 (EIP) | EIP 최소 RPI 거부(`0x01/0x0112` + 허용 RPI)와 EDS RPI 범위 | `stacks/ethernetip/`, `tests/` | 없음 | T11-2 이후 |
-| 25 | T3 | Modbus/SLMP 클라이언트 모드 fail-fast·백오프 (1단계) | `adapters/modbus/`, `adapters/slmp/` (PR 2개) | 없음 | #49 검증 코멘트의 connect 타임아웃 메모 참고 |
-| 26 | T9-5 | Modbus 클라이언트 non-blocking connect | `stacks/modbus/`, `tests/` | 없음 | |
-| 27 | T10-3 | SLMP A~F 로 시작하는 16진 번호 파싱 | `adapters/slmp/`, `tests/` | 없음 | |
-| 28 | T10-4 | SLMP 문자열·32비트 기본 배치를 MELSEC 관례로 | `adapters/slmp/`, `config/`, `tests/` | 없음 | 기존 설정 호환성 주의 |
+| 24 | T5 (EIP) | EIP 최소 RPI 거부(`0x01/0x0112` + 허용 RPI)와 EDS RPI 범위 | `stacks/ethernetip/`, `tests/` | T5 (EIP) ×3 | T11-2 이후. 거부 응답 꼬리는 T11-3 형식에 의존 (T11-3 이후). T11-2 PR 이 EDS RPI Param 까지 넣으면 `test_eds_rpi_param_minimum_matches_cycle` 의 T5 (EIP) 표시도 그 PR 에서 지운다 (허용) |
+| 25 | T3 | Modbus/SLMP 클라이언트 모드 fail-fast·백오프 (1단계) | `adapters/modbus/`, `adapters/slmp/` (PR 2개) | T3 (Modbus 만) | #49 검증 코멘트의 connect 타임아웃 메모 참고. #49 검증 코멘트의 connect 타임아웃 메모 참고. SLMP 는 이미 백오프가 있어 오라클 없음 (완료 조건의 timeout 해석은 사람 결정). T9-1 수정에 백오프까지 넣으면 T3 표시도 그 PR 에서 지운다 (허용) |
+| 26 | T9-5 | Modbus 클라이언트 non-blocking connect | `stacks/modbus/`, `tests/` | T9-5 | |
+| 27 | T10-3 | SLMP A~F 로 시작하는 16진 번호 파싱 | `adapters/slmp/`, `tests/` | T10-3 (테스트 3개) | |
+| 28 | T10-4 | SLMP 문자열·32비트 기본 배치를 MELSEC 관례로 | `adapters/slmp/`, `config/`, `tests/` | T10-4 ×2 (테스트 3개) | 기존 설정 호환성 주의 |
 | 29 | T9-4 | Modbus 수량 위반 예외 03 | `stacks/modbus/`, `tests/`, `tests/scenarios/modbus/` | T9-4 ×2 | |
 | 30 | T9-6 | Modbus Unit ID 0xFF 수락 | `stacks/modbus/`, `tests/` | T9-6 | |
-| 31 | T12-9 | PN 자체 HMAC 보안 기본값 끄기·명칭 정리 | `adapters/profinet/`, `stacks/profinet/`, `docs/` | 없음 | |
-| 32 | T12-10 | PN 알람 RTA-PDU 형식·AlarmCRBlockReq 파싱 | `stacks/profinet/`, `tests/` | 없음 | |
+| 31 | T12-9 | PN 자체 HMAC 보안 기본값 끄기·명칭 정리 | `adapters/profinet/`, `stacks/profinet/`, `docs/` | T12-9 | |
+| 32 | T12-10 | PN 알람 RTA-PDU 형식·AlarmCRBlockReq 파싱 | `stacks/profinet/`, `tests/` | T12-10 ×2 | |
 | 33 | T12-11 | PN LLDP OUI·PortID·필수 TLV | `stacks/profinet/`, `tests/` | T12-11 | |
-| 34 | T12-12 | PN AlarmCRBlockRes 길이, ARBlockRes 포트 | `stacks/profinet/`, `tests/` | 없음 | |
-| 35 | T12-14 | PN DCE/RPC 헤더 처리 (drep, UUID, 단편화, EPM) | `stacks/profinet/`, `tests/` | 없음 | |
-| 36 | T12-16 | PN DCP Set 처리 규칙 | `stacks/profinet/`, `tests/` | 없음 | |
-| 37 | T12-17 | PN 표준 Release(0x0114) | `stacks/profinet/`, `tests/`, `tools/ctt/` | 없음 | |
-| 38 | T12-18 | PN 미지원 레코드 index 에러 | `stacks/profinet/`, `tests/` | 없음 | |
-| 39 | T12-19 | PN SNMP 요청 파싱 | `stacks/profinet/`, `tests/` | 없음 | |
-| 40 | T12-20 | PN DCP IP 적용·이름/I&M 저장 | `stacks/profinet/`, `tests/` | 없음 | |
-| 41 | T12-21 | PN 어댑터 slot/subslot/index, 예제 입력 길이 | `adapters/profinet/`, `config/` | 없음 | |
+| 34 | T12-12 | PN AlarmCRBlockRes 길이, ARBlockRes 포트 | `stacks/profinet/`, `tests/` | T12-12 ×2 | |
+| 35 | T12-14 | PN DCE/RPC 헤더 처리 (drep, UUID, 단편화, EPM) | `stacks/profinet/`, `tests/` | T12-14 ×4 | |
+| 36 | T12-16 | PN DCP Set 처리 규칙 | `stacks/profinet/`, `tests/` | T12-16 ×3 | |
+| 37 | T12-17 | PN 표준 Release(0x0114) | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-17 | |
+| 38 | T12-18 | PN 미지원 레코드 index 에러 | `stacks/profinet/`, `tests/` | T12-18 ×2 | T12-1 이후 |
+| 39 | T12-19 | PN SNMP 요청 파싱 | `stacks/profinet/`, `tests/` | T12-19 ×2 | |
+| 40 | T12-20 | PN DCP IP 적용·이름/I&M 저장 | `stacks/profinet/`, `tests/` | 없음 | 오라클 없음: OS IP 적용은 실제 NIC·root 필요, 비휘발 저장은 설정 인터페이스 미정 |
+| 41 | T12-21 | PN 어댑터 slot/subslot/index, 예제 입력 길이 | `adapters/profinet/`, `config/` | T12-21 | |
 | 42 | T12-22 | PN IOCRReference, DCP 지연 슬롯, DeviceRole 0x01 | `stacks/profinet/`, `tests/` | T12-22 | T12-2 이후 |
-| 43 | T11-8 | EIP Class 1 소비 규칙·FO 파라미터 검증 | `stacks/ethernetip/`, `tests/` | 없음 | |
+| 43 | T11-8 | EIP Class 1 소비 규칙·FO 파라미터 검증 | `stacks/ethernetip/`, `tests/` | T11-8 ×4 (테스트 6개) | |
 | 44 | T11-9 | EIP Encapsulation 편차 | `stacks/ethernetip/`, `tests/` | T11-9 | |
-| 45 | T11-10 | EIP 표준 객체 속성 | `stacks/ethernetip/`, `tests/` | 없음 | |
+| 45 | T11-10 | EIP 표준 객체 속성 | `stacks/ethernetip/`, `tests/` | T11-10 ×10 | |
 | 46 | T11-11 | EIP 자체 보안 프로파일 명칭 정리 | `stacks/ethernetip/`, `docs/` | 없음 | |
-| 47 | T11-12 | EIP Originator Logix 태그 서비스 | `stacks/ethernetip/`, `tests/` | 없음 | |
-| 48 | T11-13 | EIP 기타 (워치독 여유, Reset, 버퍼, LLDP 송신) | `stacks/ethernetip/`, `tests/` | 없음 | |
+| 47 | T11-12 | EIP Originator Logix 태그 서비스 | `stacks/ethernetip/`, `tests/` | T11-12 ×3 | |
+| 48 | T11-13 | EIP 기타 (워치독 여유, Reset, 버퍼, LLDP 송신) | `stacks/ethernetip/`, `tests/` | T11-13 ×4 | |
 | 49 | T10-5 | SLMP 서버 시뮬 엔드 코드·에러 정보 | `stacks/slmp/`, `tests/`, `tests/scenarios/slmp/` | T10-5 | |
 | 50 | T10-6 | SLMP 서버 시뮬 비트 디바이스 워드 접근 선두 번호 | `stacks/slmp/`, `tests/` | T10-6 | |
-| 51 | T9-7 | Modbus TCP_NODELAY | `stacks/modbus/` | 없음 | |
-| 52 | T9-8 | Modbus send EAGAIN 처리 | `stacks/modbus/`, `tests/` | 없음 | |
-| 53 | T9-9 | Modbus TID 카운터 인스턴스 필드로 | `stacks/modbus/` | 없음 | |
-| 54 | T9-10 | Modbus 스키마 `chars_per_word` 통일 | `adapters/modbus/` 또는 `config/` | 없음 | |
+| 51 | T9-7 | Modbus TCP_NODELAY | `stacks/modbus/` | T9-7 | |
+| 52 | T9-8 | Modbus send EAGAIN 처리 | `stacks/modbus/`, `tests/` | T9-8 | T9-8 을 응답 모아 보내기로 구현하면 T9-7 도 통과할 수 있다. 그러면 T9-7 표시도 그 PR 에서 지운다 (허용) |
+| 53 | T9-9 | Modbus TID 카운터 인스턴스 필드로 | `stacks/modbus/` | T9-9 | |
+| 54 | T9-10 | Modbus 스키마 `chars_per_word` 통일 | `adapters/modbus/` 또는 `config/` | T9-10 | |
 | 55 | T8 | `config_loader.c` 를 `LOG_*` 로 | `core/config_loader.c` | 없음 | 패치가 인수인계 문서에 있음 |
 | 56 | T6 | `core/scheduler.c` 중복 정리 | `core/`, `CLAUDE.md`, `CMakeLists.txt` | 없음 | |
 | 57 | T7 | 사이클 지연 µs 측정 | `core/`, `include/fb_api.h` | 없음 | T6 이후 |
