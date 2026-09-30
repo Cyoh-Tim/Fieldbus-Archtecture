@@ -6,11 +6,14 @@ slmp_oracle_server 시드: D0..D9 = 0x1000 + n.
 """
 import socket
 import struct
+import subprocess
+import threading
+import time
 
 import pymcprotocol
 import pytest
 
-from conftest import known_defect
+from conftest import dut_path, free_port, known_defect
 
 
 @pytest.fixture
@@ -85,3 +88,101 @@ def test_bit_device_word_access_head_is_bit_number(plc):
 def test_unsupported_command_end_code(slmp_dut):
     # 저장소 서버는 21바이트 미만 요청을 응답 없이 버리므로 더미 6바이트를 붙여 길이를 맞춘다.
     assert raw_3e(slmp_dut.port, 0x0619, 0x0000, bytes(6)) == 0xC059
+
+
+# ---------------------------------------------------------------- 클라이언트 경로
+# pymcprotocol 은 클라이언트라서 스택의 클라이언트 경로는 사양 기반 가짜 PLC 로 본다.
+# 가짜 PLC 는 0401 워드 읽기에 D[n] = 0x1000 + n 을 돌려주고, 첫 요청만 DELAY 초 늦게 답한다.
+class FakePlc:
+    """Binary 3E 서버 (MELSEC 역할). 저장소 코드를 쓰지 않는다."""
+
+    def __init__(self, first_delay_s: float):
+        self.first_delay_s = first_delay_s
+        self.port = free_port()
+        self._first = True
+        self._lock = threading.Lock()
+        self._srv = socket.socket()
+        self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._srv.bind(("127.0.0.1", self.port))
+        self._srv.listen(4)
+        self.accepts = 0
+        threading.Thread(target=self._accept_loop, daemon=True).start()
+
+    def _accept_loop(self):
+        while True:
+            try:
+                conn, _ = self._srv.accept()
+            except OSError:
+                return
+            self.accepts += 1
+            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+
+    def _serve(self, conn):
+        with conn:
+            while True:
+                hdr = conn.recv(9)
+                if len(hdr) < 9:
+                    return
+                (length,) = struct.unpack_from("<H", hdr, 7)
+                body = b""
+                while len(body) < length:
+                    chunk = conn.recv(length - len(body))
+                    if not chunk:
+                        return
+                    body += chunk
+                # body: timer(2) command(2) subcommand(2) head(3) device(1) points(2)
+                head = int.from_bytes(body[6:9], "little")
+                (points,) = struct.unpack_from("<H", body, 10)
+                data = b"".join(struct.pack("<H", 0x1000 + head + i) for i in range(points))
+                rsp = bytes([0xD0, 0x00]) + hdr[2:7] + struct.pack("<HH", 2 + len(data), 0) + data
+                with self._lock:
+                    delay, self._first = (self.first_delay_s if self._first else 0.0), False
+                if delay:
+                    time.sleep(delay)
+                try:
+                    conn.sendall(rsp)
+                except OSError:
+                    return
+
+    def close(self):
+        self._srv.close()
+
+
+def run_client(port, count, interval_ms=300, timeout_s=60):
+    out = subprocess.run(
+        [str(dut_path("slmp_oracle_client")), "--port", str(port),
+         "--count", str(count), "--interval-ms", str(interval_ms)],
+        capture_output=True, text=True, timeout=timeout_s,
+    ).stdout
+    reads = []
+    for line in out.splitlines():
+        if line.startswith("READ "):
+            _, head, rc, value = line.split()
+            reads.append((int(head), int(rc), int(value, 16)))
+    return reads
+
+
+def test_client_reads_correct_values():
+    plc = FakePlc(first_delay_s=0)
+    try:
+        reads = run_client(plc.port, 5, interval_ms=50)
+    finally:
+        plc.close()
+    assert [(h, rc, v) for h, rc, v in reads] == [(n, 0, 0x1000 + n) for n in range(1, 6)]
+
+
+def test_client_never_returns_stale_value_after_timeout():
+    """T10-2: 타임아웃 뒤 늦게 온 이전 응답을 다음 요청의 결과로 돌려주면 안 된다.
+
+    첫 응답을 스택의 어떤 타임아웃(설정 1 s, 감시 타이머 4 s)보다 늦게 보낸다.
+    실패(rc<0)는 허용하지만, 성공(rc==0)한 읽기는 반드시 자기 주소의 값이어야 한다.
+    """
+    plc = FakePlc(first_delay_s=6.0)
+    try:
+        reads = run_client(plc.port, 12, interval_ms=300)
+    finally:
+        plc.close()
+    ok = [(h, v) for h, rc, v in reads if rc == 0]
+    assert ok, f"성공한 읽기가 하나도 없음: {reads}"
+    wrong = [(h, v) for h, v in ok if v != 0x1000 + h]
+    assert not wrong, f"다른 주소의 값이 돌아옴 (head, value): {wrong}"

@@ -7,7 +7,7 @@
 | 프로토콜 | 오라클 | DUT | 연결 |
 |---|---|---|---|
 | Modbus TCP | pymodbus | `mb_seeded_server` | 루프백 TCP |
-| SLMP 3E | pymcprotocol | `slmp_oracle_server` | 루프백 TCP |
+| SLMP 3E | pymcprotocol (서버 경로), 사양 기반 가짜 PLC (클라이언트 경로) | `slmp_oracle_server`, `slmp_oracle_client` | 루프백 TCP |
 | EtherNet/IP | pycomm3 + 사양 기반 인코더 (Forward Open, Class 1) | `eip_oracle_adapter` | 루프백 TCP/UDP |
 | PROFINET | scapy (`pnio`, `pnio_dcp`, `pnio_rpc`, `lldp`) | `pn_oracle_pipe` | mock Ethernet (stdin/stdout) |
 
@@ -16,7 +16,7 @@
 ```bash
 cmake -S . -B build-oracle -DBUILD_DAEMON=OFF -DBUILD_CTT=OFF -DBUILD_PN_LAB_TOOLS=OFF \
       -DENABLE_PN_TESTS=OFF -DENABLE_EIP_TESTS=OFF -DENABLE_MB_TESTS=OFF -DENABLE_SLMP_TESTS=OFF
-cmake --build build-oracle --target mb_seeded_server slmp_oracle_server eip_oracle_adapter pn_oracle_pipe
+cmake --build build-oracle --target mb_seeded_server slmp_oracle_server slmp_oracle_client eip_oracle_adapter pn_oracle_pipe
 python3 -m venv .venv && .venv/bin/pip install -r tests/oracle/requirements.txt
 ORACLE_BUILD_DIR=build-oracle .venv/bin/python -m pytest tests/oracle
 ```

@@ -57,6 +57,15 @@ description: 코딩 에이전트(Grok 등)가 올린 PR 을 구현자와 독립�
    - 실패가 있으면 그 job 로그를 읽고, base(`main`)에서도 실패하는지 확인한다. PR 이 만든 실패면
      그것만으로 **FAIL** 이다 (4·5단계는 생략 가능, 코멘트에 실패 job 과 원인 요약).
    - Cursor Bugbot 처럼 사용량 한도로 실행되지 못한 봇 체크(neutral)는 판정에 넣지 않는다.
+   - **CI 가 인프라 문제로 돌지 못했으면**(job 에 단계가 없고 몇 초 만에 실패, 로그 404, `main` 도 같은 모습 —
+     GitHub Actions 결제·러너 장애), PR 탓으로 보지 않는다. 대신 **로컬 CI 로 대체**한다:
+     ```bash
+     git fetch origin pull/<N>/head:pr<N>
+     python3 tools/ci/local_ci.py --ref pr<N> --out <스크래치>/localci-pr<N>   # 처음이면 --install-deps
+     ```
+     `tools/ci/local_ci.py` 는 같은 커밋의 `ci.yml` 을 읽어 job 을 같은 명령으로 돌린다 (조건부 job 은 CI 처럼 건너뜀).
+     결과 `summary.md` 표를 검증 코멘트의 "전체 회귀" 근거로 넣고, 코멘트 맨 위에 "CI 는 인프라 문제로 실행되지 않았고
+     로컬 CI 로 대체했다" 고 적는다. 로컬 CI 가 실패하면 CI 실패와 똑같이 FAIL 이다.
 2. CI 가 green 이면, 4·5단계를 위해 PR head 를 별도 worktree(스크래치 디렉토리)에 체크아웃해서
    로컬로 빌드한다. CI 에 없는 `-Werror` 를 추가해 경고 회귀도 본다.
 
