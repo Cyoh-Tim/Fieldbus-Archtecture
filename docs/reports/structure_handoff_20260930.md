@@ -44,7 +44,7 @@ T8 (config_loader 정리)              ─ 독립
 | T5 | 중간 | 컨트롤러가 요구하는 주기가 `cycle_ms` 보다 짧을 때 처리 | 아니오 |
 | T6 | 낮음 | `core/scheduler.c` 가 쓰이지 않고 루프가 중복됨 | 아니오 |
 | T7 | 낮음 | 사이클 지연을 ms 로 잘라서 측정함 | 아니오 |
-| T8 | 낮음 | `config_loader.c` 가 로깅 규칙을 어기고 기능 매크로 위치가 틀림 | 아니오 |
+| T8 | 낮음 | `config_loader.c` 가 `LOG_*` 대신 `fprintf` 를 씀 (사전 검증 완료, 패치 포함) | 아니오 |
 
 ---
 
@@ -248,20 +248,64 @@ PN RT (`pn_rt.c:93`)와 EIP Class 1 (`stacks/ethernetip/src/eip_io.c:105`) 모�
 
 ---
 
-## T8. `config_loader.c` 가 로깅 규칙을 어기고 기능 매크로 위치가 틀림
+## T8. `config_loader.c` 가 `LOG_*` 대신 `fprintf` 를 씀
 
-**문제:**
-- 오류를 `fprintf(stderr, …)` 로 직접 출력한다 (`core/config_loader.c:42`, `:49`, `:57`).
-  `CLAUDE.md` 는 `LOG_ERROR`/`LOG_WARN` 을 쓰라고 한다.
-- `#define _POSIX_C_SOURCE 200809L` 이 첫 `#include "config_loader.h"` 다음(3행)에 있다.
-  기능 매크로는 모든 include 보다 앞에 있어야 하며, 지금 위치에서는 `strdup` 선언이
-  보이는지가 libc 설정에 따라 달라진다.
-- (참고) `core/main.c:19` 의 사용법 출력 `fprintf` 는 CLI 사용법이라 예외로 둬도 된다.
+**문제:** 오류를 `fprintf(stderr, …)` 로 직접 출력한다 (`core/config_loader.c:42`, `:49`, `:57`).
+`CLAUDE.md` 는 `LOG_ERROR`/`LOG_WARN` (`core/logger.h`)을 쓰라고 한다.
+(참고) `core/main.c:19` 의 사용법 출력 `fprintf` 는 CLI 사용법 안내라 예외로 둬도 된다.
 
-**수정 범위:** `core/config_loader.c`.
+**`logger.h` 를 써도 되는지 사전 검토 (2026-09-30, 스크래치 복사본에서 확인):**
+- 같은 `core/` 의 `fb_api.c`, `main.c`, `scheduler.c` 와 모든 어댑터·스택이 이미 `logger.h` 를 쓴다.
+  헤더만으로 된 매크로라 초기화가 필요 없고, 출력도 기존과 같은 `stderr` 로 나간다.
+- `config_load()` 가 실패하면 `fb_api.c:393-394` 는 `"config_load failed"` 만 남긴다.
+  구체적인 원인은 이 로그에만 있으므로 **메시지 내용은 그대로 유지**해야 한다.
+- 로그 문구를 파싱하는 테스트나 스크립트는 없다 (`[config]` 문자열은 문서에만 등장).
+- 아래 패치를 적용해 gcc 와 clang 모두 `-Wall -Wextra -Werror` (프로젝트 기본 `gnu11`)로 빌드가
+  통과했고, `test_fb_api` 도 OK 였다. 세 오류 경로의 실제 출력:
+  ```
+  [2026-09-30 01:18:43][ERROR][config] 파일을 열 수 없음: /nonexistent.json
+  [2026-09-30 01:18:43][ERROR][config] JSON 파싱 실패: ad
+  [2026-09-30 01:18:43][ERROR][config] "protocol" 필드가 없거나 문자열이 아님
+  ```
 
-**완료 조건:** `-Wall -Wextra -Werror -std=c11` 빌드가 통과하고, 에러 메시지 형식이
-`[ts][ERROR][config] …` 로 통일된다.
+**권장 패치 (검증한 그대로):**
+```c
+#define _POSIX_C_SOURCE 200809L      /* 파일 맨 위로 이동 */
+
+#include "config_loader.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <cJSON.h>
+
+#include "logger.h"
+...
+LOG_ERROR("config", "파일을 열 수 없음: %s", path);
+LOG_ERROR("config", "JSON 파싱 실패: %s", ep ? ep : "(unknown)");
+LOG_ERROR("config", "\"protocol\" 필드가 없거나 문자열이 아님");
+```
+
+**주의:**
+1. `config_loader.c` 의 `#define _POSIX_C_SOURCE` 를 **지우지 말 것.** `logger.h` 도 같은 값을
+   정의하지만, `<stdio.h>` 뒤에 include 되면 이미 늦다 (`strdup`, `localtime_r` 선언 노출이
+   `-std=c11` 에서 달라질 수 있음). 같은 값의 재정의라 경고는 나지 않는다.
+2. 현재 3행 위치도 **지금은 실제 버그가 아니다.** `config_loader.h` 가 시스템 헤더를 include 하지
+   않기 때문이다. 다만 헤더에 include 가 추가되는 순간 깨지므로 맨 위로 옮긴다.
+   (앞선 판에서 "지금 위치에서 선언 노출이 달라진다"고 쓴 것은 과장이었다.)
+3. 인자 없는 `LOG_ERROR("config", "리터럴")` 은 `##__VA_ARGS__` (GNU 확장)에 의존한다.
+   저장소 전체에 이미 41곳이 같은 형태이고, 기존 코드도 clang `-Wpedantic` 에서는
+   `-Wgnu-zero-variadic-macro-arguments` 로 실패한다. 이는 T8 범위 밖이며, `-Wpedantic` 을
+   게이트로 쓰려면 `logger.h` 를 따로 고쳐야 한다.
+4. `cJSON_GetErrorPtr()` 는 오류 위치부터 **입력의 나머지 전체**를 돌려준다 (위 예시처럼 개행까지 포함).
+   큰 설정 파일이면 로그가 길어지므로 `%.40s` 처럼 자르는 것을 권장한다 (선택).
+
+**수정 범위:** `core/config_loader.c` (+ 주석을 고치려면 `core/config_loader.h` 17행의
+"stderr 에 원인 로그 출력").
+
+**완료 조건:** gcc/clang `-Wall -Wextra -Werror` 빌드와 `test_fb_api` 가 통과하고, 세 오류 경로가
+`[ts][ERROR][config] …` 형식으로 출력된다.
 
 ---
 
