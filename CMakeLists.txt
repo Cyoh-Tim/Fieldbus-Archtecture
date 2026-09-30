@@ -308,6 +308,13 @@ if(BUILD_ORACLE_DUTS)
     target_link_libraries(eip_oracle_adapter PRIVATE eip_stack)
     add_executable(pn_oracle_pipe tests/oracle/dut/pn_oracle_pipe.c)
     target_link_libraries(pn_oracle_pipe PRIVATE pn_stack)
+    # 어댑터 수준 PN DUT (fb_api + adapters/profinet). cJSON 이 필요해 BUILD_DAEMON=ON 일 때만.
+    # --wrap=pn_stack_create 로 어댑터가 만든 스택에 mock Ethernet 을 붙인다.
+    if(BUILD_DAEMON)
+        add_executable(pn_oracle_app tests/oracle/dut/pn_oracle_app.c)
+        target_link_libraries(pn_oracle_app PRIVATE fieldbus m)
+        target_link_options(pn_oracle_app PRIVATE "LINKER:--wrap=pn_stack_create")
+    endif()
 endif()
 
 enable_testing()
