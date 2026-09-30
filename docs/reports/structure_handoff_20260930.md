@@ -59,7 +59,7 @@ T12-0 (PN 독립 오라클) ──▶ T12-1…22 ──▶ T4 ──▶ T5
 | T10 | **치명**~낮음 | SLMP 사양 차이·결함 7건 (비트 단위 니블 형식, 타임아웃 후 stale 응답 등) | T10-7 만 사양 확인 |
 | T11 | **치명**~낮음 | EtherNet/IP 가 표준 스캐너와 연결되지 않는 결함 14건 (Run/Idle 헤더, EDS, FO 오류 형식 등). **T11-0(독립 오라클)부터** | 아니오 |
 | T12 | **치명**~낮음 | PROFINET 이 실제 컨트롤러와 연결되지 않는 결함 23건. **T12-0(독립 오라클)부터** | 아니오 |
-| T13 | 정리 | 닫힌 PR 의 원격 브랜치 46개 정리 (삭제 43, 태그 보관 3 — 목록 확인 완료) | 아니오 |
+| T13 | 정리 | **완료 (2026-09-30).** 원격에는 `main` 과 작업 브랜치만 남음. 보관 대상 3개는 태그 대신 PR ref 로 남아 있다 (`refs/pull/1/head`, `refs/pull/5/head`, `refs/pull/6/head`) | — |
 
 ---
 
@@ -483,6 +483,10 @@ IOCR 블록 없는 Connect, BlockInfo 없는 DCP). 즉 "거울 구현" 상태라
 최종 확인은 실 컨트롤러(TIA Portal 또는 CODESYS Control) 연결이다 (`docs/ctt_lab.md` 절차).
 
 ## T13. 저장소 정리 — 남아 있는 원격 브랜치 삭제
+
+> **완료 (2026-09-30).** 원격 브랜치가 `main` 과 작업 브랜치만 남도록 정리됐다. `archive/*` 태그는 만들어지지 않았지만,
+> 보관 대상 3개 브랜치의 커밋은 GitHub 이 PR 마다 유지하는 ref 로 남아 있다:
+> `git fetch origin refs/pull/1/head` (profinet-cm-rtc1-dcp), `refs/pull/5/head` (skip-ethercat), `refs/pull/6/head` (codesys-pooltest).
 
 **문제:** 원격 브랜치가 48개다. `main` 과 이 문서의 브랜치를 빼면 46개 모두 이미 닫힌 PR 의 브랜치다.
 (2026-09-30 확인. Claude 세션은 작업 브랜치 외에는 푸시 권한이 없어 직접 삭제하지 못했다.)
