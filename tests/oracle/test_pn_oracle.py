@@ -908,8 +908,6 @@ def t2_app(pn_app):
     return app
 
 
-@known_defect("T2 (PN)", "scale 포인트에 코어가 넘긴 float32(BE) 앞 2바이트를 그대로 쓴다 (300 → 43 96). "
-              "기대: 원시값 3000 = 0B B8 (PN 빅 엔디안)")
 def test_adapter_scaled_point_rtc1_bytes(pn_app):
     app = t2_app(pn_app)
     frames = rtc1_frames(app, poll_ms=60, layout=T2_LAYOUT)
@@ -917,7 +915,6 @@ def test_adapter_scaled_point_rtc1_bytes(pn_app):
     assert c_sdu(frames[-1])[0:2] == b"\x0b\xb8", f"IO 데이터 {c_sdu(frames[-1])[0:2].hex()}"
 
 
-@known_defect("T2 (PN)", "scale 포인트 읽기에 scale 을 적용하지 않는다 (300 을 쓰고 읽으면 17302). 기대: 300.0")
 def test_adapter_scaled_point_read_roundtrip(pn_app):
     app = t2_app(pn_app)
     vals = [x for tag, x in app.cmd("RF32 level") if tag == "F32"]
