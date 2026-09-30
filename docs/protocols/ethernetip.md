@@ -1522,7 +1522,7 @@ while (rx_len >= 24) {
 3. Transport class/trigger 지원? → 0x01/0x0103
 4. Electronic key → 0x01/0x0114·0x0115·0x0116
 5. 경로의 Assembly/connection point 유효? → 0x01/0x0315, 0x0117
-6. RPI 범위 → 0x01/0x0111 (+ 허용 범위 반환)
+6. RPI 범위 → 0x01/**0x0112** "RPI value(s) not acceptable" + 허용 RPI 반환 (추가 상태 6워드: `0x0112`, O→T/T→O RPI type 각 1바이트, O→T RPI UDINT, T→O RPI UDINT. type 2 = 최소 허용 RPI). 0x0111 은 허용값 형식이 없는 레거시 코드 [사양 — 판본별 문구 사양서 확인 필요]
 7. NCP(Type/Priority/Fixed) 지원? → 0x01/0x0108
 8. 크기 → 0x01/0x0109 (또는 0x0127/0x0128 — 사양서 확인 필요)
 9. 소유권: 이미 Exclusive Owner 가 있으면 → 0x01/0x0106
@@ -1602,8 +1602,9 @@ else {
 - 실효 최소 주기 = `cycle_ms`. RPI 가 사이클보다 짧으면(예: RPI 2 ms, cycle 8 ms) 8 ms 마다 1개만 나간다.
 - RPI 가 사이클의 배수가 아니면 송신 간격이 사이클 단위로 **양자화** 되어 흔들린다 (예: RPI 10 ms, cycle 8 ms → 8/16 ms 간격 혼재).
 - 저장소 에이징 결과(8 ms 사이클 편차 0.1 ms, `CLAUDE.md`) 는 **RPI = cycle 배수** 일 때의 이야기다.
-- FO 응답의 API 는 RPI 를 그대로 돌려준다 — 실제로 지킬 수 없는 RPI 도 "수락" 한다. 사양은 지원 못 하는 RPI 에 0x0111 을
-  주거나 API 로 실제 값을 알려 주게 되어 있다.
+- FO 응답의 API 는 RPI 를 그대로 돌려준다 — 실제로 지킬 수 없는 RPI 도 "수락" 한다. 사양은 지원 못 하는 RPI 에 0x01/0x0112
+  (허용 RPI 포함) 로 거부하거나, 수락한다면 API 에 실제 생산 주기를 넣게 되어 있다. Originator 는 T→O 타임아웃을
+  API × 4 × 2^N 으로 계산하므로, API 를 요청 RPI 로 에코하면 8 ms 폴링에서는 곧바로 타임아웃이 난다.
 
 같은 poll 안에서 순서는 `accept → TCP → UDP 수신 → 워치독 → 생산 → 송신(flush) → LLDP → TLS` 다 (`eip_stack.c:594-620`).
 
@@ -1948,7 +1949,7 @@ fo(req, large):
     path: [ekey] 20 04 24 cfg [80 data] 2C cons 2C prod
           ekey 불일치 → 0x0114/0x0115/0x0116
           cons/prod 가 내 Assembly 아님 → 0x0315 / 0x0117
-    if RPI 범위 밖 → 0x01/0x0111
+    if RPI 범위 밖 → 0x01/0x0112 (+ type 2 최소 허용 RPI)
     size_ot = NCP.size;  expect_ot = out_size + 2 + (O→T 헤더 ? 4 : 0)
     size_to = NCP.size;  expect_to = in_size + 2
     불일치 → 0x01/0x0109 (또는 0x0127/0x0128)
@@ -2550,7 +2551,7 @@ EtherNet/IP 기본 프로토콜(CIP Security 없이)은 **인증·암호화가 �
 - [ ] transport class/trigger 검사(0x0103), NCP type/priority/fixed 검사(0x0108)
 - [ ] Electronic key 검사(0x0114~0x0116)
 - [ ] 크기 = 데이터 + 2 + (Run/Idle 4) (0x0109)
-- [ ] RPI 범위(0x0111), API 반환
+- [ ] RPI 범위(0x0112 + 허용 RPI), API 에 실제 생산 주기 반환
 - [ ] Exclusive Owner 중복(0x0106), Input Only / Listen Only / 멀티캐스트
 - [ ] Target 이 O→T ID 선택(예측 어려운 값)
 - [ ] 연결 직후 T→O 생산, 목적지 = Originator IP:2222 또는 Sockaddr
@@ -2671,7 +2672,8 @@ EtherNet/IP 기본 프로토콜(CIP Security 없이)은 **인증·암호화가 �
 | 0x0108 | Invalid network connection parameter |
 | 0x0109 | Invalid connection size |
 | 0x0110 | Target for connection not configured |
-| 0x0111 | RPI not supported |
+| 0x0111 | RPI not supported (레거시; 허용값 형식 없음) |
+| 0x0112 | RPI value(s) not acceptable — 추가 상태에 허용 RPI 포함 (6워드) |
 | 0x0113 | Out of connections |
 | 0x0114 | Vendor ID or product code mismatch |
 | 0x0115 | Device type mismatch |
@@ -2681,13 +2683,18 @@ EtherNet/IP 기본 프로토콜(CIP Security 없이)은 **인증·암호화가 �
 | 0x0119 | Non-listen only connection not opened |
 | 0x011A | Target object out of connections |
 | 0x011B | RPI is smaller than the production inhibit time |
+| 0x011C | Transport class not supported (사양서 확인 필요) |
+| 0x011D | Production trigger not supported (사양서 확인 필요) |
+| 0x011E | Direction not supported (사양서 확인 필요) |
+| 0x011F~0x0126 | NCP 필드별 오류 — O→T/T→O fixed/variable, priority, connection type(멀티캐스트 거절은 0x0124 T→O type), redundant owner, config size (정확한 배정은 사양서 확인 필요) |
 | 0x0127 | Invalid O→T network connection size (사양서 확인 필요) |
 | 0x0128 | Invalid T→O network connection size (사양서 확인 필요) |
+| 0x0133 | Connection timeout multiplier not acceptable (multiplier 8~255 예약) (사양서 확인 필요) |
 | 0x0203 | Connection timed out |
 | 0x0204 | Unconnected request timed out |
 | 0x0205 | Parameter error in unconnected request |
 | 0x0301 | No buffer memory available |
-| 0x0311 | Invalid port |
+| 0x0311 | Port not available (문헌에 따라 "Invalid port") |
 | 0x0312 | Invalid link address |
 | 0x0315 | Invalid segment in connection path |
 

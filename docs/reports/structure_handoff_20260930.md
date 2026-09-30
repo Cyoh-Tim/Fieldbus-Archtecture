@@ -33,6 +33,7 @@ T4 (PN RT 송신 주기) ──▶ T5 (최소 주기 제한)
 T6 (scheduler 중복 정리) ──▶ T7 (µs 지연 측정)
 T8 (config_loader 정리)              ─ 독립
 T9 (Modbus 결함) · T10 (SLMP 결함)   ─ T9-5/T10-2 는 T3 과 함께
+T11-0 (EIP 독립 오라클) ──▶ T11-1…13 (+T1) ──▶ T5
 T12-0 (PN 독립 오라클) ──▶ T12-1…22 ──▶ T4 ──▶ T5
 ```
 
@@ -49,7 +50,7 @@ T12-0 (PN 독립 오라클) ──▶ T12-1…22 ──▶ T4 ──▶ T5
 | T8 | 낮음 | `config_loader.c` 가 `LOG_*` 대신 `fprintf` 를 씀 (사전 검증 완료, 패치 포함) | 아니오 |
 | T9 | 높음~낮음 | Modbus 사양 차이·결함 11건 (클라이언트 TID 영구 불일치, 8진 주소 파싱 등) | T9-11 만 예 |
 | T10 | **치명**~낮음 | SLMP 사양 차이·결함 7건 (비트 단위 니블 형식, 타임아웃 후 stale 응답 등) | T10-7 만 사양 확인 |
-| T11 | (작성 예정) | EtherNet/IP 사양 차이 — Fable 검토와 대조 후 | — |
+| T11 | **치명**~낮음 | EtherNet/IP 가 표준 스캐너와 연결되지 않는 결함 14건 (Run/Idle 헤더, EDS, FO 오류 형식 등). **T11-0(독립 오라클)부터** | 아니오 |
 | T12 | **치명**~낮음 | PROFINET 이 실제 컨트롤러와 연결되지 않는 결함 23건. **T12-0(독립 오라클)부터** | 아니오 |
 
 ---
@@ -235,7 +236,16 @@ PN RT (`pn_rt.c:93`)와 EIP Class 1 (`stacks/ethernetip/src/eip_io.c:105`) 모�
   `cycle_ms` 를 바꾸면 GSDML 도 같이 바꿔야 하므로 GSDML 생성·검증 스크립트를 두는 편이 안전하다.
 - RR 은 2의 거듭제곱만 받는다 (상한은 사양서 확인 필요).
 
-**EtherNet/IP 쪽 값:** T11 에서 Fable 검토 결과로 채운다.
+**EtherNet/IP 쪽 값 (Fable 사양 검토, 실행 확인):**
+- 현재 RPI 500µs Forward Open 도 수락하고 응답 API 에 요청값(`F4 01 00 00`)을 그대로 돌려준다. Originator 는
+  T→O 타임아웃을 `API × 4 × 2^N` 으로 계산하므로 8ms 폴링에서는 곧바로 연결 폴트가 난다.
+- 거부: General Status `0x01` + Extended `0x0112` "RPI value(s) not acceptable". 추가 상태에 허용값을 **포함해야**
+  한다 → Additional Status Size = 6워드: `0x0112`, O→T RPI type(1B) + T→O RPI type(1B), O→T RPI(UDINT), T→O RPI(UDINT).
+  RPI type 2 = 최소 허용 RPI → 양방향 모두 type 2 + `cycle_ms×1000`. (`0x0111` 은 허용값 형식이 없는 레거시 코드)
+- 응답은 Unsuccessful Forward_Open Response 형식(T11-3: triad + Remaining Path Size)을 따라야 한다.
+- 수락할 때 RPI 가 `cycle_ms` 의 배수가 아니면 API 에 실제 생산 주기(올림한 배수)를 넣는다.
+- EDS: Connection 항목의 O=>T / T=>O RPI 칸에 Param 참조를 넣고, `[Params]` 에 UDINT(0xC8), 단위 µs,
+  min = `cycle_ms×1000` 으로 선언한다. Studio 5000 의 RPI 입력 범위가 그 값으로 제한된다 (T11-2 의 EDS 재작성과 같이).
 
 **완료 조건:** 짧은 RPI/주기 요청이 거부되는 CTT 시나리오를 추가한다.
 
@@ -375,6 +385,44 @@ T10-1 과 T10-2 는 이 세션에서 코드를 읽어 다시 확인했다.
 **완료 조건 (공통):** 항목마다 재현 테스트를 `tests/test_slmp_stack.c` 나 `tests/test_slmp_adapter.c` 에 추가하고,
 `ctest -R slmp -LE soak_ci` 가 통과한다. T10-1 은 가능하면 실 MELSEC PLC(또는 GX Simulator3)로 확인한다.
 
+## T11. EtherNet/IP — 표준 스캐너와 연결되지 않는 결함들
+
+**출처와 신뢰도:** 두 개의 독립 분석이 같은 결론을 냈다.
+(1) [`../protocols/ethernetip.md`](../protocols/ethernetip.md) 부록 D (41건) — 하네스로 요청을 주입해 응답 바이트 확인.
+(2) Fable 사양 검토 (EIP-S1–S12) — 스택에 링크한 프로브로 응답 바이트 확인 (P1~P16).
+"교차" 는 두 분석이 모두 지적한 항목이다. 실제 Studio 5000 / CODESYS 스캐너로는 아직 확인하지 않았다.
+
+**전제:** CTT 가 저장소 자체 형식(O→T = Assembly+2)으로 요청을 보내므로 T11-1 같은 결함을 잡지 못한다.
+T12-0 과 같은 원칙으로, 스택과 가정을 공유하지 않는 기준(Wireshark `enip`/`cip` 디섹터, 또는 OpENer·pycomm3
+같은 독립 구현)으로 검증하는 테스트를 먼저 둔다 (**T11-0**).
+
+| ID | 우선순위 | 문제 | 근거 | 교차 |
+|---|---|---|---|---|
+| T11-0 | **선행** | 독립 오라클이 없다. CTT 의 Forward Open 을 Logix 기본 형식(O→T 32-bit Run/Idle 헤더, 0x8001 sockaddr, 전자 키 포함)으로 만들고, 응답을 독립 디섹터로 파싱하는 테스트를 추가한다 | `tools/ctt/proto/ethernetip/` | 교차 |
+| T11-1 | **치명** | **O→T 32-bit Run/Idle 헤더 형식을 거부한다.** 표준 O→T 크기는 `data + 2(seq) + 4(Run/Idle)` 인데 `asm` 또는 `asm+2` 만 받는다 → 응답 `D4 00 20 01 09 01`. 받아도 헤더를 벗기지 않아 output 이미지에 헤더 바이트가 들어가고, Run/Idle 비트를 해석하지 않아 **PLC 가 PROGRAM(Idle) 모드여도 출력이 유지된다(안전 문제).** 저장소 EDS(`0x44640405`)는 오히려 32-bit 헤더를 선언해 스택과 모순. **Studio 5000 Generic Ethernet Module / 이 EDS 로 만든 모듈의 Exclusive Owner 연결이 열리지 않는다** | `stacks/ethernetip/src/eip_cm.c:42-45`, `:198-210`; `eip_io.c:64-74`; `eds/FieldbusSensor.eds:58` | 교차 |
+| T11-2 | **치명** | **EDS 가 문법·내용 모두 틀렸다.** Connection1 의 RPI 칸에 값 2개(`1000000,8000,`)를 넣어 이후 필드가 모두 밀렸고, 연결 경로 문자열이 없다. Param1 은 타입 0xC1(BOOL)인데 크기 2, `MinRev = 1` 인데 Identity 는 1.0 (전자 키 불일치), Port1 필드 구성 비표준. 어댑터는 `minor_rev = 0` 고정 | `eds/FieldbusSensor.eds:17`, `:25-37`, `:56-66`, `:68-75`; `adapters/ethernetip/ethernetip_adapter.c:161-162` | Fable 단독 (문서는 EDS 해설만) |
+| T11-3 | 높음 | **Forward Open/Close 실패 응답 형식이 틀렸다.** General Status 로 0x20/0x05/0x04/0x02 를 쓴다 (CM 오류는 0x01 + Extended). 응답 뒤 Connection Serial·Vendor·Originator Serial·Remaining Path Size 10바이트가 없다. 없는 연결의 Forward Close 가 성공한다 (사양 0x01/0x0107) | `eip_cm.c:8-20`(`cm_err`), `:136`, `:178`, `:184`, `:194`, `:207`, `:224`, `:297-307` | 교차 |
+| T11-4 | 높음 | **UDP 44818 수신 소켓이 없어** RSLinx/Studio 5000 브라우즈(브로드캐스트 ListIdentity)에 장치가 안 보인다. ListIdentity 의 sockaddr·Status·State 가 0/0/0xFF 고정, ListInterfaces 가 status 1 | `eip_stack.c:193-215`, `:321-337`; `eip_encap.c:40-62`, `:384-387` | 교차 |
+| T11-5 | 높음 | **Exclusive Owner 소유권 검사가 없다.** 다른 triad 의 두 번째 EO Forward Open 도 성공해서 두 PLC 가 같은 출력을 덮어쓴다(안전, 사양 0x01/0x0106). Input Only·Listen Only(heartbeat connection point) 미지원, 멀티캐스트 요청도 수락 후 유니캐스트로 송신 (사양: 구현하거나 0x01/0x0124 로 거절) | `eip_cm.c:34-40`, `:106-125`, `:212-220`; `eip_encap.c:259-283` | 교차 |
+| T11-6 | 높음 | **Connection ID·생산 목적지 처리가 사양과 달라 I/O 위조가 가능하다.** O→T ID 를 Target 이 고르지 않고 요청값을 그대로 쓰며 중복 검사도 없다. ID 는 0x20000001 부터 순차. T→O 는 첫 O→T 패킷을 받아야 시작하고, 목적지를 매 O→T 패킷의 출발지로 갱신한다(0x8001 sockaddr 무시, 출발지 IP 검증 없음). ID 를 맞힌 임의 호스트가 출력을 위조하거나 T→O 를 가로챌 수 있다 | `eip_io.c:57-58`, `:111`; `eip_cm.c:228-233`; `eip_stack.c:157`; `eip_encap.c:193-211` | 교차 |
+| T11-7 | 높음 | **Transport class/trigger 를 검사하지 않는다.** Class 3 Forward Open 도 Class 1 슬롯으로 수락된다. 반면 Class 3 데이터 경로(SendUnitData 0x70)는 미구현(status 1). 제품 범위에 "Class 3" 이 있으나 실제로는 없다. 미지원 조합은 0x01/0x0103 으로 거부해야 한다 | `eip_cm.c:176`, `:188-196`; `eip_encap.c:384-387` | 교차 |
+| T11-8 | 중간 | Class 1 소비 규칙: 순번 비교 없음(UDP 재정렬 시 옛 데이터 적용, 출력 역행), timeout multiplier >7 을 7로 클램프(사양 0x01/0x0133), 전자 키 미검사(0x0114~0x0116), 경로의 Data Segment(0x80, config 데이터) 거부 — EDS 가 Config Assembly 를 선언하므로 EDS-AOP 요청이 즉시 거절될 수 있다 | `eip_io.c:59-67`; `eip_cm.c:61-104`, `:153`, `:243-247`; `eip_internal.h:199-212` | 교차 |
+| T11-9 | 중간 | Encapsulation: NOP·UnRegisterSession 에 응답한다(사양: 무응답, Unregister 후 TCP 종료). RegisterSession 버전≠1(→0x0069)·옵션≠0(→0x0003) 미검사, 헤더 Options 필드 미검사, SendUnitData·ListInterfaces 미구현 | `eip_encap.c:302-352`, `:384-387` | 교차 |
+| T11-10 | 중간 | 표준 객체 속성 오류: Identity Status 에 Owned(bit0) 대신 Configured(bit2), State 2 를 결함 상태로 오용, Protection Mode 를 attr 17 로 노출(attr 17 은 Geographic_Location; 정확한 번호 사양서 확인 필요). QoS 속성 번호가 3 밀림(attr 1 이 802.1Q Tag Enable 이어야 함), DSCP 를 소켓에 적용 안 함. TCP/IP attr 2 ACD 비트 위치 오류(bit 2 → bit 7), attr 5 없음, attr 10/11 타입 오류, attr 13 없음. Port Type 0(사양 4), 클래스 레벨 속성 없음, 읽기 전용 Set 에 0x05(사양 0x0E) | `stacks/ethernetip/src/eip_cip.c:78`, `:110-170`, `:298-331`, `:375-516`; `eip_stack.c:647` | 교차 |
+| T11-11 | 중간 | **"CIP Security Class 1/2" 는 ODVA Vol 8 CIP Security 가 아니다.** 미할당 CPF 항목 0x00C1 에 HMAC-SHA256(session‖CIP) 을 붙이는 독자 방식이고, Get 무인증·세션 내 재전송 가능·UDP I/O 무보호·평문 44818 병존·DTLS 없음. 켜면 표준 Originator 의 Forward Open 이 거절된다. 명칭을 "저장소 무결성 프로파일(비표준)" 으로 바꾸고, 진짜 CIP Security 가 목표면 TLS/DTLS + 0x5D/0x5E/0x5F + ListIdentity 0x0086 부터 재설계 | `stacks/ethernetip/include/eip_sec.h:21`, `src/eip_sec.c:29-184`, `eip_cip.c:519-546` | 교차 |
+| T11-12 | 중간 | Originator: tag 읽기·쓰기에 Logix 태그 서비스(0x4C/0x4D) 대신 Get/Set_Attribute_Single 을 쓴다 → Logix 태그 접근 불가. TCP 재조립 없음, 보안 MAC 미부착 | `stacks/ethernetip/src/eip_client.c` | **단독** (문서) |
+| T11-13 | 낮음 | FO 직후 워치독이 RPI×배수로 바로 무장(첫 패킷 여유 없음; 관례 10s, 사양 조항 확인 필요). Identity Reset 타입 무시. UCMM 응답 버퍼 568B(큰 Assembly Get 실패). Encap 8KB 초과 시 TCP 종료. LLDP 는 메모리에만 생성되고 실제로 송신되지 않는다 | `eip_cm.c:248-249`; `eip_cip.c:298-308`; `eip_encap.c:244`; `eip_stack.c:498-501`; `eip_lldp.c:40`, `:96-100` | 교차 |
+
+**권장 순서:** T11-0 → T11-1 → T11-2 → T11-3 → (T1: 바이트 순서) → T11-4 → T11-5 → T11-6 → T5 → 나머지.
+T11-1·T11-2·T11-3 이 해결돼야 Studio 5000 Generic/EDS 모듈로 Exclusive Owner 연결이 열린다 (Fable 판단).
+T1(바이트 순서)은 Fable 검토에서도 실행으로 다시 확인됐다 (`fb_read_u32` 왕복은 300 으로 돌아와 앱 테스트로는 보이지 않고, 스캐너에서만 뒤집힌다).
+
+**범위 주의:** 대부분 `stacks/ethernetip/` 이고, T11-2 의 `minor_rev` 파싱과 T1 은 `adapters/ethernetip/`, T11-0 은 `tools/ctt/`·`tests/` 다.
+디렉토리별로 PR 을 나눈다.
+
+**완료 조건:** T11-0 의 독립 오라클 테스트가 각 항목의 수정 전 실패와 수정 후 통과를 보여 준다.
+최종 확인은 실제 스캐너(Studio 5000 Generic Ethernet Module / EDS-AOP, 또는 CODESYS EtherNet/IP Scanner) 연결이다.
+
 ## T12. PROFINET — 실제 컨트롤러와 연결되지 않는 결함들
 
 **출처와 신뢰도:** 두 개의 독립 분석이 같은 결론을 냈다.
@@ -425,5 +473,4 @@ IOCR 블록 없는 Connect, BlockInfo 없는 DCP). 즉 "거울 구현" 상태라
 
 ## 이후 추가될 항목
 
-EtherNet/IP 문서의 사양 차이(`docs/protocols/ethernetip.md` 부록 D, 41건)는 Fable 사양 검토 결과와 대조한 뒤
-T11 로 덧붙인다.
+네 프로토콜 모두 반영 완료. 새로 발견되는 항목은 T13 이후로 덧붙인다.
