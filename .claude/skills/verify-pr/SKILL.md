@@ -5,7 +5,8 @@ description: 코딩 에이전트(Grok 등)가 올린 PR 을 구현자와 독립�
 
 # PR 독립 검증 절차
 
-이 저장소는 **Grok 이 구현하고 Claude 가 검증**한다. 검증자는 구현자의 테스트를 믿지 않는다.
+이 저장소는 **구현 에이전트(Grok 등)가 코드를 고치고, Claude 가 검증과 CI/CD 를 맡는다.**
+정기 검증은 Claude 의 주간 루틴이 실행한다. 검증자는 구현자의 테스트와 설명을 믿지 않는다.
 배경: 2026-09-30 분석에서 EtherNet/IP·PROFINET 스택이 자체 테스트를 모두 통과했지만, CTT·golden·단위
 테스트가 스택과 같은 잘못된 가정을 공유하고 있었다 ([`docs/reports/structure_handoff_20260930.md`](../../../docs/reports/structure_handoff_20260930.md) T11-0, T12-0).
 사양서 원문이 없으므로, **실제 장비와 상호운용이 검증된 오픈소스 구현체를 오라클로 쓴다.**
