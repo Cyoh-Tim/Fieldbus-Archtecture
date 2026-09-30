@@ -290,6 +290,24 @@ if(ENABLE_SLMP_TESTS)
     endif()
 endif()
 
+# ---- Oracle DUTs (tests/oracle) ----
+# 스택을 독립 구현체(pymodbus / pymcprotocol / pycomm3 / scapy)로 교차 확인할 때
+# 시험 대상(DUT)으로 띄우는 실행 파일. 판정은 Python 오라클이 한다. ctest 대상 아님.
+option(BUILD_ORACLE_DUTS "tests/oracle 교차 확인용 DUT 실행 파일" ON)
+if(BUILD_ORACLE_DUTS)
+    if(NOT TARGET mb_seeded_server)
+        add_executable(mb_seeded_server tests/mb_seeded_server.c)
+        target_include_directories(mb_seeded_server PRIVATE stacks/modbus/include include core)
+        target_link_libraries(mb_seeded_server PRIVATE mb_stack)
+    endif()
+    add_executable(slmp_oracle_server tests/oracle/dut/slmp_oracle_server.c)
+    target_link_libraries(slmp_oracle_server PRIVATE slmp_stack)
+    add_executable(eip_oracle_adapter tests/oracle/dut/eip_oracle_adapter.c)
+    target_link_libraries(eip_oracle_adapter PRIVATE eip_stack)
+    add_executable(pn_oracle_pipe tests/oracle/dut/pn_oracle_pipe.c)
+    target_link_libraries(pn_oracle_pipe PRIVATE pn_stack)
+endif()
+
 enable_testing()
 
 if(ENABLE_PN_TESTS)

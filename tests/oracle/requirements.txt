@@ -1,0 +1,6 @@
+# tests/oracle — 독립 구현체 오라클. 버전 고정: 오라클이 바뀌면 판정 기준도 바뀐다.
+pytest==8.4.2
+pymodbus==3.15.0
+pymcprotocol==0.3.0
+pycomm3==1.2.16
+scapy==2.7.0
