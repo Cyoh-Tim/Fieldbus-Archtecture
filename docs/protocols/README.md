@@ -326,6 +326,19 @@ config.json ─┬─ protocol ──────────▶ registry 선택
    로 직접 출력한다 (CLAUDE.md: `LOG_ERROR`/`LOG_WARN` 사용). 또 `#define
    _POSIX_C_SOURCE` 가 첫 `#include` 뒤(3행)에 있어, `strdup` 등의 선언 노출이
    컴파일러/libc 설정에 따라 달라질 수 있다.
+8. **EtherNet/IP 숫자 포인트가 빅 엔디안으로 Assembly 에 들어간다.** 코어의
+   `encode_numeric` ([`core/fb_api.c`](../../core/fb_api.c) 601행)은 숫자를 항상
+   빅 엔디안으로 만들고, EtherNet/IP 어댑터는 이를 변환 없이 Assembly 에 복사한다.
+   CIP 의 `UINT`/`DINT`/`REAL` 은 리틀 엔디안이므로 스캐너는 바이트가 뒤집힌 값을
+   본다. 재현: `config/example.ethernetip.json` 의 `status_word`(uint16)에
+   `fb_write_u32(300)` → Assembly 바이트 `01 2C` → 스캐너가 읽는 UINT = 11265.
+   (PROFINET IO 데이터는 빅 엔디안이 관례라 PN 쪽은 해당 없음.)
+9. **EtherNet/IP·PROFINET 포인트에 `scale`/`offset` 을 주면 값이 깨진다.** 코어는
+   `scale≠1` 이면 "어댑터가 스케일을 적용한다"고 가정하고 float32 4바이트를 만들지만,
+   스케일 적용은 Modbus/SLMP 어댑터에만 구현돼 있다. EIP/PN 어댑터는 이 4바이트를
+   포인트 `length` 로 잘라 쓴다. 재현: 위 포인트에 `"scale": 0.1` 추가 후
+   `fb_write_u32(300)` → float32 `43 96 00 00` 의 앞 2바이트 `43 96` 이 기록됨
+   (기대값은 원시값 3000).
 
 ---
 
