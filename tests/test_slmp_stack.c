@@ -3,9 +3,13 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <poll.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <time.h>
@@ -542,6 +546,337 @@ static void test_g7_slmp_idle_per_ip_and_slow(void)
     slmp_stack_destroy(s);
 }
 
+/* T10-2: a late reply to the first request must not become the next result.
+ * Binary 3E has no request id, so the only safe reaction to a timeout is to
+ * drop the TCP connection. This server answers D0 later than the client
+ * timeout and answers any later head immediately. */
+typedef struct {
+    int lfd;
+    int port;
+    int late_ms;
+    uint16_t d0_value;
+    uint16_t d1_value;
+    atomic_int stop;
+    atomic_int late_sent;
+    atomic_int accepts;
+    atomic_int inflight;
+} late_srv_t;
+
+typedef struct {
+    int fd;
+    late_srv_t *srv;
+} late_conn_t;
+
+static int read_full(int fd, uint8_t *buf, size_t len)
+{
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = recv(fd, buf + off, len - off, 0);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (n == 0) {
+            return -1;
+        }
+        off += (size_t)n;
+    }
+    return 0;
+}
+
+static void write_word_response(int fd, const uint8_t *req, uint16_t value)
+{
+    uint8_t resp[13];
+    memset(resp, 0, sizeof(resp));
+    wr_le16(resp, SLMP_SUBHEADER_RES_3E);
+    memcpy(resp + 2, req + 2, 5);
+    wr_le16(resp + 7, 4);
+    wr_le16(resp + 9, SLMP_END_OK);
+    wr_le16(resp + 11, value);
+    size_t off = 0;
+    while (off < sizeof(resp)) {
+        ssize_t n = send(fd, resp + off, sizeof(resp) - off, MSG_NOSIGNAL);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return;
+        }
+        if (n == 0) {
+            return;
+        }
+        off += (size_t)n;
+    }
+}
+
+static void *late_conn_main(void *arg)
+{
+    late_conn_t *c = arg;
+    late_srv_t *srv = c->srv;
+    uint8_t req[21];
+    if (read_full(c->fd, req, sizeof(req)) == 0) {
+        uint32_t head = (uint32_t)req[15] | ((uint32_t)req[16] << 8) |
+                        ((uint32_t)req[17] << 16);
+        if (head == 0) {
+            usleep((useconds_t)srv->late_ms * 1000u);
+            write_word_response(c->fd, req, srv->d0_value);
+            atomic_store(&srv->late_sent, 1);
+        } else {
+            write_word_response(c->fd, req, srv->d1_value);
+        }
+    }
+    close(c->fd);
+    free(c);
+    atomic_fetch_sub(&srv->inflight, 1);
+    return NULL;
+}
+
+static void *late_accept_main(void *arg)
+{
+    late_srv_t *srv = arg;
+    while (!atomic_load(&srv->stop)) {
+        struct pollfd pfd;
+        memset(&pfd, 0, sizeof(pfd));
+        pfd.fd = srv->lfd;
+        pfd.events = POLLIN;
+        int pr = poll(&pfd, 1, 50);
+        if (pr < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+        if (pr == 0) {
+            continue;
+        }
+        int fd = accept(srv->lfd, NULL, NULL);
+        if (fd < 0) {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            }
+            break;
+        }
+        int one = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+        atomic_fetch_add(&srv->accepts, 1);
+        late_conn_t *c = calloc(1, sizeof(*c));
+        if (!c) {
+            close(fd);
+            continue;
+        }
+        c->fd = fd;
+        c->srv = srv;
+        atomic_fetch_add(&srv->inflight, 1);
+        pthread_t th;
+        if (pthread_create(&th, NULL, late_conn_main, c) != 0) {
+            atomic_fetch_sub(&srv->inflight, 1);
+            close(fd);
+            free(c);
+            continue;
+        }
+        pthread_detach(th);
+    }
+    return NULL;
+}
+
+static int late_srv_listen(late_srv_t *srv)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+        listen(fd, 16) != 0) {
+        close(fd);
+        return -1;
+    }
+    socklen_t alen = sizeof(addr);
+    if (getsockname(fd, (struct sockaddr *)&addr, &alen) != 0) {
+        close(fd);
+        return -1;
+    }
+    srv->lfd = fd;
+    srv->port = ntohs(addr.sin_port);
+    return 0;
+}
+
+static void late_srv_stop(late_srv_t *srv, pthread_t acc, int acc_started)
+{
+    atomic_store(&srv->stop, 1);
+    if (acc_started) {
+        pthread_join(acc, NULL);
+    }
+    if (srv->lfd >= 0) {
+        close(srv->lfd);
+        srv->lfd = -1;
+    }
+    for (int i = 0; i < 150 && atomic_load(&srv->inflight) != 0; i++) {
+        usleep(20000);
+    }
+}
+
+static void test_t10_2_stale_response_after_timeout(void)
+{
+    late_srv_t srv;
+    memset(&srv, 0, sizeof(srv));
+    srv.lfd = -1;
+    srv.late_ms = 800;
+    srv.d0_value = 0x1111;
+    srv.d1_value = 0x2222;
+    atomic_init(&srv.stop, 0);
+    atomic_init(&srv.late_sent, 0);
+    atomic_init(&srv.accepts, 0);
+    atomic_init(&srv.inflight, 0);
+    if (late_srv_listen(&srv) != 0) {
+        fprintf(stderr, "FAIL: T10-2 listen\n");
+        g_fail = 1;
+        return;
+    }
+    pthread_t acc;
+    memset(&acc, 0, sizeof(acc));
+    int acc_started = pthread_create(&acc, NULL, late_accept_main, &srv) == 0;
+    if (!acc_started) {
+        fprintf(stderr, "FAIL: T10-2 accept thread\n");
+        g_fail = 1;
+        late_srv_stop(&srv, acc, 0);
+        return;
+    }
+
+    slmp_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.role = SLMP_ROLE_CLIENT;
+    cfg.frame = SLMP_FRAME_3E_BINARY;
+    cfg.port = srv.port;
+    snprintf(cfg.plc_ip, sizeof(cfg.plc_ip), "127.0.0.1");
+    cfg.pc_no = 0xFF;
+    cfg.dest_module_io = 0x03FF;
+    /* 1 tick = 250 ms, equal to timeout_ms so the socket wait is not raised. */
+    cfg.monitoring_timer = 1;
+    cfg.timeout_ms = 250;
+
+    slmp_stack_t *client = slmp_stack_create(&cfg);
+    if (!client || slmp_stack_start(client) != 0) {
+        fprintf(stderr, "FAIL: T10-2 client start\n");
+        g_fail = 1;
+        slmp_stack_destroy(client);
+        late_srv_stop(&srv, acc, acc_started);
+        return;
+    }
+
+    slmp_range_t d0 = {.addr = {.device_code = SLMP_DEV_D,
+                                .head = 0,
+                                .unit = SLMP_ACCESS_WORD},
+                       .quantity = 1};
+    uint8_t out[8];
+    size_t out_len = 0;
+    memset(out, 0, sizeof(out));
+    int rc = slmp_stack_client_batch_read(client, &d0, out, sizeof(out),
+                                          &out_len);
+    if (rc != -ETIMEDOUT) {
+        fprintf(stderr, "FAIL: D0 read rc=%d, want -ETIMEDOUT (%d)\n", rc,
+                -ETIMEDOUT);
+        g_fail = 1;
+    }
+
+    /* Backoff starts at 100 ms and must not reuse the socket that still
+     * has the late D0 reply in flight. */
+    slmp_range_t d1 = d0;
+    d1.addr.head = 1;
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    memset(out, 0, sizeof(out));
+    out_len = 0;
+    rc = slmp_stack_client_batch_read(client, &d1, out, sizeof(out), &out_len);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    long backoff_ms = (long)((t1.tv_sec - t0.tv_sec) * 1000 +
+                             (t1.tv_nsec - t0.tv_nsec) / 1000000);
+    if (rc != -EAGAIN || backoff_ms > 200 ||
+        (out[0] == 0x11 && out[1] == 0x11)) {
+        fprintf(stderr,
+                "FAIL: retry during backoff rc=%d elapsed=%ld ms value=%02x%02x "
+                "(want -EAGAIN, not D0)\n",
+                rc, backoff_ms, out[0], out[1]);
+        g_fail = 1;
+    }
+
+    int saw_late = 0;
+    for (int i = 0; i < 100; i++) {
+        if (atomic_load(&srv.late_sent)) {
+            saw_late = 1;
+            break;
+        }
+        usleep(20000);
+    }
+    if (!saw_late) {
+        fprintf(stderr, "FAIL: late D0 response was not attempted\n");
+        g_fail = 1;
+    }
+    /* Reconnect backoff starts at 100 ms. This wait lets the next read
+     * open a new connection instead of being deferred. */
+    usleep(150000);
+
+    memset(out, 0, sizeof(out));
+    out_len = 0;
+    rc = slmp_stack_client_batch_read(client, &d1, out, sizeof(out), &out_len);
+    int accepts = atomic_load(&srv.accepts);
+    if (rc != 0 || out_len != 2 || out[0] != 0x22 || out[1] != 0x22) {
+        fprintf(stderr,
+                "FAIL: D1 read rc=%d len=%zu value=%02x%02x accepts=%d "
+                "(stale D0 is 1111 on the old socket)\n",
+                rc, out_len, out[0], out[1], accepts);
+        g_fail = 1;
+    }
+
+    slmp_stack_destroy(client);
+    late_srv_stop(&srv, acc, acc_started);
+}
+
+static void test_t10_2_timeout_not_shorter_than_monitor(void)
+{
+    slmp_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.role = SLMP_ROLE_CLIENT;
+    cfg.frame = SLMP_FRAME_3E_BINARY;
+    snprintf(cfg.plc_ip, sizeof(cfg.plc_ip), "127.0.0.1");
+    cfg.monitoring_timer = 0x0010; /* 16 * 250 ms = 4000 ms */
+    cfg.timeout_ms = 1000;
+    slmp_stack_t *s = slmp_stack_create(&cfg);
+    const slmp_cfg_t *got = slmp_stack_cfg(s);
+    if (!s || !got || got->timeout_ms < 16 * 250) {
+        fprintf(stderr,
+                "FAIL: timeout_ms %d is shorter than monitoring timer %d ms\n",
+                got ? got->timeout_ms : -1, 16 * 250);
+        g_fail = 1;
+    }
+    slmp_stack_destroy(s);
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.role = SLMP_ROLE_CLIENT;
+    cfg.frame = SLMP_FRAME_3E_BINARY;
+    snprintf(cfg.plc_ip, sizeof(cfg.plc_ip), "127.0.0.1");
+    cfg.monitoring_timer = 1;
+    cfg.timeout_ms = 250;
+    s = slmp_stack_create(&cfg);
+    got = slmp_stack_cfg(s);
+    if (!s || !got || got->timeout_ms != 250) {
+        fprintf(stderr,
+                "FAIL: timeout_ms %d changed when it already matched the "
+                "monitoring timer\n",
+                got ? got->timeout_ms : -1);
+        g_fail = 1;
+    }
+    slmp_stack_destroy(s);
+}
+
 int main(void)
 {
     test_device_table();
@@ -551,6 +886,8 @@ int main(void)
     test_handle_qty_and_unknown();
     test_client_server_loopback();
     test_g7_slmp_idle_per_ip_and_slow();
+    test_t10_2_stale_response_after_timeout();
+    test_t10_2_timeout_not_shorter_than_monitor();
     if (g_fail) {
         fprintf(stderr, "test_slmp_stack: FAILED\n");
         return 1;
