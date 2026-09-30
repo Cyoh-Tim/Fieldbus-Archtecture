@@ -6,17 +6,21 @@
 
 | 프로토콜 | 오라클 | DUT | 연결 |
 |---|---|---|---|
-| Modbus TCP | pymodbus | `mb_seeded_server` | 루프백 TCP |
-| SLMP 3E | pymcprotocol (서버 경로), 사양 기반 가짜 PLC (클라이언트 경로) | `slmp_oracle_server`, `slmp_oracle_client` | 루프백 TCP |
-| EtherNet/IP | pycomm3 + 사양 기반 인코더 (Forward Open, Class 1) | `eip_oracle_adapter` | 루프백 TCP/UDP |
-| PROFINET | scapy (`pnio`, `pnio_dcp`, `pnio_rpc`, `lldp`) | `pn_oracle_pipe` | mock Ethernet (stdin/stdout) |
+| Modbus TCP | pymodbus, 사양 기반 가짜 서버 (클라이언트 경로) | `mb_seeded_server`, `mb_oracle_client`, `mb_slmp_oracle_app` | 루프백 TCP |
+| SLMP 3E | pymcprotocol (서버 경로), 사양 기반 가짜 PLC (클라이언트 경로) | `slmp_oracle_server`, `slmp_oracle_client`, `mb_slmp_oracle_app` | 루프백 TCP |
+| EtherNet/IP | pycomm3, scapy `enipTCP` + 사양 기반 인코더 (Forward Open, Class 1), 가짜 Logix (Originator) | `eip_oracle_adapter`, `eip_oracle_originator`, `eip_oracle_fbapi` | 루프백 TCP/UDP |
+| PROFINET | scapy (`pnio`, `pnio_dcp`, `pnio_rpc`, `dcerpc`, `lldp`, `snmp`) | `pn_oracle_pipe`, `pn_oracle_app` | mock Ethernet (stdin/stdout) |
+
+`*_fbapi`, `*_app` DUT 는 공개 `fb_api` 로 설정 파일을 열어 **어댑터까지** 시험한다 (스케일, 주소 파싱, 바이트 순서 등).
+cJSON 이 필요해 `BUILD_DAEMON=ON` 에서만 빌드된다.
 
 ## 실행
 
 ```bash
-cmake -S . -B build-oracle -DBUILD_DAEMON=OFF -DBUILD_CTT=OFF -DBUILD_PN_LAB_TOOLS=OFF \
+cmake -S . -B build-oracle -DBUILD_DAEMON=ON -DBUILD_CTT=OFF -DBUILD_PN_LAB_TOOLS=OFF \
       -DENABLE_PN_TESTS=OFF -DENABLE_EIP_TESTS=OFF -DENABLE_MB_TESTS=OFF -DENABLE_SLMP_TESTS=OFF
-cmake --build build-oracle --target mb_seeded_server slmp_oracle_server slmp_oracle_client eip_oracle_adapter pn_oracle_pipe
+cmake --build build-oracle -j --target mb_seeded_server mb_oracle_client slmp_oracle_server slmp_oracle_client \
+      eip_oracle_adapter eip_oracle_originator pn_oracle_pipe eip_oracle_fbapi mb_slmp_oracle_app pn_oracle_app
 python3 -m venv .venv && .venv/bin/pip install -r tests/oracle/requirements.txt
 ORACLE_BUILD_DIR=build-oracle .venv/bin/python -m pytest tests/oracle
 ```
@@ -32,6 +36,10 @@ CI 정의는 `.github/workflows/ci.yml` 의 `oracle` job 이다. GitHub Actions 
 - 결함을 고치면 테스트가 통과(XPASS)하고, strict 설정 때문에 **CI 가 빨간색이 된다.**
   수정 PR 은 해당 `@known_defect` 줄을 지워야 한다. 이것이 "고쳤다" 는 증거가 된다.
 - 결함이 고쳐지지 않았는데 표시를 지우면 테스트가 실패한다.
+- DUT 실행 파일이 하나라도 없으면 `dut_path` 가 **실행 전체를 중단**한다 (종료 코드 3). DUT 가 없어서 실패한 것이
+  xfail(결함 남음)이나 skip 으로 위장되지 않게 하기 위해서다.
+- 선행 추가: 큐(`docs/reports/work_queue.md`) 항목은 구현 에이전트가 이슈를 받기 전에 오라클을 먼저 넣는다.
+  "오라클 표시" 칸이 그 항목의 표시 수다.
 
 ## 규칙
 

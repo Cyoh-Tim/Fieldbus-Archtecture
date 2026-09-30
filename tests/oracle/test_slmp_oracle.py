@@ -3,7 +3,9 @@
 pymcprotocol 은 실제 MELSEC PLC 와 쓰이는 클라이언트다. 비트 단위 데이터를 사양대로
 1점=니블(앞 점이 상위 니블)로 인코딩한다.
 slmp_oracle_server 시드: D0..D9 = 0x1000 + n.
+어댑터 설정·포인트 배치는 mb_slmp_oracle_app(fb_api 앱, 서버 모드 어댑터)이 DUT 다.
 """
+import json
 import socket
 import struct
 import subprocess
@@ -13,7 +15,7 @@ import time
 import pymcprotocol
 import pytest
 
-from conftest import dut_path, free_port, known_defect
+from conftest import dut_path, free_port, known_defect, wait_tcp
 
 
 @pytest.fixture
@@ -186,3 +188,133 @@ def test_client_never_returns_stale_value_after_timeout():
     assert ok, f"성공한 읽기가 하나도 없음: {reads}"
     wrong = [(h, v) for h, v in ok if v != 0x1000 + h]
     assert not wrong, f"다른 주소의 값이 돌아옴 (head, value): {wrong}"
+
+
+# ---------------------------------------------------------------- 어댑터 (fb_api 앱)
+# mb_slmp_oracle_app 은 공개 fb_api.h 만 쓰는 앱이다. 서버 모드 어댑터에 앱이 값을 쓰면
+# pymcprotocol 이 실제 MELSEC 클라이언트처럼 디바이스를 읽어 주소와 배치를 판정한다.
+class AppPipe:
+    """mb_slmp_oracle_app 줄 프로토콜 클라이언트."""
+
+    def __init__(self, cfg_path):
+        self.proc = subprocess.Popen(
+            [str(dut_path("mb_slmp_oracle_app")), str(cfg_path)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+        )
+        self.opened = self.proc.stdout.readline().split()
+
+    def cmd(self, line):
+        self.proc.stdin.write(line + "\n")
+        self.proc.stdin.flush()
+        return self.proc.stdout.readline().split()
+
+    def close(self):
+        try:
+            self.proc.stdin.write("QUIT\n")
+            self.proc.stdin.flush()
+            self.proc.wait(timeout=3)
+        except Exception:
+            self.proc.kill()
+            self.proc.wait()
+
+
+@pytest.fixture
+def slmp_app(tmp_path):
+    """points 로 서버 모드 SLMP 어댑터를 띄우고 (앱, pymcprotocol 클라이언트) 를 돌려준다."""
+    apps = []
+
+    def make(points):
+        port = free_port()
+        cfg = {
+            "protocol": "slmp",
+            "device": {"name": "oracle", "role": "server"},
+            "cycle_ms": 5,
+            "protocol_params": {"role": "server", "ip": "127.0.0.1", "port": port},
+            "points": points,
+        }
+        path = tmp_path / "slmp.json"
+        path.write_text(json.dumps(cfg))
+        app = AppPipe(path)
+        apps.append(app)
+        assert app.opened == ["OPEN", "0"], app.opened
+        assert app.cmd("START") == ["START", "0"]
+        wait_tcp(port)
+        c = pymcprotocol.Type3E(plctype="Q")
+        c.soc_timeout = 1
+        c.connect("127.0.0.1", port)
+        apps.append(c)
+        return app, c
+
+    yield make
+    for a in reversed(apps):
+        a.close()
+
+
+def u16(values):
+    return [v & 0xFFFF for v in values]
+
+
+def test_adapter_word_point_roundtrip(slmp_app):
+    """DUT 확인용: D 워드 포인트는 앱 쓰기 → pymcprotocol 읽기, pymcprotocol 쓰기 → 앱 읽기가 맞는다."""
+    app, plc = slmp_app([
+        {"name": "p", "access": "readwrite", "data_type": "uint16",
+         "address": {"slmp": {"device_code": "D", "start": 320}}},
+        {"name": "q", "access": "readwrite", "data_type": "uint16",
+         "address": {"slmp": {"device_code": "D", "start": 321}}},
+    ])
+    assert app.cmd("WU32 p 0x2345") == ["W", "0"]
+    assert u16(plc.batchread_wordunits(headdevice="D320", readsize=1)) == [0x2345]
+    plc.batchwrite_wordunits(headdevice="D321", values=[0x0102])
+    assert app.cmd("RU32 q") == ["R", "0", str(0x0102)]
+
+
+@known_defect("T10-3", "A~F 로 시작하는 16진 디바이스 번호를 파싱하지 못해 포인트가 경고 없이 빠진다")
+@pytest.mark.parametrize(
+    "slmp,write,device,mask",
+    [
+        # pymcprotocol 은 "WA" 를 이름으로 오해하지 않도록 "W0A" 표기를 요구한다 (같은 W 10번).
+        ({"start": "WA"}, "WU32 p 0x1234", "W0A", 0xFFFF),
+        ({"device_code": "W", "start": "A"}, "WU32 p 0x1234", "W0A", 0xFFFF),
+        ({"start": "XA"}, "WBOOL p 1", "X0", 0x0400),
+    ],
+    ids=["start=WA", "device_code=W,start=A", "start=XA"],
+)
+def test_adapter_hex_device_number_starting_with_letter(slmp_app, slmp, write, device, mask):
+    """W/X 는 16진 번호 디바이스다 (사양 디바이스 표). "A" 는 10번이므로 WA = W 10번 워드, XA = X0~XF 워드의 bit 10.
+
+    판정은 pymcprotocol 이 같은 디바이스를 읽은 값이다 (W0A / X0 워드).
+    """
+    data_type = "bool" if write.startswith("WBOOL") else "uint16"
+    app, plc = slmp_app([{"name": "p", "access": "readwrite", "data_type": data_type,
+                          "address": {"slmp": slmp}}])
+    assert app.cmd(write) == ["W", "0"]
+    got = u16(plc.batchread_wordunits(headdevice=device, readsize=1))[0]
+    expect = 0x1234 if mask == 0xFFFF else mask
+    assert got & mask == expect, f"{device} = {got:#06x}"
+
+
+@known_defect("T10-4", "문자열 기본 배치가 앞 문자=상위 바이트다. MELSEC($MOV) 관례는 앞 문자=하위 바이트")
+def test_adapter_string_default_is_melsec_order(slmp_app):
+    app, plc = slmp_app([{"name": "s", "access": "readwrite", "data_type": "string", "length": 4,
+                          "address": {"slmp": {"device_code": "D", "start": 300}}}])
+    assert app.cmd("WSTR s ABCD") == ["W", "0"]
+    words = u16(plc.batchread_wordunits(headdevice="D300", readsize=2))
+    # PLC 워드 메모리를 바이트 순서(워드마다 하위 바이트 먼저)로 늘어놓으면 문자열이 그대로 읽혀야 한다.
+    assert b"".join(struct.pack("<H", w) for w in words) == b"ABCD", [hex(w) for w in words]
+
+
+@known_defect("T10-4", "32비트 기본 워드 순서가 ABCD(상위 워드 먼저)다. MELSEC(DMOV/DINT)은 하위 워드가 D(n)")
+@pytest.mark.parametrize(
+    "data_type,write,expect",
+    [("int32", "WI32 v 0x12345678", [0x5678, 0x1234]), ("float32", "WF32 v 1.5", [0x0000, 0x3FC0])],
+    ids=["int32", "float32"],
+)
+def test_adapter_32bit_default_is_low_word_first(slmp_app, data_type, write, expect):
+    app, plc = slmp_app([{"name": "v", "access": "readwrite", "data_type": data_type,
+                          "address": {"slmp": {"device_code": "D", "start": 310}}}])
+    assert app.cmd(write) == ["W", "0"]
+    assert u16(plc.batchread_wordunits(headdevice="D310", readsize=2)) == expect

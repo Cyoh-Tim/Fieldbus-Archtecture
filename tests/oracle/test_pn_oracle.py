@@ -44,7 +44,7 @@ from scapy.layers.dcerpc import DceRpc4, NDRContextHandle
 from scapy.layers.msrpce.raw.ept import ept_lookup_Request
 from scapy.layers.snmp import SNMP, SNMPget, SNMPresponse, SNMPvarbind
 
-from conftest import BUILD, REPO, PnPipe, known_defect
+from conftest import REPO, PnPipe, dut_path, known_defect
 
 CONTROLLER_MAC = "00:11:22:33:44:55"
 DCP_MCAST = "01:0e:cf:00:00:00"
@@ -841,12 +841,10 @@ def test_example_configs_match_gsdml_io_length():
 
 # ---------------------------------------------------------------- 어댑터 수준 (T12-9, T2)
 # pn_oracle_app: fb_api 로 config 를 열고, 어댑터가 만든 스택에 mock Ethernet 을 붙인 DUT.
-# cJSON 이 필요해 BUILD_DAEMON=ON 빌드에만 있다. 없으면 skip 한다 (DUT 부재를 xfail 로 위장하지 않는다).
+# cJSON 이 필요해 BUILD_DAEMON=ON 빌드에만 있다. 없으면 dut_path 가 실행 전체를 멈춘다.
 class PnApp(PnPipe):
     def __init__(self, config_path):
-        exe = BUILD / "pn_oracle_app"
-        if not exe.exists():
-            pytest.skip(f"{exe} 없음 (BUILD_DAEMON=ON 으로 pn_oracle_app 타깃 빌드 필요)")
+        exe = dut_path("pn_oracle_app")
         self.proc = subprocess.Popen([str(exe), str(config_path)], stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                      text=True, bufsize=1)

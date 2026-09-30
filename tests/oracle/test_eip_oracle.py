@@ -7,7 +7,7 @@ T→O = 데이터 + 2(seq).
 
 eip_oracle_adapter: input assembly 150 (8B, 01..08), output 101 (4B), config 100, 최소 RPI 8000 µs.
 eip_oracle_originator: 스택 Originator 경로. 판정은 이 파일의 사양 기반 가짜 Logix 대상(FakeLogix).
-eip_oracle_fbapi: fb_api + adapters/ethernetip (T1/T2). BUILD_DAEMON=ON 에서만 빌드되고, 없으면 skip.
+eip_oracle_fbapi: fb_api + adapters/ethernetip (T1/T2). BUILD_DAEMON=ON 에서만 빌드된다 (CI oracle job 이 빌드한다).
 EDS 는 CIP Vol 1 7장 형식으로 정적 검사한다.
 """
 import itertools
@@ -25,7 +25,7 @@ from pycomm3.cip import Services
 from pycomm3.cip.data_types import UINT, UDINT, USINT, SHORT_STRING
 from scapy.contrib.enipTCP import ENIPTCP, ENIPListIdentity
 
-from conftest import BUILD, REPO, Dut, dut_path, free_port, known_defect
+from conftest import REPO, Dut, dut_path, free_port, known_defect
 
 IN_ASM, OUT_ASM, CFG_ASM = 150, 101, 100
 IN_SIZE, OUT_SIZE = 8, 4
@@ -518,9 +518,7 @@ class FbApiDut:
     """eip_oracle_fbapi (fb_open + adapters/ethernetip, 실제 루프백 소켓)."""
 
     def __init__(self, cfg: dict, tmp_path):
-        exe = BUILD / "eip_oracle_fbapi"
-        if not exe.exists():
-            pytest.skip(f"{exe} 없음 (BUILD_DAEMON=ON 으로 eip_oracle_fbapi 빌드)")
+        exe = dut_path("eip_oracle_fbapi")
         path = tmp_path / "eip_fbapi.json"
         path.write_text(json.dumps(cfg))
         pp = cfg["protocol_params"]
