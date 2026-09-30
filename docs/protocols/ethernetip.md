@@ -1754,9 +1754,9 @@ C1 00 20 00  03 5B B8 1E A4 4C 25 CA FB F0 7B BD F7 A1 92 B6
 
 ### 7.5 이 설계의 위협 분석 (구현자가 알아야 할 것)
 
-1. **Replay**: MAC 입력에 순번/난수가 없다. 공격자가 한 번 캡처한 Set 요청+MAC 을 **같은 TCP 세션 안에서** 다시 보낼
-   수는 없다(세션 소유권 검사) — 그러나 세션 핸들은 평문 헤더에 있고, 소유권은 TCP 연결에 묶여 있으므로 공격자가 그
-   TCP 연결에 끼어들 수 있는 위치(MITM)라면 재전송이 가능하다.
+1. **Replay**: MAC 입력에 순번/난수가 없다. 다른 TCP 연결에서 재전송하면 새 세션 핸들이 발급되고 MAC 입력에 핸들이
+   들어가므로 실패한다(세션 결속). 그러나 **같은 TCP 연결 안** 에서는 같은 요청+MAC 이 몇 번이고 유효하다. 평문 44818 위의
+   TCP 스트림에 끼어들 수 있는 위치(MITM)라면 캡처한 Set/Forward Open 을 재전송할 수 있다.
 2. **UDP I/O 스푸핑**: O→T 연결 ID 는 0x20000001 부터 순차이고, 출발지 IP 검사도 없다. 연결 ID 를 맞힌 아무 호스트가
    출력 이미지를 덮어쓰고, **T→O 목적지를 자기 주소로 바꿀 수 있다** (`eip_io.c:57-58`). 저장소 Security Class 는 이것을 막지 않는다.
 3. **Get 은 무인증**: 입력 Assembly(센서값)·Identity 는 누구나 읽는다. Class 2 여도 평문 포트로 읽힌다.
@@ -1827,4 +1827,453 @@ CIP status 0x05 다 (검증 5.5.4).
 | 기본 RPI (FO 에 0 이 왔을 때) | `rpi_us` (기본 8000) |
 | TCP 유휴 | 60 s |
 | LLDP TX 주기 | 30 s (메모리에만 생성) |
+
+---
+
+## 9. 직접 구현하기 — 단계별 로드맵
+
+이 장은 "빈 폴더에서 Adapter 를 만든다" 는 가정으로 쓴다. 각 마일스톤은 **이전 것 위에** 쌓이며, 끝날 때마다
+검증 방법이 있다. 저장소 코드는 참고 구현으로 병기한다(불일치는 피해서 구현할 것).
+
+### 9.1 모듈 분해
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ app API: write_input(off,buf) / read_output(off,buf) / health │  ← 저장소: eip_stack.h
+├──────────────────────────────────────────────────────────────┤
+│ io.c        Class 1 소비/생산, 워치독, 스케줄러               │  ← eip_io.c
+│ cm.c        Forward Open/Close, 연결 테이블                   │  ← eip_cm.c
+│ objects/*.c Identity, Assembly, TCP/IP, Ethernet Link, QoS … │  ← eip_cip.c (if 사슬)
+│ router.c    EPATH 파싱 → (class,instance,attr) → 객체 테이블  │  ← eip_cip_route_auth, eip_path_asm.c
+│ encap.c     24B 헤더, 세션, CPF, 명령 디스패치                │  ← eip_encap.c
+│ net.c       TCP listen/accept/스트림 조립, UDP 44818/2222    │  ← eip_stack.c
+│ bytes.h     LE 읽기/쓰기, 경계 검사 커서                      │  ← eip_endian.h
+└──────────────────────────────────────────────────────────────┘
+```
+
+권장: 객체를 **테이블 구동**(class code → 핸들러 구조체) 으로 만든다. 저장소처럼 거대한 if 사슬은 서비스·에러 코드를
+객체마다 일관되게 맞추기 어렵다(4.12 의 0x05 낙하 문제가 그 예).
+
+```c
+typedef struct {
+    uint16_t class_id;
+    int (*get_single)(uint16_t inst, uint16_t attr, buf_t *out);   /* 0x14 / 0x05 반환 */
+    int (*set_single)(uint16_t inst, uint16_t attr, cur_t *in);    /* 0x0E / 0x13 / 0x15 */
+    int (*get_all)(uint16_t inst, buf_t *out);
+    int (*custom)(uint8_t svc, uint16_t inst, cur_t *in, buf_t *out); /* CM: 0x54 등 */
+} cip_class_t;
+```
+
+### 9.2 파서 요령 — 경계 검사 커서
+
+패킷 파서 버그의 거의 전부는 "길이 필드를 믿고 버퍼 밖을 읽는 것" 이다. 모든 읽기를 커서 하나로 강제하라.
+
+```c
+typedef struct { const uint8_t *p; size_t n, off; int err; } cur_t;
+
+static uint8_t  rd8 (cur_t *c) { if (c->off + 1 > c->n) { c->err = 1; return 0; }
+                                 return c->p[c->off++]; }
+static uint16_t rd16(cur_t *c) { if (c->off + 2 > c->n) { c->err = 1; return 0; }
+                                 uint16_t v = c->p[c->off] | (c->p[c->off+1] << 8);
+                                 c->off += 2; return v; }
+static uint32_t rd32(cur_t *c) { uint32_t lo = rd16(c); return lo | ((uint32_t)rd16(c) << 16); }
+static cur_t    sub (cur_t *c, size_t len) {          /* 길이만큼 하위 커서 */
+    cur_t s = { c->p + c->off, len, 0, 0 };
+    if (c->off + len > c->n) { c->err = 1; s.n = 0; } else c->off += len;
+    return s;
+}
+/* 사용: 여러 필드를 다 읽고 마지막에 한 번만 if (c.err) → 에러 응답 */
+```
+
+저장소도 같은 원칙(길이 먼저 검사)을 손으로 지킨다: `eip_encap.c:193-201`, `eip_io.c:22-31`. 퍼저가 이 경로를 지킨다 (11.4).
+
+### 9.3 마일스톤
+
+#### M0. 뼈대: TCP 44818 accept + 스트림 조립
+
+- 할 일: 비차단 listen/accept, 연결별 수신 버퍼, "24바이트 헤더 + Length" 단위로 자르기 (6.2).
+- 검증: `nc` 로 24바이트 아무거나 보내 보고 연결이 유지되는지, 반쪽만 보내고 나머지를 나중에 보내도 한 메시지로 처리되는지.
+
+#### M1. ListIdentity 응답
+
+- 할 일: 5.2.3 표대로 CPF 아이템 0x000C. **Socket Address 는 빅 엔디안.** UDP 44818 소켓도 열어 브로드캐스트 요청에 응답.
+- 검증: Wireshark 필터 `enip.command == 0x0063` 에서 "Identity" 트리가 제대로 펼쳐지는지. Python 한 줄 발견 스크립트:
+
+```python
+import socket, struct
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+s.settimeout(1.0)
+s.sendto(struct.pack("<HHII8sI", 0x63, 0, 0, 0, b"\0"*8, 0), ("255.255.255.255", 44818))
+print(s.recvfrom(1024)[0].hex(" "))
+```
+
+#### M2. RegisterSession / UnRegisterSession / NOP
+
+- 할 일: 버전 1 확인(아니면 0x0069), TCP 연결당 세션 1개, 추측 어려운 핸들, NOP 무응답, UnRegister 시 TCP 종료.
+- 검증: 세션 없이 SendRRData → 0x0064. 다른 TCP 연결에서 남의 핸들 → 0x0064 (저장소 `test_g5_session_owner_and_close`).
+
+#### M3. SendRRData + Message Router + Identity Get_Attribute_Single
+
+- 할 일: CPF 파싱(Null + 0x00B2), CIP 요청 파싱, EPATH(0x20/0x21/0x24/0x25/0x30/0x31), Identity attr 1~7, 응답 포장.
+- 검증: 5.5.1 의 hex 를 그대로 보내 같은 응답이 나오는지. `pycomm3` 의 generic message 기능이나 Wireshark 의 CIP 디섹터로 확인.
+
+```
+/* 의사코드: CIP 라우터 */
+route(req):
+    svc = rd8; words = rd8; path = sub(words*2)
+    (cls, inst, attr) = parse_epath(path)       실패 → [svc|0x80, 0, 0x04, 0]
+    obj = find_class(cls)                       없음 → 0x05
+    switch svc:
+      0x0E: if !obj.get_single → 0x08;  return obj.get_single(inst, attr)
+      0x10: 권한/보안 검사 → 0x0F;       return obj.set_single(inst, attr, data)
+      0x01: return obj.get_all(inst)
+      default: obj.custom ? obj.custom(...) : 0x08
+```
+
+#### M4. Assembly 객체
+
+- 할 일: 입력/출력/config 인스턴스, attr 3(Data), attr 4(Size). Set 은 정확한 길이만(0x13/0x15), 소유 연결이 있으면 거부.
+- 검증: Get 150/3 → 입력 이미지, Set 101/3 → 출력 이미지 변화.
+
+#### M5. Forward Open (Class 1, Exclusive Owner)
+
+핵심. 6.3 의 검사 순서를 **사양 에러 코드로** 구현한다.
+
+```
+/* 의사코드: Forward Open */
+fo(req, large):
+    parse 5.6.1 필드 (large 면 NCP 32비트)          부족 → 0x01/0x0205(?) 또는 0x13
+    if find_triad(serial, vendor, oser) → 0x01/0x0100
+    tt = transport byte; if (tt & 0x0F) != 1 or trigger != cyclic → 0x01/0x0103
+    path: [ekey] 20 04 24 cfg [80 data] 2C cons 2C prod
+          ekey 불일치 → 0x0114/0x0115/0x0116
+          cons/prod 가 내 Assembly 아님 → 0x0315 / 0x0117
+    if RPI 범위 밖 → 0x01/0x0111
+    size_ot = NCP.size;  expect_ot = out_size + 2 + (O→T 헤더 ? 4 : 0)
+    size_to = NCP.size;  expect_to = in_size + 2
+    불일치 → 0x01/0x0109 (또는 0x0127/0x0128)
+    if 출력 Assembly 에 이미 EO → 0x01/0x0106
+    slot = alloc                                  없음 → 0x01/0x0113
+    slot.ot_id = random_unique()                  ← Target 이 정함
+    slot.to_id = NCP_to.type==multicast ? random_unique() : req.to_id
+    slot.timeout = ot_rpi * (4 << mult)
+    slot.first_deadline = now + max(timeout, 10s)  ← 초기 워치독 여유 (사양서 확인)
+    slot.dst = originator_ip:2222 (Sockaddr 0x8001 있으면 그 값)
+    응답 5.6.7 (API = 실제 지킬 수 있는 주기), 필요시 Sockaddr 아이템
+```
+
+- 검증: 5.6.8 hex. 실패 경로마다 CIP 응답에 **triad + remaining path size** 가 붙는지 Wireshark 로 확인.
+
+#### M6. Class 1 I/O
+
+```
+/* 의사코드: UDP 2222 수신 */
+on_udp(buf, src):
+    cpf 파싱 → 0x8002(conn_id, enc_seq), 0x00B1(payload)
+    c = find_by_ot_id(conn_id);  없음 → drop
+    if src.ip != c.originator_ip → drop          ← 스푸핑 1차 방어
+    if !seq_newer(enc_seq, c.last_enc_seq) → drop  (32비트 모듈러 비교)
+    cip_seq = le16(payload); p = payload + 2
+    if c.ot_has_run_idle: run = le32(p) & 1; p += 4
+    c.deadline = now + c.timeout                  ← 워치독 갱신은 중복이어도
+    if cip_seq == c.last_cip_seq → return         ← 새 데이터 아님
+    if run: memcpy(output_image, p, out_size)  else: apply_idle_outputs()
+
+/* 생산: 전용 타이머나 사이클 루프에서 */
+for each c: if now >= c.next_tx:
+    frame = [02 00][02 80 08 00][to_id][++enc_seq][B1 00 len][cip_seq][input_image]
+    sendto(c.dst); c.next_tx += c.to_api   (밀리면 now+api 로 재정렬)
+```
+
+```c
+/* 32비트 순번 비교 (랩어라운드 안전) */
+static int seq_newer(uint32_t a, uint32_t b) { return (int32_t)(a - b) > 0; }
+```
+
+- 검증: Wireshark `udp.port == 2222` 에서 "CIP I/O" 로 디코드되는지(FO 를 함께 캡처해야 연결 ID 를 안다),
+  패킷 간격 그래프(Statistics → I/O Graph)가 RPI 에 붙는지, O→T 를 끊으면 timeout 후 T→O 가 멈추는지.
+
+#### M7. Forward Close + 연결 정리
+
+- 할 일: triad 로 찾기, 없으면 0x01/0x0107, 경로 일치 확인(사양서 확인 필요), 출력 안전값 적용.
+- 검증: FC 후 T→O 중단, 같은 triad 로 FO 재개 가능 (저장소 `class1_lifetime.yaml` 과 같은 흐름).
+
+#### M8. TCP/IP·Ethernet Link·QoS 객체, 실제 값
+
+- 할 일: 실제 IP/마스크/MAC/링크 상태, attr 13 유휴 타임아웃, DSCP 를 소켓에 적용(`setsockopt(IP_TOS, dscp << 2)`).
+- 검증: 스캐너 툴의 장치 속성 화면, Wireshark 에서 IP DSCP 필드.
+
+#### M9. EDS 작성과 상용 스캐너 연동
+
+- 할 일: 10.6 의 EDS 구조로 파일 작성, ODVA 의 EDS 검사 도구(EZ-EDS 등, 회원용 — 사양서 확인 필요)로 문법 검사.
+- 검증: Studio 5000 / CODESYS 에 EDS 등록 → 연결 성공 → I/O 값 확인 (11.6).
+
+#### M10 (선택). Class 3, Unconnected Send 라우팅, CIP Security(TLS/DTLS)
+
+### 9.4 타이머/스레드 설계
+
+| 방식 | 장점 | 단점 | 이 저장소 |
+|---|---|---|---|
+| 단일 루프 + 주기 poll | 락 적음, 단순 | 생산 주기가 루프 주기에 양자화 | **이 방식** (`cycle_ms`) |
+| 단일 루프 + `epoll` + `timerfd` (가장 가까운 deadline 까지 대기) | RPI 정확, CPU 효율 | 구현 조금 복잡 | |
+| I/O 전용 RT 스레드 (SCHED_FIFO) + explicit 스레드 | 지터 최소 | 이미지 공유에 락/더블버퍼 필요 | |
+
+I/O 이미지는 **더블 버퍼(또는 seqlock)** 로 두면 생산 스레드가 애플리케이션 쓰기 도중의 "반쯤 쓴" 값을 보내지 않는다.
+저장소는 mutex 로 memcpy 구간을 보호한다 (`eip_stack.c:737-755`).
+
+### 9.5 Originator(클라이언트) 측 구현
+
+Originator 는 Adapter 의 거울이다.
+
+1. TCP 연결 → RegisterSession → 핸들 보관.
+2. UCMM Get/Set: SendRRData(Null + 0x00B2). 응답의 **General status 와 Additional status size** 를 확인하고, 데이터는
+   `4 + 2*addl_size` 바이트 뒤부터다. (저장소 `originator_sendrr()` 가 이렇게 한다, `stacks/ethernetip/src/eip_client.c:120-139`.)
+3. 백플레인 너머(ControlLogix 슬롯 N CPU)면 Unconnected Send(0x52) + route path `01 N` 로 감싼다 (5.9.1).
+4. I/O 가 필요하면 Forward Open 을 **보내는 쪽** 이 된다: triad 생성(연결마다 serial 증가), T→O ID 를 정하고, O→T 에
+   Run/Idle 헤더를 붙여 RPI 마다 생산, T→O 워치독.
+5. 끝낼 때 Forward Close → UnRegisterSession → TCP close.
+
+**Logix 태그 읽기는 Get_Attribute_Single 이 아니다.** Rockwell Logix 컨트롤러는 심볼 경로(`91 len name`)에
+**Read Tag(0x4C)** 서비스와 요소 개수(UINT)를 보내고, 응답은 데이터 타입(UINT, 예: DINT=0x00C4) + 데이터다. Write Tag(0x4D)는
+타입 + 개수 + 데이터 (Rockwell 문서 "Logix5000 Data Access" 기반, 벤더 전용 — 사양서 확인 필요).
+
+[저장소] Originator 의 현재 한계 (`eip_client.c`, `eip_stack.c:246-305`):
+
+| 항목 | 저장소 |
+|---|---|
+| RegisterSession | 2초 blocking 대기, 응답 status 확인 안 함 |
+| explicit Get/Set | UCMM 직접 전송(라우팅 없음) — 대상이 직접 Message Router 를 가진 장치여야 함 |
+| 태그 R/W | ⚠ Get/Set_Attribute_Single + 심볼 경로 (Logix 는 0x4C/0x4D 를 기대 → 실 PLC 에서 동작 안 할 가능성 높음) |
+| 응답 수신 | `recv` 1회 — TCP 조각 난 응답 재조립 없음 |
+| Security Class 1 대상 | MAC 아이템을 붙이지 않음 → 보안 Target 에 Set 불가 |
+| Class 1 Originator | 없음 (헤더 주석의 "optional Class1" 은 미구현) |
+| mock/adapter 모드 태그 R/W | 자기 자신의 입력 Assembly 로 루프백 (`eip_client.c:246-262`) |
+
+실사용 Originator 참고 구현(오픈소스): **EIPScanner**(C++), **pycomm3**(Python, Logix 중심), **cpppo**(Python),
+**libplctag**(C). Adapter 참고 구현: **OpENer**(C, ODVA 회원사들이 유지). 라이선스·정확성은 각 프로젝트에서 확인할 것.
+
+---
+
+## 10. 이 저장소의 구현 지도
+
+### 10.1 파일 지도
+
+| 파일 | 줄 수 | 역할 |
+|---|---|---|
+| [`stacks/ethernetip/include/eip_types.h`](../../stacks/ethernetip/include/eip_types.h) | 134 | 포트·명령·아이템·서비스·클래스·상태 상수, 용량 한도 |
+| [`stacks/ethernetip/include/eip_endian.h`](../../stacks/ethernetip/include/eip_endian.h) | 33 | LE 헬퍼 |
+| [`stacks/ethernetip/include/eip_stack.h`](../../stacks/ethernetip/include/eip_stack.h) | 135 | 공개 API, `eip_cfg_t` |
+| [`stacks/ethernetip/include/eip_internal.h`](../../stacks/ethernetip/include/eip_internal.h) | 221 | 내부 구조체(`struct eip_stack`, 연결/세션), 워치독 공식 |
+| [`stacks/ethernetip/include/eip_sec.h`](../../stacks/ethernetip/include/eip_sec.h) | 43 | 보안 API, `0x00C1` |
+| [`stacks/ethernetip/include/eip_crypto.h`](../../stacks/ethernetip/include/eip_crypto.h) | 16 | HMAC API |
+| [`stacks/ethernetip/src/eip_encap.c`](../../stacks/ethernetip/src/eip_encap.c) | 399 | Encapsulation, 세션, SendRRData |
+| [`stacks/ethernetip/src/eip_cip.c`](../../stacks/ethernetip/src/eip_cip.c) | 668 | Message Router + 모든 객체 |
+| [`stacks/ethernetip/src/eip_cm.c`](../../stacks/ethernetip/src/eip_cm.c) | 328 | Forward Open/Close |
+| [`stacks/ethernetip/src/eip_io.c`](../../stacks/ethernetip/src/eip_io.c) | 181 | Class 1 소비·생산·워치독 |
+| [`stacks/ethernetip/src/eip_path_asm.c`](../../stacks/ethernetip/src/eip_path_asm.c) | 283 | EPATH 인코드/디코드, Assembly 저장소, 시계 |
+| [`stacks/ethernetip/src/eip_client.c`](../../stacks/ethernetip/src/eip_client.c) | 301 | Originator explicit |
+| [`stacks/ethernetip/src/eip_sec.c`](../../stacks/ethernetip/src/eip_sec.c) | 415 | HMAC 무결성, TLS-PSK 리스너 |
+| [`stacks/ethernetip/src/eip_crypto.c`](../../stacks/ethernetip/src/eip_crypto.c) | 24 | OpenSSL HMAC-SHA256 래퍼 |
+| [`stacks/ethernetip/src/eip_lldp.c`](../../stacks/ethernetip/src/eip_lldp.c) | 101 | LLDP 프레임 생성(송신 안 함) |
+| [`stacks/ethernetip/src/eip_stack.c`](../../stacks/ethernetip/src/eip_stack.c) | 845 | 생성/소켓/poll 루프/앱 API/테스트 주입 |
+| [`stacks/ethernetip/eds/FieldbusSensor.eds`](../../stacks/ethernetip/eds/FieldbusSensor.eds) | 91 | EDS |
+| [`adapters/ethernetip/ethernetip_adapter.c`](../../adapters/ethernetip/ethernetip_adapter.c) | 530 | config 파싱, 포인트 ↔ 이미지 매핑 |
+
+### 10.2 개념 ↔ 함수 매핑
+
+| 개념 | 함수 | 위치 |
+|---|---|---|
+| 스택 생성·기본값·보안 설정 검사 | `eip_stack_create()` | `stacks/ethernetip/src/eip_stack.c:40` |
+| 소켓 열기 (TCP 44818, UDP 2222, TLS 2221) | `eip_stack_start()`, `bind_tcp_listen()`, `bind_udp()`, `eip_sec_tls_start()` | `eip_stack.c:307`, `:217`, `:193`, `eip_sec.c:128` |
+| 한 사이클 처리 | `eip_stack_poll()` | `eip_stack.c:582` |
+| TCP accept + IP 당 제한 | `accept_clients()` | `eip_stack.c:420` |
+| TCP 스트림 → Encap 메시지 | `service_tcp_client()` | `eip_stack.c:486` |
+| Encapsulation 디스패치 | `eip_encap_process()` | `stacks/ethernetip/src/eip_encap.c:288` |
+| 헤더 작성 | `encap_hdr()` | `eip_encap.c:8` |
+| ListIdentity | `build_list_identity()` | `eip_encap.c:23` |
+| 세션 발급/소유/삭제 | `session_alloc()`, `session_owned()`, `session_drop()`, `eip_encap_drop_owner()` | `eip_encap.c:120`, `:82`, `:142`, `:152` |
+| SendRRData (UCMM) | `handle_sendrr()` | `eip_encap.c:168` |
+| Message Router | `eip_cip_route_auth()` → `handle_object()` | `stacks/ethernetip/src/eip_cip.c:620`, `:241` |
+| Set/Reset 권한 게이트 | `gate_set_reset()` | `eip_cip.c:213` |
+| Identity 속성 | `identity_get_attr()`, `identity_get_attr_all()` | `eip_cip.c:39`, `:143` |
+| Assembly 속성 | `assembly_get_attr()`, `assembly_set_attr()` | `eip_cip.c:172`, `:198` |
+| CIP 응답 헤더 | `cip_ok_header()`, `cip_error()` | `eip_cip.c:27`, `:10` |
+| EPATH 인코딩 | `eip_path_append_class/instance/attribute/ansi_tag()` | `stacks/ethernetip/src/eip_path_asm.c:21/42/63/84` |
+| EPATH 디코딩 | `eip_path_parse()` | `eip_path_asm.c:105` |
+| Assembly 저장소 | `eip_assembly_init/find/read/write()` | `eip_path_asm.c:208/245/255/271` |
+| Forward Open | `eip_cm_forward_open()` | `stacks/ethernetip/src/eip_cm.c:127` |
+| FO 경로 해석 | `parse_fo_path()`, `fo_path_matches_asm()` | `eip_cm.c:61`, `:106` |
+| 연결 크기 검사 | `conn_size_from_net()`, `conn_size_matches()` | `eip_cm.c:34`, `:42` |
+| 중복 triad | `find_dup_triad()` | `eip_cm.c:47` |
+| Forward Close | `eip_cm_forward_close()` | `eip_cm.c:284` |
+| 워치독 공식 | `eip_class1_watchdog_us()` | `stacks/ethernetip/include/eip_internal.h:200` |
+| O→T 소비 | `eip_io_handle_udp()` | `stacks/ethernetip/src/eip_io.c:9` |
+| 워치독 만료 | `eip_io_watchdog()` | `eip_io.c:78` |
+| T→O 생산 | `eip_io_produce()` → `flush_produces()` | `eip_io.c:106`, `eip_stack.c:562` |
+| HMAC 필요 서비스 | `eip_sec_service_needs_mac()` | `stacks/ethernetip/src/eip_sec.c:29` |
+| HMAC 검증/부착 | `eip_sec_check_ucmm()`, `eip_sec_append_mac_item()` | `eip_sec.c:61`, `:95` |
+| TLS 서비스 | `tls_accept()`, `tls_service()`, `eip_sec_tls_poll()` | `eip_sec.c:266`, `:337`, `:392` |
+| Originator 연결 | `connect_originator()` | `eip_stack.c:246` |
+| Originator UCMM | `originator_sendrr()`, `eip_stack_explicit_get/set()`, `eip_stack_tag_read/write()` | `stacks/ethernetip/src/eip_client.c:48/142/191/229/266` |
+| ACD 주입 | `eip_stack_acd_conflict()` | `eip_stack.c:634` |
+| LLDP | `eip_lldp_build()`, `eip_lldp_poll()` | `stacks/ethernetip/src/eip_lldp.c:32`, `:75` |
+| 앱 I/O 이미지 API | `eip_stack_read_input/write_input/read_output/write_output()` | `eip_stack.c:718/737/757/776` |
+| 테스트 주입 | `eip_stack_handle_encap()`, `eip_stack_handle_encap_owned()`, `eip_stack_handle_io()` | `eip_stack.c:814`, `:796`, `:836` |
+| RT 통계 | `eip_stack_rt_stats()` | `eip_stack.c:656` |
+
+### 10.3 핵심 자료구조
+
+- `eip_cfg_t` (`stacks/ethernetip/include/eip_stack.h:25-67`) — 역할, 포트, Identity 값, Assembly 번호/크기, RPI, mock,
+  보안, DoS 한도, LLDP/ACD 옵션.
+- `struct eip_stack` (`eip_internal.h:70-136`) — 소켓들, 세션 배열, TCP/TLS 클라이언트 배열, **Class 1 연결 배열 32개**,
+  Assembly 배열, I/O 이미지 포인터, QoS/ACD/LLDP 상태, RT 통계, mutex.
+- `eip_class1_conn_t` (`eip_internal.h:19-42`) — 연결 ID 두 개, 크기, RPI 두 개, peer IP/포트(첫 O→T 에서 학습),
+  순번, 마지막 수신 시각, 다음 송신 시각, triad, 배수, 워치독, 마지막 생산 프레임 버퍼.
+
+### 10.4 코어 → 어댑터 → 스택: 어떻게 구동되나
+
+```
+core/main.c:41  fb_run()
+  └ core/fb_api.c:739  run_cycle_loop()   매 cycle_ms (기본 8ms) 절대시각 sleep
+      └ adapter->poll_cycle()             = eip_poll_cycle()     adapters/ethernetip/ethernetip_adapter.c:400
+          └ eip_stack_poll()                                      stacks/ethernetip/src/eip_stack.c:582
+응용(센서 앱)
+  └ fb_write_point("barcode_value", ...)  core/fb_api.c
+      └ adapter->write_point()            = eip_write_point()    ethernetip_adapter.c:463
+          └ eip_stack_write_input(off, ...)  (T→O 이미지)
+```
+
+어댑터 등록은 `core/adapter_registry.c:29` 한 줄뿐이다 — 코어는 EtherNet/IP 를 전혀 모른다 (`CLAUDE.md` 규칙).
+(`core/scheduler.c:28` `scheduler_run()` 도 같은 모양의 루프를 가진다.)
+
+### 10.5 config: protocol_params 와 points
+
+**protocol_params** — 어댑터가 cJSON 으로 직접 읽는다 (`eip_init()`, `ethernetip_adapter.c:137-377`):
+
+| 키 | 기본 (어댑터) | 의미 |
+|---|---|---|
+| `role` | `"server"` | `"client"` 면 Originator |
+| `bind_ip` / `ip` | "" (0.0.0.0) | Adapter: 바인드 주소 / Originator: `ip` 가 원격 |
+| `remote_ip` | | Originator 원격 |
+| `port` | 44818 | TCP (Originator 원격 포트 겸용) |
+| `udp_io_port` | 2222 | Class 1 UDP |
+| `vendor_id`, `device_type`, `product_code`, `serial_number`, `product_name` | 0xABCD, 0x0C, 1, (스택 기본 0x12345678), "FieldbusSensor" | Identity |
+| `input_assembly` / `output_assembly` / `config_assembly` | 150 / 101 / 100 | Assembly 번호 |
+| `assembly_instance` | | 옛 키 → input_assembly |
+| `input_size` / `output_size` | 256 / 256 | 이미지 바이트 (points 가 더 필요하면 자동 확장) |
+| `rpi_us` | 8000 | FO 에 RPI 0 일 때 기본 |
+| `security_class` | 0 | 0/1/2 (7장) |
+| `psk_hex` | | 64 hex. Class≥1 필수 |
+| `secure_tcp_port` | 2221 | TLS |
+| `protection_mode` | 0 | 비0 이면 Set/Reset 전부 0x0F |
+| `idle_timeout_ms` / `max_conn_per_ip` | 60000 / 4 | TCP DoS 한도 |
+| `iface`, `lldp_enable`, `lldp_tx_interval_sec`, `acd_enable` | "", true, 30, true | LLDP/ACD |
+| `mock` | false | true 면 소켓 없음 (테스트) |
+
+`major_rev`/`minor_rev` 는 config 키가 없다 (어댑터가 1/0 고정, `ethernetip_adapter.c:161-162`). `config_size` 도 키가 없다(1바이트).
+
+**points** — `address.ethernetip` 의 세 가지 형태 (`parse_points()`, `ethernetip_adapter.c:71-135`):
+
+| 형태 | 예 | Adapter 역할에서 | Originator 역할에서 |
+|---|---|---|---|
+| assembly + offset | `{ "assembly": 150, "byte_offset": 0, "length": 32 }` | 이미지 오프셋 | (이미지 오프셋) |
+| tag | `{ "tag": "Sensor1.Barcode" }` | 이미지 오프셋 (tag 무시) | `eip_stack_tag_read/write()` |
+| CIP path | `{ "class_id": 4, "instance": 150, "attribute": 3 }` | 이미지 오프셋 0 (path 무시) | `eip_stack_explicit_get/set()` |
+
+Adapter 역할의 핵심 규칙 (`eip_read_point()` `:418-461`, `eip_write_point()` `:463-488`):
+
+- `access: "read"` 포인트 → **입력(T→O) 이미지**, `byte_offset` 위치. 앱은 `write_point` 로 여기에 센서값을 **쓴다**.
+- `access: "write"` 포인트 → **출력(O→T) 이미지**. 앱은 `read_point` 로 PLC 가 보낸 값을 **읽는다**.
+- ⚠ `assembly` 숫자는 **기본값 채우기에만** 쓰이고 실제 읽기/쓰기는 항상 설정된 input/output 이미지로 간다. `assembly: 100`
+  (config) 같은 값을 적어도 config Assembly 로 가지 않는다.
+- ⚠ `write_point` 는 access 와 무관하게 **항상 입력 이미지** 에 쓴다 (`:484-487`). "write" 포인트에 앱이 쓰면 같은 오프셋의
+  입력 이미지가 바뀐다 — 설계 의도(센서는 입력만 생산)지만 이름이 헷갈리기 쉽다.
+- 포인트의 `offset + length` 가 이미지보다 크면 이미지를 자동 확장 (최대 2048) (`:342-362`).
+
+**예제 해설** — [`config/example.ethernetip.json`](../../config/example.ethernetip.json):
+
+```
+input_assembly 150 / input_size 512   → T→O 514바이트(seq 포함) → Large Forward Open 필요 (5.6.8)
+output_assembly 101 / output_size 128 → O→T 130 허용 (Run/Idle 포함 134 는 거절 ⚠)
+security_class 1 + psk_hex 11…11      → FO/Set/Close 에 0x00C1 MAC 필요 → 상용 스캐너 불가
+mock: true                            → 소켓을 열지 않음! 데몬으로 돌려도 네트워크에 안 보임
+points:
+  barcode_value  read  offset 0  len 32  → 입력 이미지 0..31
+  status_word    read  offset 32 len 2   → 입력 이미지 32..33
+  trigger        write offset 0  len 1   → 출력 이미지 0 (PLC 가 씀)
+```
+
+실제 스캐너와 붙이려면 [`config/example.codesys.ethernetip.json`](../../config/example.codesys.ethernetip.json)
+(`mock: false`, `security_class: 0`, input 64 / output 16) 이나
+[`config/example.sw_master.ethernetip.json`](../../config/example.sw_master.ethernetip.json) (루프백 15562/15563) 를 본다.
+
+### 10.6 EDS 파일 해설
+
+EDS(Electronic Data Sheet)는 INI 비슷한 텍스트 파일로, 스캐너 설정 툴이 "이 장치는 어떤 Assembly 를 몇 바이트로, 어떤
+RPI 범위로 연결할 수 있다" 를 알게 해 준다. [`stacks/ethernetip/eds/FieldbusSensor.eds`](../../stacks/ethernetip/eds/FieldbusSensor.eds):
+
+| 섹션 | 내용 | 코멘트 |
+|---|---|---|
+| `[File]` | 설명, 날짜, Revision 1.1 | |
+| `[Device]` | VendCode 43981(0xABCD), ProdType 12, ProdCode 1, MajRev 1, **MinRev 1**, ProdName | ⚠ 스택 Identity minor rev 는 0 (어댑터 고정) → 전자키 minor 검사 시 불일치 |
+| `[Device Classification]` | `Class1 = EtherNet/IP` | |
+| `[Params]` | Param1 "Input Size" | 링크 경로가 placeholder |
+| `[Assembly]` | Assem100 Config(1), Assem101 Output(128), Assem150 Input(512) | |
+| `[Connection Manager]` | Connection1 Exclusive Owner | 아래 참고 |
+| `[Port]` | TCP 포트 | 표준 형식과 다름(사양서 확인 필요) |
+| `[Capacity]` | MaxIOConnections 32 등, `TSpec1 = TCP, 44818` | ⚠ TSpec 은 보통 `TxRx, 연결크기, 초당패킷` 형식 (사양서 확인 필요) |
+| `[LLDP Management]` | 클래스 0x109 | |
+
+**Connection1 해석** [사양의 EDS Connection 항목 필드 순서 — 사양서 확인 필요]:
+`trigger&transport(DWORD), connection params(DWORD), O→T RPI, O→T size, O→T format, T→O RPI, T→O size, T→O format,
+config1 size, config1 format, config2 size, config2 format, name, help, path`.
+
+- 첫 DWORD `0x04010002`: bit 1 = Class 1, bit 16 = Cyclic, bit 24-27 의 값 4 = Exclusive Owner (OpENer 샘플 EDS 와 같은 값).
+  EDS 주석은 "Exclusive Owner" 라고만 적었다.
+- 둘째 DWORD `0x44640405`: bit 0 O→T fixed, bit 2 T→O fixed, **bit 8-10 = 4 → O→T 헤더 = 32비트 Run/Idle**, bit 12-14 = 0 →
+  T→O pure data, bit 16-19 = 4 → O→T P2P, bit 20-23 = 6 → T→O multicast/P2P, bit 24-31 = scheduled 우선순위.
+  EDS 주석은 이것을 "trigger & transport" 라고 잘못 부른다.
+- ⚠ **EDS 는 O→T 32비트 Run/Idle 헤더를 선언하지만 스택은 그 형식을 거절한다** (5.6.4). 이 EDS 로 설정한 스캐너는
+  O→T 크기 = 128+6 = 134 를 보내고 0x0109 로 실패할 것으로 예상된다(정적 분석; 실기 미검증).
+- 이후 필드 `1000000,8000, 128, 1000000,8000, 512, ,, ,Assem100,,Assem101,Assem150,,` 는 위 필드 순서와 칸 수가 맞지 않는다
+  (RPI 자리에 두 값, format 자리에 크기 등). EZ-EDS 류 검사기로 검증이 필요하다. 표준에 가까운 모양 예:
+
+```
+Connection1 =
+    0x04010002,                 $ trigger & transport: Class1, cyclic, exclusive owner
+    0x44640405,                 $ conn params: O→T 32bit run/idle, T→O pure data, ...
+    ,,Assem101,                 $ O→T RPI(기본), size(비움 = Assembly 크기), format(Assembly 참조)
+    ,,Assem150,                 $ T→O RPI, size, format
+    ,,                          $ config part 1
+    ,,                          $ config part 2
+    "Exclusive Owner",          $ name
+    "",                         $ help
+    "20 04 24 64 2C 65 2C 96";  $ path: config 100, O→T 101, T→O 150
+```
+
+(스택이 Run/Idle 을 지원하지 않는 동안에는 둘째 DWORD 의 O→T 헤더 비트를 "pure data" 로 바꾸는 것이 EDS-스택 일관성에 맞다.)
+
+### 10.7 이 저장소에만 있는 동작 (알아 둘 것)
+
+| 동작 | 위치 |
+|---|---|
+| 심볼 태그 경로(클래스 없이 0x91)는 **입력 Assembly attr 3** 으로 매핑 | `eip_cip.c:648-658` |
+| Set/Reset 은 세션 소유 + (Class≥1 이면 인증) + protection_mode 0 필요 | `eip_cip.c:213-239` |
+| protection_mode ≠ 0 이면 protection_mode 자신도 Set 불가 (원격 해제 불가) | 같은 게이트 |
+| mock 모드: 소켓 없이 poll 이 워치독/생산/LLDP 만 수행 | `eip_stack.c:588-593` |
+| ACD 는 실제 ARP 감시 없이 `eip_stack_acd_conflict()` 주입으로만 | `eip_stack.c:634-654` |
+
+### 10.8 의도적 비범위
+
+| 항목 | 상태 |
+|---|---|
+| Class 3 연결형 explicit (SendUnitData) | 없음 |
+| Unconnected Send 라우팅 / Multiple Service Packet | 없음 |
+| Input Only / Listen Only / 멀티캐스트 T→O / COS | 없음 |
+| Run/Idle 헤더 | 없음 (⚠ 상호운용 영향 큼) |
+| ListInterfaces, UDP 44818 ListIdentity | 없음 |
+| CIP Security (ODVA 표준 TLS/DTLS, 인증서, 0x5D/0x5F) | 없음 (저장소 프로파일만) |
+| DLR (링), CIP Sync (PTP), CIP Motion, CIP Safety | 없음 |
+| LLDP 실제 송신/수신, 실제 ACD(ARP) | 없음 |
+| 공식 ODVA CT / DoC | 제품 프로세스 (13장) |
 
