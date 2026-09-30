@@ -265,7 +265,30 @@ PN RT (`pn_rt.c:93`)와 EIP Class 1 (`stacks/ethernetip/src/eip_io.c:105`) 모�
 
 ---
 
+## T9. Modbus — 사양 차이와 결함 (`docs/protocols/modbus.md` 부록 D 에서)
+
+전체 17항목과 재현 방법은 [`../protocols/modbus.md`](../protocols/modbus.md) 부록 C·D 에 있다.
+아래는 수정할 가치가 있는 항목만 추렸다. **(실측)** 표시는 하네스로 재현한 항목이다.
+T9-1 과 T9-3 은 이 세션에서도 따로 재현해 확인했다.
+
+| ID | 우선순위 | 문제 | 근거 | 수정 범위 |
+|---|---|---|---|---|
+| T9-1 | 높음 | **클라이언트: 한 번 타임아웃이 나면 이후 모든 트랜잭션이 영구적으로 `-EIO`.** 늦게 도착한 응답이 소켓에 남아 TID 가 어긋나는데, `connected=1` 이 유지돼 재연결도 하지 않는다 (실측: txn0 `-110`, txn1~4 `-5`) | `stacks/modbus/src/mb_stack.c:710`, `:744-747` | `stacks/modbus/`: 타임아웃이나 TID 불일치가 나면 소켓을 닫고 재연결하거나, TID 가 맞을 때까지 오래된 응답을 버린다 |
+| T9-2 | 높음 | **어댑터: bit_count ≤ 8 비트필드 + 2바이트 타입(uint16 등)** 에서 쓰기는 상위 바이트만 쓰고, 읽기는 두 번째 바이트로 초기화되지 않은 스택 메모리를 돌려준다. 예제 config 의 `status_nibble` 이 해당 (실측) | `adapters/modbus/modbus_adapter.c:601-602`, `:634-635`, `:673-676` | `adapters/modbus/` |
+| T9-3 | 높음 | **어댑터: 주소 문자열을 `strtol(…, 0)` 으로 파싱해서 앞자리 0 이 8진수로 해석된다.** `"00010"`→PDU 7, `"00009"`→0, `"040001"`→16385 (실측) | `adapters/modbus/modbus_adapter.c:113` | `adapters/modbus/`: 10진 고정(`base 10`). 16진을 허용하려면 `0x` 접두사를 명시적으로 처리 |
+| T9-4 | 중간 | FC01~04 에서 **수량 위반(0, 초과)에 예외 02 를 낸다.** 사양은 수량 위반 03, 주소 위반 02. CTT `MB-T-NEG-001` 이 잘못된 값 02 를 기대값으로 고정해 두었다 (실측) | `stacks/modbus/src/mb_stack.c:168`, `:194`; `tests/scenarios/modbus/exception_illegal_address.yaml` | `stacks/modbus/` + 해당 CTT 시나리오 기대값. 다른 FC(15/16/23)의 수량 검사도 같이 점검 |
+| T9-5 | 중간 | 클라이언트 `connect()` 가 블로킹이고 타임아웃이 없다. 상대가 SYN 에 응답하지 않으면 사이클 스레드가 커널 기본값(수십 초~분)만큼 멈춘다 | `stacks/modbus/src/mb_stack.c:519` | `stacks/modbus/`: non-blocking connect + `poll` 타임아웃. T3 과 같이 처리 |
+| T9-6 | 중간 | 기본 설정에서 **Unit ID 0xFF 요청을 무시**(무응답)한다. TCP 구현 가이드는 직접 연결 장치에 0xFF 를 권고하므로 0xFF 를 보내는 마스터와 연결되지 않는다 (실측) | `stacks/modbus/src/mb_stack.c:149` | `stacks/modbus/`: 0xFF 는 항상 수락 (설정으로 끌 수 있게) |
+| T9-7 | 낮음 | 서버 소켓에 `TCP_NODELAY` 가 없어 파이프라인 응답이 Nagle/지연 ACK 로 늦어진다. 한 줄 추가로 해결됨을 확인 (실측) | `stacks/modbus/src/mb_stack.c` accept 경로 | `stacks/modbus/` |
+| T9-8 | 낮음 | non-blocking `send` 가 `EAGAIN` 을 내면 연결을 끊는다 | `stacks/modbus/src/mb_stack.c:665-693` | `stacks/modbus/`: 송신 버퍼에 남겨 두고 다음 poll 에서 재시도 |
+| T9-9 | 낮음 | TID 카운터가 함수별 `static` 3개다(모두 1부터 시작, 인스턴스 간 공유) | `stacks/modbus/src/mb_stack.c:767`, `:879`, `:949` | `stacks/modbus/`: 스택 인스턴스 필드 하나로 통합 |
+| T9-10 | 낮음 | 스키마의 `chars_per_word` 를 어댑터가 읽지 않는다 (`chars_per_register` 계열만 읽음) | `config/config.schema.json:58`, `adapters/modbus/modbus_adapter.c:335-340` | 스키마 또는 어댑터 한쪽으로 통일 |
+| T9-11 | 결정 필요 | 작은 숫자 주소의 해석이 테이블마다 다르다 (coil 은 1-based, 나머지는 0-based). 4자리 `4001` 이 PDU 1 이 된다 (전통 4자리 표기에서는 PDU 0) | `adapters/modbus/modbus_adapter.c:160-201` | 주소 표기 규칙을 먼저 정하고 문서화한 뒤 수정 |
+
+**완료 조건 (공통):** 항목마다 재현 테스트를 `tests/test_mb_stack.c` 나 `tests/test_mb_adapter.c` 에 추가하고,
+`ctest -L modbus -LE soak_ci` 가 통과한다.
+
 ## 이후 추가될 항목
 
-`docs/protocols/` 의 프로토콜별 문서(Modbus/SLMP/EtherNet/IP/PROFINET)를 작성하면서
-사양과 이 저장소 스택의 차이가 추가로 정리될 예정이다. 확인되면 이 문서에 T9 이후로 덧붙인다.
+SLMP / EtherNet/IP / PROFINET 문서의 사양 차이와, Fable 사양 검토(PROFINET·EtherNet/IP)
+결과가 확인되면 T10 이후로 덧붙인다.
