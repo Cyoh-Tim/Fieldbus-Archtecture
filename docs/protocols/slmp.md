@@ -1463,7 +1463,7 @@ ok(data)  = D0 00 | req[2..6] | le16(2+len(data)) | 00 00 | data
 | BCD | [`slmp_codec.c:266-285`](../../adapters/slmp/slmp_codec.c) | |
 | 코어 등록 | [`core/adapter_registry.c:27`](../../core/adapter_registry.c) | |
 | 코어가 JSON 을 문자열로 전달 | [`core/config_loader.c:81-90`](../../core/config_loader.c) | 코어는 내용 해석 안 함 |
-| 주기 호출 | [`core/scheduler.c:28-69`](../../core/scheduler.c), [`core/fb_api.c:730-736`](../../core/fb_api.c) | |
+| 주기 호출 | [`core/scheduler.c:28-69`](../../core/scheduler.c), [`core/fb_api.c:729-737`](../../core/fb_api.c) | |
 
 ### 9.2 코어가 어댑터를 구동하는 방식
 
@@ -1538,9 +1538,9 @@ JSON 숫자 필드는 문자열 `"0x3FF"` 도 받는다(`strtol(…, 0)`, [`slmp
 | `barcode_value` | `string`, `length: 32`, D100 | 16워드(`D100~D115`) 일괄 쓰기. 문자 배치는 11.1 절 주의 |
 | `temperature` | `uint16`, `scale: 0.1`, `"address": "110"` | D110 1워드. 앱은 float32(BE 4바이트)로 25.5 를 주고, 어댑터가 255 로 변환 |
 | `pressure` | `float`, `endian: "CDAB"`, D200, quantity 2 | D200=하위 워드, D201=상위 워드 → **MELSEC 관례(4.6)와 일치** [검증] |
-| `plc_trigger` | `bool`, M10, `unit: "bit"` | M10 1점 **비트 단위** 읽기 → 부록 D-1 때문에 실 PLC 와는 비호환 |
+| `plc_trigger` | `bool`, M10, `unit: "bit"` | M10 1점 **비트 단위** 읽기. 1점 읽기는 우연히 동작하지만(부록 D-1) 같은 형태의 쓰기·다점 접근은 실 PLC 와 비호환 |
 | `alarm_bit` | `bool`, D300, `bit: 3` | D300 1워드 읽고 bit3 추출 |
-| `input_x` | `bool`, X, `start: "1A"`, `unit: "bit"` | X1A(=26) 1점 비트 단위 읽기 → 부록 D-1 |
+| `input_x` | `bool`, X, `start: "1A"`, `unit: "bit"` | X1A(=26) 1점 비트 단위 읽기 (부록 D-1 의 1점 예외로 동작) |
 
 엔디안 어휘 (저장소 canonical 은 "워드마다 상위 바이트 먼저"인 BE 바이트 창):
 
@@ -1603,3 +1603,478 @@ float 1.5,        endian CDAB → D200=0x0000 D201=0x3FC0 (wire 00 00 C0 3F)   �
 | Mitsubishi/CLPA 인증 | 아님 | 12장 |
 | 재연결 | 없음 | 6.4 절 (의도라기보다 미구현) |
 
+---
+
+## 10. 테스트와 디버깅
+
+### 10.1 단위 테스트
+
+| 테스트 | 파일 | 확인 내용 | 빌드 조건 |
+|--------|------|-----------|-----------|
+| `test_slmp_stack` | [`tests/test_slmp_stack.c`](../../tests/test_slmp_stack.c) | 디바이스 표(`:36`), 0401 인코드 필드(`:56`), 빈 정상 응답 디코드(`:90`), handle_request 워드/비트/ASCII(`:108`), 점수 0·961·7169·1013 과 미지원 서브커맨드·디바이스(`:298`), localhost TCP client↔server(`:195`, 포트 15557), 유휴·IP 당 상한·느린 클라이언트 격리(`:426`) | 항상 (`BUILD_DAEMON=OFF` 에서도) |
+| `test_slmp_adapter` | [`tests/test_slmp_adapter.c`](../../tests/test_slmp_adapter.c) | 엔디안 CDAB, 타입 별칭, BCD, 서버 모드 어댑터로 string/scale/float/bit-in-word/X1A 왕복 | `BUILD_DAEMON=ON` (cJSON 필요) |
+
+```sh
+cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON
+cmake --build build -j4
+./build/test_slmp_stack
+ctest --test-dir build -L slmp --output-on-failure
+```
+
+필자 실행 결과(2026-09-30, 별도 빌드 디렉토리): `test_slmp_stack: OK`, `ctest -R slmp -LE soak_ci`
+12/12 통과, `BUILD_DAEMON=ON` 빌드에서 `test_slmp_adapter: OK`.
+
+**한계:** 이 테스트들은 저장소 인코더로 만든 요청을 저장소 서버에 넣는 **자기 일관성(self-consistency)**
+테스트다. 양쪽이 같은 오해를 공유하면(비트 단위 1바이트/점, 부록 D-1) 통과해 버린다. 실 PLC 호환성을
+보려면 **사양서/실 PLC 캡처에서 가져온 고정 hex(golden)** 를 입력으로 쓰는 테스트가 필요하다(부록 B 를
+그대로 쓸 수 있다).
+
+### 10.2 CTT 시나리오
+
+CTT(Controller Test Tool)는 이 저장소의 내부 시나리오 러너다. SLMP 플러그인
+([`tools/ctt/proto/slmp/slmp_plugin.c`](../../tools/ctt/proto/slmp/slmp_plugin.c), 등록
+`ctt_plugin_slmp` `:880`)은 TCP 없이 `slmp_encode_batch_*` 로 요청을 만들어
+`slmp_stack_handle_request` 에 직접 주입한다.
+
+| TC ID | YAML ([`tests/scenarios/slmp/`](../../tests/scenarios/slmp/)) | 내용 |
+|-------|------|------|
+| SLMP-3E-DEV-001 | `device_table.yaml` | D/M/ZR/X/Y/W 코드·비트여부·16진여부, 미지 이름 거절 |
+| SLMP-3E-ENC-001 | `encode_batch_read.yaml` | 0401 21바이트, 0401/1401 커맨드, 비트 쓰기 길이 25(=1바이트/점 기준) |
+| SLMP-3E-CM-001 | `batch_read_write_loopback.yaml` | 워드/비트/ASCII/X1A 왕복 |
+| SLMP-3E-CM-002 | `batch_lifetime.yaml` | 쓰기→읽기→덮어쓰기 |
+| SLMP-3E-CYC-001/002/003 | `soak_short.yaml`, `batch_cyclic_metrics.yaml`, `batch_cycle_4ms.yaml` | 8 ms / 4 ms 주기 반복 읽기, late/missed/jitter |
+| SLMP-3E-NEG-001 | `reject_non_3e.yaml` | ASCII/4E 생성 거절, 서브헤더 `54 00` 주입 거절, `0403` → `C050h` |
+| SLMP-3E-NEG-002 | `frame_malformed.yaml` | 2바이트/20바이트 절단, 데이터 없는 쓰기 → reject |
+| SLMP-3E-NEG-003 | `oob_batch_read.yaml` | D5000 읽기/쓰기 → `C056h`, 맵 보존 |
+
+```sh
+./build/ctt --scenario tests/scenarios/slmp/encode_batch_read.yaml
+./build/ctt --scenario tests/scenarios/slmp/batch_cyclic_metrics.yaml --report /tmp/slmp.json
+```
+
+`frame_malformed.yaml` 의 `pdu_hex` 는 5장 표로 직접 읽어 볼 수 있는 좋은 연습 문제다:
+`500000ffff03000c00100001140000000000a80200` = "D0 부터 2워드 쓰기인데 데이터 0바이트" (21바이트).
+
+주의: `encode_batch_read.yaml` 의 비트 쓰기 `length: 25` 는 저장소의 1바이트/점 인코딩을 고정한다.
+사양대로 니블 패킹으로 고치면 4점 쓰기는 23바이트가 되므로 시나리오도 함께 바꿔야 한다.
+자세한 카탈로그는 [`docs/ctt_slmp_bundle.md`](../ctt_slmp_bundle.md),
+[`docs/ctt_slmp_matrix.md`](../ctt_slmp_matrix.md).
+
+### 10.3 Fuzz
+
+[`tests/fuzz/fuzz_slmp_request.c`](../../tests/fuzz/fuzz_slmp_request.c) 는 libFuzzer 하네스로, 첫
+바이트로 모드를 골라(`:143`) 원시 바이트(0), 워드 읽기(1), 워드 쓰기(2), 비트 R/W(3), 미구현
+커맨드(4: `0403`/`1402`/`0801`/`0402`), 미지 디바이스·서브커맨드(5), 점수 경계·짧은 쓰기(6),
+상태 있는 쓰기→읽기(7) 를 `slmp_stack_handle_request` 에 넣는다. 사전은
+[`tests/fuzz/dict/slmp_request.dict`](../../tests/fuzz/dict/slmp_request.dict), 코퍼스는
+`tests/fuzz/corpus/slmp_request/`.
+
+```sh
+CC=clang cmake -S . -B build-fuzz -DBUILD_FUZZERS=ON -DBUILD_DAEMON=OFF -DBUILD_CTT=OFF
+cmake --build build-fuzz --target fuzz_slmp_request
+./build-fuzz/fuzz_slmp_request -max_total_time=60 \
+    -dict=tests/fuzz/dict/slmp_request.dict tests/fuzz/corpus/slmp_request
+```
+
+(필자 환경에서는 clang 의 libFuzzer 런타임(`libclang_rt.fuzzer`)이 없어 링크 단계에서 실패해 실행하지
+못했다 — 환경 문제이며 하네스 코드는 읽기로만 확인.)
+
+직접 구현한다면 fuzz 대상은 두 곳이다: **서버의 요청 처리**(외부 입력)와 **클라이언트의 응답 파서**
+(PLC 나 중간자가 보낸 입력). 이 저장소 fuzz 는 앞의 것만 다룬다.
+
+### 10.4 소프트웨어 마스터 (실소켓 루프백)
+
+[`examples/sw_master.py`](../../examples/sw_master.py) 는 Python 표준 라이브러리만으로 3E 워드 일괄
+읽기/쓰기를 보내는 클라이언트다. 저장소 데몬을 서버 모드
+([`config/example.fake_sensor.slmp.json`](../../config/example.fake_sensor.slmp.json), 127.0.0.1:15561)로
+띄워 실 TCP 로 검증한다.
+
+```sh
+./examples/run_sw_master_soak.sh slmp --seconds 8
+./examples/run_mock_flow.sh slmp
+```
+
+### 10.5 Wireshark
+
+- **2026-09 기준 Wireshark 본선(GitLab master 의 `epan/dissectors/` 파일 목록)에는 SLMP/MC 프로토콜
+  전용 디섹터가 없다.** (필자가 파일 목록을 조회해 `slmp`/`melsec`/`mcprotocol` 이름을 찾지 못함.)
+  그래서 캡처하면 그냥 "TCP payload" 로 보인다.
+- 캡처 필터: `tcp port 5000` (PLC 에서 연 포트로). 디스플레이 필터: `tcp.port == 5000 && tcp.len > 0`.
+- 페이로드 첫 두 바이트로 방향을 즉시 구분: `50 00` 요청, `D0 00` 응답.
+- 편하게 보려면 Lua 디섹터를 쓴다. 아래는 **스케치**다 (필자 환경에 Wireshark 가 없어 실행 검증 못 함):
+
+```lua
+-- slmp3e.lua : Wireshark → Help → About → Folders → Personal Lua Plugins 에 복사
+local p = Proto("slmp3e", "SLMP Binary 3E")
+local F = p.fields
+F.sub  = ProtoField.bytes ("slmp3e.subheader", "Subheader")
+F.net  = ProtoField.uint8 ("slmp3e.net",   "Network No.", base.HEX)
+F.pc   = ProtoField.uint8 ("slmp3e.pc",    "PC No.",      base.HEX)
+F.io   = ProtoField.uint16("slmp3e.io",    "Dest module I/O", base.HEX)
+F.md   = ProtoField.uint8 ("slmp3e.md",    "Multidrop",   base.HEX)
+F.len  = ProtoField.uint16("slmp3e.len",   "Data length")
+F.tmr  = ProtoField.uint16("slmp3e.timer", "Monitoring timer (x250ms)")
+F.cmd  = ProtoField.uint16("slmp3e.cmd",   "Command",     base.HEX)
+F.sc   = ProtoField.uint16("slmp3e.subcmd","Subcommand",  base.HEX)
+F.head = ProtoField.uint24("slmp3e.head",  "Head device No.")
+F.dev  = ProtoField.uint8 ("slmp3e.dev",   "Device code", base.HEX)
+F.pts  = ProtoField.uint16("slmp3e.points","Points")
+F.end_ = ProtoField.uint16("slmp3e.end",   "End code",    base.HEX)
+
+local function one(tvb, pinfo, tree)
+  local t = tree:add(p, tvb())
+  local is_req = tvb(0,1):uint() == 0x50
+  t:add(F.sub, tvb(0,2)); t:add(F.net, tvb(2,1)); t:add(F.pc, tvb(3,1))
+  t:add_le(F.io, tvb(4,2)); t:add(F.md, tvb(6,1)); t:add_le(F.len, tvb(7,2))
+  if is_req and tvb:len() >= 21 then
+    t:add_le(F.tmr, tvb(9,2)); t:add_le(F.cmd, tvb(11,2)); t:add_le(F.sc, tvb(13,2))
+    t:add_le(F.head, tvb(15,3)); t:add(F.dev, tvb(18,1)); t:add_le(F.pts, tvb(19,2))
+    pinfo.cols.info = string.format("SLMP req cmd=%04X", tvb(11,2):le_uint())
+  elseif not is_req and tvb:len() >= 11 then
+    t:add_le(F.end_, tvb(9,2))
+    pinfo.cols.info = string.format("SLMP resp end=%04X", tvb(9,2):le_uint())
+  end
+end
+
+function p.dissector(buf, pinfo, tree)
+  pinfo.cols.protocol = "SLMP3E"
+  local off = 0
+  while off < buf:len() do
+    local rem = buf:len() - off
+    if rem < 9 then
+      pinfo.desegment_offset = off; pinfo.desegment_len = DESEGMENT_ONE_MORE_SEGMENT
+      return buf:len()
+    end
+    local total = 9 + buf(off + 7, 2):le_uint()
+    if rem < total then
+      pinfo.desegment_offset = off; pinfo.desegment_len = total - rem
+      return buf:len()
+    end
+    one(buf(off, total):tvb(), pinfo, tree)
+    off = off + total
+  end
+  return off
+end
+DissectorTable.get("tcp.port"):add(5000, p)
+```
+
+Wireshark 없이 빠르게 보려면 `tcpdump -i any -X 'tcp port 5000'` 로 hex 를 뜨고 부록 B 와 비교한다.
+
+### 10.6 이 문서의 hex 를 재현하는 법
+
+문서의 [검증] 값은 저장소에 파일을 추가하지 않고, 스크래치 디렉토리의 작은 C 파일로 만들었다.
+
+```c
+/* harness.c — cc -std=c11 -D_GNU_SOURCE -Istacks/slmp/include -Iinclude -Icore \
+ *             harness.c build/libslmp_stack.a -lpthread */
+#include "slmp_stack.h"
+#include <stdio.h>
+#include <string.h>
+static void dump(const char *t, const uint8_t *b, size_t n)
+{
+    printf("%-10s", t);
+    for (size_t i = 0; i < n; i++) printf(" %02X", b[i]);
+    printf("\n");
+}
+int main(void)
+{
+    slmp_cfg_t cfg; memset(&cfg, 0, sizeof cfg);
+    cfg.role = SLMP_ROLE_SERVER; cfg.frame = SLMP_FRAME_3E_BINARY;
+    cfg.pc_no = 0xFF; cfg.dest_module_io = 0x03FF; cfg.monitoring_timer = 0x0010;
+    slmp_stack_t *s = slmp_stack_create(&cfg);
+    uint16_t seed[2] = {0x1234, 0xABCD};
+    slmp_stack_write_words(s, SLMP_DEV_D, 100, seed, 2);
+    slmp_range_t r = {.addr = {.device_code = SLMP_DEV_D, .head = 100,
+                               .unit = SLMP_ACCESS_WORD}, .quantity = 2};
+    uint8_t req[64], resp[64]; size_t rl, sl;
+    slmp_encode_batch_read(&cfg, &r, req, sizeof req, &rl);  dump("REQ", req, rl);
+    slmp_stack_handle_request(s, req, rl, resp, sizeof resp, &sl); dump("RES", resp, sl);
+    slmp_stack_destroy(s);
+    return 0;
+}
+```
+
+주의: `slmp_encode_batch_*` 는 넘겨받은 `cfg` 를 **그대로** 쓴다. `slmp_stack_create` 가 채우는
+기본값(`dest_module_io=0x03FF`, 감시 타이머 16)은 스택 내부 사본에만 적용되므로, 0 으로 초기화한
+구조체를 그대로 인코더에 넘기면 I/O 번호 `00 00`, 타이머 `00 00` 인 프레임이 나온다. 인코더에는
+`slmp_stack_cfg(s)` 가 돌려주는 설정을 넘기는 것이 안전하다.
+
+### 10.7 실 PLC 연결 시 체크
+
+| 증상 | 의심 | 확인 |
+|------|------|------|
+| connect 거부 (RST) | 포트 미개방 / 프로토콜 TCP·UDP 불일치 | 7.3 포트 설정, `nc -vz` |
+| connect 타임아웃 | IP/서브넷/방화벽 | `ping`, 스위치 링크 |
+| 연결은 되는데 응답 없음 | 교신 데이터 코드 ASCII 로 설정됨, 또는 3E 가 아닌 프레임 기대 | PLC 파라미터 |
+| `C056h` | 디바이스 범위 초과 | PLC 파라미터의 디바이스 점수, 16진/10진 착오 |
+| `C059h` | 미지원 커맨드 (예: iQ-R 확장을 Q 에) | 서브커맨드 |
+| 쓰기만 에러 | RUN 중 쓰기 금지 | 7.3 "RUN 중 쓰기 허용" |
+| 값이 뒤집혀 보임 (`0x3412`) | LE 처리 누락 | 4.6 / 0.4 |
+| float 이 이상한 값 | 워드 순서 (ABCD vs CDAB) | 4.6, 9.4 |
+| 문자열이 두 글자씩 뒤바뀜 (`BADC`) | 워드 내 문자 순서 | 11.1 |
+| 비트가 항상 OFF / 엉뚱한 비트가 바뀜 | 니블 패킹 미준수 | 5.7, 부록 D-1 |
+| 주기적으로 엉뚱한 주소의 값 | 타임아웃 후 stale 응답 | 6.4 |
+
+GX Works 의 이더넷 진단(Ethernet diagnostics) 화면에서 연결 상태·수신 에러 코드를 볼 수 있다
+**[메뉴 위치 기종별 확인 필요]**. PLC 가 기록한 에러 코드는 SD 영역(예: SD0 최신 자기진단 에러 코드)에서도
+읽을 수 있다 **[주소 기종별 확인 필요]**.
+
+---
+
+## 11. 흔한 함정과 보안 고려사항
+
+### 11.1 흔한 함정
+
+1. **리틀엔디안을 잊음.** `0x0401` 을 `04 01` 로 보내면 PLC 는 커맨드 `0104h` 로 읽고 `C059h`.
+2. **서브헤더를 LE 수치로 생각함.** "0x5000 을 LE 로" 보내면 `00 50` 이 되어 무응답. 고정 바이트 `50 00`.
+3. **길이 필드 범위 착오.** 요청 길이는 감시 타이머부터 센다(헤더 9바이트 제외). 읽기 요청은 항상 12.
+4. **X/Y/B/W 를 10진으로 해석.** `X100` 은 256번. FX5 X/Y 는 8진.
+5. **비트 단위 데이터를 1바이트/점으로 처리.** 사양은 니블 패킹(5.7).
+6. **워드 순서.** MELSEC 의 32비트/float 는 하위 워드가 앞 번호(이 저장소 어휘 `CDAB`). 기본값
+   `ABCD` 로 두면 PLC 의 `DMOV`/`EMOV` 결과와 워드가 뒤바뀐다.
+7. **문자열 바이트 순서.** MELSEC `$MOV` 관례는 앞 문자가 하위 바이트(D100=`4241h` 에 "AB").
+   이 저장소 어댑터의 기본(`string_swap: false`)은 앞 문자를 **상위** 바이트에 넣는다
+   ([`slmp_codec.c:442-445`](../../adapters/slmp/slmp_codec.c)). 실측 [검증]: `"ABCD"` 를 기본값으로
+   쓰면 D100=`4142h`, D101=`4344h`(와이어 `42 41 44 43`), `string_swap: true` 면 D100=`4241h`(와이어
+   `41 42 43 44`). PLC 래더가 `$MOV`/문자열 명령으로 다루는 값이면 `string_swap: true` 가 맞고,
+   예제 config 의 `barcode_value` 는 이를 지정하지 않으므로 PLC 쪽 가이드와 대조해 결정해야 한다.
+   (반대로 PLC 가이드가 "상위 바이트가 첫 문자"라고 정의한 장비도 있어 옵션으로 둔 것이다.)
+8. **타임아웃 후 같은 연결 재사용.** 3E 는 ID 가 없어 이전 응답이 섞인다(6.4).
+9. **소켓 타임아웃 < 감시 타이머.** PLC 의 타임아웃 에러 응답을 못 받고 stale 이 된다.
+10. **작은 요청 폭탄.** 포인트마다 1 요청 → PLC 스캔 시간에 묶여 주기를 못 맞춤. 연속 주소로 모아 일괄 요청.
+11. **워드 내 비트 쓰기(read-modify-write) 경합.** PLC 도 같은 워드를 쓰면 덮어씀.
+12. **포트 공유.** TCP 포트 하나를 HMI 가 이미 점유 → 연결 거부. PLC 에 포트를 여러 개 연다.
+13. **TCP 에서 `recv` 한 번 = 프레임 하나라고 가정.** 반쪽/두 개가 올 수 있다(6.3).
+14. **저장소 특유:** `"XA"`, `"BA0"` 처럼 A~F 로 시작하는 16진 번호 문자열은 파싱 실패 후 포인트가 조용히
+    빠진다(9.5). `X0A` 로 쓸 것.
+15. **저장소 특유:** 인코더에 기본값이 채워지지 않은 `cfg` 를 넘기면 `03FF`/타이머가 0 인 프레임(10.6).
+
+### 11.2 스케일/타입 관련 함정 (이 저장소 어댑터)
+
+- 스케일이 설정된 포인트의 앱 값은 **float32 빅엔디안 4바이트**로 교환된다
+  ([`slmp_adapter.c:840-863`](../../adapters/slmp/slmp_adapter.c), [`:886-905`](../../adapters/slmp/slmp_adapter.c)).
+- `bool` + `bit` 지정 포인트 쓰기는 클라이언트 모드에서 먼저 PLC 에서 워드를 읽어 온 뒤 비트만 바꿔 다시
+  쓴다([`slmp_adapter.c:927-933`](../../adapters/slmp/slmp_adapter.c) → `write_map_window` 의 RMW
+  [`:617-647`](../../adapters/slmp/slmp_adapter.c)). 11.1-11 의 경합이 그대로 적용된다.
+
+### 11.3 (유지보수 메모) 사양 정합을 위해 고칠 곳
+
+이 문서 작성 범위에서는 코드를 고치지 않았다. 고친다면 어댑터/스택 범위 안에서(CLAUDE.md):
+
+| 항목 | 위치 | 방향 |
+|------|------|------|
+| 비트 단위 니블 패킹 | `slmp_encode_batch_write` 비트 경로, `slmp_stack_client_batch_read` 비트 경로, `handle_request` 비트 읽기/쓰기 | 5.7/8.3 코드. CTT `encode_batch_read.yaml` 길이·fuzz 모드 3 함께 수정 |
+| 타임아웃 시 연결 폐기 + 재연결 | `client_transact`, `slmp_stack_client_batch_*` | 8.5 코드. 어댑터 `poll_cycle` 에서 백오프 재연결 |
+| 소켓 타임아웃 기본값 | `slmp_init` | `timeout_ms` 기본을 감시 타이머 시간 + 여유로 |
+| 엔드 코드 | `SLMP_END_CMD` | 사양 `C059h` 로 (CTT `reject_non_3e.yaml` 동반 수정) |
+| 에러 정보 9B | `build_response` | 5.9 |
+| 비트 디바이스 워드 단위 선두 번호 | `slmp_stack_read/write_words` 의 비트 디바이스 경로 | 선두를 비트 번호로 해석 (부록 D-5) |
+| `"XA"` 파싱 | `parse_device_head` | 최장 접두사 매칭 (8.4) |
+| 응답 에코 검사 | `client_transact` | 5바이트 비교 |
+
+### 11.4 보안
+
+- **SLMP(3E/4E)에는 인증도 암호화도 없다.** 네트워크에 닿는 누구든 포트만 알면 디바이스를 읽고 쓸 수
+  있고, 기종/설정에 따라 원격 RUN/STOP 까지 가능하다. 평문이므로 스니핑·변조·재전송에 무방비다.
+- PLC 측 완화책(기종별 **[사양서 확인 필요]**): 원격 패스워드(원격 패스워드 해제 커맨드 필요), IP 필터,
+  "RUN 중 쓰기 금지", 포트를 필요한 것만 개방, 불필요 프로토콜 비활성화.
+- 네트워크 측: 제어망 분리(VLAN/방화벽), 인터넷 직접 노출 금지, 원격 접속은 VPN, IEC 62443 존/콘딧 설계.
+- MELSEC 이더넷 기능에 대해서는 과거 여러 공개 보안 권고(DoS, 인증 우회 등)가 있었다. 구체 항목은
+  Mitsubishi Electric PSIRT 와 CISA ICS 권고로 확인할 것(번호는 여기서 단정하지 않는다).
+- 이 저장소 서버(시뮬레이터)의 방어: 연결 수 상한, 출발지 IP 당 상한, 유휴 타임아웃, 프레임 최대 2048B,
+  점수 상한, 알 수 없는 디바이스 코드에 대해 맵을 새로 할당하지 않음(`slmp_device_known` 검사
+  [`slmp_stack.c:884`](../../stacks/slmp/src/slmp_stack.c)). 그러나 **인증은 없으므로 랩 외부에 노출하지 말 것.**
+- 클라이언트로서의 방어: 응답 길이 필드가 버퍼보다 크면 거절(`client_transact` [`:667-669`](../../stacks/slmp/src/slmp_stack.c)),
+  다만 이때 남은 바이트를 읽지 않고 연결도 유지하므로 동기가 깨진다(11.3 의 연결 폐기로 해결).
+
+---
+
+## 12. 인증/적합성
+
+- SLMP/CC-Link 계열의 적합성(conformance)은 **CLPA(CC-Link Partner Association)** 가 관리한다.
+  CC-Link IE Field / TSN / Field Network Basic 제품은 CLPA 적합성 시험 대상이다. SLMP 대응 기기 단독의
+  인증 프로그램 유무·절차는 CLPA 에 확인해야 한다 **[확인 필요]**.
+- Mitsubishi 쪽에는 파트너 프로그램(e-F@ctory Alliance 등)이 있으나 이는 프로토콜 인증과는 별개다.
+- **이 저장소의 CTT green 은 인증이 아니다.** [`docs/ctt_slmp_bundle.md`](../ctt_slmp_bundle.md) 와
+  [`docs/ctt_slmp_matrix.md`](../ctt_slmp_matrix.md) 가 명시하듯 `SLMP-3E-*` ID 는 내부 라벨이고,
+  공인 랩 판정·공식 TC 번호를 대체하지 않는다. 또한 10.1 절처럼 자기 일관성 테스트라 실 PLC 호환성도
+  보증하지 않는다(부록 D).
+- 실무적 "적합성" 확인 방법: 대상 PLC 기종(가능하면 Q, iQ-R, FX5 각각)과 실제로 연결해 부록 B 의 요청을
+  보내고 응답을 캡처해 golden 으로 보관한다.
+
+---
+
+## 13. 참고 사양 문헌
+
+문서 번호는 필자 기억과 공개 검색 결과에 근거하며, **정확한 번호/개정판은 Mitsubishi Electric FA 사이트에서
+확인할 것**.
+
+| 문헌 | 문서 번호 | 내용 | 확실성 |
+|------|-----------|------|--------|
+| SLMP Reference Manual | SH-080956ENG | SLMP 프레임(3E/4E, Binary/ASCII), 커맨드, 엔드 코드 | 번호 높은 확신, 개정판 확인 필요 |
+| MELSEC Communication Protocol Reference Manual (Q/L) | SH-080008 | MC 프로토콜 1E/3E/4E, QnA 호환 디바이스 표, 에러 코드 | 번호 높은 확신 |
+| MELSEC iQ-F FX5 User's Manual (SLMP) | JY997D56001 계열 | FX5 SLMP, 디바이스 표(8진 X/Y) | **확인 필요** |
+| MELSEC iQ-F FX5 User's Manual (MELSEC Communication Protocol) | JY997D60801 | FX5 MC 프로토콜 | 검색 결과 제목 기준, 확인 필요 |
+| MELSEC iQ-R Ethernet User's Manual (Application) | SH-081257ENG 계열 | iQ-R 이더넷 SLMP 설정 | **확인 필요** |
+| QnUCPU User's Manual (Communication via Built-in Ethernet Port) | SH-080811ENG 계열 | Q 내장 이더넷 MC 프로토콜 설정 | **확인 필요** |
+| CLPA SLMP / CC-Link IE 사양 | CLPA 회원 문서 | SLMP 가 CC-Link IE 계열에서의 정의 | 회원 전용 |
+
+교차 확인에 사용한 공개 구현 (사양서 대체물이 아님):
+
+- pymcprotocol (`senrust/pymcprotocol`): 디바이스 코드 표, 비트 니블 해석, `C059h` 처리, 감시 타이머 250 ms 단위
+- mc-protocol-3e (`score915/mc-protocol-3e`): 비트 니블 해석, 포트는 사양이 정하지 않는다는 점, 보안 경고
+
+저장소 내부 문서: [`docs/slmp_stack.md`](../slmp_stack.md), [`docs/ctt_slmp_bundle.md`](../ctt_slmp_bundle.md),
+[`docs/ctt_slmp_matrix.md`](../ctt_slmp_matrix.md), [`docs/design.md`](../design.md),
+[`tools/ctt/proto/slmp/README.md`](../../tools/ctt/proto/slmp/README.md).
+
+---
+
+## 부록 A. 구현 체크리스트
+
+**코덱**
+
+- [ ] 모든 다바이트 수치 LE, 서브헤더는 고정 바이트 `50 00` / `D0 00`
+- [ ] 요청 길이 = 오프셋 9 부터 끝 (읽기 = 12, 워드 쓰기 = 12 + 2n, 비트 쓰기 = 12 + ceil(n/2))
+- [ ] 선두 번호 3바이트 LE, `<= 0xFFFFFF`
+- [ ] 서브커맨드 `0000` 워드 / `0001` 비트
+- [ ] 비트 데이터 니블 패킹 (앞 점 = 상위 니블), 홀수 점수 패딩
+- [ ] 점수 상한 (워드 960, 비트 7168 — 기종 확인)
+- [ ] 응답: 서브헤더, `9 + len == n`, `len >= 2`, 엔드 코드, 정상 데이터 길이 검사
+- [ ] 이상 응답의 에러 정보 9바이트를 데이터로 오해하지 않음
+- [ ] 디바이스 문자열 파서: 최장 접두사, 디바이스별 기수, FX5 8진 처리
+
+**전송 (클라이언트)**
+
+- [ ] 연결당 요청 1개씩 (또는 4E 시리얼)
+- [ ] 정확히 9바이트 → 길이만큼 수신
+- [ ] 소켓 타임아웃 > 감시 타이머
+- [ ] 타임아웃/프레이밍 오류 시 연결 폐기, 백오프 재연결
+- [ ] 엔드 코드 ≠ 0 은 연결 유지
+- [ ] 에코 필드 확인
+- [ ] `TCP_NODELAY` (작은 요청 지연 방지)
+
+**서버 / 시뮬레이터**
+
+- [ ] 논블로킹 + 프레이밍 버퍼, 최대 프레임 크기
+- [ ] 연결 수 / IP 당 / 유휴 타임아웃 상한
+- [ ] 미지원 커맨드 `C059h`, 점수 `C051h`, 범위 `C056h`, 길이 불일치 `C061h` (+ 에러 정보)
+- [ ] 비트 디바이스 워드 단위 접근: 선두 = 비트 번호
+- [ ] `handle_request` 는 순수 함수 → 단위 테스트/fuzz
+
+**값 매핑**
+
+- [ ] int32/float: 하위 워드 먼저 (MELSEC)
+- [ ] 문자열: 앞 문자 하위 바이트 (MELSEC `$MOV`), 옵션으로 반대
+- [ ] BCD, 스케일/오프셋, 워드 내 비트필드
+
+**운영**
+
+- [ ] PLC 포트/프로토콜/교신 데이터 코드/RUN 중 쓰기 허용 설정
+- [ ] 제어망 분리, 인터넷 비노출
+- [ ] 실 PLC golden 캡처 확보
+
+---
+
+## 부록 B. hex 예제 모음
+
+공통 헤더(자국 CPU): `50 00 | 00 | FF | FF 03 | 00` (요청), `D0 00 | 00 | FF | FF 03 | 00` (응답).
+감시 타이머 `10 00` (4 초). "[검증]" = 저장소 스택으로 생성/처리해 확인, "[사양]" = 사양 형식대로 작성
+(8장 최소 구현으로 생성한 것 포함).
+
+| # | 설명 | 바이트 | 출처 |
+|---|------|--------|------|
+| B-1 | D100 부터 2워드 읽기 요청 | `50 00 00 FF FF 03 00 0C 00 10 00 01 04 00 00 64 00 00 A8 02 00` | [검증] |
+| B-1r | 응답 (D100=1234h, D101=ABCDh) | `D0 00 00 FF FF 03 00 06 00 00 00 34 12 CD AB` | [검증] |
+| B-2 | D100 ← 0102h, 0304h 쓰기 요청 | `50 00 00 FF FF 03 00 10 00 10 00 01 14 00 00 64 00 00 A8 02 00 02 01 04 03` | [검증] |
+| B-2r | 쓰기 정상 응답 | `D0 00 00 FF FF 03 00 02 00 00 00` | [검증] |
+| B-3 | M0 부터 4점 비트 읽기 요청 | `50 00 00 FF FF 03 00 0C 00 10 00 01 04 01 00 00 00 00 90 04 00` | [검증] |
+| B-3r | 응답 (M0..3 = 1,0,1,1), 사양 니블 | `D0 00 00 FF FF 03 00 04 00 00 00 10 11` | [사양] |
+| B-3x | 같은 응답, 저장소 서버 (1바이트/점) | `D0 00 00 FF FF 03 00 06 00 00 00 01 00 01 01` | [검증] (사양과 다름) |
+| B-4 | M0 부터 4점 쓰기 (1,0,1,1), 사양 니블 | `50 00 00 FF FF 03 00 0E 00 10 00 01 14 01 00 00 00 00 90 04 00 10 11` | [사양] |
+| B-4b | M0 부터 3점 쓰기 (1,0,1), 사양 니블 | `50 00 00 FF FF 03 00 0E 00 10 00 01 14 01 00 00 00 00 90 03 00 10 10` | [사양] |
+| B-4c | M10 1점 ON 쓰기, 사양 니블 | `50 00 00 FF FF 03 00 0D 00 10 00 01 14 01 00 0A 00 00 90 01 00 10` | [사양] |
+| B-4x | M0 4점 쓰기, 저장소 인코더 (1바이트/점) | `50 00 00 FF FF 03 00 10 00 10 00 01 14 01 00 00 00 00 90 04 00 01 00 01 01` | [검증] (사양과 다름) |
+| B-5 | X1A 1점 비트 읽기 요청 | `50 00 00 FF FF 03 00 0C 00 10 00 01 04 01 00 1A 00 00 9C 01 00` | [검증] |
+| B-6 | ZR100000 1워드 읽기 요청 | `50 00 00 FF FF 03 00 0C 00 10 00 01 04 00 00 A0 86 01 B0 01 00` | [검증] |
+| B-7 | D5000 1워드 읽기 요청 | `50 00 00 FF FF 03 00 0C 00 10 00 01 04 00 00 88 13 00 A8 01 00` | [검증] |
+| B-7r | 범위 초과 응답, 저장소 서버 (에러 정보 없음) | `D0 00 00 FF FF 03 00 02 00 56 C0` | [검증] |
+| B-7s | 범위 초과 응답, 사양 형식 (에러 정보 9B) | `D0 00 00 FF FF 03 00 0B 00 56 C0 00 FF FF 03 00 01 04 00 00` | [사양] (에러 정보 값은 예시) |
+| B-8 | `0403` 주입 시 저장소 서버 응답 | `D0 00 00 FF FF 03 00 02 00 50 C0` | [검증] (사양은 `C059h` 예상) |
+| B-9 | 점수 0 요청 시 저장소 서버 응답 | `D0 00 00 FF FF 03 00 02 00 51 C0` | [검증] |
+| B-10 | 미지 디바이스 코드 `EEh` 시 저장소 서버 응답 | `D0 00 00 FF FF 03 00 02 00 56 C0` | [검증] |
+| B-11 | D200 1워드 = "AB" (MELSEC 관례) 읽기 응답 데이터 | `... 04 00 00 00 41 42` | [사양]; 저장소 기본 `string_swap:false` 로 쓰면 `42 41` [검증] |
+| B-12 | D200..D201 = float 1.5 (MELSEC REAL) 데이터 | `00 00 C0 3F` | [검증] (`endian: CDAB`) |
+| B-13 | 4E: D100 2워드 읽기 (시리얼 1234h) | `54 00 34 12 00 00 00 FF FF 03 00 0C 00 10 00 01 04 00 00 64 00 00 A8 02 00` | [사양], 저장소 미구현 |
+| B-14 | ASCII 3E: D100 2워드 읽기 | `"500000FF03FF000018001004010000D*0001000002"` | [사양], 저장소 미구현 |
+| B-15 | 절단 프레임 (CTT NEG-002) | `50 00 00 FF FF 03 00 0C 00 10 00 01 14 00 00 00 00 00 A8 02 00` (데이터 없음) | 저장소: 무응답 폐기 [검증] |
+
+---
+
+## 부록 C. 디바이스 코드 표
+
+Q/L 호환 서브커맨드(`0000`/`0001`)용 1바이트 코드. "저장소" 열: 이 저장소 `g_devices`
+([`slmp_stack.c:52-67`](../../stacks/slmp/src/slmp_stack.c))의 값과 16진 번호 여부. "공개 구현" 열:
+pymcprotocol `DeviceConstants` 와의 일치 여부(필자 대조).
+
+| 디바이스 | 이름 | 종류 | 코드 | 번호 표기 (Q/iQ-R) | 저장소 is_bit / hex | 공개 구현 |
+|----------|------|------|------|--------------------|---------------------|-----------|
+| SM | 특수 릴레이 | 비트 | `91h` | 10진 | 1 / 0 | 일치 |
+| SD | 특수 레지스터 | 워드 | `A9h` | 10진 | 0 / 0 | 일치 |
+| X | 입력 | 비트 | `9Ch` | 16진 (FX5: 8진) | 1 / 1 | 일치 |
+| Y | 출력 | 비트 | `9Dh` | 16진 (FX5: 8진) | 1 / 1 | 일치 |
+| M | 내부 릴레이 | 비트 | `90h` | 10진 | 1 / 0 | 일치 |
+| L | 래치 릴레이 | 비트 | `92h` | 10진 | 1 / 0 | 일치 |
+| F | 어넌시에이터 | 비트 | `93h` | 10진 | 1 / 0 | 일치 |
+| V | 에지 릴레이 | 비트 | `94h` | 10진 | 1 / 0 | 일치 |
+| B | 링크 릴레이 | 비트 | `A0h` | 16진 | 1 / 1 | 일치 |
+| D | 데이터 레지스터 | 워드 | `A8h` | 10진 | 0 / 0 | 일치 |
+| W | 링크 레지스터 | 워드 | `B4h` | 16진 | 0 / 1 | 일치 |
+| TS | 타이머 접점 | 비트 | `C1h` | 10진 | 1 / 0 | 일치 |
+| TC | 타이머 코일 | 비트 | `C0h` | 10진 | 1 / 0 | 일치 |
+| TN | 타이머 현재값 | 워드 | `C2h` | 10진 | 0 / 0 | 일치 |
+| SS (STS) | 적산 타이머 접점 | 비트 | `C7h` | 10진 | 1 / 0 | 일치 |
+| SC (STC) | 적산 타이머 코일 | 비트 | `C6h` | 10진 | 1 / 0 | 일치 |
+| SN (STN) | 적산 타이머 현재값 | 워드 | `C8h` | 10진 | 0 / 0 | 일치 |
+| CS | 카운터 접점 | 비트 | `C4h` | 10진 | 1 / 0 | 일치 |
+| CC | 카운터 코일 | 비트 | `C3h` | 10진 | 1 / 0 | 일치 |
+| CN | 카운터 현재값 | 워드 | `C5h` | 10진 | 0 / 0 | 일치 |
+| SB | 링크 특수 릴레이 | 비트 | `A1h` | 16진 | 1 / 1 | 일치 |
+| SW | 링크 특수 레지스터 | 워드 | `B5h` | 16진 | 0 / 1 | 일치 |
+| S | 스텝 릴레이 | 비트 | `98h` | 10진 | 1 / 0 | (공개 구현 표에 없음) |
+| DX | 다이렉트 입력 | 비트 | `A2h` | 16진 | 1 / 1 | 일치 |
+| DY | 다이렉트 출력 | 비트 | `A3h` | 16진 | 1 / 1 | 일치 |
+| Z | 인덱스 레지스터 | 워드 | `CCh` | 10진 | 0 / 0 | (공개 구현 표에 없음) |
+| R | 파일 레지스터 (블록) | 워드 | `AFh` | 10진 | 0 / 0 | 일치 |
+| ZR | 파일 레지스터 (연번) | 워드 | `B0h` | iQ-R 10진 / Q 계열 MC 매뉴얼은 16진이라는 자료 **[사양서 확인 필요]** | 0 / **0** | 코드 일치, 공개 구현은 **16진**으로 취급 |
+
+iQ-R 전용(확장 서브커맨드 `0002`/`0003`, 2바이트 코드로 전송, 이 저장소 미지원) — 공개 구현 기준 코드:
+LTS `51h`, LTC `50h`, LTN `52h`, LSTS `59h`, LSTC `58h`, LSTN `5Ah`, LCS `55h`, LCC `54h`, LCN `56h`,
+LZ `62h`, RD `2Ch` **[사양서 확인 필요]**.
+
+이 저장소는 `"device_code": "0xNN"` 처럼 raw 코드를 주면 표에 없는 코드도 클라이언트 요청에 그대로 싣는다
+([`slmp_stack.c:123-143`](../../stacks/slmp/src/slmp_stack.c)). 단 저장소 **서버**는 표에 없는 코드를
+`C056h` 로 거절한다([`:884-887`](../../stacks/slmp/src/slmp_stack.c)).
+
+---
+
+## 부록 D. 사양 vs 저장소 차이 요약
+
+작성 시점 코드 기준. "영향" 은 실 MELSEC PLC 와 통신할 때의 영향이다. 코드는 수정하지 않았다.
+
+| ID | 항목 | 사양 | 저장소 | 근거 | 영향 |
+|----|------|------|--------|------|------|
+| D-1 | 비트 단위 데이터 형식 (`0401`/`1401` 서브커맨드 `0001`) | 1점 = 니블, 1바이트 2점, 앞 점이 상위 니블 | 1점 = 1바이트 `00`/`01` | [`slmp_stack.c:505-506, 525-526, 750-763, 900-906, 930-936`](../../stacks/slmp/src/slmp_stack.c) | **높음.** 비트 단위 포인트(`unit: "bit"`)는 실 PLC 와 비호환: 1점 ON 쓰기(데이터 `01`)가 PLC 에서 OFF 로 해석되고, 2점 이상 쓰기는 데이터 길이 불일치로 에러, 2점 이상 읽기는 응답 데이터가 `ceil(n/2)` 바이트라 `-ENOSPC`. 1점 읽기만 우연히 동작(ON 이 `0x10` ≠ 0). 워드 단위 경로는 정상 |
+| D-2 | 미지원 커맨드/서브커맨드 엔드 코드 | `C059h` (`C050h` 는 ASCII 변환 오류) | `C050h` | [`slmp_types.h:31`](../../stacks/slmp/include/slmp_types.h), [`slmp_stack.c:876-883`](../../stacks/slmp/src/slmp_stack.c) | 낮음 (서버 시뮬만). CTT 가 값 고정 |
+| D-3 | 이상 응답 에러 정보 | 엔드 코드 뒤 9바이트 | 없음 (길이 2) | [`slmp_stack.c:836-858`](../../stacks/slmp/src/slmp_stack.c) | 낮음 (서버 시뮬만). 저장소 클라이언트는 실 PLC 의 에러 정보를 무시하므로 문제없음 |
+| D-4 | 타임아웃 후 연결 처리 | (사양 외 구현 원칙) 3E 는 ID 가 없어 연결 폐기 필요 | 소켓 유지, 재연결 없음 → **stale 응답을 다음 요청 결과로 반환** 재현 | [`slmp_stack.c:644-680`](../../stacks/slmp/src/slmp_stack.c) | **높음.** 잘못된 주소의 값이 조용히 전달될 수 있음. 기본 타임아웃(1 s) < 감시 타이머(4 s) 라 발생 조건이 쉬움 |
+| D-5 | 비트 디바이스의 워드 단위 접근 선두 번호 | 선두는 비트 디바이스 번호 (M16 → M16~M31) | 워드 인덱스로 해석 (head=16 → M256~M271, head=1 → M16~M31) [검증] | [`slmp_stack.c:327-330`](../../stacks/slmp/src/slmp_stack.c) | 서버 시뮬에서만 틀림. 클라이언트는 head 를 그대로 PLC 에 보내므로 PLC 는 올바르게 처리하고, 로컬 캐시는 자기 일관적 |
+| D-6 | `A`~`F` 로 시작하는 16진 번호 문자열 | (파싱은 구현 영역) | `"XA"`, `"device_code":"X","start":"A"` 파싱 실패 → 포인트 조용히 누락 [검증] | [`slmp_adapter.c:147-163`](../../adapters/slmp/slmp_adapter.c) | 중간. `X0A` 로 우회 |
+| D-7 | 알 수 없는 디바이스 코드 엔드 코드 | 기종별 (`C05Bh`/`C05Ch`/`C056h` 등) **[확인 필요]** | `C056h` | [`slmp_stack.c:884-887`](../../stacks/slmp/src/slmp_stack.c) | 낮음 |
+| D-8 | 쓰기 데이터 길이 불일치 | 에러 응답 (`C061h` 등) | 응답 없이 폐기 (`-EBADMSG`) | [`slmp_stack.c:929-933`](../../stacks/slmp/src/slmp_stack.c) | 낮음 (서버 시뮬만). 상대 클라이언트는 타임아웃 |
+| D-9 | 감시 타이머 `0` | 무한 대기 | 0 이면 `0x0010` 으로 치환 | [`slmp_stack.c:274-276`](../../stacks/slmp/src/slmp_stack.c) | 낮음 (의도적 안전장치로 볼 수 있음) |
+| D-10 | ZR 번호 기수 | iQ-R 10진, Q 계열 MC 매뉴얼 16진이라는 자료 **[확인 필요]** | 10진 | [`slmp_stack.c:65`](../../stacks/slmp/src/slmp_stack.c) | Q 계열에서 문자열 주소 사용 시 번호 착오 가능 |
+| D-11 | FX5 X/Y 8진 | 8진 | 항상 16진 | [`slmp_stack.c:53`](../../stacks/slmp/src/slmp_stack.c) | FX5 대상 시 숫자로 지정 |
+| D-12 | 응답 에코 검증 | (권장) | 서브헤더만 검사 | [`slmp_stack.c:661-664`](../../stacks/slmp/src/slmp_stack.c) | 낮음 |
+| D-13 | 문자열 기본 바이트 배치 | MELSEC `$MOV` 는 앞 문자 = 하위 바이트 | 기본은 앞 문자 = 상위 바이트 (`string_swap: true` 로 MELSEC 관례) | [`slmp_codec.c:442-445`](../../adapters/slmp/slmp_codec.c) | 중간. 설정으로 해결 가능, 예제 config 는 미지정 |
+| D-14 | 32비트 기본 워드 순서 | MELSEC 는 하위 워드 먼저 (`CDAB`) | 기본 `ABCD` | [`slmp_codec.c:39-43`](../../adapters/slmp/slmp_codec.c) | 중간. 예제 `pressure` 는 `CDAB` 로 올바름 |

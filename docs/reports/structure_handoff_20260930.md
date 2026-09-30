@@ -288,7 +288,25 @@ T9-1 과 T9-3 은 이 세션에서도 따로 재현해 확인했다.
 **완료 조건 (공통):** 항목마다 재현 테스트를 `tests/test_mb_stack.c` 나 `tests/test_mb_adapter.c` 에 추가하고,
 `ctest -L modbus -LE soak_ci` 가 통과한다.
 
+## T10. SLMP — 사양 차이와 결함 (`docs/protocols/slmp.md` 부록 D 에서)
+
+전체 14항목과 재현 방법은 [`../protocols/slmp.md`](../protocols/slmp.md) 부록 D 에 있다.
+T10-1 과 T10-2 는 이 세션에서 코드를 읽어 다시 확인했다.
+
+| ID | 우선순위 | 문제 | 근거 | 수정 범위 |
+|---|---|---|---|---|
+| T10-1 | **치명** | **비트 단위(서브커맨드 `0001`) 데이터 형식이 사양과 다르다.** 사양은 1점 = 4비트(니블), 1바이트에 2점, 앞 점이 상위 니블이다. 저장소는 1점 = 1바이트(`00`/`01`)로 처리한다(코드 주석 `/* 1 byte/bit */`). 실 PLC 에서는 1점 ON 쓰기(`01`)가 OFF 로 해석되고, 2점 이상 쓰기는 길이 오류, 2점 이상 읽기는 `-ENOSPC` 가 난다. 워드 단위(`0000`)는 정상 | `stacks/slmp/src/slmp_stack.c:505-506`, `:525-526`, `:750-763`, `:900-906`, `:930-936` | `stacks/slmp/` 인코더·디코더·서버 모두. CTT `encode_batch_read.yaml`(길이 25) 등 비트 프레임 기대값 갱신. 니블 패킹 예제는 `slmp.md` 5장과 8장에 있다 |
+| T10-2 | **치명** | **타임아웃 후 이전 요청의 늦은 응답을 다음 요청 결과로 돌려준다.** `client_transact` 는 오류 시 `connected=0` 만 하고 소켓을 유지하며, 재연결하는 곳이 없다. 3E 프레임에는 요청 ID 가 없어서 응답을 구분할 수 없다. 재현: D0 읽기가 타임아웃된 뒤 D1 읽기가 D0 의 값을 반환. 기본값에서 소켓 타임아웃(1s)이 PLC 감시 타이머(4s)보다 짧아 쉽게 발생한다 | `stacks/slmp/src/slmp_stack.c:644-680` | `stacks/slmp/`: 오류가 나면 소켓을 닫고 백오프 재연결한다. 소켓 타임아웃은 감시 타이머보다 길게 잡는다. T3 과 같이 처리 |
+| T10-3 | 중간 | `"XA"` 나 `"device_code":"X","start":"A"` 처럼 A~F 로 시작하는 16진 번호가 파싱에 실패하고, 해당 포인트가 **경고 없이 빠진다** (`X0A` 는 동작) | `adapters/slmp/slmp_adapter.c:147-163` | `adapters/slmp/`: 16진 디바이스(X/Y/B/W/SB/SW/DX/DY)는 번호를 16진으로 파싱하고, 실패하면 `LOG_ERROR` 후 init 실패 |
+| T10-4 | 중간 | 기본 문자열 바이트 배치가 MELSEC 관례와 반대다(MELSEC 는 앞 문자가 하위 바이트). 32비트 기본 워드 순서도 `ABCD` 로 MELSEC(`CDAB`)와 다르다 | `adapters/slmp/slmp_codec.c:442-445`, `:39-43` | `adapters/slmp/`: 기본값을 MELSEC 관례로 바꾸고 예제·스키마·문서를 함께 갱신 (기존 설정과 호환성 주의) |
+| T10-5 | 낮음 | 서버 시뮬레이터가 미지원 커맨드에 `C050` 을 낸다(사양은 `C059`, `C050` 은 ASCII 변환 오류). 이상 응답에 9바이트 에러 정보가 없다. 쓰기 데이터 길이가 틀리면 응답 없이 버린다 | `stacks/slmp/include/slmp_types.h:31`, `stacks/slmp/src/slmp_stack.c:836-858`, `:929-933` | `stacks/slmp/` + CTT `reject_non_3e.yaml` 기대값 |
+| T10-6 | 낮음 | 서버 시뮬레이터가 비트 디바이스를 워드 단위로 접근할 때 선두 번호를 워드 인덱스로 해석한다 (M16 → M256~) | `stacks/slmp/src/slmp_stack.c:327-330` | `stacks/slmp/` |
+| T10-7 | 확인 필요 | ZR 번호 기수(Q 계열), FX5 의 X/Y 8진 표기. 사양서를 확인한 뒤 처리 | `stacks/slmp/src/slmp_stack.c:53`, `:65` | 사양 확인 후 결정 |
+
+**완료 조건 (공통):** 항목마다 재현 테스트를 `tests/test_slmp_stack.c` 나 `tests/test_slmp_adapter.c` 에 추가하고,
+`ctest -R slmp -LE soak_ci` 가 통과한다. T10-1 은 가능하면 실 MELSEC PLC(또는 GX Simulator3)로 확인한다.
+
 ## 이후 추가될 항목
 
-SLMP / EtherNet/IP / PROFINET 문서의 사양 차이와, Fable 사양 검토(PROFINET·EtherNet/IP)
-결과가 확인되면 T10 이후로 덧붙인다.
+EtherNet/IP / PROFINET 문서의 사양 차이와, Fable 사양 검토(PROFINET·EtherNet/IP)
+결과가 확인되면 T11 이후로 덧붙인다.
