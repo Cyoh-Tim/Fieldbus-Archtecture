@@ -16,9 +16,16 @@ BUILD = Path(os.environ.get("ORACLE_BUILD_DIR", REPO / "build"))
 
 
 def dut_path(name: str) -> Path:
+    """DUT 실행 파일 경로. 없으면 **전체 실행을 중단**한다.
+
+    pytest.fail/skip 을 쓰면 known_defect 테스트 안에서는 "xfailed" 나 "skipped" 로 보여서,
+    DUT 가 빌드되지 않은 것이 결함이 남아 있는 것처럼 위장된다. 그래서 pytest.exit 로 멈춘다.
+    DUT 목록은 README 의 "실행" 절과 CI oracle job 의 --target 목록이 같아야 한다.
+    """
     p = BUILD / name
     if not p.exists():
-        pytest.fail(f"DUT 실행 파일 없음: {p} (cmake --build 로 {name} 타깃을 빌드)")
+        pytest.exit(f"DUT 실행 파일 없음: {p} (BUILD_DAEMON=ON 으로 설정하고 {name} 타깃을 빌드)",
+                    returncode=3)
     return p
 
 
