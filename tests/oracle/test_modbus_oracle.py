@@ -520,7 +520,6 @@ def test_adapter_plain_point_roundtrip(mb_app_factory):
     assert app.cmd("RU32 q") == ["R", "0", str(0x0102)]
 
 
-@known_defect("T9-3", "주소 문자열을 strtol(…, 0) 으로 읽어 앞자리 0 이 8진수가 된다 (\"00010\"→8, \"00009\"→0)")
 @pytest.mark.parametrize("text,pdu", [("00010", 10), ("00009", 9)])
 def test_adapter_address_string_is_decimal(mb_app_factory, text, pdu):
     """zero_based 포인트의 주소 문자열은 10진 PDU 주소다. 앱이 쓴 값이 그 레지스터에 있어야 한다."""
