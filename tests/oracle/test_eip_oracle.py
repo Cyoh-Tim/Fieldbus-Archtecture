@@ -630,7 +630,6 @@ def scanner_write_output(port: int, udp_port: int, data: bytes):
         s.close()
 
 
-@known_defect("T1", "숫자 포인트를 코어의 빅 엔디안 그대로 Assembly 에 복사한다 (300 → 01 2C). CIP 는 리틀 엔디안")
 @pytest.mark.parametrize("name,typ,value,off,wire", [
     ("status_word", "u32", 300, 32, struct.pack("<H", 300)),  # 인수인계 T1 재현: 기대 2C 01
     ("count_i32", "i32", -2, 36, struct.pack("<i", -2)),
@@ -642,7 +641,6 @@ def test_numeric_point_write_is_little_endian_on_wire(fbapi, name, typ, value, o
     assert raw[off:off + len(wire)] == wire, raw[off:off + len(wire)].hex(" ")
 
 
-@known_defect("T1", "스캐너가 O→T 로 보낸 UINT 300(2C 01)을 앱이 11265 로 읽는다. CIP 는 리틀 엔디안")
 def test_numeric_point_read_from_scanner_little_endian(fbapi):
     scanner_write_output(fbapi.port, fbapi.udp_port, struct.pack("<H", 300) + bytes(6))
     assert fbapi.read("cmd_word", "u32") == (0, 300)
