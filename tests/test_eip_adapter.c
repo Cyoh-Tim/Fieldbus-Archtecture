@@ -2,6 +2,7 @@
 #include "ethernetip_adapter.h"
 #include "fb_api.h"
 
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -68,8 +69,61 @@ static void expect_bytes(const uint8_t *got, size_t n, const uint8_t *exp,
 }
 
 /*
+ * Prefix of struct fb_runtime / fb_session_t in core/fb_api.c so a test that
+ * opened a session with fb_open can read the CIP image through the stack.
+ * Checked at runtime: adapter->name must be "ethernetip".
+ */
+typedef struct {
+    char protocol[64];
+    char device_name[128];
+    char role[32];
+    int cycle_ms;
+    char *protocol_params_json;
+    char *points_json;
+    protocol_adapter_t *adapter;
+} fb_session_head_t;
+
+typedef struct {
+    pthread_mutex_t mu;
+    fb_session_head_t session;
+} fb_rt_peek_t;
+
+static eip_stack_t *stack_of(fb_runtime_t *rt)
+{
+    if (!rt) {
+        return NULL;
+    }
+    fb_rt_peek_t *p = (fb_rt_peek_t *)rt;
+    protocol_adapter_t *a = p->session.adapter;
+    if (!a || !a->name || strcmp(a->name, "ethernetip") != 0 || !a->ctx) {
+        return NULL;
+    }
+    return ((eip_ctx_peek_t *)a->ctx)->stack;
+}
+
+static void expect_input_le(fb_runtime_t *rt, size_t off, const uint8_t *exp,
+                            size_t n, const char *msg)
+{
+    eip_stack_t *s = stack_of(rt);
+    expect(s != NULL, "runtime stack");
+    if (!s) {
+        return;
+    }
+    uint8_t got[8];
+    memset(got, 0, sizeof got);
+    int rc = eip_stack_read_input(s, off, got, n);
+    if (rc != (int)n) {
+        fprintf(stderr, "FAIL: %s stack read rc=%d\n", msg, rc);
+        g_fail = 1;
+        return;
+    }
+    expect_bytes(got, (size_t)rc, exp, n, msg);
+}
+
+/*
  * Issue harness: config/example.ethernetip.json status_word = 300.
- * fb_read_bytes returns the raw assembly image (no numeric conversion).
+ * fb_read_bytes returns canonical big-endian. CIP wire is little-endian,
+ * checked with eip_stack_read_input (status_word byte_offset 32).
  */
 static const char *example_cfg(void)
 {
@@ -101,11 +155,23 @@ static void test_repro_status_word(void)
     size_t n = 0;
     expect(fb_read_bytes(rt, "status_word", b, sizeof b, &n) == FB_OK,
            "read status_word bytes");
-    printf("%02X %02X -> CIP UINT %u\n", b[0], b[1],
-           (unsigned)(b[0] | (b[1] << 8)));
+    {
+        const uint8_t canon[] = {0x01, 0x2C};
+        expect_bytes(b, n, canon, 2, "status_word canonical BE");
+    }
+
+    uint8_t wire[2] = {0};
+    eip_stack_t *stack = stack_of(rt);
+    expect(stack != NULL, "status_word stack");
+    if (stack) {
+        expect(eip_stack_read_input(stack, 32, wire, 2) == 2,
+               "status_word assembly read");
+    }
+    printf("%02X %02X -> CIP UINT %u\n", wire[0], wire[1],
+           (unsigned)(wire[0] | (wire[1] << 8)));
     fflush(stdout);
-    expect(n >= 2 && b[0] == 0x2C && b[1] == 0x01, "status_word wire 2C 01");
-    expect((b[0] | (b[1] << 8)) == 300, "CIP UINT 300");
+    expect(wire[0] == 0x2C && wire[1] == 0x01, "status_word wire 2C 01");
+    expect((wire[0] | (wire[1] << 8)) == 300, "CIP UINT 300");
 
     uint32_t back = 0;
     expect(fb_read_u32(rt, "status_word", &back) == FB_OK, "read status_word u32");
@@ -167,8 +233,12 @@ static void test_numeric_roundtrip(void)
     size_t n = 0;
     expect(fb_read_bytes(rt, "u16", b, sizeof b, &n) == FB_OK, "read u16 bytes");
     {
-        const uint8_t exp[] = {0x34, 0x12};
-        expect_bytes(b, n, exp, 2, "u16 LE");
+        const uint8_t canon[] = {0x12, 0x34};
+        expect_bytes(b, n, canon, 2, "u16 canonical BE");
+    }
+    {
+        const uint8_t wire[] = {0x34, 0x12};
+        expect_input_le(rt, 0, wire, 2, "u16 wire LE");
     }
     uint32_t u = 0;
     expect(fb_read_u32(rt, "u16", &u) == FB_OK && u == 0x1234, "u16 value");
@@ -178,8 +248,12 @@ static void test_numeric_roundtrip(void)
     n = 0;
     expect(fb_read_bytes(rt, "i16", b, sizeof b, &n) == FB_OK, "read i16 bytes");
     {
-        const uint8_t exp[] = {0xFE, 0xFF};
-        expect_bytes(b, n, exp, 2, "i16 LE");
+        const uint8_t canon[] = {0xFF, 0xFE};
+        expect_bytes(b, n, canon, 2, "i16 canonical BE");
+    }
+    {
+        const uint8_t wire[] = {0xFE, 0xFF};
+        expect_input_le(rt, 2, wire, 2, "i16 wire LE");
     }
     int32_t s = 0;
     expect(fb_read_i32(rt, "i16", &s) == FB_OK && s == -2, "i16 value");
@@ -189,8 +263,12 @@ static void test_numeric_roundtrip(void)
     n = 0;
     expect(fb_read_bytes(rt, "u32", b, sizeof b, &n) == FB_OK, "read u32 bytes");
     {
-        const uint8_t exp[] = {0x04, 0x03, 0x02, 0x01};
-        expect_bytes(b, n, exp, 4, "u32 LE");
+        const uint8_t canon[] = {0x01, 0x02, 0x03, 0x04};
+        expect_bytes(b, n, canon, 4, "u32 canonical BE");
+    }
+    {
+        const uint8_t wire[] = {0x04, 0x03, 0x02, 0x01};
+        expect_input_le(rt, 4, wire, 4, "u32 wire LE");
     }
     u = 0;
     expect(fb_read_u32(rt, "u32", &u) == FB_OK && u == 0x01020304u, "u32 value");
@@ -200,8 +278,12 @@ static void test_numeric_roundtrip(void)
     n = 0;
     expect(fb_read_bytes(rt, "i32", b, sizeof b, &n) == FB_OK, "read i32 bytes");
     {
-        const uint8_t exp[] = {0xC0, 0x1D, 0xFE, 0xFF};
-        expect_bytes(b, n, exp, 4, "i32 LE");
+        const uint8_t canon[] = {0xFF, 0xFE, 0x1D, 0xC0};
+        expect_bytes(b, n, canon, 4, "i32 canonical BE");
+    }
+    {
+        const uint8_t wire[] = {0xC0, 0x1D, 0xFE, 0xFF};
+        expect_input_le(rt, 8, wire, 4, "i32 wire LE");
     }
     s = 0;
     expect(fb_read_i32(rt, "i32", &s) == FB_OK && s == -123456, "i32 value");
@@ -211,8 +293,12 @@ static void test_numeric_roundtrip(void)
     n = 0;
     expect(fb_read_bytes(rt, "f32", b, sizeof b, &n) == FB_OK, "read f32 bytes");
     {
-        const uint8_t exp[] = {0x00, 0x00, 0x48, 0x41};
-        expect_bytes(b, n, exp, 4, "f32 LE");
+        const uint8_t canon[] = {0x41, 0x48, 0x00, 0x00};
+        expect_bytes(b, n, canon, 4, "f32 canonical BE");
+    }
+    {
+        const uint8_t wire[] = {0x00, 0x00, 0x48, 0x41};
+        expect_input_le(rt, 12, wire, 4, "f32 wire LE");
     }
     float f = 0;
     expect(fb_read_f32(rt, "f32", &f) == FB_OK && f == 12.5f, "f32 value");
@@ -226,8 +312,12 @@ static void test_numeric_roundtrip(void)
     n = 0;
     expect(fb_read_bytes(rt, "f64", d, sizeof d, &n) == FB_OK, "read f64 bytes");
     {
-        const uint8_t exp[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x3F};
-        expect_bytes(d, n, exp, 8, "f64 LE");
+        const uint8_t canon[] = {0x3F, 0xF8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+        expect_bytes(d, n, canon, 8, "f64 canonical BE");
+    }
+    {
+        const uint8_t wire[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x3F};
+        expect_input_le(rt, 16, wire, 8, "f64 wire LE");
     }
     fb_value_t dr;
     memset(&dr, 0, sizeof dr);
@@ -309,10 +399,29 @@ static void test_originator_paths(void)
     expect(fb_write_u32(rt, "tag_u16", 300) == FB_OK, "tag write");
     unsigned char b[8] = {0};
     size_t n = 0;
+    expect(fb_read_bytes(rt, "tag_u16", b, sizeof b, &n) == FB_OK, "tag numeric bytes");
+    {
+        const uint8_t canon[] = {0x01, 0x2C};
+        expect_bytes(b, n, canon, 2, "tag canonical BE");
+    }
+    /* bytes point: passthrough of the CIP image, not a numeric conversion. */
+    memset(b, 0, sizeof b);
+    n = 0;
     expect(fb_read_bytes(rt, "tag_raw", b, sizeof b, &n) == FB_OK, "tag raw read");
     {
         const uint8_t exp[] = {0x2C, 0x01};
-        expect_bytes(b, n >= 2 ? 2 : n, exp, 2, "tag wire LE");
+        expect_bytes(b, n, exp, 2, "tag bytes passthrough");
+    }
+    eip_stack_t *stack = stack_of(rt);
+    expect(stack != NULL, "originator stack");
+    if (stack) {
+        uint8_t wire[8] = {0};
+        size_t wn = sizeof wire;
+        expect(eip_stack_tag_read(stack, "N16", wire, &wn) == 0, "tag stack read");
+        {
+            const uint8_t exp[] = {0x2C, 0x01};
+            expect_bytes(wire, wn >= 2 ? 2 : wn, exp, 2, "tag wire LE");
+        }
     }
     uint32_t u = 0;
     expect(fb_read_u32(rt, "tag_u16", &u) == FB_OK && u == 300, "tag numeric");
@@ -320,11 +429,28 @@ static void test_originator_paths(void)
     expect(fb_write_i32(rt, "cip_i32", -2) == FB_OK, "cip write");
     memset(b, 0, sizeof b);
     n = 0;
+    expect(fb_read_bytes(rt, "cip_i32", b, sizeof b, &n) == FB_OK, "cip numeric bytes");
+    {
+        const uint8_t canon[] = {0xFF, 0xFF, 0xFF, 0xFE};
+        expect_bytes(b, n, canon, 4, "cip canonical BE");
+    }
+    memset(b, 0, sizeof b);
+    n = 0;
     expect(fb_read_bytes(rt, "cip_raw", b, sizeof b, &n) == FB_OK, "cip raw read");
     {
-        /* int32 -2 = 0xFFFFFFFE, CIP little-endian */
+        /* int32 -2 = 0xFFFFFFFE stored little-endian; bytes point is passthrough. */
         const uint8_t exp[] = {0xFE, 0xFF, 0xFF, 0xFF};
-        expect_bytes(b, n >= 4 ? 4 : n, exp, 4, "cip wire LE");
+        expect_bytes(b, n, exp, 4, "cip bytes passthrough");
+    }
+    if (stack) {
+        uint8_t wire[8] = {0};
+        size_t wn = sizeof wire;
+        expect(eip_stack_explicit_get(stack, 4, 150, 3, wire, &wn) == 0,
+               "cip stack read");
+        {
+            const uint8_t exp[] = {0xFE, 0xFF, 0xFF, 0xFF};
+            expect_bytes(wire, wn >= 4 ? 4 : wn, exp, 4, "cip wire LE");
+        }
     }
     int32_t s = 0;
     expect(fb_read_i32(rt, "cip_i32", &s) == FB_OK && s == -2, "cip numeric");

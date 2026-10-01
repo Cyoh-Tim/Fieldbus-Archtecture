@@ -1,23 +1,11 @@
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 #include "ethernetip_adapter.h"
 
 #include <ctype.h>
-#include <elf.h>
 #include <errno.h>
-#include <execinfo.h>
-#include <fcntl.h>
-#include <link.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include <cJSON.h>
 
@@ -157,122 +145,11 @@ static void eip_swap_elems(uint8_t *buf, size_t n, size_t width)
     }
 }
 
-/*
- * fb_read_bytes is specified to return the raw assembly image with no
- * numeric conversion. Numeric fb_read_* share read_point, so tell them
- * apart by the caller's symbol. If the executable is stripped, fall back
- * to converting (app canonical big-endian).
- */
-static uintptr_t g_raw_lo;
-static uintptr_t g_raw_hi;
-
-static int bias_cb(struct dl_phdr_info *info, size_t size, void *data)
-{
-    (void)size;
-    *(uintptr_t *)data = (uintptr_t)info->dlpi_addr;
-    return 1;
-}
-
-static void locate_fb_read_bytes(void)
-{
-    g_raw_lo = 0;
-    g_raw_hi = 0;
-    uintptr_t bias = 0;
-    dl_iterate_phdr(bias_cb, &bias);
-
-    int fd = open("/proc/self/exe", O_RDONLY);
-    if (fd < 0) {
-        return;
-    }
-    struct stat st;
-    if (fstat(fd, &st) != 0 || st.st_size < (off_t)sizeof(Elf64_Ehdr)) {
-        close(fd);
-        return;
-    }
-    size_t fsz = (size_t)st.st_size;
-    void *map = mmap(NULL, fsz, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-    if (map == MAP_FAILED) {
-        return;
-    }
-    const unsigned char *base = map;
-    const Elf64_Ehdr *eh = map;
-    if (eh->e_ident[EI_MAG0] != ELFMAG0 || eh->e_ident[EI_CLASS] != ELFCLASS64 ||
-        eh->e_shoff == 0 || eh->e_shentsize == 0 || eh->e_shnum == 0 ||
-        eh->e_shoff > fsz) {
-        munmap(map, fsz);
-        return;
-    }
-    size_t sh_bytes = (size_t)eh->e_shnum * (size_t)eh->e_shentsize;
-    if (sh_bytes / eh->e_shentsize != eh->e_shnum || eh->e_shoff + sh_bytes > fsz) {
-        munmap(map, fsz);
-        return;
-    }
-    const Elf64_Shdr *sh = (const Elf64_Shdr *)(base + eh->e_shoff);
-    for (unsigned i = 0; i < eh->e_shnum; i++) {
-        if (sh[i].sh_type != SHT_SYMTAB || sh[i].sh_link >= eh->e_shnum ||
-            sh[i].sh_entsize == 0 || sh[i].sh_offset > fsz) {
-            continue;
-        }
-        const Elf64_Shdr *strh = &sh[sh[i].sh_link];
-        if (strh->sh_offset > fsz || strh->sh_size > fsz - strh->sh_offset) {
-            continue;
-        }
-        if (sh[i].sh_size > fsz - sh[i].sh_offset) {
-            continue;
-        }
-        size_t nsym = sh[i].sh_size / sh[i].sh_entsize;
-        const Elf64_Sym *syms = (const Elf64_Sym *)(base + sh[i].sh_offset);
-        const char *strtab = (const char *)(base + strh->sh_offset);
-        size_t strsz = strh->sh_size;
-        for (size_t s = 0; s < nsym; s++) {
-            if (ELF64_ST_TYPE(syms[s].st_info) != STT_FUNC ||
-                syms[s].st_size == 0 || syms[s].st_name >= strsz) {
-                continue;
-            }
-            size_t remain = strsz - syms[s].st_name;
-            if (memchr(strtab + syms[s].st_name, '\0', remain) == NULL) {
-                continue;
-            }
-            if (strcmp(strtab + syms[s].st_name, "fb_read_bytes") != 0) {
-                continue;
-            }
-            g_raw_lo = bias + (uintptr_t)syms[s].st_value;
-            g_raw_hi = g_raw_lo + (uintptr_t)syms[s].st_size;
-            munmap(map, fsz);
-            return;
-        }
-    }
-    munmap(map, fsz);
-}
-
-static int caller_is_raw_bytes_api(void)
-{
-    static pthread_once_t once = PTHREAD_ONCE_INIT;
-    pthread_once(&once, locate_fb_read_bytes);
-    if (g_raw_lo == 0 || g_raw_hi <= g_raw_lo) {
-        return 0;
-    }
-    void *frames[24];
-    int n = backtrace(frames, 24);
-    for (int i = 0; i < n; i++) {
-        uintptr_t a = (uintptr_t)frames[i];
-        if (i > 0 && a > 0) {
-            a--;
-        }
-        if (a >= g_raw_lo && a < g_raw_hi) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
+/* Numeric points: API boundary is canonical big-endian, including fb_read_bytes.
+ * CIP wire stays little-endian (canon_to_wire / wire_to_canon). */
 static void wire_to_canon(const eip_point_t *pt, uint8_t *buf, size_t n)
 {
     if (!pt || pt->endian_width < 2 || !buf || n < pt->endian_width) {
-        return;
-    }
-    if (caller_is_raw_bytes_api()) {
         return;
     }
     eip_swap_elems(buf, n, pt->endian_width);
