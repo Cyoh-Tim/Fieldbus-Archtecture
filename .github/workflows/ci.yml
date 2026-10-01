@@ -74,12 +74,15 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libssl-dev
+          sudo apt-get install -y build-essential cmake libssl-dev libcjson-dev
       - name: Build oracle DUTs
+        # 어댑터 수준 DUT(eip_oracle_fbapi, mb_slmp_oracle_app, pn_oracle_app)는 fb_api 를 쓰므로 BUILD_DAEMON=ON.
+        # DUT 가 하나라도 없으면 tests/oracle/conftest.py 의 dut_path 가 실행 전체를 실패시킨다.
         run: |
-          cmake -S . -B build-oracle -DBUILD_DAEMON=OFF -DBUILD_CTT=OFF -DBUILD_PN_LAB_TOOLS=OFF \
+          cmake -S . -B build-oracle -DBUILD_DAEMON=ON -DBUILD_CTT=OFF -DBUILD_PN_LAB_TOOLS=OFF \
                 -DENABLE_PN_TESTS=OFF -DENABLE_EIP_TESTS=OFF -DENABLE_MB_TESTS=OFF -DENABLE_SLMP_TESTS=OFF
-          cmake --build build-oracle -j --target mb_seeded_server slmp_oracle_server slmp_oracle_client eip_oracle_adapter pn_oracle_pipe
+          cmake --build build-oracle -j --target mb_seeded_server mb_oracle_client slmp_oracle_server slmp_oracle_client \
+                eip_oracle_adapter eip_oracle_originator pn_oracle_pipe eip_oracle_fbapi mb_slmp_oracle_app pn_oracle_app
       - name: Install oracles (pinned)
         run: python -m pip install -r tests/oracle/requirements.txt
       - name: Oracle cross-check
