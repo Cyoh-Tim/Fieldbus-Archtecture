@@ -1,0 +1,32 @@
+# 감사 라운드 — 새 문제 찾기
+
+인수인계 문서(`../structure_handoff_20260930.md`)의 항목이 줄어들면, 검증 담당(Claude)의 일일 루틴이 하루에 영역 하나씩
+감사해서 새 결함을 찾는다. 절차는 [`.claude/skills/verify-pr/SKILL.md`](../../../.claude/skills/verify-pr/SKILL.md) 11~14단계.
+
+- 발견 ID: `A<YYYYMMDD>-<n>`. 보고서: 이 폴더의 `<YYYYMMDD>-<영역>.md`.
+- 재현과 독립 근거(오라클 라이브러리 또는 사양 문서)가 둘 다 있는 것만 큐(`../work_queue.md`)에 올린다.
+- 오라클로 판정할 수 있으면 `tests/oracle/` 에 `@known_defect("A<ID>", …)` 를 먼저 넣는다.
+- 한 라운드에 큐 항목 최대 5개. 발견이 없어도 기록한다.
+
+## 영역 순환
+
+위에서부터 차례로 돌고, 끝나면 처음으로 돌아간다. 다음 라운드는 아래 기록의 마지막 영역 다음이다.
+
+| 순서 | 영역 | 주로 볼 것 |
+|---|---|---|
+| 1 | Modbus 스택·어댑터 | 예외 코드, 경계 수량, 클라이언트 재연결, 주소·타입 변환 (pymodbus) |
+| 2 | SLMP | 3E 프레임, 디바이스 코드, 비트/워드 단위, 엔드 코드 (pymcprotocol) |
+| 3 | EtherNet/IP 스택 | Encapsulation, CM Forward Open/Close, Class 1, 표준 객체 (pycomm3, scapy enipTCP) |
+| 4 | EtherNet/IP 어댑터·Originator | 포인트 변환, 태그 서비스, 설정 파싱 |
+| 5 | PROFINET DCP·LLDP·SNMP | 블록 형식, Set 규칙, TLV (scapy pnio_dcp, lldp, snmp) |
+| 6 | PROFINET RPC·레코드 | NDR, Connect/Control/Read/Write, 에러 PNIOStatus (scapy pnio_rpc, dcerpc) |
+| 7 | PROFINET RT·알람 | RTC1 프레임, 주기, DataStatus, RTA (scapy pnio) |
+| 8 | 코어 | fb_api, config_loader, 사이클 루프, 스케일·바이트 순서 규칙 (CLAUDE.md 경계) |
+| 9 | 보안 | EIP·PN 자체 보안 경로, 입력 검증, 자원 한도 |
+| 10 | fuzz 장시간 | 각 하니스 10분 + sanitizer 재현 |
+
+## 기록
+
+| 날짜 | 영역 | 보고서 | 큐 추가 | 비고 |
+|---|---|---|---|---|
+| 2026-09-30 | (시작) | — | — | 인수인계 T 항목 58개가 큐에 있음. 감사는 큐 여유가 10개 미만이 되거나 일요일에 시작 |
