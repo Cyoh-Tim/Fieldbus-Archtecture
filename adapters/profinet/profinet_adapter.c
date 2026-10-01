@@ -1,6 +1,8 @@
 #include "profinet_adapter.h"
 
+#include <ctype.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +14,23 @@
 
 #define PN_ADAPTER_POINTS_MAX 64
 
+/* 스케일된 숫자의 IO 이미지 표현. 문자열/raw 는 복사만 한다. */
+typedef enum {
+    PN_DT_UINT8 = 0,
+    PN_DT_INT8,
+    PN_DT_UINT16,
+    PN_DT_INT16,
+    PN_DT_UINT32,
+    PN_DT_INT32,
+    PN_DT_UINT64,
+    PN_DT_INT64,
+    PN_DT_FLOAT32,
+    PN_DT_FLOAT64,
+    PN_DT_BOOL,
+    PN_DT_STRING,
+    PN_DT_RAW
+} pn_dt_t;
+
 typedef struct {
     char name[64];
     char access[8];
@@ -20,6 +39,10 @@ typedef struct {
     int index;
     int byte_offset;
     int length;
+    pn_dt_t data_type;
+    double scale;
+    double eng_offset;
+    int apply_scale;
 } pn_point_t;
 
 typedef struct {
@@ -69,6 +92,266 @@ static uint32_t parse_ipv4(const char *s)
     return (a << 24) | (b << 16) | (c << 8) | d;
 }
 
+static int eqi(const char *a, const char *b)
+{
+    if (!a || !b) {
+        return 0;
+    }
+    while (*a && *b) {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
+            return 0;
+        }
+        a++;
+        b++;
+    }
+    return *a == 0 && *b == 0;
+}
+
+static pn_dt_t pn_parse_dt(const char *s)
+{
+    if (!s || !s[0]) {
+        return PN_DT_UINT16;
+    }
+    if (eqi(s, "uint8") || eqi(s, "u8") || eqi(s, "byte")) {
+        return PN_DT_UINT8;
+    }
+    if (eqi(s, "int8") || eqi(s, "i8") || eqi(s, "sbyte")) {
+        return PN_DT_INT8;
+    }
+    if (eqi(s, "uint16") || eqi(s, "u16") || eqi(s, "word") ||
+        eqi(s, "ushort")) {
+        return PN_DT_UINT16;
+    }
+    if (eqi(s, "int16") || eqi(s, "i16") || eqi(s, "short")) {
+        return PN_DT_INT16;
+    }
+    if (eqi(s, "uint32") || eqi(s, "u32") || eqi(s, "dword") ||
+        eqi(s, "uint")) {
+        return PN_DT_UINT32;
+    }
+    if (eqi(s, "int32") || eqi(s, "i32") || eqi(s, "int") || eqi(s, "long")) {
+        return PN_DT_INT32;
+    }
+    if (eqi(s, "uint64") || eqi(s, "u64") || eqi(s, "qword")) {
+        return PN_DT_UINT64;
+    }
+    if (eqi(s, "int64") || eqi(s, "i64")) {
+        return PN_DT_INT64;
+    }
+    if (eqi(s, "float32") || eqi(s, "float") || eqi(s, "real") ||
+        eqi(s, "single")) {
+        return PN_DT_FLOAT32;
+    }
+    if (eqi(s, "float64") || eqi(s, "double")) {
+        return PN_DT_FLOAT64;
+    }
+    if (eqi(s, "bool") || eqi(s, "boolean") || eqi(s, "bit")) {
+        return PN_DT_BOOL;
+    }
+    if (eqi(s, "string") || eqi(s, "ascii") || eqi(s, "str")) {
+        return PN_DT_STRING;
+    }
+    if (eqi(s, "raw") || eqi(s, "bytes") || eqi(s, "blob")) {
+        return PN_DT_RAW;
+    }
+    return PN_DT_UINT16;
+}
+
+/* 스케일 적용 시 IO 에 쓰는 정수/실수 크기. 문자열은 length 를 쓴다. */
+static int pn_type_wire_len(pn_dt_t dt, int length)
+{
+    switch (dt) {
+    case PN_DT_UINT8:
+    case PN_DT_INT8:
+    case PN_DT_BOOL:
+        return 1;
+    case PN_DT_UINT16:
+    case PN_DT_INT16:
+        return 2;
+    case PN_DT_UINT32:
+    case PN_DT_INT32:
+    case PN_DT_FLOAT32:
+        return 4;
+    case PN_DT_UINT64:
+    case PN_DT_INT64:
+    case PN_DT_FLOAT64:
+        return 8;
+    case PN_DT_STRING:
+    case PN_DT_RAW:
+        return length > 0 ? length : 0;
+    }
+    return length > 0 ? length : 2;
+}
+
+static uint16_t ld_be16(const uint8_t *p)
+{
+    return (uint16_t)(((unsigned)p[0] << 8) | p[1]);
+}
+
+static uint32_t ld_be32(const uint8_t *p)
+{
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static uint64_t ld_be64(const uint8_t *p)
+{
+    return ((uint64_t)ld_be32(p) << 32) | ld_be32(p + 4);
+}
+
+static void st_be16(uint8_t *d, uint16_t v)
+{
+    d[0] = (uint8_t)(v >> 8);
+    d[1] = (uint8_t)v;
+}
+
+static void st_be32(uint8_t *d, uint32_t v)
+{
+    d[0] = (uint8_t)(v >> 24);
+    d[1] = (uint8_t)(v >> 16);
+    d[2] = (uint8_t)(v >> 8);
+    d[3] = (uint8_t)v;
+}
+
+static void st_be64(uint8_t *d, uint64_t v)
+{
+    st_be32(d, (uint32_t)(v >> 32));
+    st_be32(d + 4, (uint32_t)v);
+}
+
+static float ld_f32_be(const uint8_t *p)
+{
+    uint32_t u = ld_be32(p);
+    float f;
+    memcpy(&f, &u, sizeof(f));
+    return f;
+}
+
+static double ld_f64_be(const uint8_t *p)
+{
+    uint64_t u = ld_be64(p);
+    double d;
+    memcpy(&d, &u, sizeof(d));
+    return d;
+}
+
+static void st_f32_be(uint8_t *d, float f)
+{
+    uint32_t u;
+    memcpy(&u, &f, sizeof(u));
+    st_be32(d, u);
+}
+
+static void st_f64_be(uint8_t *d, double v)
+{
+    uint64_t u;
+    memcpy(&u, &v, sizeof(u));
+    st_be64(d, u);
+}
+
+/* llround 와 같이 0.5 는 0 에서 먼 쪽으로. libm 에 의존하지 않는다. */
+static int64_t pn_iround(double x)
+{
+    if (x >= 0.0) {
+        return (int64_t)(x + 0.5);
+    }
+    return (int64_t)(x - 0.5);
+}
+
+static double pn_decode_number(pn_dt_t dt, const uint8_t *b, size_t n)
+{
+    switch (dt) {
+    case PN_DT_UINT8:
+        return n >= 1 ? (double)b[0] : 0.0;
+    case PN_DT_INT8:
+        return n >= 1 ? (double)(int8_t)b[0] : 0.0;
+    case PN_DT_UINT16:
+        return n >= 2 ? (double)ld_be16(b) : 0.0;
+    case PN_DT_INT16:
+        return n >= 2 ? (double)(int16_t)ld_be16(b) : 0.0;
+    case PN_DT_UINT32:
+        return n >= 4 ? (double)ld_be32(b) : 0.0;
+    case PN_DT_INT32:
+        return n >= 4 ? (double)(int32_t)ld_be32(b) : 0.0;
+    case PN_DT_UINT64:
+        return n >= 8 ? (double)ld_be64(b) : 0.0;
+    case PN_DT_INT64:
+        return n >= 8 ? (double)(int64_t)ld_be64(b) : 0.0;
+    case PN_DT_FLOAT32:
+        return n >= 4 ? (double)ld_f32_be(b) : 0.0;
+    case PN_DT_FLOAT64:
+        return n >= 8 ? ld_f64_be(b) : 0.0;
+    case PN_DT_BOOL:
+        return (n >= 1 && b[0]) ? 1.0 : 0.0;
+    default:
+        return 0.0;
+    }
+}
+
+static void pn_encode_number(pn_dt_t dt, double raw, uint8_t *b, size_t n)
+{
+    memset(b, 0, n);
+    switch (dt) {
+    case PN_DT_UINT8:
+        if (n >= 1) {
+            b[0] = (uint8_t)pn_iround(raw);
+        }
+        break;
+    case PN_DT_INT8:
+        if (n >= 1) {
+            b[0] = (uint8_t)(int8_t)pn_iround(raw);
+        }
+        break;
+    case PN_DT_UINT16:
+        if (n >= 2) {
+            st_be16(b, (uint16_t)pn_iround(raw));
+        }
+        break;
+    case PN_DT_INT16:
+        if (n >= 2) {
+            st_be16(b, (uint16_t)(int16_t)pn_iround(raw));
+        }
+        break;
+    case PN_DT_UINT32:
+        if (n >= 4) {
+            st_be32(b, (uint32_t)pn_iround(raw));
+        }
+        break;
+    case PN_DT_INT32:
+        if (n >= 4) {
+            st_be32(b, (uint32_t)(int32_t)pn_iround(raw));
+        }
+        break;
+    case PN_DT_UINT64:
+        if (n >= 8) {
+            st_be64(b, (uint64_t)pn_iround(raw));
+        }
+        break;
+    case PN_DT_INT64:
+        if (n >= 8) {
+            st_be64(b, (uint64_t)pn_iround(raw));
+        }
+        break;
+    case PN_DT_FLOAT32:
+        if (n >= 4) {
+            st_f32_be(b, (float)raw);
+        }
+        break;
+    case PN_DT_FLOAT64:
+        if (n >= 8) {
+            st_f64_be(b, raw);
+        }
+        break;
+    case PN_DT_BOOL:
+        if (n >= 1) {
+            b[0] = (raw != 0.0) ? 1 : 0;
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 static int parse_points(pn_ctx_t *ctx, const char *points_json)
 {
     cJSON *arr = cJSON_Parse(points_json);
@@ -97,6 +380,21 @@ static int parse_points(pn_ctx_t *ctx, const char *points_json)
         snprintf(pt->access, sizeof(pt->access), "%s",
                  cJSON_IsString(access) ? access->valuestring : "read");
         pt->length = cJSON_IsNumber(length) ? length->valueint : 1;
+        cJSON *dt = cJSON_GetObjectItemCaseSensitive(p, "data_type");
+        if (!cJSON_IsString(dt)) {
+            dt = cJSON_GetObjectItemCaseSensitive(p, "datatype");
+        }
+        pt->data_type = pn_parse_dt(cJSON_IsString(dt) ? dt->valuestring : NULL);
+        cJSON *sc = cJSON_GetObjectItemCaseSensitive(p, "scale");
+        if (!cJSON_IsNumber(sc)) {
+            sc = cJSON_GetObjectItemCaseSensitive(p, "gain");
+        }
+        pt->scale = cJSON_IsNumber(sc) ? sc->valuedouble : 1.0;
+        cJSON *eoff = cJSON_GetObjectItemCaseSensitive(p, "offset");
+        pt->eng_offset = cJSON_IsNumber(eoff) ? eoff->valuedouble : 0.0;
+        pt->apply_scale = pt->data_type != PN_DT_STRING &&
+                          pt->data_type != PN_DT_RAW &&
+                          (pt->scale != 1.0 || pt->eng_offset != 0.0);
         cJSON *slot = cJSON_GetObjectItemCaseSensitive(pn, "slot");
         cJSON *sub = cJSON_GetObjectItemCaseSensitive(pn, "subslot");
         cJSON *idx = cJSON_GetObjectItemCaseSensitive(pn, "index");
@@ -254,6 +552,16 @@ static pn_point_t *find_point(pn_ctx_t *ctx, const char *name)
     return NULL;
 }
 
+static int pn_read_image(pn_ctx_t *ctx, const pn_point_t *pt, uint8_t *dst,
+                         size_t n)
+{
+    if (strcmp(pt->access, "write") == 0) {
+        return pn_stack_read_output(ctx->stack, (size_t)pt->byte_offset, dst,
+                                    n);
+    }
+    return pn_stack_read_input(ctx->stack, (size_t)pt->byte_offset, dst, n);
+}
+
 static int pn_read_point(protocol_adapter_t *self, const char *point_name,
                          point_value_t *out)
 {
@@ -262,18 +570,32 @@ static int pn_read_point(protocol_adapter_t *self, const char *point_name,
     if (!pt || !out || !out->data) {
         return -EINVAL;
     }
+    /* T0 A안: wire 정수 → eng = raw*scale+offset → float32(BE) 4바이트. */
+    if (pt->apply_scale) {
+        int wlen = pn_type_wire_len(pt->data_type, pt->length);
+        if (wlen <= 0 || wlen > 8) {
+            return -EINVAL;
+        }
+        if (out->len < 4) {
+            return -ENOSPC;
+        }
+        uint8_t wire[8];
+        memset(wire, 0, sizeof(wire));
+        int rc = pn_read_image(ctx, pt, wire, (size_t)wlen);
+        if (rc != 0) {
+            return rc;
+        }
+        double raw = pn_decode_number(pt->data_type, wire, (size_t)wlen);
+        double eng = raw * pt->scale + pt->eng_offset;
+        st_f32_be(out->data, (float)eng);
+        out->len = 4;
+        return 0;
+    }
     size_t n = (size_t)pt->length;
     if (n > out->len) {
         n = out->len;
     }
-    int rc;
-    if (strcmp(pt->access, "write") == 0) {
-        rc = pn_stack_read_output(ctx->stack, (size_t)pt->byte_offset,
-                                  out->data, n);
-    } else {
-        rc = pn_stack_read_input(ctx->stack, (size_t)pt->byte_offset, out->data,
-                                 n);
-    }
+    int rc = pn_read_image(ctx, pt, out->data, n);
     if (rc == 0) {
         out->len = n;
     }
@@ -287,6 +609,31 @@ static int pn_write_point(protocol_adapter_t *self, const char *point_name,
     pn_point_t *pt = find_point(ctx, point_name);
     if (!pt || !value || !value->data) {
         return -EINVAL;
+    }
+    /* T0 A안: float32(BE) 공학값 → raw = (eng-offset)/scale → data_type 크기, BE. */
+    if (pt->apply_scale) {
+        int wlen = pn_type_wire_len(pt->data_type, pt->length);
+        if (wlen <= 0 || wlen > 8) {
+            return -EINVAL;
+        }
+        double eng;
+        if (value->len >= 4) {
+            eng = (double)ld_f32_be(value->data);
+        } else {
+            uint8_t tmp[8];
+            memset(tmp, 0, sizeof(tmp));
+            size_t n = value->len < (size_t)wlen ? value->len : (size_t)wlen;
+            if (n > 0) {
+                memcpy(tmp, value->data, n);
+            }
+            eng = pn_decode_number(pt->data_type, tmp, (size_t)wlen);
+        }
+        double denom = pt->scale != 0.0 ? pt->scale : 1.0;
+        double raw = (eng - pt->eng_offset) / denom;
+        uint8_t wire[8];
+        pn_encode_number(pt->data_type, raw, wire, (size_t)wlen);
+        return pn_stack_write_input(ctx->stack, (size_t)pt->byte_offset, wire,
+                                    (size_t)wlen);
     }
     size_t n = value->len;
     if ((int)n > pt->length) {
