@@ -357,7 +357,6 @@ def test_client_reads_correct_values(mb_client_dut):
     assert [int(v, 16) for v in rsp[4:]] == [0xC005, 0xC006, 0xC007]
 
 
-@known_defect("T9-1", "한 번 타임아웃 뒤 늦은 응답이 소켓에 남아 이후 모든 트랜잭션이 TID 불일치(-EIO), 재연결도 안 함")
 def test_client_recovers_after_late_response(mb_client_dut):
     """첫 응답을 타임아웃(300ms)보다 늦게(500ms) 보낸 뒤에도 클라이언트는 다시 올바른 값을 읽어야 한다.
 
@@ -591,7 +590,6 @@ def test_adapter_honours_schema_chars_keys(mb_app_factory):
     assert not bad, f"한 글자/레지스터가 아닌 키: {bad}"
 
 
-@known_defect("T3", "클라이언트 모드 사이클이 포인트마다 응답 타임아웃을 기다리고(사이클 = 타임아웃 × 포인트 수) 재시도 백오프도 없다")
 def test_adapter_client_cycle_fails_fast_and_backs_off(mb_app_factory):
     """응답 없는 서버 상대로 (인수인계 T3 1단계):
 
