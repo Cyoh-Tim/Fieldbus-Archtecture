@@ -412,6 +412,8 @@ static const uint8_t *ndr_blocks(const uint8_t *stub, size_t len, size_t *blen)
     return stub + 20;
 }
 
+/* Request NDR (device-originated calls such as ApplicationReady):
+ * ArgsMaximum, ArgsLength, MaximumCount, Offset, ActualCount, blocks. */
 static size_t ndr_wrap(uint8_t *out, const uint8_t *blocks, size_t n)
 {
     pn_wr_le32(out, (uint32_t)n);
@@ -421,6 +423,27 @@ static size_t ndr_wrap(uint8_t *out, const uint8_t *blocks, size_t n)
     pn_wr_le32(out + 16, (uint32_t)n);
     memcpy(out + 20, blocks, n);
     return 20 + n;
+}
+
+/* Response NDR: PNIOStatus, ArgsLength, MaxCount, Offset, ActualCount, blocks.
+ * status is ErrorCode, ErrorDecode, ErrorCode1, ErrorCode2 (NULL = OK).
+ * Length words are little-endian and count the block bytes that follow. */
+static size_t ndr_res(uint8_t *out, const uint8_t status[4],
+                      const uint8_t *blocks, size_t n)
+{
+    if (status) {
+        memcpy(out, status, 4);
+    } else {
+        memset(out, 0, 4);
+    }
+    pn_wr_le32(out + 4, (uint32_t)n);
+    pn_wr_le32(out + 8, (uint32_t)n);
+    pn_wr_le32(out + 12, 0);
+    pn_wr_le32(out + 16, (uint32_t)n);
+    if (n > 0 && blocks) {
+        memcpy(out + 20, blocks, n);
+    }
+    return 20u + n;
 }
 
 static size_t wrap_rpc_req(uint8_t *out, size_t cap, uint16_t op,
@@ -459,9 +482,11 @@ static void queue_app_ready(pn_stack_t *s)
 static int reply_pnio_err(const uint8_t *pdu, uint8_t *resp, size_t cap,
                           size_t *out_len, uint8_t *stub_out)
 {
-    uint8_t err[4];
-    pn_wr_be32(err, 0x81u << 24);
-    size_t so = ndr_wrap(stub_out, err, 4);
+    /* Same 4-byte indicator as before (81 00 00 00), now in PNIOStatus.
+     * The stub carries no blocks. */
+    uint8_t status[4];
+    pn_wr_be32(status, 0x81u << 24);
+    size_t so = ndr_res(stub_out, status, NULL, 0);
     *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so);
     return 0;
 }
@@ -545,7 +570,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         s->last_rt_ns = 0;
         uint8_t blocks_res[512];
         size_t bn = build_connect_res_blocks(s, blocks_res, sizeof(blocks_res));
-        so = ndr_wrap(stub_out, blocks_res, bn);
+        so = ndr_res(stub_out, NULL, blocks_res, bn);
         LOG_INFO("pn_rpc",
                  "AR established in_fid=0x%04x out_fid=0x%04x in=%u out=%u",
                  s->ar.in_frame_id, s->ar.out_frame_id, s->ar.in_data_len,
@@ -576,7 +601,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         s->ar.established = 0;
         memset(&s->ar, 0, sizeof(s->ar));
         uint8_t z[4] = {0};
-        so = ndr_wrap(stub_out, z, 4);
+        so = ndr_res(stub_out, NULL, z, 4);
         LOG_INFO("pn_rpc", "AR released");
     } else if (op == OP_CONTROL) {
         if (!s->ar.established) {
@@ -610,7 +635,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         uint8_t blocks_res[64];
         size_t bn = wr_block(blocks_res, PN_BLOCK_CONTROL_RES, cres,
                              sizeof(cres));
-        so = ndr_wrap(stub_out, blocks_res, bn);
+        so = ndr_res(stub_out, NULL, blocks_res, bn);
         s->ar.established = 1;
         ar_touch_cmi(s);
         if (cw.command == PN_CONTROL_PRM_END) {
@@ -647,7 +672,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         }
         pn_record_read(s, rw.slot, rw.subslot, rw.index, rec, sizeof(rec),
                        &rlen);
-        so = ndr_wrap(stub_out, rec, rlen);
+        so = ndr_res(stub_out, NULL, rec, rlen);
     } else if (op == OP_WRITE) {
         write_walk_t ww;
         memset(&ww, 0, sizeof(ww));
@@ -677,7 +702,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
                      ww.index, ww.slot, ww.subslot, ww.dlen);
         }
         uint8_t z[4] = {0};
-        so = ndr_wrap(stub_out, z, 4);
+        so = ndr_res(stub_out, NULL, z, 4);
     } else {
         return -ENOSYS;
     }

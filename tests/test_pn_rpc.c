@@ -18,6 +18,14 @@ static void expect(int cond, const char *msg)
     }
 }
 
+static void expect_u32(uint32_t got, uint32_t want, const char *msg)
+{
+    if (got != want) {
+        fprintf(stderr, "FAIL: %s (got 0x%08x want 0x%08x)\n", msg, got, want);
+        g_fail = 1;
+    }
+}
+
 static void fill_aruuid(uint8_t *dst)
 {
     for (int i = 0; i < 16; i++) {
@@ -587,8 +595,72 @@ static void test_cmi_ignores_own_tx(void)
     pn_stack_destroy(s);
 }
 
+/* T12-1: response NDR is PNIOStatus, ArgsLength, MaxCount, Offset,
+ * ActualCount, then blocks. A successful Connect.rsp starts with status 0,
+ * not the block length (build_connect_res_blocks is 0x48 bytes). */
+static void test_connect_response_ndr_pniostatus(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "ndr-res create");
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = build_connect(pdu);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "ndr-res connect");
+    expect(rlen >= 80 + 20, "ndr-res rsp short");
+    const uint8_t *stub = resp + 80;
+    uint32_t status = pn_rd_le32(stub);
+    uint32_t args_len = pn_rd_le32(stub + 4);
+    uint32_t max_count = pn_rd_le32(stub + 8);
+    uint32_t offset = pn_rd_le32(stub + 12);
+    uint32_t actual = pn_rd_le32(stub + 16);
+    expect_u32(status, 0, "Connect.rsp PNIOStatus");
+    expect_u32(args_len, 0x48, "Connect.rsp ArgsLength");
+    expect_u32(max_count, 0x48, "Connect.rsp MaxCount");
+    expect_u32(offset, 0, "Connect.rsp Offset");
+    expect_u32(actual, 0x48, "Connect.rsp ActualCount");
+    expect(rlen == 80 + 20 + 0x48, "Connect.rsp length is header + NDR + blocks");
+    expect(pn_rd_be16(stub + 20) == PN_BLOCK_AR_RES, "blocks follow the NDR header");
+    pn_stack_destroy(s);
+}
+
+/* T12-1: a rejected Connect still answers, but the first NDR word is the
+ * PNIOStatus (the existing 81 00 00 00 indicator) and there are no blocks. */
+static void test_connect_error_ndr_pniostatus(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "ndr-err create");
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = build_connect(pdu);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "ndr-err first connect");
+    expect(pn_stack_ar_up(s) == 1, "ndr-err ar up");
+
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000002) ==
+               0,
+           "ndr-err other-ip connect");
+    expect(pn_stack_ar_up(s) == 1, "ndr-err ar kept");
+    expect(s->ar.owner_ip == 0x0a000001, "ndr-err owner kept");
+    expect(rlen == 100, "error rsp is 80-byte RPC + 20-byte NDR");
+    const uint8_t *stub = resp + 80;
+    expect_u32(pn_rd_be32(stub), 0x81u << 24, "error PNIOStatus bytes 81 00 00 00");
+    expect_u32(pn_rd_le32(stub + 4), 0, "error ArgsLength");
+    expect_u32(pn_rd_le32(stub + 8), 0, "error MaxCount");
+    expect_u32(pn_rd_le32(stub + 12), 0, "error Offset");
+    expect_u32(pn_rd_le32(stub + 16), 0, "error ActualCount");
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
+    test_connect_response_ndr_pniostatus();
+    test_connect_error_ndr_pniostatus();
     test_write_short_block();
     test_ar_ownership();
     test_ndr_huge_args_len();

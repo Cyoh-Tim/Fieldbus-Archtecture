@@ -127,16 +127,16 @@ static void feed_rpc(pn_stack_t *s, const uint8_t *pdu, size_t n)
     }
 }
 
-/* reply_pnio_err is 80-byte RPC + 24-byte NDR carrying 0x81000000. */
+/* Rejected Connect: 80-byte RPC + 20-byte NDR, PNIOStatus = 81 00 00 00. */
 static int last_connect_rejected(void)
 {
     if (g_rpc_rc != 0) {
         return 1;
     }
-    if (g_rpc_rlen != 104) {
+    if (g_rpc_rlen != 100) {
         return 0;
     }
-    return pn_rd_be32(g_rpc_head + 100) == (0x81u << 24);
+    return pn_rd_be32(g_rpc_head + 80) == (0x81u << 24);
 }
 
 static void do_connect(pn_stack_t *s, int hmac, int hmac_bad,

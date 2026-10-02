@@ -17,6 +17,11 @@
 
 #define MB_RX_CAP (MB_ADU_MAX * 2)
 
+/* After a timeout, short read, or TID mismatch the socket may still hold a
+ * late ADU. The next transaction reconnects only after this backoff. */
+#define MB_RECONNECT_BACKOFF_MIN_MS 100
+#define MB_RECONNECT_BACKOFF_MAX_MS 2000
+
 struct mb_client {
     int fd;
     uint32_t peer_ip;
@@ -32,6 +37,8 @@ struct mb_stack {
     struct mb_client clients[MB_CLIENTS_MAX];
     int max_clients;
     int connected;
+    int reconnect_backoff_ms;
+    uint64_t reconnect_not_before_ns;
     char last_error[128];
 
     uint16_t *holding;
@@ -692,24 +699,122 @@ static int send_all(int fd, const uint8_t *buf, size_t len)
     return 0;
 }
 
+/* Returns the delay just armed. The stored backoff doubles up to the cap. */
+static int client_arm_backoff(mb_stack_t *s)
+{
+    int wait_ms = s->reconnect_backoff_ms;
+    if (wait_ms < MB_RECONNECT_BACKOFF_MIN_MS) {
+        wait_ms = MB_RECONNECT_BACKOFF_MIN_MS;
+    }
+    if (wait_ms > MB_RECONNECT_BACKOFF_MAX_MS) {
+        wait_ms = MB_RECONNECT_BACKOFF_MAX_MS;
+    }
+    s->reconnect_not_before_ns =
+        mb_now_ns() + (uint64_t)wait_ms * 1000000ull;
+    int next = wait_ms * 2;
+    if (next > MB_RECONNECT_BACKOFF_MAX_MS) {
+        next = MB_RECONNECT_BACKOFF_MAX_MS;
+    }
+    s->reconnect_backoff_ms = next;
+    return wait_ms;
+}
+
+static void client_note_success(mb_stack_t *s)
+{
+    s->reconnect_backoff_ms = MB_RECONNECT_BACKOFF_MIN_MS;
+    s->reconnect_not_before_ns = 0;
+}
+
+/* Drop the client socket. A late response left on this TCP stream would be
+ * read as the next transaction (TID mismatch, then one step behind forever).
+ * Closing is the robust recovery: unlike scanning for a matching TID, it
+ * also discards a partial or over-read frame. Same policy as SLMP T10-2. */
+static void client_drop(mb_stack_t *s, int err)
+{
+    if (s->client_fd >= 0) {
+        close(s->client_fd);
+        s->client_fd = -1;
+    }
+    s->connected = 0;
+    int wait_ms = client_arm_backoff(s);
+    LOG_WARN("modbus-stack",
+             "closed client socket after error %d; reconnect in %d ms", err,
+             wait_ms);
+}
+
+static int client_ensure_connected(mb_stack_t *s)
+{
+    if (s->client_fd >= 0 && s->connected) {
+        return 0;
+    }
+    if (s->client_fd >= 0) {
+        close(s->client_fd);
+        s->client_fd = -1;
+        s->connected = 0;
+    }
+    uint64_t now = mb_now_ns();
+    if (s->reconnect_not_before_ns != 0 && now < s->reconnect_not_before_ns) {
+        return -EAGAIN;
+    }
+    int rc = client_connect(s);
+    if (rc != 0) {
+        int wait_ms = client_arm_backoff(s);
+        LOG_WARN("modbus-stack", "reconnect %s:%d failed (%d); retry in %d ms",
+                 s->cfg.remote_ip, s->cfg.port, rc, wait_ms);
+        return rc;
+    }
+    return 0;
+}
+
+static int wait_readable(int fd, int to_ms)
+{
+    for (;;) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+        struct timeval tv = {.tv_sec = to_ms / 1000,
+                             .tv_usec = (to_ms % 1000) * 1000};
+        int sel = select(fd + 1, &rfds, NULL, NULL, &tv);
+        if (sel < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -EIO;
+        }
+        if (sel == 0) {
+            return -ETIMEDOUT;
+        }
+        return 0;
+    }
+}
+
 static int client_recv_adu(mb_stack_t *s, uint16_t expect_tid, uint8_t *resp,
                            size_t resp_cap, size_t *resp_len)
 {
+    if (resp_cap < MB_MBAP_LEN) {
+        return -ENOSPC;
+    }
     size_t got = 0;
     int to_ms = s->cfg.client_timeout_ms > 0 ? s->cfg.client_timeout_ms : 200;
     while (got < MB_MBAP_LEN) {
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(s->client_fd, &rfds);
-        struct timeval tv = {.tv_sec = to_ms / 1000,
-                             .tv_usec = (to_ms % 1000) * 1000};
-        if (select(s->client_fd + 1, &rfds, NULL, NULL, &tv) <= 0) {
-            snprintf(s->last_error, sizeof(s->last_error), "client read timeout");
-            return -ETIMEDOUT;
+        int w = wait_readable(s->client_fd, to_ms);
+        if (w != 0) {
+            if (w == -ETIMEDOUT) {
+                snprintf(s->last_error, sizeof(s->last_error),
+                         "client read timeout");
+            }
+            client_drop(s, w);
+            return w;
         }
-        ssize_t n = recv(s->client_fd, resp + got, resp_cap - got, 0);
+        /* Header only. Reading resp_cap here would swallow the next ADU. */
+        ssize_t n = recv(s->client_fd, resp + got, MB_MBAP_LEN - got, 0);
+        if (n < 0 &&
+            (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+            continue;
+        }
         if (n <= 0) {
-            s->connected = 0;
+            snprintf(s->last_error, sizeof(s->last_error), "client read");
+            client_drop(s, -EIO);
             return -EIO;
         }
         got += (size_t)n;
@@ -718,34 +823,44 @@ static int client_recv_adu(mb_stack_t *s, uint16_t expect_tid, uint8_t *resp,
     uint16_t proto = rd_be16(resp + 2);
     uint16_t len = rd_be16(resp + 4);
     if (proto != 0 || len < 2) {
+        snprintf(s->last_error, sizeof(s->last_error), "bad mbap");
+        client_drop(s, -EIO);
         return -EIO;
     }
     size_t need = (size_t)(MB_MBAP_LEN - 1) + (size_t)len;
     if (need > resp_cap) {
+        client_drop(s, -ENOSPC);
         return -ENOSPC;
     }
     while (got < need) {
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(s->client_fd, &rfds);
-        struct timeval tv = {.tv_sec = to_ms / 1000,
-                             .tv_usec = (to_ms % 1000) * 1000};
-        if (select(s->client_fd + 1, &rfds, NULL, NULL, &tv) <= 0) {
-            snprintf(s->last_error, sizeof(s->last_error), "client read timeout");
-            return -ETIMEDOUT;
+        int w = wait_readable(s->client_fd, to_ms);
+        if (w != 0) {
+            if (w == -ETIMEDOUT) {
+                snprintf(s->last_error, sizeof(s->last_error),
+                         "client read timeout");
+            }
+            client_drop(s, w);
+            return w;
         }
         ssize_t n = recv(s->client_fd, resp + got, need - got, 0);
+        if (n < 0 &&
+            (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+            continue;
+        }
         if (n <= 0) {
-            s->connected = 0;
+            snprintf(s->last_error, sizeof(s->last_error), "client read");
+            client_drop(s, -EIO);
             return -EIO;
         }
         got += (size_t)n;
     }
     if (tid != expect_tid) {
         snprintf(s->last_error, sizeof(s->last_error), "tid mismatch");
+        client_drop(s, -EIO);
         return -EIO;
     }
     *resp_len = need;
+    client_note_success(s);
     return 0;
 }
 
@@ -753,9 +868,6 @@ static int client_recv_adu(mb_stack_t *s, uint16_t expect_tid, uint8_t *resp,
 static int client_txn(mb_stack_t *s, uint8_t fc, uint16_t addr, uint16_t qty,
                       uint8_t *data_out, size_t *data_len)
 {
-    if (s->client_fd < 0) {
-        return -ENOTCONN;
-    }
     if ((fc == MB_FC_READ_HOLDING || fc == MB_FC_READ_INPUT) &&
         (qty < 1 || qty > 125)) {
         return -EINVAL;
@@ -763,6 +875,10 @@ static int client_txn(mb_stack_t *s, uint8_t fc, uint16_t addr, uint16_t qty,
     if ((fc == MB_FC_READ_COILS || fc == MB_FC_READ_DISCRETE) &&
         (qty < 1 || qty > 2000)) {
         return -EINVAL;
+    }
+    int conn = client_ensure_connected(s);
+    if (conn != 0) {
+        return conn;
     }
     static uint16_t tid_seq;
     uint16_t tid = ++tid_seq;
@@ -778,7 +894,7 @@ static int client_txn(mb_stack_t *s, uint8_t fc, uint16_t addr, uint16_t qty,
     wr_be16(req + 8, addr);
     wr_be16(req + 10, qty);
     if (send_all(s->client_fd, req, sizeof(req)) != 0) {
-        s->connected = 0;
+        client_drop(s, -EIO);
         return -EIO;
     }
 
@@ -873,8 +989,9 @@ int mb_stack_client_write_regs(mb_stack_t *s, uint16_t addr,
         quantity > 123) {
         return -EINVAL;
     }
-    if (s->client_fd < 0) {
-        return -ENOTCONN;
+    int conn = client_ensure_connected(s);
+    if (conn != 0) {
+        return conn;
     }
     static uint16_t tid_seq;
     uint16_t tid = ++tid_seq;
@@ -911,7 +1028,7 @@ int mb_stack_client_write_regs(mb_stack_t *s, uint16_t addr,
         }
     }
     if (send_all(s->client_fd, req, total) != 0) {
-        s->connected = 0;
+        client_drop(s, -EIO);
         return -EIO;
     }
     uint8_t resp[MB_ADU_MAX];
@@ -943,8 +1060,9 @@ int mb_stack_client_write_bits(mb_stack_t *s, uint16_t addr, const uint8_t *src,
         quantity > 1968) {
         return -EINVAL;
     }
-    if (s->client_fd < 0) {
-        return -ENOTCONN;
+    int conn = client_ensure_connected(s);
+    if (conn != 0) {
+        return conn;
     }
     static uint16_t tid_seq;
     uint16_t tid = ++tid_seq;
@@ -985,7 +1103,7 @@ int mb_stack_client_write_bits(mb_stack_t *s, uint16_t addr, const uint8_t *src,
         }
     }
     if (send_all(s->client_fd, req, total) != 0) {
-        s->connected = 0;
+        client_drop(s, -EIO);
         return -EIO;
     }
     uint8_t resp[MB_ADU_MAX];
@@ -1041,14 +1159,9 @@ void mb_stack_poll(mb_stack_t *s)
         return;
     }
 
-    /* Client: reconnect if needed. Point refresh is driven by adapter. */
-    if (s->client_fd < 0 || !s->connected) {
-        if (s->client_fd >= 0) {
-            close(s->client_fd);
-            s->client_fd = -1;
-        }
-        (void)client_connect(s);
-    }
+    /* Client: reconnect if needed. Point refresh is driven by adapter.
+     * A timeout or bad frame arms a backoff inside client_drop. */
+    (void)client_ensure_connected(s);
 }
 
 int mb_stack_connected(const mb_stack_t *s)

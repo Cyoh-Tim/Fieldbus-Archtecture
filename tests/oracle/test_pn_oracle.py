@@ -223,7 +223,6 @@ def test_connect_is_answered(pn_dut):
     assert rsp.ptype == 2  # response
 
 
-@known_defect("T12-1", "RPC 응답 NDR 첫 워드에 PNIOStatus 가 아니라 인자 길이를 쓴다")
 def test_connect_response_pniostatus_ok(pn_dut):
     rsp = rpc_response(pn_dut.rpc(raw(connect_pdu())))
     res = PNIOServiceResPDU(raw(rsp.payload))

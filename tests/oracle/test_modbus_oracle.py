@@ -357,14 +357,17 @@ def test_client_reads_correct_values(mb_client_dut):
     assert [int(v, 16) for v in rsp[4:]] == [0xC005, 0xC006, 0xC007]
 
 
-@known_defect("T9-1", "한 번 타임아웃 뒤 늦은 응답이 소켓에 남아 이후 모든 트랜잭션이 TID 불일치(-EIO), 재연결도 안 함")
 def test_client_recovers_after_late_response(mb_client_dut):
-    """첫 응답을 타임아웃(300ms)보다 늦게(1 s) 보낸 뒤에도 클라이언트는 다시 올바른 값을 읽어야 한다.
+    """첫 응답을 타임아웃(300ms)보다 늦게(500ms) 보낸 뒤에도 클라이언트는 다시 올바른 값을 읽어야 한다.
 
     어댑터처럼 매 사이클 poll → read 순서로 구동한다. 실패(rc<0)는 허용하지만 마지막 3번은 성공해야
     하고, 성공한 읽기는 반드시 자기 주소의 값이어야 한다 (사양: 응답은 TID 로 요청과 짝짓는다).
+
+    시간 배치 (결정적으로 만들기 위함): 요청1 t=0 → 클라이언트 타임아웃 t=0.3 → 늦은 응답1 t=0.5 (혼자 도착)
+    → 사이클 간격 600ms 뒤 요청2 t≈0.9. 늦은 응답이 다음 응답과 한 TCP 읽기에 붙어 오면 결함이 있는
+    클라이언트도 우연히 정렬이 맞아 통과할 수 있어서(2026-10-01 main 에서 XPASS 1회), 두 응답이 겹치지 않게 했다.
     """
-    srv = FakeMbServer(first_delay_s=1.0)
+    srv = FakeMbServer(first_delay_s=0.5)
     reads = []
     try:
         mb_client_dut.cmd(f"NEW {srv.port} 300")
@@ -373,7 +376,7 @@ def test_client_recovers_after_late_response(mb_client_dut):
             mb_client_dut.cmd("POLL 0")
             rsp = mb_client_dut.cmd(f"READ 0 h {n} 1")
             reads.append((n, int(rsp[2]), int(rsp[4], 16) if len(rsp) > 4 else None))
-            mb_client_dut.cmd("SLEEP 200")
+            mb_client_dut.cmd("SLEEP 600")
     finally:
         srv.close()
     wrong = [(n, v) for n, rc, v in reads if rc == 0 and v != 0xC000 + n]
@@ -520,7 +523,6 @@ def test_adapter_plain_point_roundtrip(mb_app_factory):
     assert app.cmd("RU32 q") == ["R", "0", str(0x0102)]
 
 
-@known_defect("T9-3", "주소 문자열을 strtol(…, 0) 으로 읽어 앞자리 0 이 8진수가 된다 (\"00010\"→8, \"00009\"→0)")
 @pytest.mark.parametrize("text,pdu", [("00010", 10), ("00009", 9)])
 def test_adapter_address_string_is_decimal(mb_app_factory, text, pdu):
     """zero_based 포인트의 주소 문자열은 10진 PDU 주소다. 앱이 쓴 값이 그 레지스터에 있어야 한다."""
@@ -585,7 +587,6 @@ def test_adapter_honours_schema_chars_keys(mb_app_factory):
     assert not bad, f"한 글자/레지스터가 아닌 키: {bad}"
 
 
-@known_defect("T3", "클라이언트 모드 사이클이 포인트마다 응답 타임아웃을 기다리고(사이클 = 타임아웃 × 포인트 수) 재시도 백오프도 없다")
 def test_adapter_client_cycle_fails_fast_and_backs_off(mb_app_factory):
     """응답 없는 서버 상대로 (인수인계 T3 1단계):
 
