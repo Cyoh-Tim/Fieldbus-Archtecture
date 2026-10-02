@@ -2,6 +2,7 @@
 #include "ethernetip_adapter.h"
 #include "fb_api.h"
 
+#include <math.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -509,6 +510,116 @@ static void test_assembly_directions(void)
     a->destroy(a);
 }
 
+/*
+ * T2 (EIP): scale/offset 는 어댑터 책임 (T0 A안).
+ * uint16, scale 0.1 에 fb_write_u32(..., 300) 이면 Assembly 는
+ * 원시값 3000 의 리틀 엔디안 B8 0B 이고, 읽기 왕복은 300.0 이다.
+ * status_word_io 는 같은 오프셋의 bytes 포인트라 변환 없이 wire 를 읽는다.
+ */
+static const char *k_scale =
+    "{\n"
+    "  \"protocol\": \"ethernetip\",\n"
+    "  \"device\": {\"name\": \"eip_t2\", \"role\": \"server\"},\n"
+    "  \"cycle_ms\": 8,\n"
+    "  \"protocol_params\": {\n"
+    "    \"role\": \"server\", \"mock\": true, \"security_class\": 0,\n"
+    "    \"input_assembly\": 150, \"output_assembly\": 101,\n"
+    "    \"input_size\": 16, \"output_size\": 8\n"
+    "  },\n"
+    "  \"points\": [\n"
+    "    {\"name\": \"status_word\", \"access\": \"read\",\n"
+    "     \"data_type\": \"uint16\", \"length\": 2, \"scale\": 0.1,\n"
+    "     \"address\": {\"ethernetip\": {\"assembly\": 150,\n"
+    "     \"byte_offset\": 0, \"length\": 2}}},\n"
+    "    {\"name\": \"status_word_io\", \"access\": \"read\",\n"
+    "     \"data_type\": \"bytes\", \"length\": 2,\n"
+    "     \"address\": {\"ethernetip\": {\"assembly\": 150,\n"
+    "     \"byte_offset\": 0, \"length\": 2}}},\n"
+    "    {\"name\": \"biased\", \"access\": \"read\",\n"
+    "     \"data_type\": \"uint16\", \"length\": 2,\n"
+    "     \"scale\": 0.1, \"offset\": 10.0,\n"
+    "     \"address\": {\"ethernetip\": {\"assembly\": 150,\n"
+    "     \"byte_offset\": 2, \"length\": 2}}},\n"
+    "    {\"name\": \"biased_io\", \"access\": \"read\",\n"
+    "     \"data_type\": \"bytes\", \"length\": 2,\n"
+    "     \"address\": {\"ethernetip\": {\"assembly\": 150,\n"
+    "     \"byte_offset\": 2, \"length\": 2}}},\n"
+    "    {\"name\": \"setpoint_scaled\", \"access\": \"write\",\n"
+    "     \"data_type\": \"uint16\", \"length\": 2, \"scale\": 0.1,\n"
+    "     \"address\": {\"ethernetip\": {\"assembly\": 101,\n"
+    "     \"byte_offset\": 2, \"length\": 2}}}\n"
+    "  ]\n"
+    "}\n";
+
+static void test_repro_scale(void)
+{
+    fb_runtime_t *rt = NULL;
+    int rc = open_cfg(k_scale, &rt);
+    expect(rc == FB_OK, "open scale cfg");
+    if (rc != FB_OK) {
+        fprintf(stderr, "scale open: %s\n", fb_strerror(rc));
+        return;
+    }
+
+    rc = fb_write_u32(rt, "status_word", 300);
+    expect(rc == FB_OK, "fb_write_u32 status_word 300");
+    if (rc != FB_OK) {
+        fprintf(stderr, "write: %s\n", fb_strerror(rc));
+    }
+
+    unsigned char io[8] = {0};
+    size_t n = 0;
+    expect(fb_read_bytes(rt, "status_word_io", io, sizeof io, &n) == FB_OK,
+           "read status_word_io");
+    printf("%02X %02X -> CIP UINT %u\n", io[0], io[1],
+           (unsigned)(io[0] | (io[1] << 8)));
+    fflush(stdout);
+    expect(n == 2 && io[0] == 0xB8 && io[1] == 0x0B, "status_word wire B8 0B");
+    expect((io[0] | (io[1] << 8)) == 3000, "CIP UINT 3000");
+
+    float eng = 0.0f;
+    rc = fb_read_f32(rt, "status_word", &eng);
+    expect(rc == FB_OK, "fb_read_f32 status_word");
+    if (!(rc == FB_OK && fabsf(eng - 300.0f) < 1e-3f)) {
+        fprintf(stderr, "FAIL: read roundtrip %.4f, expected 300.0\n",
+                (double)eng);
+        g_fail = 1;
+    }
+
+    /* offset: eng 310, scale 0.1, offset 10 → raw (310-10)/0.1 = 3000 */
+    rc = fb_write_u32(rt, "biased", 310);
+    expect(rc == FB_OK, "fb_write_u32 biased 310");
+    memset(io, 0, sizeof io);
+    n = 0;
+    expect(fb_read_bytes(rt, "biased_io", io, sizeof io, &n) == FB_OK,
+           "read biased_io");
+    expect(n == 2 && io[0] == 0xB8 && io[1] == 0x0B, "biased wire B8 0B");
+    eng = 0.0f;
+    rc = fb_read_f32(rt, "biased", &eng);
+    if (!(rc == FB_OK && fabsf(eng - 310.0f) < 1e-3f)) {
+        fprintf(stderr, "FAIL: offset read roundtrip %.4f, expected 310.0\n",
+                (double)eng);
+        g_fail = 1;
+    }
+
+    /* 스캐너가 output assembly 에 원시 UINT 3000 (B8 0B) 을 쓴 경우. */
+    eip_stack_t *stack = stack_of(rt);
+    expect(stack != NULL, "scale stack");
+    if (stack) {
+        uint8_t raw[2] = {0xB8, 0x0B};
+        expect(eip_stack_write_output(stack, 2, raw, 2) == 2, "seed setpoint");
+    }
+    eng = 0.0f;
+    rc = fb_read_f32(rt, "setpoint_scaled", &eng);
+    if (!(rc == FB_OK && fabsf(eng - 300.0f) < 1e-3f)) {
+        fprintf(stderr, "FAIL: setpoint read %.4f, expected 300.0 (rc=%d)\n",
+                (double)eng, rc);
+        g_fail = 1;
+    }
+
+    fb_close(rt);
+}
+
 int main(void)
 {
     test_repro_status_word();
@@ -516,6 +627,7 @@ int main(void)
     test_string_bool_bytes_unchanged();
     test_originator_paths();
     test_assembly_directions();
+    test_repro_scale();
     if (g_fail) {
         fprintf(stderr, "test_eip_adapter: FAILED\n");
         return 1;
