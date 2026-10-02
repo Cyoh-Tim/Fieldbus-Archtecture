@@ -43,6 +43,10 @@
 #define PN_DCP_SUB_CTRL_SIGNAL   0x03u
 #define PN_DCP_SUB_CTRL_RESPONSE 0x04u
 
+/* Identify.res / Get.res / Hello.req value prefix. Not used on Set.res. */
+#define PN_DCP_BLOCKINFO_NONE   0x0000u
+#define PN_DCP_BLOCKINFO_IP_SET 0x0001u
+
 #define PN_RPC_PORT           34964
 #define PN_SNMP_PORT          161
 
