@@ -513,6 +513,42 @@ int slmp_encode_batch_read(const slmp_cfg_t *cfg, const slmp_range_t *range,
     return 0;
 }
 
+/* Binary 3E bit-unit data (subcommand 0001): one point per nibble, two points
+ * per byte. The earlier point is the high nibble (bits 4..7); the next point
+ * is the low nibble (bits 0..3). ON = 1, OFF = 0. An odd count pads the last
+ * low nibble with 0, so the wire length is ceil(points / 2).
+ *
+ * Caller buffers (encode raw, client batch raw, read_bits/write_bits) stay
+ * one byte per point, 0 or 1. Only the on-wire frame is nibble-packed. */
+static size_t bit_wire_len(uint16_t quantity)
+{
+    return ((size_t)quantity + 1u) / 2u;
+}
+
+static void pack_bit_nibbles(const uint8_t *points, uint16_t quantity,
+                             uint8_t *wire)
+{
+    size_t n = bit_wire_len(quantity);
+    memset(wire, 0, n);
+    for (uint16_t i = 0; i < quantity; i++) {
+        if (!points[i]) {
+            continue;
+        }
+        wire[i / 2u] =
+            (uint8_t)(wire[i / 2u] | (((i % 2u) == 0) ? 0x10 : 0x01));
+    }
+}
+
+static void unpack_bit_nibbles(const uint8_t *wire, uint16_t quantity,
+                               uint8_t *points)
+{
+    for (uint16_t i = 0; i < quantity; i++) {
+        unsigned nib = ((i % 2u) == 0) ? (unsigned)(wire[i / 2u] >> 4)
+                                       : (unsigned)(wire[i / 2u] & 0x0fu);
+        points[i] = nib ? 1u : 0u;
+    }
+}
+
 int slmp_encode_batch_write(const slmp_cfg_t *cfg, const slmp_range_t *range,
                             const uint8_t *raw, size_t raw_len, uint8_t *out,
                             size_t out_cap, size_t *out_len)
@@ -520,29 +556,29 @@ int slmp_encode_batch_write(const slmp_cfg_t *cfg, const slmp_range_t *range,
     if (!cfg || !range || !out || !out_len) {
         return -EINVAL;
     }
-    size_t need_data;
-    if (range->addr.unit == SLMP_ACCESS_BIT) {
-        need_data = (size_t)range->quantity; /* 1 byte/bit */
-    } else {
-        need_data = (size_t)range->quantity * 2u; /* LE words on wire */
-    }
-    if (raw_len < need_data) {
+    int bit = range->addr.unit == SLMP_ACCESS_BIT;
+    /* Bit raw is 1 byte/point. Word raw is canonical BE, 2 bytes/word. */
+    size_t api_len = bit ? (size_t)range->quantity
+                         : (size_t)range->quantity * 2u;
+    size_t wire_len = bit ? bit_wire_len(range->quantity) : api_len;
+    if (raw_len < api_len || (api_len > 0 && !raw)) {
         return -EINVAL;
     }
-    uint16_t data_len = (uint16_t)(12 + need_data);
+    uint16_t data_len = (uint16_t)(12 + wire_len);
     if (out_cap < (size_t)9 + data_len) {
         return -ENOSPC;
     }
     encode_subheader(cfg, data_len, out, out_cap);
     wr_le16(out + 9, cfg->monitoring_timer);
     wr_le16(out + 11, SLMP_CMD_BATCH_WRITE);
-    wr_le16(out + 13, range->addr.unit == SLMP_ACCESS_BIT ? SLMP_SUB_BIT
-                                                          : SLMP_SUB_WORD);
+    wr_le16(out + 13, bit ? SLMP_SUB_BIT : SLMP_SUB_WORD);
     wr_le24(out + 15, range->addr.head);
     out[18] = range->addr.device_code;
     wr_le16(out + 19, range->quantity);
-    if (range->addr.unit == SLMP_ACCESS_BIT) {
-        memcpy(out + 21, raw, need_data);
+    if (bit) {
+        if (wire_len > 0) {
+            pack_bit_nibbles(raw, range->quantity, out + 21);
+        }
     } else {
         /* raw is canonical BE bytes from adapter; convert to SLMP LE words */
         for (uint16_t i = 0; i < range->quantity; i++) {
@@ -552,7 +588,7 @@ int slmp_encode_batch_write(const slmp_cfg_t *cfg, const slmp_range_t *range,
             out[21 + i * 2u + 1u] = hi;
         }
     }
-    *out_len = 21 + need_data;
+    *out_len = 21 + wire_len;
     return 0;
 }
 
@@ -844,14 +880,15 @@ int slmp_stack_client_batch_read(slmp_stack_t *s, const slmp_range_t *range,
         return -EIO;
     }
     if (range->addr.unit == SLMP_ACCESS_BIT) {
-        if (dlen < range->quantity || raw_cap < range->quantity) {
+        size_t wire = bit_wire_len(range->quantity);
+        if (dlen < wire || raw_cap < range->quantity) {
             return -ENOSPC;
         }
         if (range->quantity > 0) {
             if (!data) {
                 return -EIO;
             }
-            memcpy(raw_out, data, range->quantity);
+            unpack_bit_nibbles(data, range->quantity, raw_out);
         }
         *raw_len = range->quantity;
         slmp_stack_write_bits(s, range->addr.device_code, range->addr.head,
@@ -994,12 +1031,17 @@ int slmp_stack_handle_request(slmp_stack_t *s, const uint8_t *req,
         size_t plen = 0;
         int rc;
         if (bit_unit) {
-            if (qty > sizeof(payload)) {
+            size_t wire = bit_wire_len(qty);
+            if (wire > sizeof(payload)) {
                 return build_response(req, SLMP_END_POINTS, NULL, 0, resp,
                                       resp_cap, resp_len);
             }
-            rc = slmp_stack_read_bits(s, code, head, payload, qty);
-            plen = qty;
+            uint8_t points[SLMP_QTY_BIT_MAX];
+            rc = slmp_stack_read_bits(s, code, head, points, qty);
+            if (rc == 0) {
+                pack_bit_nibbles(points, qty, payload);
+                plen = wire;
+            }
         } else {
             if ((size_t)qty * 2u > sizeof(payload)) {
                 return build_response(req, SLMP_END_POINTS, NULL, 0, resp,
@@ -1023,13 +1065,15 @@ int slmp_stack_handle_request(slmp_stack_t *s, const uint8_t *req,
     }
 
     const uint8_t *data = req + 21;
-    size_t need = bit_unit ? (size_t)qty : (size_t)qty * 2u;
+    size_t need = bit_unit ? bit_wire_len(qty) : (size_t)qty * 2u;
     if (req_len < 21 + need) {
         return -EBADMSG;
     }
     int rc;
     if (bit_unit) {
-        rc = slmp_stack_write_bits(s, code, head, data, qty);
+        uint8_t points[SLMP_QTY_BIT_MAX];
+        unpack_bit_nibbles(data, qty, points);
+        rc = slmp_stack_write_bits(s, code, head, points, qty);
     } else {
         uint16_t words[SLMP_QTY_WORD_MAX];
         for (uint16_t i = 0; i < qty; i++) {
