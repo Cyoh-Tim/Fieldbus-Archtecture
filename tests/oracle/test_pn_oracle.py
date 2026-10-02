@@ -346,6 +346,39 @@ def test_connect_rejects_cycle_below_device_minimum(pn_dut):
     assert not [f for f in tx_frames(out) if is_rtc1(f)], "거부한 Connect 뒤에 RTC1 을 보낸다"
 
 
+# ---------------------------------------------------------------- 두 번째 컨트롤러 Connect 거부 (A20261002-1)
+OTHER_AR_UUID = "b0b1b2b3-b4b5-b6b7-b8b9-babbbcbdbebf"
+OTHER_CM_INITIATOR_OBJECT_UUID = "dea00000-6c97-11d1-8271-00640002abcd"
+OTHER_CONTROLLER_MAC = "00:11:22:33:44:66"
+
+
+@known_defect("A20261002-1", "AR 이 있는 동안 다른 컨트롤러의 Connect 를 PNIOStatus 바이트 81 00 00 00 "
+              "(LE drep 정수 0x00000081, ErrorCode=0x00 'OK') 로 거부한다. "
+              "사양: DB 81 40 04 (IODConnectRes, PNIO, CMRPC, Out of AR resources)")
+def test_connect_second_controller_out_of_ar_resources(pn_dut):
+    first = rpc_response(pn_dut.rpc(raw(connect_pdu())))
+    assert first is not None and ndr_response(first)[0] == 0, "첫 Connect 가 수립되지 않음"
+    # 다른 컨트롤러: ARUUID·CMInitiatorObjectUUID·MAC·스테이션 이름이 모두 다르다.
+    # (같은 ARUUID 재사용은 p-net 에서 CMDEV 상태 충돌 DB 81 3D 00 이라 다른 경우다.)
+    req = connect_pdu(station=b"other-controller")
+    ar = req[ARBlockReq]
+    ar.ARUUID = OTHER_AR_UUID
+    ar.CMInitiatorObjectUUID = OTHER_CM_INITIATOR_OBJECT_UUID
+    ar.CMInitiatorMacAdd = OTHER_CONTROLLER_MAC
+    rsp = rpc_response(pn_dut.rpc(raw(req)))
+    assert rsp is not None, "두 번째 Connect 응답 없음"
+    # PNIOStatus 는 drep 순서 32비트 정수: ErrorCode<<24 | ErrorDecode<<16 | ErrorCode1<<8 | ErrorCode2
+    # (Wireshark packet-pn.c dissect_PNIO_status, scapy PNIOServiceResPDU EField, p-net pf_put_pnet_status).
+    # 0xDB IODConnectRes, 0x81 PNIO, 0x40 CMRPC, 0x04 Out of AR resources
+    # (Wireshark pn_io_error_code2_pnio_64, p-net PNET_ERROR_CODE_2_CMRPC_NO_AR_RESOURCES).
+    status, blocks = ndr_response(rsp)
+    assert status == 0xDB814004, f"PNIOStatus {status:08x}"
+    assert blocks == b"", f"거부 응답에 블록 {blocks.hex()}"
+    # 거부는 기존 AR 을 건드리지 않는다: 첫 컨트롤러로 RTC1 이 계속 나간다.
+    out = pn_dut.cmd("POLL 60")
+    assert [f for f in tx_frames(out) if is_rtc1(f)], "두 번째 Connect 거부 뒤 기존 AR 의 RTC1 이 멈췄다"
+
+
 # ---------------------------------------------------------------- Record Read/Write (T12-3)
 IM0_INDEX = 0xAFF0
 IM1_INDEX = 0xAFF1
