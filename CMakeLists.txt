@@ -199,6 +199,11 @@ if(BUILD_DAEMON)
         add_executable(test_fb_api tests/test_fb_api.c)
         target_link_libraries(test_fb_api PRIVATE fieldbus m)
 
+        add_executable(test_eip_adapter tests/test_eip_adapter.c)
+        target_include_directories(test_eip_adapter PRIVATE
+            adapters/ethernetip stacks/ethernetip/include include)
+        target_link_libraries(test_eip_adapter PRIVATE fieldbus m)
+
         add_executable(test_pn_scale tests/test_pn_scale.c)
         target_link_libraries(test_pn_scale PRIVATE fieldbus m)
 
@@ -358,6 +363,9 @@ endif()
 
 if(BUILD_DAEMON AND BUILD_API)
     add_test(NAME test_fb_api COMMAND test_fb_api)
+    add_test(NAME test_eip_adapter COMMAND test_eip_adapter)
+    set_tests_properties(test_eip_adapter PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     add_test(NAME test_pn_scale COMMAND test_pn_scale)
     # Keep example_fake_sensor_once as Modbus (existing path).
     set(_fake_sensor_tests
