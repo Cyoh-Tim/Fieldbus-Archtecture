@@ -48,6 +48,86 @@ static int tx_has_fid(uint16_t fid)
     return 0;
 }
 
+static const uint8_t *tx_frame_fid(uint16_t fid, size_t *len)
+{
+    for (int i = 0; i < g_ntx; i++) {
+        if (g_txlen[i] >= 16 && pn_rd_be16(g_tx[i] + 14) == fid) {
+            *len = g_txlen[i];
+            return g_tx[i];
+        }
+    }
+    return NULL;
+}
+
+/* DCP payload starts at Ethernet offset 14. Blocks follow the 12-byte header. */
+static const uint8_t *dcp_blocks_of(const uint8_t *frame, size_t len,
+                                    uint16_t *dlen)
+{
+    if (len < 26) {
+        return NULL;
+    }
+    *dlen = pn_rd_be16(frame + 24);
+    if (26u + *dlen > len) {
+        return NULL;
+    }
+    return frame + 26;
+}
+
+static const uint8_t *find_dcp_block(const uint8_t *blocks, uint16_t dlen,
+                                     uint8_t opt, uint8_t sub, uint16_t *blen)
+{
+    size_t off = 0;
+    while (off + 4 <= dlen) {
+        uint16_t bl = pn_rd_be16(blocks + off + 2);
+        size_t total = 4u + bl + (bl & 1u);
+        if (off + total > dlen) {
+            return NULL;
+        }
+        if (blocks[off] == opt && blocks[off + 1] == sub) {
+            *blen = bl;
+            return blocks + off;
+        }
+        off += total;
+    }
+    return NULL;
+}
+
+static void dump_prefix(const uint8_t *p, size_t n)
+{
+    if (n > 40) {
+        n = 40;
+    }
+    for (size_t i = 0; i < n; i++) {
+        fprintf(stderr, " %02x", p[i]);
+    }
+    fprintf(stderr, "\n");
+}
+
+/* Identify.res / Get.res / Hello.req: value is BlockInfo(2) then the payload. */
+static void expect_blockinfo(const uint8_t *blocks, uint16_t dlen, uint8_t opt,
+                             uint8_t sub, uint16_t info, const void *val,
+                             size_t vlen, const char *what)
+{
+    uint16_t bl = 0;
+    const uint8_t *b = find_dcp_block(blocks, dlen, opt, sub, &bl);
+    if (!b) {
+        fprintf(stderr, "FAIL: %s block missing\n", what);
+        g_fail = 1;
+        return;
+    }
+    uint16_t want_len = (uint16_t)(2u + vlen);
+    int ok = bl == want_len && pn_rd_be16(b + 4) == info &&
+             (vlen == 0 || memcmp(b + 6, val, vlen) == 0);
+    if (!ok) {
+        fprintf(stderr,
+                "FAIL: %s BlockInfo len=%u want %u info=0x%04x want 0x%04x\n",
+                what, bl, want_len, pn_rd_be16(b + 4), info);
+        fprintf(stderr, "  bytes:");
+        dump_prefix(b, 4u + bl);
+        g_fail = 1;
+    }
+}
+
 static pn_stack_t *make_dcp_stack(void)
 {
     pn_cfg_t cfg;
@@ -86,6 +166,46 @@ static size_t dcp_ident_frame(uint8_t *out, const uint8_t *dst,
     memcpy(pay + 12, blocks, blen);
     return pn_eth_build(out, PN_FRAME_MAX, dst, src, PN_ETHTYPE_PN, pay,
                         12 + blen);
+}
+
+static size_t dcp_get_frame(uint8_t *out, const uint8_t *dst, const uint8_t *src)
+{
+    uint8_t pay[16];
+    pn_wr_be16(pay, PN_FRAMEID_DCP_GETSET);
+    pay[2] = PN_DCP_GET;
+    pay[3] = PN_DCP_REQ;
+    pn_wr_be32(pay + 4, 0x55667788);
+    pn_wr_be16(pay + 8, 0);
+    pn_wr_be16(pay + 10, 4);
+    pay[12] = PN_DCP_OPT_ALL;
+    pay[13] = 0xFF;
+    pn_wr_be16(pay + 14, 0);
+    return pn_eth_build(out, PN_FRAME_MAX, dst, src, PN_ETHTYPE_PN, pay, 16);
+}
+
+static size_t dcp_set_ip_frame(uint8_t *out, const uint8_t *dst,
+                               const uint8_t *src, uint32_t ip, uint32_t nm,
+                               uint32_t gw)
+{
+    uint8_t val[14];
+    pn_wr_be16(val, 1); /* BlockQualifier: permanent */
+    pn_wr_be32(val + 2, ip);
+    pn_wr_be32(val + 6, nm);
+    pn_wr_be32(val + 10, gw);
+    uint8_t blocks[32];
+    blocks[0] = PN_DCP_OPT_IP;
+    blocks[1] = PN_DCP_SUB_IP_PARAM;
+    pn_wr_be16(blocks + 2, 14);
+    memcpy(blocks + 4, val, 14);
+    uint8_t pay[64];
+    pn_wr_be16(pay, PN_FRAMEID_DCP_GETSET);
+    pay[2] = PN_DCP_SET;
+    pay[3] = PN_DCP_REQ;
+    pn_wr_be32(pay + 4, 0x01020304);
+    pn_wr_be16(pay + 8, 0);
+    pn_wr_be16(pay + 10, 18);
+    memcpy(pay + 12, blocks, 18);
+    return pn_eth_build(out, PN_FRAME_MAX, dst, src, PN_ETHTYPE_PN, pay, 30);
 }
 
 static size_t dcp_set_name_frame(uint8_t *out, const uint8_t *dst,
@@ -280,11 +400,141 @@ static void test_set_name_and_enforce(void)
     }
 }
 
+static int blocks_of_tx(uint16_t fid, const uint8_t **blocks, uint16_t *dlen,
+                          const char *what)
+{
+    size_t flen = 0;
+    const uint8_t *frame = tx_frame_fid(fid, &flen);
+    if (!frame) {
+        fprintf(stderr, "FAIL: %s frame missing\n", what);
+        g_fail = 1;
+        return 0;
+    }
+    *blocks = dcp_blocks_of(frame, flen, dlen);
+    if (!*blocks) {
+        fprintf(stderr, "FAIL: %s DCP blocks truncated\n", what);
+        g_fail = 1;
+        return 0;
+    }
+    return 1;
+}
+
+/* T12-2: Identify/Get/Hello blocks carry BlockInfo. A spec parser reads the
+ * first two value bytes as BlockInfo, so the station name must follow them
+ * intact ("sensor-line1", not "nsor-line1") and the IP must not shift.
+ * Set.res Control/Response stays BlockError without BlockInfo.
+ * DeviceRole details stay 0x02 (T12-22). */
+static void test_response_blockinfo(void)
+{
+    pn_stack_t *s = make_dcp_stack();
+    expect(s != NULL, "blockinfo stack");
+    if (!s) {
+        return;
+    }
+    uint8_t mc[6] = {0x01, 0x0E, 0xCF, 0x00, 0x00, 0x00};
+    uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t frame[PN_FRAME_MAX];
+    const char *name = "sensor-line1";
+    const char *dtype = "Fieldbus PN Device";
+    uint8_t devid[4];
+    pn_wr_be16(devid, 0xABCD);
+    pn_wr_be16(devid + 2, 0x0001);
+    uint8_t role[2] = {0x02, 0x00};
+    uint8_t ip_zero[12];
+    memset(ip_zero, 0, sizeof(ip_zero));
+    uint8_t mac[6] = {0x02, 0xFB, 0x00, 0x00, 0x00, 0x01};
+    uint8_t opts[4] = {PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, PN_DCP_OPT_DEV,
+                       PN_DCP_SUB_DEV_NAME};
+
+    uint8_t all[4] = {PN_DCP_OPT_ALL, 0xFF, 0x00, 0x00};
+    tx_reset();
+    size_t flen = dcp_ident_frame(frame, mc, src, 0, all, sizeof(all));
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "ident for blockinfo");
+    const uint8_t *blocks = NULL;
+    uint16_t dlen = 0;
+    if (blocks_of_tx(PN_FRAMEID_DCP_ID_RES, &blocks, &dlen, "Identify.Res")) {
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_TYPE, 0,
+                         dtype, strlen(dtype), "Identify TypeOfStation");
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, 0,
+                         name, strlen(name), "Identify NameOfStation");
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ID, 0,
+                         devid, sizeof(devid), "Identify DeviceID");
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ROLE, 0,
+                         role, sizeof(role), "Identify DeviceRole");
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, 0,
+                         ip_zero, sizeof(ip_zero), "Identify IP not set");
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_IP, PN_DCP_SUB_IP_MAC, 0, mac,
+                         sizeof(mac), "Identify MAC");
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_OPTS, 0,
+                         opts, sizeof(opts), "Identify DeviceOptions");
+    }
+
+    tx_reset();
+    flen = dcp_get_frame(frame, s->cfg.mac, src);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "get for blockinfo");
+    if (blocks_of_tx(PN_FRAMEID_DCP_GETSET, &blocks, &dlen, "Get.Res")) {
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, 0,
+                         name, strlen(name), "Get NameOfStation");
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, 0,
+                         ip_zero, sizeof(ip_zero), "Get IP not set");
+    }
+
+    tx_reset();
+    pn_stack_send_hello(s);
+    if (blocks_of_tx(PN_FRAMEID_DCP_HELLO, &blocks, &dlen, "Hello.Req")) {
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, 0,
+                         name, strlen(name), "Hello NameOfStation");
+    }
+
+    /* Set.res Control/Response has no BlockInfo: Option, Suboption, BlockError. */
+    tx_reset();
+    flen = dcp_set_name_frame(frame, s->cfg.mac, src, "ok-name");
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "set name for res shape");
+    if (blocks_of_tx(PN_FRAMEID_DCP_GETSET, &blocks, &dlen, "Set.Res")) {
+        uint16_t bl = 0;
+        const uint8_t *b =
+            find_dcp_block(blocks, dlen, PN_DCP_OPT_CTRL, PN_DCP_SUB_CTRL_RESPONSE,
+                           &bl);
+        uint8_t want[3] = {PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, 0x00};
+        int ok = b && bl == 3 && memcmp(b + 4, want, 3) == 0;
+        if (!ok) {
+            fprintf(stderr, "FAIL: Set.Res Control/Response must stay "
+                            "without BlockInfo\n");
+            if (b) {
+                fprintf(stderr, "  bytes:");
+                dump_prefix(b, 4u + bl + (bl & 1u));
+            }
+            g_fail = 1;
+        }
+    }
+
+    uint8_t ipb[12];
+    pn_wr_be32(ipb, 0xC0A8000Au);
+    pn_wr_be32(ipb + 4, 0xFFFFFF00u);
+    pn_wr_be32(ipb + 8, 0xC0A80001u);
+    tx_reset();
+    flen = dcp_set_ip_frame(frame, s->cfg.mac, src, 0xC0A8000Au, 0xFFFFFF00u,
+                            0xC0A80001u);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "set ip");
+    tx_reset();
+    flen = dcp_ident_frame(frame, mc, src, 0, all, sizeof(all));
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "ident after set ip");
+    if (blocks_of_tx(PN_FRAMEID_DCP_ID_RES, &blocks, &dlen, "Identify after IP")) {
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, 0x0001,
+                         ipb, sizeof(ipb), "Identify IP set");
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, 0,
+                         "ok-name", 7, "Identify name after Set");
+    }
+
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
     test_name_ok();
     test_ident_filter_and_delay();
     test_set_name_and_enforce();
+    test_response_blockinfo();
     if (g_fail) {
         fprintf(stderr, "test_pn_dcp: FAILED\n");
         return 1;

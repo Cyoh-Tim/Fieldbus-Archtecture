@@ -188,7 +188,6 @@ def test_dcp_identify_is_answered(pn_dut):
     assert dcp.xid == 0x1234
 
 
-@known_defect("T12-2", "DCP 응답 블록에 BlockInfo(2바이트)가 없어 NameOfStation 앞 2글자가 잘린다")
 def test_dcp_identify_name_of_station(pn_dut):
     f = identify_all(pn_dut)
     names = [bytes(b.name_of_station) for b in f[ProfinetDCP].dcp_blocks

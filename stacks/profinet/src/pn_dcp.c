@@ -52,14 +52,18 @@ static void wr_pad_even(wr_t *w, size_t payload_len)
     }
 }
 
-static void wr_block(wr_t *w, uint8_t opt, uint8_t sub, const void *data,
-                     size_t dlen)
+/* Identify.res / Get.res / Hello.req block: BlockInfo then value.
+ * DCPBlockLength includes BlockInfo and excludes the odd-length pad. */
+static void wr_block(wr_t *w, uint8_t opt, uint8_t sub, uint16_t block_info,
+                     const void *data, size_t dlen)
 {
+    uint16_t blen = (uint16_t)(2u + dlen);
     wr_u8(w, opt);
     wr_u8(w, sub);
-    wr_be16(w, (uint16_t)dlen);
+    wr_be16(w, blen);
+    wr_be16(w, block_info);
     wr_bytes(w, data, dlen);
-    wr_pad_even(w, dlen);
+    wr_pad_even(w, blen);
 }
 
 static int parse_hdr(const uint8_t *p, size_t n, uint16_t *fid, uint8_t *sid,
@@ -382,26 +386,33 @@ static size_t build_identify_blocks(const pn_stack_t *s, uint8_t *out,
                                     size_t cap)
 {
     wr_t w = {out, cap, 0};
-    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_TYPE, s->cfg.device_type,
-             strlen(s->cfg.device_type));
-    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, s->cfg.station_name,
-             strlen(s->cfg.station_name));
+    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_TYPE, PN_DCP_BLOCKINFO_NONE,
+             s->cfg.device_type, strlen(s->cfg.device_type));
+    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, PN_DCP_BLOCKINFO_NONE,
+             s->cfg.station_name, strlen(s->cfg.station_name));
     uint8_t devid[4];
     pn_wr_be16(devid, s->cfg.vendor_id);
     pn_wr_be16(devid + 2, s->cfg.device_id);
-    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ID, devid, 4);
-    uint8_t role = 0x02; /* IO-Device */
-    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ROLE, &role, 1);
+    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ID, PN_DCP_BLOCKINFO_NONE, devid,
+             4);
+    /* RoleDetails stays 0x02 (IO-Controller). 0x01 is T12-22. */
+    uint8_t role[2] = {0x02, 0x00};
+    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ROLE, PN_DCP_BLOCKINFO_NONE,
+             role, sizeof(role));
     uint8_t ipb[12];
     pn_wr_be32(ipb, s->cfg.ip);
     pn_wr_be32(ipb + 4, s->cfg.netmask);
     pn_wr_be32(ipb + 8, s->cfg.gateway);
-    wr_block(&w, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ipb, 12);
-    wr_block(&w, PN_DCP_OPT_IP, PN_DCP_SUB_IP_MAC, s->cfg.mac, 6);
+    uint16_t ip_info =
+        s->cfg.ip != 0 ? PN_DCP_BLOCKINFO_IP_SET : PN_DCP_BLOCKINFO_NONE;
+    wr_block(&w, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ip_info, ipb, 12);
+    wr_block(&w, PN_DCP_OPT_IP, PN_DCP_SUB_IP_MAC, PN_DCP_BLOCKINFO_NONE,
+             s->cfg.mac, 6);
     /* DeviceOptions: IP, Device */
     uint8_t opts[] = {PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, PN_DCP_OPT_DEV,
                       PN_DCP_SUB_DEV_NAME};
-    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_OPTS, opts, sizeof(opts));
+    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_OPTS, PN_DCP_BLOCKINFO_NONE,
+             opts, sizeof(opts));
     if (w.n > cap) {
         return 0;
     }
