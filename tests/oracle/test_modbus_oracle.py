@@ -613,3 +613,48 @@ def test_adapter_client_cycle_fails_fast_and_backs_off(mb_app_factory):
     gaps = [round((b - a) * 1000) for a, b in zip(srv.times, srv.times[1:])]
     assert max(ms) <= 600, f"(a) 사이클 ms (POLL 2회, LOOP 최대): {ms}"
     assert gaps and max(gaps) >= 800, f"(b) 요청 간격 ms: {gaps}"
+
+
+# ---------------------------------------------------------------- scale 포인트 (fb_api 경계)
+# fb_api.h: scale/offset 이 있는 숫자 포인트는 앱 경계에서 공학값(F32)이다 (flags SCALED, wire_size 4).
+# 기대값은 사양식 그대로: 공학값 = raw × scale + offset. raw 는 pymodbus 가 레지스터에 쓴 정수
+# (ABCD = 상위 워드 먼저, Modbus 관례). 32비트 포인트도 16비트 포인트와 같은 규칙이어야 한다.
+def _pymodbus_write_regs(port, addr, regs):
+    c = ModbusTcpClient("127.0.0.1", port=port, timeout=2, retries=0)
+    assert c.connect()
+    try:
+        assert not c.write_registers(addr, regs, device_id=UNIT).isError()
+    finally:
+        c.close()
+
+
+def _scaled_point(name, start, data_type):
+    return holding_point(name, start, data_type, scale=0.1,
+                         modbus={"byte_order": "big", "word_order": "abcd"})
+
+
+def test_adapter_scaled_uint16_read(mb_app_factory):
+    """DUT 확인용: scale 0.1 uint16, raw 1234 → 공학값 123.4."""
+    app = mb_app_factory([_scaled_point("s16", 30, "uint16")])
+    _pymodbus_write_regs(app.port, 30, [1234])
+    r = app.cmd("RF32 s16")
+    assert r[:2] == ["R", "0"] and abs(float(r[2]) - 123.4) < 1e-3, r
+
+
+@known_defect("A20261003-1", "scale 이 있는 uint32/int32 읽기에서 core decode_numeric 이 BE float32 공학값을 정수 비트로 해석한다 (6553.6 → 1.17e9)")
+@pytest.mark.parametrize("data_type,regs", [("uint32", [0x0001, 0x0000]), ("int32", [0x0001, 0x0000])])
+def test_adapter_scaled_32bit_read(mb_app_factory, data_type, regs):
+    """scale 0.1 uint32/int32, raw 0x00010000 (65536) → 공학값 6553.6. 16비트 포인트(위)와 같은 규칙.
+    결함은 core/fb_api.c 라서 프로토콜과 무관하다. Modbus 경로로만 재현한다."""
+    app = mb_app_factory([_scaled_point("s32", 40, data_type)])
+    _pymodbus_write_regs(app.port, 40, regs)
+    r = app.cmd("RF32 s32")
+    assert r[:2] == ["R", "0"] and abs(float(r[2]) - 6553.6) < 1e-2, r
+
+
+@pytest.mark.parametrize("data_type", ["uint32", "int32"])
+def test_adapter_scaled_32bit_write(mb_app_factory, data_type):
+    """DUT 확인용: 공학값 6553.6 쓰기 → 레지스터 raw 65536 (0x0001 0x0000)."""
+    app = mb_app_factory([_scaled_point("s32", 40, data_type)])
+    assert app.cmd("WF32 s32 6553.6") == ["W", "0"]
+    assert pymodbus_read(app.port, 40, 2) == [0x0001, 0x0000]
