@@ -537,14 +537,12 @@ def _nibble_point():
     return holding_point("nib", 20, modbus={"bit": 4, "bit_count": 4})
 
 
-@known_defect("T9-2", "bit_count≤8 비트필드 + uint16 쓰기가 값의 상위 바이트만 쓴다 (0x000A → 0)")
 def test_adapter_bitfield_uint16_write(mb_app_factory):
     app = mb_app_factory([_nibble_point()])
     assert app.cmd("WU32 nib 10") == ["W", "0"]
     assert pymodbus_read(app.port, 20, 1) == [0x00A0]
 
 
-@known_defect("T9-2", "bit_count≤8 비트필드 + uint16 읽기의 두 번째 바이트가 초기화되지 않은 메모리다")
 def test_adapter_bitfield_uint16_read(mb_app_factory):
     app = mb_app_factory([_nibble_point()])
     c = ModbusTcpClient("127.0.0.1", port=app.port, timeout=2, retries=0)

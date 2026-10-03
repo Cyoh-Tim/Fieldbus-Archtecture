@@ -591,6 +591,51 @@ static modbus_point_t *find_point(modbus_ctx_t *ctx, const char *name)
     return NULL;
 }
 
+/* App↔adapter numbers are canonical big-endian of the point's data type
+ * (T0 A). A bit field uses that width, not bit_count: uint16 0x000A is
+ * 00 0A. bit_count <= 8 used to keep only byte 0, so a uint16 write stored
+ * the high byte and a read left byte 1 uninitialized. */
+static size_t bitfield_canon_len(const modbus_point_t *pt)
+{
+    size_t n = pt->byte_len;
+    if (n < 1) {
+        n = 1;
+    }
+    if (n > 8) {
+        n = 8;
+    }
+    return n;
+}
+
+static uint64_t load_canon_be(const uint8_t *p, size_t n)
+{
+    uint64_t v = 0;
+    for (size_t i = 0; i < n; i++) {
+        v = (v << 8) | p[i];
+    }
+    return v;
+}
+
+static void store_canon_be(uint8_t *p, size_t n, uint64_t v)
+{
+    for (size_t i = 0; i < n; i++) {
+        unsigned shift = (unsigned)((n - 1u - i) * 8u);
+        p[i] = (uint8_t)((v >> shift) & 0xFFu);
+    }
+}
+
+static size_t bitfield_io_len(const modbus_point_t *pt)
+{
+    size_t win = map_window_bytes(pt);
+    if (pt->bit >= 0) {
+        size_t canon = bitfield_canon_len(pt);
+        if (canon > win) {
+            return canon;
+        }
+    }
+    return win;
+}
+
 static int read_map_window(mb_stack_t *stack, const modbus_point_t *pt,
                            uint8_t *wire, size_t wire_cap)
 {
@@ -611,17 +656,12 @@ static int read_map_window(mb_stack_t *stack, const modbus_point_t *pt,
             word |= (uint64_t)regs[i] << (16 * i);
         }
         uint64_t v = mb_extract_bits(word, pt->bit, pt->bit_count);
-        if (pt->bit_count <= 8) {
-            wire[0] = (uint8_t)v;
-        } else if (pt->bit_count <= 16) {
-            wire[0] = (uint8_t)(v >> 8);
-            wire[1] = (uint8_t)v;
-        } else {
-            wire[0] = (uint8_t)(v >> 24);
-            wire[1] = (uint8_t)(v >> 16);
-            wire[2] = (uint8_t)(v >> 8);
-            wire[3] = (uint8_t)v;
+        size_t n = bitfield_canon_len(pt);
+        if (n > wire_cap) {
+            return -ENOSPC;
         }
+        memset(wire, 0, n);
+        store_canon_be(wire, n, v);
         return 0;
     }
     return mb_stack_read_bytes(stack, pt->reg_type, pt->start, wire, need);
@@ -643,18 +683,11 @@ static int write_map_window(mb_stack_t *stack, const modbus_point_t *pt,
         for (uint16_t i = 0; i < nreg; i++) {
             word |= (uint64_t)regs[i] << (16 * i);
         }
-        uint64_t v = 0;
-        if (pt->bit_count <= 8) {
-            v = wire_len ? wire[0] : 0;
-        } else if (pt->bit_count <= 16) {
-            v = ((uint64_t)(wire_len > 0 ? wire[0] : 0) << 8) |
-                (wire_len > 1 ? wire[1] : 0);
-        } else {
-            v = ((uint64_t)(wire_len > 0 ? wire[0] : 0) << 24) |
-                ((uint64_t)(wire_len > 1 ? wire[1] : 0) << 16) |
-                ((uint64_t)(wire_len > 2 ? wire[2] : 0) << 8) |
-                (wire_len > 3 ? wire[3] : 0);
+        size_t n = bitfield_canon_len(pt);
+        if (n > wire_len) {
+            n = wire_len;
         }
+        uint64_t v = n ? load_canon_be(wire, n) : 0;
         word = mb_insert_bits(word, pt->bit, pt->bit_count, v);
         for (uint16_t i = 0; i < nreg; i++) {
             regs[i] = (uint16_t)((word >> (16 * i)) & 0xFFFF);
@@ -684,7 +717,7 @@ static int app_from_wire(const modbus_point_t *pt, const uint8_t *wire,
     memset(app, 0, app_len);
 
     if (pt->bit >= 0) {
-        size_t n = app_len < 4 ? app_len : 4;
+        size_t n = app_len < 8 ? app_len : 8;
         memcpy(app, wire, n);
         return 0;
     }
@@ -723,8 +756,16 @@ static int wire_from_app(const modbus_point_t *pt, const uint8_t *app,
     memset(wire, 0, win);
 
     if (pt->bit >= 0) {
-        size_t n = app_len < 4 ? app_len : 4;
-        memcpy(wire, app, n);
+        size_t n = app_len < 8 ? app_len : 8;
+        if (n > wire_cap) {
+            return -ENOSPC;
+        }
+        if (n > win) {
+            memset(wire, 0, n);
+        }
+        if (n > 0) {
+            memcpy(wire, app, n);
+        }
         return 0;
     }
 
@@ -851,16 +892,9 @@ static int mb_write_point(protocol_adapter_t *self, const char *point_name,
             (eng - pt->eng_offset) / (pt->scale != 0.0 ? pt->scale : 1.0);
         if (pt->bit >= 0) {
             uint64_t iv = (uint64_t)llround(raw);
-            if (pt->bit_count <= 8) {
-                app[0] = (uint8_t)iv;
-            } else if (pt->bit_count <= 16) {
-                app[0] = (uint8_t)(iv >> 8);
-                app[1] = (uint8_t)iv;
-            } else {
-                app[0] = (uint8_t)(iv >> 24);
-                app[1] = (uint8_t)(iv >> 16);
-                app[2] = (uint8_t)(iv >> 8);
-                app[3] = (uint8_t)iv;
+            size_t n = app_len < 8 ? app_len : 8;
+            if (n > 0) {
+                store_canon_be(app, n, iv);
             }
         } else {
             mb_encode_number(pt->data_type, raw, app, app_len);
@@ -886,7 +920,7 @@ static int mb_write_point(protocol_adapter_t *self, const char *point_name,
                 }
             }
             /* Always write through local map update + client holding write. */
-            rc = write_map_window(ctx->stack, pt, wire, map_window_bytes(pt));
+            rc = write_map_window(ctx->stack, pt, wire, bitfield_io_len(pt));
             if (rc != 0) {
                 return rc;
             }
@@ -919,7 +953,7 @@ static int mb_write_point(protocol_adapter_t *self, const char *point_name,
         return -EINVAL;
     }
 
-    return write_map_window(ctx->stack, pt, wire, map_window_bytes(pt));
+    return write_map_window(ctx->stack, pt, wire, bitfield_io_len(pt));
 }
 
 static int mb_health(protocol_adapter_t *self, int *connected, char *err_buf,
