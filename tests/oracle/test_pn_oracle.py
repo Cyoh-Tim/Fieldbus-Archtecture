@@ -407,7 +407,6 @@ def read_res_record(blocks):
     return blocks[64:64 + hdr.recordDataLength]
 
 
-@known_defect("T12-3", "Read 응답에 IODReadResHeader(0x8009)가 없고 I&M0 에 BlockHeader(0x0020)가 없다")
 def test_record_read_im0(pn_dut):
     pn_dut.rpc(raw(connect_pdu()))
     status, blocks = record_read(pn_dut, IM0_INDEX, seqnum=1)
@@ -417,8 +416,6 @@ def test_record_read_im0(pn_dut):
     assert (im0.VendorIDHigh << 8 | im0.VendorIDLow) == 0xABCD
 
 
-@known_defect("T12-3", "Write 데이터를 64바이트 IODWriteReqHeader 뒤가 아니라 헤더 안쪽에서 읽어 I&M1 을 0 으로 덮고, "
-              "Write 응답에 IODWriteResHeader(0x8008)가 없다")
 def test_record_write_im1_roundtrip(pn_dut):
     pn_dut.rpc(raw(connect_pdu()))
     im1 = raw(IM1Block(IMTagFunction=b"ORACLE-FUNCTION".ljust(32),

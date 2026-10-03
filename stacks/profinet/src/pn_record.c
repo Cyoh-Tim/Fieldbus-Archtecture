@@ -12,14 +12,33 @@ static void im_spaces(char *p, size_t n)
 static const uint8_t *im_payload(const uint8_t *data, size_t len, size_t want,
                                  size_t *out_n)
 {
-    /* CM Write may prefix a 6-byte BlockHeader. */
-    if (len >= want + 6u && pn_rd_be16(data) >= 0x0020 &&
+    /* CM Write may prefix a 6-byte BlockHeader (0x0020..0x0024). */
+    if (data && len >= want + 6u && pn_rd_be16(data) >= PN_BLOCK_IM0 &&
         pn_rd_be16(data) <= 0x0030) {
         data += 6;
         len -= 6;
     }
     *out_n = len < want ? len : want;
     return data;
+}
+
+/* I&M record on the wire is BlockHeader (type, length, version 1.0) + payload.
+ * block_length counts the version and the payload, not BlockType/BlockLength. */
+static int emit_im(uint8_t *out, size_t cap, size_t *out_len, uint16_t btype,
+                   const uint8_t *payload, size_t plen)
+{
+    if (cap < 6u + plen) {
+        return -1;
+    }
+    pn_wr_be16(out, btype);
+    pn_wr_be16(out + 2, (uint16_t)(2u + plen));
+    out[4] = 1;
+    out[5] = 0;
+    if (plen > 0 && payload) {
+        memcpy(out + 6, payload, plen);
+    }
+    *out_len = 6u + plen;
+    return 0;
 }
 
 int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
@@ -47,48 +66,25 @@ int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
         pn_wr_be16(im + 48, 0x0001);
         pn_wr_be16(im + 50, 0x0101);
         pn_wr_be16(im + 52, 0x001E); /* I&M1–4 supported */
-        if (cap < sizeof(im)) {
-            return -1;
-        }
-        memcpy(out, im, sizeof(im));
-        *out_len = sizeof(im);
-        return 0;
+        return emit_im(out, cap, out_len, PN_BLOCK_IM0, im, sizeof(im));
     }
 
     if (index == PN_INDEX_IM1) {
         uint8_t im[PN_IM1_FUNC_LEN + PN_IM1_LOC_LEN];
         memcpy(im, s->im1_function, PN_IM1_FUNC_LEN);
         memcpy(im + PN_IM1_FUNC_LEN, s->im1_location, PN_IM1_LOC_LEN);
-        if (cap < sizeof(im)) {
-            return -1;
-        }
-        memcpy(out, im, sizeof(im));
-        *out_len = sizeof(im);
-        return 0;
+        return emit_im(out, cap, out_len, PN_BLOCK_IM1, im, sizeof(im));
     }
     if (index == PN_INDEX_IM2) {
-        if (cap < PN_IM2_DATE_LEN) {
-            return -1;
-        }
-        memcpy(out, s->im2_date, PN_IM2_DATE_LEN);
-        *out_len = PN_IM2_DATE_LEN;
-        return 0;
+        return emit_im(out, cap, out_len, PN_BLOCK_IM2, (const uint8_t *)s->im2_date,
+                       PN_IM2_DATE_LEN);
     }
     if (index == PN_INDEX_IM3) {
-        if (cap < PN_IM3_DESC_LEN) {
-            return -1;
-        }
-        memcpy(out, s->im3_desc, PN_IM3_DESC_LEN);
-        *out_len = PN_IM3_DESC_LEN;
-        return 0;
+        return emit_im(out, cap, out_len, PN_BLOCK_IM3, (const uint8_t *)s->im3_desc,
+                       PN_IM3_DESC_LEN);
     }
     if (index == PN_INDEX_IM4) {
-        if (cap < PN_IM4_SIG_LEN) {
-            return -1;
-        }
-        memcpy(out, s->im4_sig, PN_IM4_SIG_LEN);
-        *out_len = PN_IM4_SIG_LEN;
-        return 0;
+        return emit_im(out, cap, out_len, PN_BLOCK_IM4, s->im4_sig, PN_IM4_SIG_LEN);
     }
 
     /* Unknown index: empty record (not an RPC reject). */
