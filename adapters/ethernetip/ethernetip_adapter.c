@@ -26,6 +26,25 @@ typedef enum {
     EIP_ADDR_CIP_PATH = 2,
 } eip_addr_kind_t;
 
+/* 스케일된 숫자의 Assembly 표현. 문자열/raw/bool 은 복사만 한다.
+ * bcd16/bcd32 는 T1 과 같이 그 폭의 정수(엔디안만 변환)로 다룬다. */
+typedef enum {
+    EIP_DT_NONE = 0, /* 누락·미인식: 변환 없음 */
+    EIP_DT_UINT8,
+    EIP_DT_INT8,
+    EIP_DT_UINT16,
+    EIP_DT_INT16,
+    EIP_DT_UINT32,
+    EIP_DT_INT32,
+    EIP_DT_UINT64,
+    EIP_DT_INT64,
+    EIP_DT_FLOAT32,
+    EIP_DT_FLOAT64,
+    EIP_DT_BOOL,
+    EIP_DT_STRING,
+    EIP_DT_RAW,
+} eip_dt_t;
+
 typedef struct {
     char name[EIP_ADAPTER_NAME_MAX];
     char access[8]; /* read | write */
@@ -37,6 +56,10 @@ typedef struct {
     uint16_t assembly;
     int byte_offset;
     int length;
+    eip_dt_t data_type;
+    double scale;
+    double eng_offset;
+    int apply_scale;
     /* 0 = no endian conversion (bool/string/bytes/uint8/missing/unknown).
      * 2/4/8 = numeric width; app boundary is canonical big-endian, CIP wire
      * is little-endian. */
@@ -91,38 +114,116 @@ static int eqi(const char *a, const char *b)
     return *a == 0 && *b == 0;
 }
 
-/* Positive width = swap that many bytes per element. 0 = leave bytes alone.
- * -1 = data_type string was not recognized. */
-static int eip_numeric_width(const char *s)
+/* 0 = recognized (including empty). -1 = data_type string was not recognized. */
+static int eip_parse_dt(const char *s, eip_dt_t *out)
 {
     if (!s || !s[0]) {
+        *out = EIP_DT_NONE;
         return 0;
     }
-    if (eqi(s, "bool") || eqi(s, "boolean") || eqi(s, "bit") ||
-        eqi(s, "string") || eqi(s, "ascii") || eqi(s, "str") ||
-        eqi(s, "raw") || eqi(s, "bytes") || eqi(s, "blob") ||
-        eqi(s, "uint8") || eqi(s, "u8") || eqi(s, "byte") ||
-        eqi(s, "int8") || eqi(s, "i8") || eqi(s, "sbyte")) {
+    if (eqi(s, "bool") || eqi(s, "boolean") || eqi(s, "bit")) {
+        *out = EIP_DT_BOOL;
         return 0;
     }
-    if (eqi(s, "uint16") || eqi(s, "u16") || eqi(s, "word") ||
-        eqi(s, "ushort") || eqi(s, "int16") || eqi(s, "i16") ||
-        eqi(s, "short") || eqi(s, "bcd16") || eqi(s, "bcd")) {
-        return 2;
+    if (eqi(s, "string") || eqi(s, "ascii") || eqi(s, "str")) {
+        *out = EIP_DT_STRING;
+        return 0;
     }
-    if (eqi(s, "uint32") || eqi(s, "u32") || eqi(s, "dword") ||
-        eqi(s, "uint") || eqi(s, "int32") || eqi(s, "i32") ||
-        eqi(s, "int") || eqi(s, "long") || eqi(s, "float32") ||
-        eqi(s, "float") || eqi(s, "real") || eqi(s, "single") ||
+    if (eqi(s, "raw") || eqi(s, "bytes") || eqi(s, "blob")) {
+        *out = EIP_DT_RAW;
+        return 0;
+    }
+    if (eqi(s, "uint8") || eqi(s, "u8") || eqi(s, "byte")) {
+        *out = EIP_DT_UINT8;
+        return 0;
+    }
+    if (eqi(s, "int8") || eqi(s, "i8") || eqi(s, "sbyte")) {
+        *out = EIP_DT_INT8;
+        return 0;
+    }
+    if (eqi(s, "uint16") || eqi(s, "u16") || eqi(s, "word") || eqi(s, "ushort") ||
+        eqi(s, "bcd16") || eqi(s, "bcd")) {
+        *out = EIP_DT_UINT16;
+        return 0;
+    }
+    if (eqi(s, "int16") || eqi(s, "i16") || eqi(s, "short")) {
+        *out = EIP_DT_INT16;
+        return 0;
+    }
+    if (eqi(s, "uint32") || eqi(s, "u32") || eqi(s, "dword") || eqi(s, "uint") ||
         eqi(s, "bcd32")) {
-        return 4;
+        *out = EIP_DT_UINT32;
+        return 0;
     }
-    if (eqi(s, "uint64") || eqi(s, "u64") || eqi(s, "qword") ||
-        eqi(s, "int64") || eqi(s, "i64") || eqi(s, "float64") ||
-        eqi(s, "double")) {
-        return 8;
+    if (eqi(s, "int32") || eqi(s, "i32") || eqi(s, "int") || eqi(s, "long")) {
+        *out = EIP_DT_INT32;
+        return 0;
     }
+    if (eqi(s, "float32") || eqi(s, "float") || eqi(s, "real") ||
+        eqi(s, "single")) {
+        *out = EIP_DT_FLOAT32;
+        return 0;
+    }
+    if (eqi(s, "uint64") || eqi(s, "u64") || eqi(s, "qword")) {
+        *out = EIP_DT_UINT64;
+        return 0;
+    }
+    if (eqi(s, "int64") || eqi(s, "i64")) {
+        *out = EIP_DT_INT64;
+        return 0;
+    }
+    if (eqi(s, "float64") || eqi(s, "double")) {
+        *out = EIP_DT_FLOAT64;
+        return 0;
+    }
+    *out = EIP_DT_NONE;
     return -1;
+}
+
+static size_t eip_endian_width(eip_dt_t dt)
+{
+    switch (dt) {
+    case EIP_DT_UINT16:
+    case EIP_DT_INT16:
+        return 2;
+    case EIP_DT_UINT32:
+    case EIP_DT_INT32:
+    case EIP_DT_FLOAT32:
+        return 4;
+    case EIP_DT_UINT64:
+    case EIP_DT_INT64:
+    case EIP_DT_FLOAT64:
+        return 8;
+    default:
+        return 0;
+    }
+}
+
+static int eip_dt_is_numeric(eip_dt_t dt)
+{
+    return eip_endian_width(dt) > 0 || dt == EIP_DT_UINT8 || dt == EIP_DT_INT8;
+}
+
+static int eip_type_wire_len(eip_dt_t dt)
+{
+    switch (dt) {
+    case EIP_DT_UINT8:
+    case EIP_DT_INT8:
+        return 1;
+    case EIP_DT_UINT16:
+    case EIP_DT_INT16:
+        return 2;
+    case EIP_DT_UINT32:
+    case EIP_DT_INT32:
+    case EIP_DT_FLOAT32:
+        return 4;
+    case EIP_DT_UINT64:
+    case EIP_DT_INT64:
+    case EIP_DT_FLOAT64:
+        return 8;
+    default:
+        return 0;
+    }
 }
 
 static void eip_swap_elems(uint8_t *buf, size_t n, size_t width)
@@ -170,6 +271,168 @@ static int canon_to_wire(const eip_point_t *pt, uint8_t *dst, size_t dst_cap,
     return 0;
 }
 
+static uint16_t eip_ld_be16(const uint8_t *p)
+{
+    return (uint16_t)(((unsigned)p[0] << 8) | p[1]);
+}
+
+static uint32_t eip_ld_be32(const uint8_t *p)
+{
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static uint64_t eip_ld_be64(const uint8_t *p)
+{
+    return ((uint64_t)eip_ld_be32(p) << 32) | eip_ld_be32(p + 4);
+}
+
+static void eip_st_be16(uint8_t *d, uint16_t v)
+{
+    d[0] = (uint8_t)(v >> 8);
+    d[1] = (uint8_t)v;
+}
+
+static void eip_st_be32(uint8_t *d, uint32_t v)
+{
+    d[0] = (uint8_t)(v >> 24);
+    d[1] = (uint8_t)(v >> 16);
+    d[2] = (uint8_t)(v >> 8);
+    d[3] = (uint8_t)v;
+}
+
+static void eip_st_be64(uint8_t *d, uint64_t v)
+{
+    eip_st_be32(d, (uint32_t)(v >> 32));
+    eip_st_be32(d + 4, (uint32_t)v);
+}
+
+static float eip_ld_f32_be(const uint8_t *p)
+{
+    uint32_t u = eip_ld_be32(p);
+    float f;
+    memcpy(&f, &u, sizeof(f));
+    return f;
+}
+
+static double eip_ld_f64_be(const uint8_t *p)
+{
+    uint64_t u = eip_ld_be64(p);
+    double d;
+    memcpy(&d, &u, sizeof(d));
+    return d;
+}
+
+static void eip_st_f32_be(uint8_t *d, float f)
+{
+    uint32_t u;
+    memcpy(&u, &f, sizeof(u));
+    eip_st_be32(d, u);
+}
+
+static void eip_st_f64_be(uint8_t *d, double v)
+{
+    uint64_t u;
+    memcpy(&u, &v, sizeof(u));
+    eip_st_be64(d, u);
+}
+
+/* 0.5 는 0 에서 먼 쪽으로. libm 에 의존하지 않는다. */
+static int64_t eip_iround(double x)
+{
+    if (x >= 0.0) {
+        return (int64_t)(x + 0.5);
+    }
+    return (int64_t)(x - 0.5);
+}
+
+static double eip_decode_number(eip_dt_t dt, const uint8_t *b, size_t n)
+{
+    switch (dt) {
+    case EIP_DT_UINT8:
+        return n >= 1 ? (double)b[0] : 0.0;
+    case EIP_DT_INT8:
+        return n >= 1 ? (double)(int8_t)b[0] : 0.0;
+    case EIP_DT_UINT16:
+        return n >= 2 ? (double)eip_ld_be16(b) : 0.0;
+    case EIP_DT_INT16:
+        return n >= 2 ? (double)(int16_t)eip_ld_be16(b) : 0.0;
+    case EIP_DT_UINT32:
+        return n >= 4 ? (double)eip_ld_be32(b) : 0.0;
+    case EIP_DT_INT32:
+        return n >= 4 ? (double)(int32_t)eip_ld_be32(b) : 0.0;
+    case EIP_DT_UINT64:
+        return n >= 8 ? (double)eip_ld_be64(b) : 0.0;
+    case EIP_DT_INT64:
+        return n >= 8 ? (double)(int64_t)eip_ld_be64(b) : 0.0;
+    case EIP_DT_FLOAT32:
+        return n >= 4 ? (double)eip_ld_f32_be(b) : 0.0;
+    case EIP_DT_FLOAT64:
+        return n >= 8 ? eip_ld_f64_be(b) : 0.0;
+    default:
+        return 0.0;
+    }
+}
+
+static void eip_encode_number(eip_dt_t dt, double raw, uint8_t *b, size_t n)
+{
+    memset(b, 0, n);
+    switch (dt) {
+    case EIP_DT_UINT8:
+        if (n >= 1) {
+            b[0] = (uint8_t)eip_iround(raw);
+        }
+        break;
+    case EIP_DT_INT8:
+        if (n >= 1) {
+            b[0] = (uint8_t)(int8_t)eip_iround(raw);
+        }
+        break;
+    case EIP_DT_UINT16:
+        if (n >= 2) {
+            eip_st_be16(b, (uint16_t)eip_iround(raw));
+        }
+        break;
+    case EIP_DT_INT16:
+        if (n >= 2) {
+            eip_st_be16(b, (uint16_t)(int16_t)eip_iround(raw));
+        }
+        break;
+    case EIP_DT_UINT32:
+        if (n >= 4) {
+            eip_st_be32(b, (uint32_t)eip_iround(raw));
+        }
+        break;
+    case EIP_DT_INT32:
+        if (n >= 4) {
+            eip_st_be32(b, (uint32_t)(int32_t)eip_iround(raw));
+        }
+        break;
+    case EIP_DT_UINT64:
+        if (n >= 8) {
+            eip_st_be64(b, (uint64_t)eip_iround(raw));
+        }
+        break;
+    case EIP_DT_INT64:
+        if (n >= 8) {
+            eip_st_be64(b, (uint64_t)eip_iround(raw));
+        }
+        break;
+    case EIP_DT_FLOAT32:
+        if (n >= 4) {
+            eip_st_f32_be(b, (float)raw);
+        }
+        break;
+    case EIP_DT_FLOAT64:
+        if (n >= 8) {
+            eip_st_f64_be(b, raw);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 static int parse_points(eip_ctx_t *ctx, const char *points_json)
 {
     cJSON *arr = cJSON_Parse(points_json);
@@ -198,20 +461,40 @@ static int parse_points(eip_ctx_t *ctx, const char *points_json)
         }
         eip_point_t *pt = &ctx->points[idx];
         memset(pt, 0, sizeof(*pt));
+        pt->scale = 1.0;
         snprintf(pt->name, sizeof(pt->name), "%s", name->valuestring);
         snprintf(pt->access, sizeof(pt->access), "%s",
                  cJSON_IsString(access) ? access->valuestring : "read");
         pt->length = cJSON_IsNumber(length) ? length->valueint : 1;
         cJSON *dtype = cJSON_GetObjectItemCaseSensitive(p, "data_type");
+        if (!cJSON_IsString(dtype)) {
+            dtype = cJSON_GetObjectItemCaseSensitive(p, "datatype");
+        }
         if (cJSON_IsString(dtype)) {
-            int width = eip_numeric_width(dtype->valuestring);
-            if (width < 0) {
+            eip_dt_t dt = EIP_DT_NONE;
+            if (eip_parse_dt(dtype->valuestring, &dt) != 0) {
                 LOG_WARN("ethernetip",
                          "point %s data_type '%s' 미인식 - 바이트 순서 변환 없음",
                          pt->name, dtype->valuestring);
-                width = 0;
+                dt = EIP_DT_NONE;
             }
-            pt->endian_width = (size_t)width;
+            pt->data_type = dt;
+            pt->endian_width = eip_endian_width(dt);
+        }
+        cJSON *sc = cJSON_GetObjectItemCaseSensitive(p, "scale");
+        if (!cJSON_IsNumber(sc)) {
+            sc = cJSON_GetObjectItemCaseSensitive(p, "gain");
+        }
+        pt->scale = cJSON_IsNumber(sc) ? sc->valuedouble : 1.0;
+        cJSON *eoff = cJSON_GetObjectItemCaseSensitive(p, "offset");
+        pt->eng_offset = cJSON_IsNumber(eoff) ? eoff->valuedouble : 0.0;
+        pt->apply_scale = eip_dt_is_numeric(pt->data_type) &&
+                          (pt->scale != 1.0 || pt->eng_offset != 0.0);
+        if (!eip_dt_is_numeric(pt->data_type) &&
+            (pt->scale != 1.0 || pt->eng_offset != 0.0)) {
+            LOG_WARN("ethernetip",
+                     "point %s scale/offset 는 숫자 data_type 에만 적용",
+                     pt->name);
         }
 
         cJSON *tag = cJSON_GetObjectItemCaseSensitive(eip, "tag");
@@ -528,6 +811,56 @@ static eip_point_t *find_point(eip_ctx_t *ctx, const char *name)
     return NULL;
 }
 
+static int eip_read_wire(eip_ctx_t *ctx, const eip_point_t *pt, uint8_t *dst,
+                         size_t n, size_t *got)
+{
+    int rc;
+    if (ctx->role == EIP_ROLE_ORIGINATOR && pt->kind == EIP_ADDR_TAG) {
+        size_t g = n;
+        rc = eip_stack_tag_read(ctx->stack, pt->tag, dst, &g);
+        if (rc == 0 && got) {
+            *got = g;
+        }
+        return rc;
+    }
+    if (ctx->role == EIP_ROLE_ORIGINATOR && pt->kind == EIP_ADDR_CIP_PATH) {
+        size_t g = n;
+        rc = eip_stack_explicit_get(ctx->stack, pt->class_id, pt->instance,
+                                    pt->attribute, dst, &g);
+        if (rc == 0 && got) {
+            *got = g;
+        }
+        return rc;
+    }
+    if (strcmp(pt->access, "write") == 0) {
+        rc = eip_stack_read_output(ctx->stack, (size_t)pt->byte_offset, dst, n);
+    } else {
+        rc = eip_stack_read_input(ctx->stack, (size_t)pt->byte_offset, dst, n);
+    }
+    if (rc > 0) {
+        if (got) {
+            *got = (size_t)rc;
+        }
+        return 0;
+    }
+    return rc;
+}
+
+static int eip_write_wire(eip_ctx_t *ctx, const eip_point_t *pt,
+                          const uint8_t *src, size_t n)
+{
+    if (ctx->role == EIP_ROLE_ORIGINATOR && pt->kind == EIP_ADDR_TAG) {
+        return eip_stack_tag_write(ctx->stack, pt->tag, src, n);
+    }
+    if (ctx->role == EIP_ROLE_ORIGINATOR && pt->kind == EIP_ADDR_CIP_PATH) {
+        return eip_stack_explicit_set(ctx->stack, pt->class_id, pt->instance,
+                                      pt->attribute, src, n);
+    }
+    /* Adapter: sensor publishes into input (T->O) image */
+    int rc = eip_stack_write_input(ctx->stack, (size_t)pt->byte_offset, src, n);
+    return rc < 0 ? rc : 0;
+}
+
 static int eip_read_point(protocol_adapter_t *self, const char *point_name,
                           point_value_t *out)
 {
@@ -535,6 +868,36 @@ static int eip_read_point(protocol_adapter_t *self, const char *point_name,
     eip_point_t *pt = find_point(ctx, point_name);
     if (!pt || !out || !out->data) {
         return -EINVAL;
+    }
+    /* T0 A안: wire 정수 → eng = raw*scale+offset → float32(BE) 4바이트.
+     * CIP wire 는 리틀 엔디안이므로 디코드 전에 빅 엔디안으로 되돌린다. */
+    if (pt->apply_scale) {
+        int wlen = eip_type_wire_len(pt->data_type);
+        if (wlen <= 0 || wlen > 8) {
+            LOG_ERROR("ethernetip",
+                      "point %s 스케일 data_type 크기를 알 수 없음",
+                      point_name);
+            return -EINVAL;
+        }
+        if (out->len < 4) {
+            LOG_ERROR("ethernetip",
+                      "point %s 스케일 읽기는 4바이트 버퍼가 필요",
+                      point_name);
+            return -ENOSPC;
+        }
+        uint8_t wire[8];
+        memset(wire, 0, sizeof(wire));
+        size_t got = 0;
+        int rc = eip_read_wire(ctx, pt, wire, (size_t)wlen, &got);
+        if (rc != 0) {
+            return rc;
+        }
+        wire_to_canon(pt, wire, got);
+        double raw = eip_decode_number(pt->data_type, wire, (size_t)wlen);
+        double eng = raw * pt->scale + pt->eng_offset;
+        eip_st_f32_be(out->data, (float)eng);
+        out->len = 4;
+        return 0;
     }
     size_t n = (size_t)pt->length;
     if (n > out->len) {
@@ -583,6 +946,34 @@ static int eip_write_point(protocol_adapter_t *self, const char *point_name,
     eip_point_t *pt = find_point(ctx, point_name);
     if (!pt || !value || !value->data) {
         return -EINVAL;
+    }
+    /* T0 A안: float32(BE) 공학값 → raw = (eng-offset)/scale → data_type 크기 → LE. */
+    if (pt->apply_scale) {
+        int wlen = eip_type_wire_len(pt->data_type);
+        if (wlen <= 0 || wlen > 8) {
+            LOG_ERROR("ethernetip",
+                      "point %s 스케일 data_type 크기를 알 수 없음",
+                      point_name);
+            return -EINVAL;
+        }
+        double eng;
+        if (value->len >= 4) {
+            eng = (double)eip_ld_f32_be(value->data);
+        } else {
+            uint8_t tmp[8];
+            memset(tmp, 0, sizeof(tmp));
+            size_t n = value->len < (size_t)wlen ? value->len : (size_t)wlen;
+            if (n > 0) {
+                memcpy(tmp, value->data, n);
+            }
+            eng = eip_decode_number(pt->data_type, tmp, (size_t)wlen);
+        }
+        double denom = pt->scale != 0.0 ? pt->scale : 1.0;
+        double raw = (eng - pt->eng_offset) / denom;
+        uint8_t wire[8];
+        eip_encode_number(pt->data_type, raw, wire, (size_t)wlen);
+        eip_swap_elems(wire, (size_t)wlen, pt->endian_width);
+        return eip_write_wire(ctx, pt, wire, (size_t)wlen);
     }
     size_t n = value->len;
     if ((int)n > pt->length) {

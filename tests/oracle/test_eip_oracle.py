@@ -646,14 +646,12 @@ def test_numeric_point_read_from_scanner_little_endian(fbapi):
     assert fbapi.read("cmd_word", "u32") == (0, 300)
 
 
-@known_defect("T2 (EIP)", "scale 0.1 포인트에 공학값 300 을 쓰면 float32(BE) 앞 2바이트(43 96)를 쓴다. 기대 원시값 3000 = B8 0B")
 def test_scaled_point_write_raw_on_wire(fbapi):
     fbapi.write("status_scaled", "u32", 300)
     raw = scanner_read_input(fbapi.port)
     assert raw[44:46] == bytes([0xB8, 0x0B]), raw[44:46].hex(" ")
 
 
-@known_defect("T2 (EIP)", "스캐너가 보낸 원시 UINT 3000(B8 0B)을 scale 0.1 공학값으로 되돌리지 못한다. 기대 300.0")
 def test_scaled_point_read_from_scanner(fbapi):
     scanner_write_output(fbapi.port, fbapi.udp_port, bytes(2) + struct.pack("<H", 3000) + bytes(4))
     rc, v = fbapi.read("setpoint_scaled", "f32")
