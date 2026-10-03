@@ -80,6 +80,7 @@
 | 56 | T6 | `core/scheduler.c` 중복 정리 | `core/`, `CLAUDE.md`, `CMakeLists.txt` | 없음 | |
 | 57 | T7 | 사이클 지연 µs 측정 | `core/`, `include/fb_api.h` | 없음 | T6 이후 |
 | 58 | T0 | 스케일·바이트 순서 규칙 문구 통일 (A안) | `CLAUDE.md`, `docs/`, `include/fb_api.h` 주석 | 없음 | T1·T2 이후 |
+| 59 | A20261002-1 | PN 다른 컨트롤러 Connect 거부 PNIOStatus `DB 81 40 04` (현재 `81 00 00 00` = ErrorCode 0) | `stacks/profinet/`, `tests/` | A20261002-1 | 출처 #74 제안, 보고서 [audits/20261002-pn-rpc-reject.md](audits/20261002-pn-rpc-reject.md). T12-1 이후 |
 
 ## 이슈 본문 템플릿
 
