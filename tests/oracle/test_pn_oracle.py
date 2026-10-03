@@ -757,6 +757,72 @@ def test_dcp_set_name_rejected_during_ar(pn_dut):
     assert res.get((0x02, 0x02)) == 0x06, f"응답 블록 {res}"
 
 
+# ---------------------------------------------------------------- DCP Get (A20261003-2)
+def dcp_get(pn, selectors, xid):
+    """DCP Get.req (FrameID 0xFEFD) → 같은 Xid 의 Get.res 를 scapy ProfinetDCP 로 해석해 돌려준다. 없으면 None.
+
+    Get.req 블록은 길이 필드 없이 Option(1) Suboption(1) 쌍의 목록이다 (Wireshark packet-pn-dcp.c
+    dissect_PNDCP_PDU: Get+Request 이면 블록 대신 "Selectors" 로 dissect_PNDCP_Option 만 읽는다).
+    scapy ProfinetDCP 요청은 DCPBlockLength 를 붙이므로 사양대로 직접 인코딩한다.
+    DCP 헤더: ServiceID(1)=3 ServiceType(1)=0 Xid(4) Reserved(2) DCPDataLength(2).
+    Get.res 는 Identify.res 와 같은 DCP 블록 형식이라 scapy dcp_blocks 로 읽는다.
+    """
+    body = b"".join(struct.pack(">BB", opt, sub) for opt, sub in selectors)
+    dcp = struct.pack(">BBIHH", 0x03, 0x00, xid, 0, len(body)) + body
+    frame = (Ether(dst=DEVICE_MAC, src=CONTROLLER_MAC, type=0x8892)
+             / ProfinetIO(frameID=0xFEFD) / dcp)
+    for f in tx_frames(pn.eth(raw(frame))):
+        if f.haslayer(ProfinetDCP) and f[ProfinetIO].frameID == 0xFEFD:
+            d = f[ProfinetDCP]
+            if d.service_id == 0x03 and d.xid == xid:
+                return d
+    return None
+
+
+def dcp_block_ids(d):
+    return [(b.option, b.sub_option) for b in d.dcp_blocks]
+
+
+@known_defect("A20261003-2", "Get.req 가 무엇을 요청하든 Identify 와 같은 블록 7개 전체를 돌려준다. "
+              "사양: Get.res 는 요청한 Option/Suboption 의 블록만 담는다")
+def test_dcp_get_returns_only_requested_blocks(pn_dut):
+    # IEC 61158-6-10 DCP Get: 요청한 GetReqBlock(Option, Suboption) 마다 응답 블록 하나.
+    # 독립 구현 p-net pf_dcp.c 도 요청 쌍마다 pf_dcp_get_req 를 한 번씩 불러 그 블록만 넣는다.
+    cases = [
+        ([(0x02, 0x02)], 0x6001),                # NameOfStation 만
+        ([(0x01, 0x02)], 0x6002),                # IP Parameter 만
+        ([(0x02, 0x02), (0x01, 0x02)], 0x6003),  # 둘
+    ]
+    for sel, xid in cases:
+        d = dcp_get(pn_dut, sel, xid)
+        assert d is not None, f"Get.res 없음 (요청 {sel})"
+        assert d.service_type == 0x01, f"ServiceType {d.service_type} (요청 {sel})"
+        got = dcp_block_ids(d)
+        assert sorted(got) == sorted(sel), f"요청 {sel} 에 응답 블록 {got}"
+    d = dcp_get(pn_dut, [(0x02, 0x02)], 0x6004)
+    assert bytes(d.dcp_blocks[0].name_of_station) == b"oracle-dut"
+
+
+@known_defect("A20261003-2", "지원하지 않는 옵션(0x04 reserved)을 Get 해도 Identify 블록 전체를 성공으로 돌려준다. "
+              "사양: 그 옵션에 대한 Control/Response(5/4) 블록 하나, BlockError 0x01 Option unsupp.(또는 0x02)")
+def test_dcp_get_unsupported_option_reports_block_error(pn_dut):
+    # GetNegResBlock = Option Control(0x05), Suboption Response(0x04), DCPBlockLength=3,
+    #   ResponseStatus = 요청 Option(1) Suboption(1) BlockError(1) — 블록 앞 BlockInfo 없음.
+    # 근거: Wireshark packet-pn-dcp.c dissect_PNDCP_Suboption_Control (PNDCP_SUBOPTION_CONTROL_RESPONSE,
+    #   hf_pn_dcp_block_error, pn_dcp_block_error 0x01 "Option unsupp." 0x02 "Suboption unsupp. ..."),
+    #   scapy DCPControlBlock (response, response_sub_option, block_error), p-net pf_dcp_get_req 의 GetNegResBlock.
+    # 서비스 자체(Get)는 지원하므로 ServiceType 은 Success(1) 이다 (5 는 ServiceID not supported).
+    d = dcp_get(pn_dut, [(0x04, 0x01)], 0x6011)
+    assert d is not None, "Get.res 없음"
+    assert d.service_type == 0x01, f"ServiceType {d.service_type}"
+    got = dcp_block_ids(d)
+    assert got == [(0x05, 0x04)], f"응답 블록 {got} (Control/Response 하나 기대)"
+    blk = d.dcp_blocks[0]
+    assert (blk.response, blk.response_sub_option) == (0x04, 0x01), \
+        f"ResponseStatus 옵션 {(blk.response, blk.response_sub_option)}"
+    assert blk.block_error in (0x01, 0x02), f"BlockError {blk.block_error}"
+
+
 # ---------------------------------------------------------------- Release (T12-17)
 @known_defect("T12-17", "표준 Release(블록 0x0114) 의 ARUUID 를 찾지 못해 거부한다. 응답이 없고 AR·RTC1 이 유지된다. "
               "사양: 0x8114 ControlCommand Done 응답 후 AR 해제")
