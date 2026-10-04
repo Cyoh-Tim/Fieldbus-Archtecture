@@ -201,8 +201,8 @@ static void test_ar_ownership(void)
            "control ok");
     expect(pn_stack_app_ready(s) == 1, "app ready");
 
-    /* Write with matching UUID */
-    uint8_t wbody[34 + 8];
+    /* Write with matching UUID. Record bytes follow the 64-byte header. */
+    uint8_t wbody[58];
     memset(wbody, 0, sizeof(wbody));
     pn_wr_be16(wbody, 1);
     fill_aruuid(wbody + 2);
@@ -210,10 +210,11 @@ static void test_ar_ownership(void)
     pn_wr_be16(wbody + 24, 1);
     pn_wr_be16(wbody + 28, PN_INDEX_IM1);
     pn_wr_be32(wbody + 30, 6);
-    memcpy(wbody + 34, "line-A", 6);
-    bn = wr_block(blocks, PN_BLOCK_IOD_WRITE_REQ, wbody, 40);
-    /* blocks[64] may be tight: wr_block of 40 body = 46. OK. */
-    sn = ndr_wrap(stub, blocks, bn);
+    uint8_t wblocks[80];
+    bn = wr_block(wblocks, PN_BLOCK_IOD_WRITE_REQ, wbody, sizeof(wbody));
+    memcpy(wblocks + bn, "line-A", 6);
+    bn += 6;
+    sn = ndr_wrap(stub, wblocks, bn);
     plen = wrap_rpc(pdu, 3, stub, sn);
     rlen = 0;
     expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
@@ -657,8 +658,152 @@ static void test_connect_error_ndr_pniostatus(void)
     pn_stack_destroy(s);
 }
 
+/* T12-3: spec IODWriteReq is a 64-byte header (block_length 60) and the
+ * record bytes follow that header. The response is IODWriteResHeader
+ * (0x8008, 64 bytes). A later Read is IODReadResHeader (0x8009, 64 bytes)
+ * plus an I&M block that starts with its own BlockHeader (0x0020..0x0024). */
+static void test_t12_3_rw_res_headers_and_write_data(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "t12-3 create");
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = build_connect(pdu);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "t12-3 connect");
+    expect(pn_stack_ar_up(s) == 1, "t12-3 ar up");
+
+    uint8_t im1[60];
+    memset(im1, ' ', sizeof(im1));
+    pn_wr_be16(im1, 0x0021);
+    pn_wr_be16(im1 + 2, 56);
+    im1[4] = 1;
+    im1[5] = 0;
+    memcpy(im1 + 6, "ORACLE-FUNCTION", 15);
+    memcpy(im1 + 38, "ORACLE-LOCATION", 15);
+
+    uint8_t body[58];
+    memset(body, 0, sizeof(body));
+    pn_wr_be16(body, 7); /* seqNum */
+    fill_aruuid(body + 2);
+    pn_wr_be32(body + 18, 0); /* API */
+    pn_wr_be16(body + 22, 0);
+    pn_wr_be16(body + 24, 1);
+    pn_wr_be16(body + 28, PN_INDEX_IM1);
+    pn_wr_be32(body + 30, (uint32_t)sizeof(im1));
+
+    uint8_t blocks[160];
+    size_t bn = wr_block(blocks, PN_BLOCK_IOD_WRITE_REQ, body, sizeof(body));
+    expect(bn == 64, "IODWriteReqHeader is 64 bytes");
+    memcpy(blocks + bn, im1, sizeof(im1));
+    bn += sizeof(im1);
+    uint8_t stub[256];
+    size_t sn = ndr_wrap(stub, blocks, bn);
+    plen = wrap_rpc(pdu, 3, stub, sn);
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "t12-3 write");
+    expect(rlen >= 80 + 20, "t12-3 write rsp short");
+    const uint8_t *rstub = resp + 80;
+    expect_u32(pn_rd_le32(rstub), 0, "write PNIOStatus");
+    uint32_t wlen = pn_rd_le32(rstub + 4);
+    expect(wlen >= 64, "write res carries a 64-byte IODWriteResHeader");
+    if (wlen >= 64 && rlen >= 100 + 64) {
+        const uint8_t *wb = rstub + 20;
+        expect(pn_rd_be16(wb) == 0x8008, "IODWriteResHeader block type 0x8008");
+        expect(pn_rd_be16(wb + 2) == 60, "IODWriteResHeader block_length 60");
+        expect(pn_rd_be16(wb + 6) == 7, "write res echoes seqNum");
+        expect(memcmp(wb + 8, body + 2, 16) == 0, "write res echoes ARUUID");
+        expect(pn_rd_be16(wb + 34) == PN_INDEX_IM1, "write res echoes index");
+        expect_u32(pn_rd_be32(wb + 36), (uint32_t)sizeof(im1),
+                   "write res recordDataLength");
+        expect_u32(pn_rd_be32(wb + 44), 0, "write res PNIOStatus in header");
+    }
+
+    uint8_t stored[80];
+    size_t stored_n = 0;
+    expect(pn_record_read(s, 0, 1, PN_INDEX_IM1, stored, sizeof(stored),
+                          &stored_n) == 0,
+           "t12-3 direct I&M1 read");
+    int saw_func = 0;
+    if (stored_n >= 15) {
+        for (size_t i = 0; i + 15 <= stored_n; i++) {
+            if (memcmp(stored + i, "ORACLE-FUNCTION", 15) == 0) {
+                saw_func = 1;
+                break;
+            }
+        }
+    }
+    expect(saw_func, "I&M1 kept ORACLE-FUNCTION (data is after the 64-byte header)");
+
+    memset(body, 0, sizeof(body));
+    pn_wr_be16(body, 9);
+    fill_aruuid(body + 2);
+    pn_wr_be16(body + 22, 0);
+    pn_wr_be16(body + 24, 1);
+    pn_wr_be16(body + 28, PN_INDEX_IM1);
+    pn_wr_be32(body + 30, 4096);
+    bn = wr_block(blocks, PN_BLOCK_IOD_READ_REQ, body, sizeof(body));
+    sn = ndr_wrap(stub, blocks, bn);
+    plen = wrap_rpc(pdu, 2, stub, sn);
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "t12-3 read im1");
+    expect(rlen >= 100, "t12-3 read rsp short");
+    rstub = resp + 80;
+    expect_u32(pn_rd_le32(rstub), 0, "read PNIOStatus");
+    uint32_t rblen = pn_rd_le32(rstub + 4);
+    expect(rblen >= 64, "read res carries a 64-byte IODReadResHeader");
+    if (rblen >= 64 && rlen >= 100 + 64) {
+        const uint8_t *rb = rstub + 20;
+        expect(pn_rd_be16(rb) == 0x8009, "IODReadResHeader block type 0x8009");
+        expect(pn_rd_be16(rb + 2) == 60, "IODReadResHeader block_length 60");
+        expect(pn_rd_be16(rb + 6) == 9, "read res echoes seqNum");
+        uint32_t rdlen = pn_rd_be32(rb + 36);
+        expect(rdlen == 60, "I&M1 recordDataLength includes BlockHeader");
+        expect(rblen >= 64 + rdlen, "record bytes follow the read header");
+        if (rblen >= 64 + 60) {
+            const uint8_t *rec = rb + 64;
+            expect(pn_rd_be16(rec) == 0x0021, "I&M1 BlockHeader 0x0021");
+            expect(pn_rd_be16(rec + 2) == 56, "I&M1 block_length 56");
+            expect(rec[4] == 1 && rec[5] == 0, "I&M1 block version 1.0");
+            expect(memcmp(rec + 6, "ORACLE-FUNCTION", 15) == 0,
+                   "read record TagFunction");
+            expect(memcmp(rec + 38, "ORACLE-LOCATION", 15) == 0,
+                   "read record TagLocation");
+        }
+    }
+
+    pn_wr_be16(body + 28, PN_INDEX_IM0);
+    bn = wr_block(blocks, PN_BLOCK_IOD_READ_REQ, body, sizeof(body));
+    sn = ndr_wrap(stub, blocks, bn);
+    plen = wrap_rpc(pdu, 2, stub, sn);
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "t12-3 read im0");
+    rstub = resp + 80;
+    rblen = (rlen >= 100) ? pn_rd_le32(rstub + 4) : 0;
+    expect(rblen >= 64 + 60, "I&M0 read res is header plus record");
+    if (rblen >= 64 + 60 && rlen >= 100 + 64 + 8) {
+        const uint8_t *rb = rstub + 20;
+        expect(pn_rd_be16(rb) == 0x8009, "I&M0 response starts with 0x8009");
+        const uint8_t *rec = rb + 64;
+        expect(pn_rd_be16(rec) == 0x0020, "I&M0 BlockHeader 0x0020");
+        expect(pn_rd_be16(rec + 2) == 56, "I&M0 block_length 56");
+        expect(pn_rd_be16(rec + 6) == 0xABCD, "I&M0 VendorID 0xABCD");
+        expect(memcmp(rec + 8, "FB-ARCH-PN-DEV", 14) == 0, "I&M0 OrderID");
+    }
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
+    test_t12_3_rw_res_headers_and_write_data();
     test_connect_response_ndr_pniostatus();
     test_connect_error_ndr_pniostatus();
     test_write_short_block();

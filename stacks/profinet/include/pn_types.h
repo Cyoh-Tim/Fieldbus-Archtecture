@@ -52,7 +52,13 @@
 
 #define PN_BLOCK_IOD_WRITE_REQ 0x0008u
 #define PN_BLOCK_IOD_READ_REQ  0x0009u
+#define PN_BLOCK_IM0           0x0020u
+#define PN_BLOCK_IM1           0x0021u
+#define PN_BLOCK_IM2           0x0022u
+#define PN_BLOCK_IM3           0x0023u
+#define PN_BLOCK_IM4           0x0024u
 #define PN_BLOCK_IOD_WRITE_RES 0x8008u
+#define PN_BLOCK_IOD_READ_RES  0x8009u
 #define PN_BLOCK_AR_REQ        0x0101u
 #define PN_BLOCK_IOCR_REQ      0x0102u
 #define PN_BLOCK_ALARMCR_REQ   0x0103u

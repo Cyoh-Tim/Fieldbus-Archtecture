@@ -1436,7 +1436,9 @@ static int step_rpc_write(ctt_run_t *run, pn_priv_t *priv,
         memcpy(data, ascii, dlen);
     }
 
-    uint8_t body[34 + 128];
+    /* IODWriteReqHeader is 64 bytes (body 58 = fields + 24-byte RWPadding).
+     * Record bytes follow the header; they are not placed in the padding. */
+    uint8_t body[58];
     memset(body, 0, sizeof(body));
     pn_wr_be16(body, 1);
     fill_connect_aruuid(body + 2);
@@ -1444,11 +1446,13 @@ static int step_rpc_write(ctt_run_t *run, pn_priv_t *priv,
     pn_wr_be16(body + 24, subslot);
     pn_wr_be16(body + 28, index);
     pn_wr_be32(body + 30, (uint32_t)dlen);
-    memcpy(body + 34, data, dlen);
 
-    uint8_t blocks[256];
-    size_t bn = wr_pn_block(blocks, PN_BLOCK_IOD_WRITE_REQ, body,
-                            (uint16_t)(34 + dlen));
+    uint8_t blocks[64 + 128];
+    size_t bn = wr_pn_block(blocks, PN_BLOCK_IOD_WRITE_REQ, body, sizeof(body));
+    if (dlen > 0) {
+        memcpy(blocks + bn, data, dlen);
+        bn += dlen;
+    }
 
     uint8_t pdu[512];
     memset(pdu, 0, sizeof(pdu));
@@ -1750,20 +1754,36 @@ static int step_record_read(ctt_run_t *run, pn_priv_t *priv,
     size_t imlen = 0;
     if (rpc_ok) {
         uint32_t actual = pn_rd_le32(resp + 80 + 16);
-        im = resp + 100;
-        imlen = actual;
-        if (100 + imlen > rlen) {
-            imlen = rlen - 100;
+        const uint8_t *ndr = resp + 100;
+        size_t ndr_len = actual;
+        if (100 + ndr_len > rlen) {
+            ndr_len = rlen - 100;
+        }
+        im = ndr;
+        imlen = ndr_len;
+        /* Record bytes follow IODReadResHeader (0x8009, 64 bytes). */
+        if (ndr_len >= 64 && pn_rd_be16(ndr) == PN_BLOCK_IOD_READ_RES) {
+            uint16_t block_len = pn_rd_be16(ndr + 2);
+            size_t hdr = 4u + (size_t)block_len;
+            if (hdr <= ndr_len) {
+                uint32_t rdlen = pn_rd_be32(ndr + 36);
+                if (hdr + (size_t)rdlen > ndr_len) {
+                    rdlen = (uint32_t)(ndr_len - hdr);
+                }
+                im = ndr + hdr;
+                imlen = rdlen;
+            }
         }
     }
 
     int out = 0;
     out |= ctt_check(run, idx, action, rpc_ok,
                      "rpc Read rlen=%zu rc=%d index=0x%04x", rlen, rc, index);
-    if (index == PN_INDEX_IM0 && im && imlen >= 2) {
-        uint16_t vendor = pn_rd_be16(im);
-        out |= ctt_check(run, idx, action, vendor == (uint16_t)want_vendor,
-                         "I&M0 vendor_id expect=0x%04lx actual=0x%04x",
+    if (index == PN_INDEX_IM0 && im) {
+        int hdr_ok = imlen >= 8 && pn_rd_be16(im) == PN_BLOCK_IM0;
+        uint16_t vendor = hdr_ok ? pn_rd_be16(im + 6) : 0;
+        out |= ctt_check(run, idx, action, hdr_ok && vendor == (uint16_t)want_vendor,
+                         "I&M0 vendor_id expect=0x%04lx actual=0x%04x (BlockHeader 0x0020)",
                          want_vendor, vendor);
         int has_order = contains(im, imlen, want_order);
         out |= ctt_check(run, idx, action, has_order,

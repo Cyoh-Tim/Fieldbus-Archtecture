@@ -60,6 +60,8 @@ typedef struct {
 } sec_walk_t;
 
 typedef struct {
+    uint16_t seq;
+    uint32_t api;
     uint16_t slot;
     uint16_t subslot;
     uint16_t index;
@@ -69,6 +71,8 @@ typedef struct {
 } read_walk_t;
 
 typedef struct {
+    uint16_t seq;
+    uint32_t api;
     uint16_t slot;
     uint16_t subslot;
     uint16_t index;
@@ -105,10 +109,14 @@ static int parse_read_req(uint16_t type, const uint8_t *body, uint16_t blen,
                           void *u)
 {
     read_walk_t *r = u;
-    /* IODReadReq: seq(2) ARUUID(16) API(4) slot(2) subslot(2) pad(2) index(2) */
+    /* IODReadReq body (after BlockVersion): seq(2) ARUUID(16) API(4)
+     * slot(2) subslot(2) pad(2) index(2). The fixed header is 64 bytes;
+     * these fields sit in the first 30. */
     if (type == PN_BLOCK_IOD_READ_REQ && blen >= 30) {
+        r->seq = pn_rd_be16(body);
         copy_uuid(r->aruuid, body + 2);
         r->saw_uuid = 1;
+        r->api = pn_rd_be32(body + 18);
         r->slot = pn_rd_be16(body + 22);
         r->subslot = pn_rd_be16(body + 24);
         r->index = pn_rd_be16(body + 28);
@@ -121,22 +129,55 @@ static int parse_write_req(uint16_t type, const uint8_t *body, uint16_t blen,
                            void *u)
 {
     write_walk_t *w = u;
-    /* seq(2)+ARUUID(16)+API(4)+slot(2)+subslot(2)+pad(2)+index(2)+dlen(4)=34 */
+    /* Header fields only. Record bytes are not inside RWPadding; they follow
+     * the whole block (see attach_write_payload). */
     if (type == PN_BLOCK_IOD_WRITE_REQ && blen >= 34) {
+        w->seq = pn_rd_be16(body);
         copy_uuid(w->aruuid, body + 2);
         w->saw_uuid = 1;
+        w->api = pn_rd_be32(body + 18);
         w->slot = pn_rd_be16(body + 22);
         w->subslot = pn_rd_be16(body + 24);
         w->index = pn_rd_be16(body + 28);
         w->dlen = pn_rd_be32(body + 30);
-        w->data = (blen > 34) ? body + 34 : NULL;
-        uint32_t avail = (blen > 34) ? (uint32_t)(blen - 34) : 0;
-        if (w->dlen > avail) {
-            w->dlen = avail;
-        }
         w->saw = 1;
     }
     return 0;
+}
+
+/* IODWriteReqHeader is 64 bytes (BlockLength 60). RecordDataLength bytes
+ * start at the first byte after that block, not at the 24-byte RWPadding. */
+static void attach_write_payload(const uint8_t *blocks, size_t n, write_walk_t *w)
+{
+    w->data = NULL;
+    if (!w->saw) {
+        w->dlen = 0;
+        return;
+    }
+    size_t off = 0;
+    while (off + 6 <= n) {
+        uint16_t type = pn_rd_be16(blocks + off);
+        uint16_t blen = pn_rd_be16(blocks + off + 2);
+        if (blen < 2 || off + 4u + (size_t)blen > n) {
+            break;
+        }
+        size_t total = 4u + (size_t)blen;
+        if (type == PN_BLOCK_IOD_WRITE_REQ) {
+            size_t avail = n - (off + total);
+            if ((size_t)w->dlen > avail) {
+                w->dlen = (uint32_t)avail;
+            }
+            if (w->dlen > 0) {
+                w->data = blocks + off + total;
+            }
+            return;
+        }
+        off += total;
+        if (off & 1u) {
+            off++;
+        }
+    }
+    w->dlen = 0;
 }
 
 static int parse_ctrl_req(uint16_t type, const uint8_t *body, uint16_t blen,
@@ -337,6 +378,35 @@ static size_t wr_block(uint8_t *p, uint16_t type, const uint8_t *body,
     size_t n = 4u + blen;
     if (n & 1u) {
         p[n++] = 0;
+    }
+    return n;
+}
+
+/* IODReadResHeader (0x8009) or IODWriteResHeader (0x8008): fixed 64 bytes
+ * (BlockLength 60). Read appends record bytes; write does not. */
+static size_t iod_rw_res(uint8_t *out, size_t cap, uint16_t type, uint16_t seq,
+                         const uint8_t aruuid[PN_UUID_LEN], uint32_t api,
+                         uint16_t slot, uint16_t subslot, uint16_t index,
+                         uint32_t record_len, const uint8_t *rec, size_t rec_len)
+{
+    uint8_t body[58];
+    memset(body, 0, sizeof(body));
+    pn_wr_be16(body, seq);
+    if (aruuid) {
+        memcpy(body + 2, aruuid, PN_UUID_LEN);
+    }
+    pn_wr_be32(body + 18, api);
+    pn_wr_be16(body + 22, slot);
+    pn_wr_be16(body + 24, subslot);
+    pn_wr_be16(body + 28, index);
+    pn_wr_be32(body + 30, record_len);
+    if (cap < 64u + rec_len) {
+        return 0;
+    }
+    size_t n = wr_block(out, type, body, sizeof(body));
+    if (rec_len > 0 && rec) {
+        memcpy(out + n, rec, rec_len);
+        n += rec_len;
     }
     return n;
 }
@@ -672,7 +742,12 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         }
         pn_record_read(s, rw.slot, rw.subslot, rw.index, rec, sizeof(rec),
                        &rlen);
-        so = ndr_res(stub_out, NULL, rec, rlen);
+        uint8_t blocks_res[64 + 256];
+        size_t bn = iod_rw_res(blocks_res, sizeof(blocks_res),
+                               PN_BLOCK_IOD_READ_RES, rw.seq, rw.aruuid, rw.api,
+                               rw.slot, rw.subslot, rw.index, (uint32_t)rlen,
+                               rec, rlen);
+        so = ndr_res(stub_out, NULL, blocks_res, bn);
     } else if (op == OP_WRITE) {
         write_walk_t ww;
         memset(&ww, 0, sizeof(ww));
@@ -682,6 +757,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
         if (blocks) {
             walk_blocks(blocks, blen, parse_write_req, &ww);
+            attach_write_payload(blocks, blen, &ww);
         }
         if (!s->ar.established) {
             LOG_WARN("pn_rpc", "Write without AR — fail closed");
@@ -701,8 +777,11 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
             LOG_INFO("pn_rpc", "Write index=0x%04x slot=%u sub=%u len=%u",
                      ww.index, ww.slot, ww.subslot, ww.dlen);
         }
-        uint8_t z[4] = {0};
-        so = ndr_res(stub_out, NULL, z, 4);
+        uint8_t blocks_res[64];
+        size_t bn = iod_rw_res(blocks_res, sizeof(blocks_res),
+                               PN_BLOCK_IOD_WRITE_RES, ww.seq, ww.aruuid, ww.api,
+                               ww.slot, ww.subslot, ww.index, ww.dlen, NULL, 0);
+        so = ndr_res(stub_out, NULL, blocks_res, bn);
     } else {
         return -ENOSYS;
     }
