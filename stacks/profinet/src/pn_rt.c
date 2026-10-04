@@ -11,16 +11,12 @@ void pn_ar_abort(pn_stack_t *s, const char *why)
         if (s) {
             memset(&s->ar, 0, sizeof(s->ar));
             s->last_rt_ns = 0;
-            s->pending_rpc_tx_len = 0;
-            s->pending_rpc_tx_ns = 0;
         }
         return;
     }
     LOG_WARN("pn_rt", "AR aborted: %s", why ? why : "timeout");
     memset(&s->ar, 0, sizeof(s->ar));
     s->last_rt_ns = 0;
-    s->pending_rpc_tx_len = 0;
-    s->pending_rpc_tx_ns = 0;
 }
 
 static int ar_controller_live(const pn_ar_t *ar)

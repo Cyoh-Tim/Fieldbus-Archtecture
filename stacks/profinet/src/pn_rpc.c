@@ -650,6 +650,10 @@ static void flush_pending_rpc(pn_stack_t *s)
     if (s->fd_rpc < 0 || s->pending_rpc_tx_len == 0) {
         return;
     }
+    if (!s->ar.established) {
+        clear_pending_rpc(s);
+        return;
+    }
     struct sockaddr_in dst;
     app_ready_dest(s, &dst);
     if (dst.sin_addr.s_addr == 0) {
