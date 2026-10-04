@@ -33,6 +33,19 @@ static void fill_aruuid(uint8_t *dst)
     }
 }
 
+/* CMInitiatorObjectUUID wire bytes (mixed-endian UUID in the AR block). */
+static void fill_initiator_uuid(uint8_t *dst)
+{
+    for (int i = 0; i < 16; i++) {
+        dst[i] = (uint8_t)(0xC0 + i);
+    }
+}
+
+/* PNIO Controller interface UUID on the wire (DEA00002-6C97-11D1-8271-00A02442DF7D). */
+static const uint8_t k_pnio_controller_if[16] = {
+    0x02, 0x00, 0xA0, 0xDE, 0x97, 0x6C, 0xD1, 0x11,
+    0x82, 0x71, 0x00, 0xA0, 0x24, 0x42, 0xDF, 0x7D};
+
 static size_t wr_block(uint8_t *p, uint16_t type, const uint8_t *body,
                        uint16_t body_len)
 {
@@ -97,6 +110,46 @@ static size_t build_connect(uint8_t *pdu)
     uint8_t stub[128];
     size_t sn = ndr_wrap(stub, blocks, bn);
     return wrap_rpc(pdu, 0, stub, sn);
+}
+
+/* Connect with CMInitiatorObjectUUID and CMInitiatorUDPRTPort so
+ * ApplicationReady can copy those fields (T12-5). */
+static size_t build_connect_initiator(uint8_t *pdu)
+{
+    uint8_t ar[50];
+    memset(ar, 0, sizeof(ar));
+    pn_wr_be16(ar, 0x0001);
+    fill_aruuid(ar + 2);
+    pn_wr_be16(ar + 18, 1);
+    ar[20] = 0x00;
+    ar[21] = 0x11;
+    ar[22] = 0x22;
+    ar[23] = 0x33;
+    ar[24] = 0x44;
+    ar[25] = 0x55;
+    fill_initiator_uuid(ar + 26);
+    pn_wr_be32(ar + 42, 0x00000001); /* ARProperties */
+    pn_wr_be16(ar + 46, 600);
+    pn_wr_be16(ar + 48, 0x8892); /* CMInitiatorUDPRTPort (L2 RT marker) */
+    uint8_t blocks[80];
+    size_t bn = wr_block(blocks, PN_BLOCK_AR_REQ, ar, sizeof(ar));
+    uint8_t stub[160];
+    size_t sn = ndr_wrap(stub, blocks, bn);
+    return wrap_rpc(pdu, 0, stub, sn);
+}
+
+static size_t build_prm_end(uint8_t *pdu)
+{
+    uint8_t cbody[26];
+    memset(cbody, 0, sizeof(cbody));
+    fill_aruuid(cbody + 2);
+    pn_wr_be16(cbody + 18, 1);
+    pn_wr_be16(cbody + 22, PN_CONTROL_PRM_END);
+    uint8_t blocks[64];
+    size_t bn = wr_block(blocks, PN_BLOCK_CONTROL_REQ, cbody, sizeof(cbody));
+    uint8_t stub[128];
+    size_t sn = ndr_wrap(stub, blocks, bn);
+    return wrap_rpc(pdu, 4, stub, sn);
 }
 
 static void test_write_short_block(void)
@@ -801,8 +854,95 @@ static void test_t12_3_rw_res_headers_and_write_data(void)
     pn_stack_destroy(s);
 }
 
+/* T12-5: PrmEnd.rsp is IODControlRes 0x8110 with ControlCommand Done
+ * (0x0008), not 0x0111 echoing PrmEnd. After PrmEnd the device queues an
+ * ApplicationReady RPC request: rpc_vers=4, object=CMInitiatorObjectUUID,
+ * interface=PNIO Controller, block 0x0112. A later 0x8112 clears the
+ * pending request so it is not taken again. */
+static void test_t12_5_prm_end_and_app_ready(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "t12-5 create");
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = build_connect_initiator(pdu);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "t12-5 connect");
+    expect(pn_stack_ar_up(s) == 1, "t12-5 ar up");
+
+    plen = build_prm_end(pdu);
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "t12-5 prm-end");
+    expect(rlen >= 80 + 20 + 32, "t12-5 prm-end rsp short");
+    const uint8_t *rstub = resp + 80;
+    expect_u32(pn_rd_le32(rstub), 0, "prm-end PNIOStatus");
+    uint32_t blen = pn_rd_le32(rstub + 4);
+    expect(blen >= 32, "prm-end ArgsLength covers IODControlRes");
+    const uint8_t *blk = rstub + 20;
+    expect(pn_rd_be16(blk) == 0x8110, "PrmEnd res block type 0x8110");
+    expect(pn_rd_be16(blk + 2) == 28, "PrmEnd res block_length 28");
+    uint8_t want_uuid[16];
+    fill_aruuid(want_uuid);
+    expect(memcmp(blk + 8, want_uuid, 16) == 0, "PrmEnd res ARUUID");
+    expect(pn_rd_be16(blk + 24) == 1, "PrmEnd res SessionKey");
+    expect(pn_rd_be16(blk + 28) == 0x0008, "PrmEnd res ControlCommand Done");
+    expect(pn_stack_app_ready(s) == 1, "t12-5 app_ready after PrmEnd");
+
+    expect(s->pending_rpc_tx_len >= 80 + 20 + 32, "t12-5 AppReady queued");
+    const uint8_t *tx = s->pending_rpc_tx;
+    expect(tx[0] == 4, "AppReady rpc_vers=4");
+    expect(tx[1] == 0, "AppReady ptype=request");
+    expect(pn_rd_le16(tx + 68) == 4, "AppReady opnum=Control");
+    uint8_t init_uuid[16];
+    fill_initiator_uuid(init_uuid);
+    expect(memcmp(tx + 8, init_uuid, 16) == 0, "AppReady object=CMInitiatorObjectUUID");
+    expect(memcmp(tx + 24, k_pnio_controller_if, 16) == 0,
+           "AppReady interface=PNIO Controller");
+    uint32_t args_len = pn_rd_le32(tx + 80 + 4);
+    expect(args_len >= 32, "AppReady ArgsLength");
+    const uint8_t *areq = tx + 100;
+    expect(pn_rd_be16(areq) == 0x0112, "AppReady block type 0x0112");
+    expect(memcmp(areq + 8, want_uuid, 16) == 0, "AppReady ARUUID");
+    expect(pn_rd_be16(areq + 24) == 1, "AppReady SessionKey");
+    expect(pn_rd_be16(areq + 28) == PN_CONTROL_APP_READY,
+           "AppReady ControlCommand ApplicationReady");
+
+    /* 0x8112 from the controller clears the pending indication. */
+    uint8_t cres[26];
+    memset(cres, 0, sizeof(cres));
+    fill_aruuid(cres + 2);
+    pn_wr_be16(cres + 18, 1);
+    pn_wr_be16(cres + 22, 0x0008);
+    uint8_t blocks[64];
+    size_t bn = wr_block(blocks, 0x8112, cres, sizeof(cres));
+    uint8_t stub[128];
+    size_t sn = ndr_wrap(stub, blocks, bn);
+    uint8_t ack[256];
+    memset(ack, 0, 80);
+    ack[0] = 4;
+    ack[1] = 2; /* RPC response */
+    pn_wr_le16(ack + 68, 4);
+    pn_wr_le16(ack + 74, (uint16_t)sn);
+    memcpy(ack + 80, stub, sn);
+    rlen = 0;
+    expect(pn_rpc_handle(s, ack, 80 + sn, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "t12-5 0x8112 ack");
+    expect(s->pending_rpc_tx_len == 0, "t12-5 pending cleared by 0x8112");
+    uint8_t takebuf[512];
+    size_t tn2 = 0;
+    expect(pn_stack_take_rpc_tx(s, takebuf, sizeof(takebuf), &tn2) == -EAGAIN,
+           "t12-5 no AppReady after 0x8112");
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
+    test_t12_5_prm_end_and_app_ready();
     test_t12_3_rw_res_headers_and_write_data();
     test_connect_response_ndr_pniostatus();
     test_connect_error_ndr_pniostatus();
