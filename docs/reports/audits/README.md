@@ -34,3 +34,4 @@
 | 2026-10-03 | 코어 (11단계 제안 선별) | [20261003-core-scaled-decode.md](20261003-core-scaled-decode.md) | 60 (A20261003-1) | PR #80 제안. scale 이 있는 uint32/int32 읽기가 float32 비트를 정수로 해석 |
 | 2026-10-03 | PROFINET DCP·LLDP·SNMP (11단계 제안 선별) | [20261003-pn-dcp-get.md](20261003-pn-dcp-get.md) | 61 (A20261003-2) | PR #81 제안. DCP Get 이 요청과 무관하게 Identify 블록 전체를 돌려주고 NegRes 블록이 없음 |
 | 2026-10-04 | PROFINET RPC·레코드 (11단계 제안 선별) | [20261004-pn-im0.md](20261004-pn-im0.md) | 62 (A20261004-1) | PR #86 제안. I&M0 OrderID 끝 NUL. Write 길이 초과·CTT fallback 은 "확인 필요" |
+| 2026-10-04 | Modbus 스택·어댑터 (12단계 일요일 감사, opus) | [20261004-modbus.md](20261004-modbus.md) | 63–65 (A20261004-2, -3, -4) | 클라이언트 응답 검증(Byte Count·Unit)과 실패 쓰기 미러. 서버 경로는 결함 없음. 쓰기 에코·BCD·다중 coil 매핑은 "확인 필요" |

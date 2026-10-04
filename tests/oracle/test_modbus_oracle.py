@@ -446,6 +446,103 @@ def test_client_tid_counter_per_instance(mb_client_dut):
     assert tids[1][0] == tids[0][0], f"첫 TID: 연결0={tids[0][0]} 연결1={tids[1][0]}"
 
 
+# ---------------------------------------------------------------- 클라이언트 응답 검증 (감사 2026-10-04)
+class ScriptedMbServer:
+    """요청마다 respond(tid, unit, pdu) 가 돌려준 ADU 를 그대로 보내는 가짜 서버 (사양 기반, 저장소 코드 미사용).
+
+    정상 응답과 일부러 틀린 응답(Unit·Byte Count·예외)을 테스트가 직접 만든다.
+    """
+
+    def __init__(self, respond):
+        self.respond = respond
+        self.requests = []  # (TID, Unit, PDU)
+        self._srv = socket.socket()
+        self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._srv.bind(("127.0.0.1", 0))
+        self._srv.listen(4)
+        self.port = self._srv.getsockname()[1]
+        threading.Thread(target=self._accept_loop, daemon=True).start()
+
+    def _accept_loop(self):
+        while True:
+            try:
+                conn, _ = self._srv.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+
+    def _serve(self, conn):
+        with conn:
+            while True:
+                try:
+                    tid, _, length, unit = struct.unpack(">HHHB", _recv_exact(conn, 7))
+                    pdu = _recv_exact(conn, length - 1)
+                except (EOFError, OSError):
+                    return
+                self.requests.append((tid, unit, pdu))
+                adu = self.respond(tid, unit, pdu)
+                if adu:
+                    try:
+                        conn.sendall(adu)
+                    except OSError:
+                        return
+
+    def close(self):
+        try:
+            self._srv.shutdown(socket.SHUT_RDWR)  # 다른 스레드의 accept() 를 깨운다
+        except OSError:
+            pass
+        self._srv.close()
+
+
+def _mbap(tid, unit, pdu):
+    return struct.pack(">HHHB", tid, 0, len(pdu) + 1, unit) + pdu
+
+
+def _regs_pdu(fc, addr, n):
+    """FC03/04 정상 응답 PDU 형태: FC, Byte Count(=2×n), reg[a] = 0xC000 + a."""
+    return bytes([fc, 2 * n]) + b"".join(struct.pack(">H", 0xC000 + addr + i) for i in range(n))
+
+
+# 사양 V1.1b3 §6.1/§6.2: 응답 Byte Count = N (= ⌈Quantity/8⌉), §6.3/§6.4: Byte Count = 2 × N (N = Quantity).
+# 요청 수량과 다른 Byte Count 의 응답은 형식 위반이다. pymodbus 3.15.0 클라이언트는 받은 만큼만 돌려준다
+# (registers 길이 = 응답 개수, 없는 값을 만들어 내지 않는다). 스택 API 는 받은 개수를 돌려줄 길이 없으므로
+# 이런 응답은 오류(rc<0)여야 한다. 현재는 rc 0 이고, 받지 못한 레지스터는 이전 캐시 값(0000),
+# 받지 못한 코일은 응답 버퍼 뒤의 초기화되지 않은 스택 메모리에서 나온다.
+@known_defect("A20261004-2", "클라이언트가 요청 수량과 Byte Count 가 다른 읽기 응답을 rc 0 으로 받는다 (없는 값은 이전 캐시·초기화 안 된 메모리). 사양 §6.1~6.4 Byte Count = 2×N / ⌈N/8⌉ → 오류여야 함")
+@pytest.mark.parametrize("cmd,pdu", [
+    ("READ 0 h 5 3", _regs_pdu(0x03, 5, 1)),        # 3개 요청, 1개 응답 (Byte Count 2)
+    ("READ 0 h 5 2", _regs_pdu(0x03, 5, 4)),        # 2개 요청, 4개 응답 (Byte Count 8)
+    ("READ 0 c 0 16", bytes([0x01, 0x01, 0x00])),  # 16비트 요청, 1바이트 응답 (Byte Count 1)
+], ids=["fc03-short", "fc03-long", "fc01-short"])
+def test_client_rejects_read_byte_count_mismatch(mb_client_dut, cmd, pdu):
+    srv = ScriptedMbServer(lambda tid, unit, _req: _mbap(tid, unit, pdu))
+    try:
+        assert mb_client_dut.cmd(f"NEW {srv.port} 300") == ["NEW", "0"]
+        assert mb_client_dut.cmd("START 0")[2] == "0"
+        rsp = mb_client_dut.cmd(cmd)
+    finally:
+        srv.close()
+    assert len(srv.requests) == 1, srv.requests  # 요청은 실제로 나갔고 응답을 받았다
+    assert rsp is not None and int(rsp[2]) < 0, f"형식이 틀린 응답을 성공으로 받음: {rsp}"
+
+
+# Messaging on TCP/IP V1.0b §3.1.3 MBAP: Unit Identifier 는 서버가 요청에서 그대로 복사한다.
+# pymodbus 3.15.0 클라이언트는 Unit 이 다른 응답을 버린다 ("request ask for id=1 but got id=7, Skipping"
+# → 응답 없음 ModbusIOException). 스택 클라이언트는 TID 만 보고 받아들인다.
+@known_defect("A20261004-3", "클라이언트가 요청과 Unit ID 가 다른 응답(1 → 7)을 rc 0 으로 받는다. MBAP 사양: 서버가 Unit 을 복사, pymodbus 는 그런 응답을 버림")
+def test_client_rejects_response_from_other_unit(mb_client_dut):
+    srv = ScriptedMbServer(lambda tid, unit, req: _mbap(tid, 7, _regs_pdu(0x03, 5, 1)))
+    try:
+        assert mb_client_dut.cmd(f"NEW {srv.port} 300") == ["NEW", "0"]
+        assert mb_client_dut.cmd("START 0")[2] == "0"
+        rsp = mb_client_dut.cmd("READ 0 h 5 1")
+    finally:
+        srv.close()
+    assert [u for _, u, _ in srv.requests] == [1], srv.requests  # 요청 Unit 은 1
+    assert rsp is not None and int(rsp[2]) < 0, f"다른 Unit(7)의 응답을 성공으로 받음: {rsp}"
+
+
 # ================================================================ 어댑터 (fb_api 앱)
 # 설정 JSON 은 테스트가 만든다. 서버 모드에서는 앱이 쓴 값을 pymodbus 로 읽어 실제 레지스터 주소와
 # 배치를 확인하고, 클라이언트 모드에서는 가짜 서버를 상대로 사이클 시간을 잰다.
@@ -613,6 +710,46 @@ def test_adapter_client_cycle_fails_fast_and_backs_off(mb_app_factory):
     gaps = [round((b - a) * 1000) for a, b in zip(srv.times, srv.times[1:])]
     assert max(ms) <= 600, f"(a) 사이클 ms (POLL 2회, LOOP 최대): {ms}"
     assert gaps and max(gaps) >= 800, f"(b) 요청 간격 ms: {gaps}"
+
+
+def _plc_rejecting_writes_at(addr):
+    """FC03/04 는 reg[a] = 0xC000 + a 로 답하고, holding addr 쓰기(FC06/16)는 예외 02 로 거부하는 PLC."""
+    def respond(tid, unit, pdu):
+        fc = pdu[0]
+        if fc in (0x03, 0x04):
+            a, q = struct.unpack_from(">HH", pdu, 1)
+            return _mbap(tid, unit, _regs_pdu(fc, a, q))
+        if fc in (0x06, 0x10):
+            (a,) = struct.unpack_from(">H", pdu, 1)
+            if a == addr:
+                return _mbap(tid, unit, bytes([fc | 0x80, 0x02]))
+            return _mbap(tid, unit, pdu[:5])
+        return _mbap(tid, unit, bytes([fc | 0x80, 0x01]))
+    return respond
+
+
+# 클라이언트 모드에서 fb_read 는 마지막으로 서버에서 읽은 값(로컬 미러)을 돌려준다.
+# 쓰기가 실패하면(사양 §7: 예외 응답 = 요청을 수행하지 않음, §4.3: Input Registers 는 읽기 전용) 서버 값은
+# 그대로이므로 미러도 그대로여야 한다. 현재는 원격 쓰기 전에 미러를 먼저 고치고 실패해도 되돌리지 않아,
+# 다음 성공한 poll 까지 PLC 가 받지 않은 값을 읽게 된다 (쓰기 후 되읽기 확인이 거짓 성공).
+@known_defect("A20261004-4", "클라이언트 모드에서 실패한 쓰기(PLC 예외 02, input 레지스터 거부)의 값이 로컬 미러에 남아 fb_read 가 PLC 가 받지 않은 값을 돌려준다")
+@pytest.mark.parametrize("rtype,addr", [("holding", 9), ("input", 5)])
+def test_adapter_client_failed_write_keeps_remote_value(mb_app_factory, rtype, addr):
+    srv = ScriptedMbServer(_plc_rejecting_writes_at(9))
+    try:
+        point = {"name": "p", "access": "readwrite", "data_type": "uint16",
+                 "address": {"modbus": {"register_type": rtype, "start": addr, "zero_based": True}}}
+        app = mb_app_factory([point], role="client", port=srv.port, timeout_ms=300)
+        assert app.cmd("START") == ["START", "0"]
+        assert app.cmd("POLL", timeout=15)[1] == "0"
+        before = app.cmd("RU32 p")
+        wrote = app.cmd("WU32 p 0x4321")
+        after = app.cmd("RU32 p")
+    finally:
+        srv.close()
+    assert before == ["R", "0", str(0xC000 + addr)], before  # poll 이 서버 값을 읽었다
+    assert wrote is not None and int(wrote[1]) < 0, f"쓰기가 실패해야 함: {wrote}"
+    assert after == before, f"실패한 쓰기 뒤 읽기: {after} (poll 값 {before[2]}, 시도한 값 {0x4321})"
 
 
 # ---------------------------------------------------------------- scale 포인트 (fb_api 경계)
