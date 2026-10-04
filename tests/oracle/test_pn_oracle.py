@@ -258,14 +258,12 @@ def test_rtc1_data_status_run(pn_dut):
     assert tail[2] == 0x35
 
 
-@known_defect("T12-7", "C_SDU 최소 길이 패딩이 없어 프레임이 60바이트 미만이다")
 def test_rtc1_minimum_frame_length(pn_dut):
     frames = rtc1_frames(pn_dut)
     assert frames
     assert len(raw(frames[-1])) >= 60
 
 
-@known_defect("T12-4", "IOCRBlockReq 의 FrameOffset 을 무시하고 입력 데이터를 C_SDU 0번부터 고정 배치한다")
 def test_rtc1_frame_offsets_follow_iocr(pn_dut):
     pattern = bytes(range(0x10, 0x10 + IO_DATA_LEN))
     pn_dut.cmd("INPUT " + pattern.hex())
@@ -314,7 +312,6 @@ def connect_blocks(pn, **connect_kw):
     return status, split_blocks(blocks)
 
 
-@known_defect("T12-4", "Connect 응답에 ARServerBlock(0x8106)이 없다 (T12-1 전에는 NDR 해석부터 틀린다)")
 def test_connect_response_has_ar_server_block(pn_dut):
     status, blocks = connect_blocks(pn_dut)
     assert status == 0
@@ -325,7 +322,6 @@ def test_connect_response_has_ar_server_block(pn_dut):
     assert servers[0][8:8 + name_len] == b"oracle-dut"
 
 
-@known_defect("T12-4", "ExpectedSubmodule 과 실제 모듈이 달라도 ModuleDiffBlock(0x8104)을 보내지 않는다")
 def test_connect_response_module_diff_on_wrong_module(pn_dut):
     # GSDML 의 slot 1 모듈은 0x00000010. 없는 모듈 번호를 기대하면 ModuleDiffBlock 으로 알려야 한다.
     status, blocks = connect_blocks(pn_dut, slot1_module=0xDEADBEEF)

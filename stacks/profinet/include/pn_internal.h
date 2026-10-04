@@ -13,13 +13,55 @@ typedef struct {
     size_t len;
 } pn_frame_t;
 
+/* One IODataObject or IOCS entry from IOCRBlockReq. frame_off is the
+ * C_SDU offset of the data (IODataObject) or of the status byte (IOCS). */
+#define PN_IOCR_REF_MAX 8
+typedef struct {
+    uint32_t api;
+    uint16_t slot;
+    uint16_t subslot;
+    uint16_t frame_off;
+} pn_iocr_ref_t;
+
+/* One submodule from ExpectedSubmoduleBlockReq. Lengths are the
+ * DataDescription SubmoduleDataLength for that direction (0 if absent). */
+#define PN_EXP_SUB_MAX 16
+typedef struct {
+    uint32_t api;
+    uint16_t slot;
+    uint32_t mod_ident;
+    uint16_t subslot;
+    uint32_t sub_ident;
+    uint16_t props;
+    uint16_t in_len;
+    uint16_t out_len;
+    uint8_t in_iops;
+    uint8_t out_iops;
+    uint8_t has_in;
+    uint8_t has_out;
+} pn_exp_sub_t;
+
 typedef struct {
     uint8_t uuid[PN_UUID_LEN];
     uint16_t session_key;
     uint16_t in_frame_id;
     uint16_t out_frame_id;
-    uint16_t in_data_len;
+    uint16_t in_data_len;  /* legacy: no IODataObject list → DataLength-1 */
     uint16_t out_data_len;
+    uint16_t in_csdu_len;  /* IOCR DataLength when a layout was parsed */
+    uint16_t out_csdu_len;
+    int have_in_layout;
+    int have_out_layout;
+    pn_iocr_ref_t in_io[PN_IOCR_REF_MAX];
+    uint8_t in_io_n;
+    pn_iocr_ref_t in_iocs[PN_IOCR_REF_MAX];
+    uint8_t in_iocs_n;
+    pn_iocr_ref_t out_io[PN_IOCR_REF_MAX];
+    uint8_t out_io_n;
+    pn_iocr_ref_t out_iocs[PN_IOCR_REF_MAX];
+    uint8_t out_iocs_n;
+    pn_exp_sub_t exp_sub[PN_EXP_SUB_MAX];
+    uint8_t exp_sub_n;
     uint16_t send_clock_factor; /* O→T IOCR; 0 = not negotiated */
     uint16_t reduction_ratio;   /* O→T IOCR; 0 = not negotiated */
     uint8_t initiator_mac[6];
@@ -131,6 +173,12 @@ void pn_snmp_poll(pn_stack_t *s);
 int pn_snmp_handle(pn_stack_t *s, const uint8_t *req, size_t len, uint8_t *resp,
                    size_t cap, size_t *out_len);
 int pn_udp_open(uint16_t port);
+
+/* Plugged modules from the device GSDML (DAP interface 0x8000, IO slot 1).
+ * Returns 0 when that slot or subslot is not plugged. */
+int pn_real_mod_ident(uint16_t slot, uint32_t *mod_ident);
+int pn_real_sub_find(uint16_t slot, uint16_t subslot, uint32_t *sub_ident,
+                     int *is_io);
 
 int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                    uint16_t index, uint8_t *out, size_t cap, size_t *out_len);
