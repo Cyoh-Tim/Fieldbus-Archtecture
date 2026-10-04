@@ -33,3 +33,4 @@
 | 2026-10-02 | PROFINET RPC·레코드 (11단계 제안 선별) | [20261002-pn-rpc-reject.md](20261002-pn-rpc-reject.md) | 59 (A20261002-1) | PR #74 제안. 다른 컨트롤러 Connect 거부 PNIOStatus. 보안 실패·블록 파싱 경로는 "확인 필요" |
 | 2026-10-03 | 코어 (11단계 제안 선별) | [20261003-core-scaled-decode.md](20261003-core-scaled-decode.md) | 60 (A20261003-1) | PR #80 제안. scale 이 있는 uint32/int32 읽기가 float32 비트를 정수로 해석 |
 | 2026-10-03 | PROFINET DCP·LLDP·SNMP (11단계 제안 선별) | [20261003-pn-dcp-get.md](20261003-pn-dcp-get.md) | 61 (A20261003-2) | PR #81 제안. DCP Get 이 요청과 무관하게 Identify 블록 전체를 돌려주고 NegRes 블록이 없음 |
+| 2026-10-04 | PROFINET RPC·레코드 (11단계 제안 선별) | [20261004-pn-im0.md](20261004-pn-im0.md) | 62 (A20261004-1) | PR #86 제안. I&M0 OrderID 끝 NUL. Write 길이 초과·CTT fallback 은 "확인 필요" |

@@ -83,6 +83,7 @@
 | 59 | A20261002-1 | PN 다른 컨트롤러 Connect 거부 PNIOStatus `DB 81 40 04` (현재 `81 00 00 00` = ErrorCode 0) | `stacks/profinet/`, `tests/` | A20261002-1 | 출처 #74 제안, 보고서 [audits/20261002-pn-rpc-reject.md](audits/20261002-pn-rpc-reject.md). T12-1 이후 |
 | 60 | A20261003-1 | scale 이 있는 uint32/int32 읽기가 float32 공학값 비트를 정수로 해석 (6553.6 → 1171050701) | `core/`, `tests/` | A20261003-1 ×2 | 출처 #80 제안, 보고서 [audits/20261003-core-scaled-decode.md](audits/20261003-core-scaled-decode.md) |
 | 61 | A20261003-2 | PN DCP Get 이 요청한 블록 대신 Identify 블록 7개 전체를 Success 로 돌려준다 (지원하지 않는 옵션도 NegRes `05 04` 없음) | `stacks/profinet/`, `tests/` | A20261003-2 ×2 | 출처 #81 제안, 보고서 [audits/20261003-pn-dcp-get.md](audits/20261003-pn-dcp-get.md) |
+| 62 | A20261004-1 | PN I&M0 OrderID 20번째 바이트가 NUL (19자 리터럴, VisibleString 공백 패딩 아님) | `stacks/profinet/`, `tests/` | A20261004-1 | 출처 #86 제안, 보고서 [audits/20261004-pn-im0.md](audits/20261004-pn-im0.md) |
 
 ## 이슈 본문 템플릿
 
