@@ -899,7 +899,18 @@ static void test_t12_5_prm_end_and_app_ready(void)
     expect(pn_rd_le16(tx + 68) == 4, "AppReady opnum=Control");
     uint8_t init_uuid[16];
     fill_initiator_uuid(init_uuid);
-    expect(memcmp(tx + 8, init_uuid, 16) == 0, "AppReady object=CMInitiatorObjectUUID");
+    uint8_t obj_dce[16];
+    obj_dce[0] = init_uuid[3];
+    obj_dce[1] = init_uuid[2];
+    obj_dce[2] = init_uuid[1];
+    obj_dce[3] = init_uuid[0];
+    obj_dce[4] = init_uuid[5];
+    obj_dce[5] = init_uuid[4];
+    obj_dce[6] = init_uuid[7];
+    obj_dce[7] = init_uuid[6];
+    memcpy(obj_dce + 8, init_uuid + 8, 8);
+    expect(memcmp(tx + 8, obj_dce, 16) == 0,
+           "AppReady object=CMInitiatorObjectUUID (DCE mixed-endian)");
     expect(memcmp(tx + 24, k_pnio_controller_if, 16) == 0,
            "AppReady interface=PNIO Controller");
     uint32_t args_len = pn_rd_le32(tx + 80 + 4);

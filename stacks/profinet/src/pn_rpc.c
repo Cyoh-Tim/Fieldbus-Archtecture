@@ -108,6 +108,21 @@ static void copy_uuid(uint8_t *dst, const uint8_t *src)
     memcpy(dst, src, PN_UUID_LEN);
 }
 
+/* PNIO Block UUIDField is canonical (big-endian time fields). DCE/RPC
+ * object/interface UUIDs are mixed-endian (time_low/mid/hi little-endian). */
+static void uuid_pnio_to_dcerpc(uint8_t out[PN_UUID_LEN], const uint8_t in[PN_UUID_LEN])
+{
+    out[0] = in[3];
+    out[1] = in[2];
+    out[2] = in[1];
+    out[3] = in[0];
+    out[4] = in[5];
+    out[5] = in[4];
+    out[6] = in[7];
+    out[7] = in[6];
+    memcpy(out + 8, in + 8, 8);
+}
+
 static int aruuid_eq(const uint8_t *a, const uint8_t *b)
 {
     return memcmp(a, b, PN_UUID_LEN) == 0;
@@ -561,7 +576,7 @@ static size_t wrap_rpc_req(uint8_t *out, size_t cap, uint16_t op,
     out[2] = 0x20; /* idempotent */
     out[4] = 0x10; /* drep: little-endian integers */
     if (object_uuid) {
-        memcpy(out + 8, object_uuid, PN_UUID_LEN);
+        uuid_pnio_to_dcerpc(out + 8, object_uuid);
     }
     memcpy(out + 24, k_pnio_controller_if, PN_UUID_LEN);
     fill_activity_uuid(out + 40);
