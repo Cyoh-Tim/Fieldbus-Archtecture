@@ -250,7 +250,6 @@ def cycle_counter(f):
     return struct.unpack(">H", raw(f[ProfinetIO])[-4:-2])[0]
 
 
-@known_defect("T12-6", "DataStatus 를 0x25 로 보낸다 (ProviderState=Stop). 정상 운전값은 0x35")
 def test_rtc1_data_status_run(pn_dut):
     frames = rtc1_frames(pn_dut)
     assert frames, "AR 수립 후 RTC1 프레임 없음"
