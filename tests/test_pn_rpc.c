@@ -3,10 +3,14 @@
 #include "pn_internal.h"
 #include "pn_stack.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 static int g_fail;
 
@@ -129,7 +133,7 @@ static size_t build_connect(uint8_t *pdu)
 
 /* Connect with CMInitiatorObjectUUID and CMInitiatorUDPRTPort so
  * ApplicationReady can copy those fields (T12-5). */
-static size_t build_connect_initiator(uint8_t *pdu)
+static size_t build_connect_initiator_port(uint8_t *pdu, uint16_t udp_rt_port)
 {
     uint8_t ar[50];
     memset(ar, 0, sizeof(ar));
@@ -145,12 +149,17 @@ static size_t build_connect_initiator(uint8_t *pdu)
     fill_initiator_uuid(ar + 26);
     pn_wr_be32(ar + 42, 0x00000001); /* ARProperties */
     pn_wr_be16(ar + 46, 600);
-    pn_wr_be16(ar + 48, 0x8892); /* CMInitiatorUDPRTPort (L2 RT marker) */
+    pn_wr_be16(ar + 48, udp_rt_port); /* CMInitiatorUDPRTPort */
     uint8_t blocks[80];
     size_t bn = wr_block(blocks, PN_BLOCK_AR_REQ, ar, sizeof(ar));
     uint8_t stub[160];
     size_t sn = ndr_wrap(stub, blocks, bn);
     return wrap_rpc(pdu, 0, stub, sn);
+}
+
+static size_t build_connect_initiator(uint8_t *pdu)
+{
+    return build_connect_initiator_port(pdu, 0x8892); /* L2 RT marker */
 }
 
 static size_t build_prm_end(uint8_t *pdu)
@@ -966,6 +975,117 @@ static void test_t12_5_prm_end_and_app_ready(void)
     pn_stack_destroy(s);
 }
 
+static int udp_bind_loopback(uint16_t port)
+{
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+    int yes = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(port);
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static int udp_recv_ms(int fd, uint8_t *buf, size_t cap, int timeout_ms)
+{
+    struct pollfd pfd;
+    memset(&pfd, 0, sizeof(pfd));
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    if (poll(&pfd, 1, timeout_ms) <= 0) {
+        return 0;
+    }
+    ssize_t n = recv(fd, buf, cap, 0);
+    return n > 0 ? (int)n : 0;
+}
+
+/* T12-5: ApplicationReady is DCE/RPC to the Connect sender's UDP 34964.
+ * CMInitiatorUDPRTPort is an RT marker (often 0x8892, sometimes 0xC000)
+ * and is not the RPC destination. */
+static void test_t12_5_app_ready_dest_rpc_port(void)
+{
+    const uint16_t advertised = 0xC000;
+    const uint32_t ctrl_ip = 0x7f000001; /* 127.0.0.1, host order */
+    int listen_rpc = udp_bind_loopback(PN_RPC_PORT);
+    int listen_adv = udp_bind_loopback(advertised);
+    expect(listen_rpc >= 0, "bind controller UDP 34964");
+    expect(listen_adv >= 0, "bind controller UDP 0xC000");
+
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "t12-5 dest create");
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    expect(tx >= 0, "t12-5 dest tx socket");
+    if (s && tx >= 0 && listen_rpc >= 0 && listen_adv >= 0) {
+        s->fd_rpc = tx;
+        tx = -1; /* pn_stack_destroy closes fd_rpc */
+
+        uint8_t pdu[512];
+        uint8_t resp[1024];
+        size_t rlen = 0;
+        size_t plen = build_connect_initiator_port(pdu, advertised);
+        expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, ctrl_ip) ==
+                   0,
+               "t12-5 dest connect");
+        expect(s->ar.initiator_udp_rt_port == advertised,
+               "t12-5 stored CMInitiatorUDPRTPort 0xC000");
+        expect(s->ar.owner_ip == ctrl_ip, "t12-5 dest owner is Connect sender");
+
+        plen = build_prm_end(pdu);
+        rlen = 0;
+        expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, ctrl_ip) ==
+                   0,
+               "t12-5 dest prm-end");
+        expect(s->pending_rpc_tx_len >= 80, "t12-5 dest AppReady queued");
+
+        pn_rpc_poll(s);
+
+        uint8_t got_rpc[PN_FRAME_MAX];
+        uint8_t got_adv[PN_FRAME_MAX];
+        int n_rpc = udp_recv_ms(listen_rpc, got_rpc, sizeof(got_rpc), 200);
+        int n_adv = udp_recv_ms(listen_adv, got_adv, sizeof(got_adv), 50);
+        uint16_t got_port = 0;
+        if (n_rpc > 0) {
+            got_port = PN_RPC_PORT;
+        } else if (n_adv > 0) {
+            got_port = advertised;
+        }
+        if (got_port != PN_RPC_PORT) {
+            fprintf(stderr,
+                    "FAIL: ApplicationReady dest port (got %u want %u)\n",
+                    got_port, (unsigned)PN_RPC_PORT);
+            g_fail = 1;
+        }
+        expect(n_adv == 0,
+               "ApplicationReady ignores CMInitiatorUDPRTPort 0xC000");
+        if (n_rpc > 0 && s->pending_rpc_tx_len > 0) {
+            expect(n_rpc == (int)s->pending_rpc_tx_len &&
+                       memcmp(got_rpc, s->pending_rpc_tx, (size_t)n_rpc) == 0,
+                   "ApplicationReady payload on UDP 34964");
+        }
+    }
+    if (s) {
+        pn_stack_destroy(s);
+    }
+    if (tx >= 0) {
+        close(tx);
+    }
+    if (listen_rpc >= 0) {
+        close(listen_rpc);
+    }
+    if (listen_adv >= 0) {
+        close(listen_adv);
+    }
+}
+
 /* T12-6: RTC1 APDUStatus DataStatus must be 0x35
  * (Primary 0x01 | DataValid 0x04 | ProviderState Run 0x10 |
  * StationProblemIndicator no-problem 0x20). PN_DATASTATUS_RUN 0x20 was
@@ -1018,6 +1138,7 @@ static void test_t12_6_rtc1_datastatus_run(void)
 int main(void)
 {
     test_t12_5_prm_end_and_app_ready();
+    test_t12_5_app_ready_dest_rpc_port();
     test_t12_6_rtc1_datastatus_run();
     test_t12_3_rw_res_headers_and_write_data();
     test_connect_response_ndr_pniostatus();

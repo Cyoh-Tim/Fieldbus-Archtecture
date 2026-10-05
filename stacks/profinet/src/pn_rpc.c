@@ -644,14 +644,10 @@ static void app_ready_dest(const pn_stack_t *s, struct sockaddr_in *dst)
 {
     memset(dst, 0, sizeof(*dst));
     dst->sin_family = AF_INET;
-    /* CMInitiatorUDPRTPort 0x8892 means RT is Ethernet II, not UDP.
-     * ApplicationReady is DCE/RPC, so the destination is the controller
-     * RPC port unless a real UDP RT port was advertised. */
+    /* ApplicationReady is DCE/RPC to the controller PNIO RPC server.
+     * The UDP port is always PN_RPC_PORT (34964 / 0x8894).
+     * CMInitiatorUDPRTPort is an RT marker, not this destination. */
     uint16_t port = PN_RPC_PORT;
-    if (s->ar.initiator_udp_rt_port != 0 &&
-        s->ar.initiator_udp_rt_port != PN_ETHTYPE_PN) {
-        port = s->ar.initiator_udp_rt_port;
-    }
     dst->sin_port = htons(port);
     if (s->ar.owner_ip != 0) {
         dst->sin_addr.s_addr = htonl(s->ar.owner_ip);
