@@ -382,8 +382,11 @@ static int parse_iocr_layout(const uint8_t *body, uint16_t blen, pn_ar_t *ar,
     return (*data_n + *iocs_n) > before;
 }
 
-/* ExpectedSubmoduleBlockReq. Type 0 has no DataDescription; type 3 has
- * input then output; type 1 or 2 has one. scapy emits that shape. */
+/* ExpectedSubmoduleBlockReq. NO_IO(0), INPUT(1) and OUTPUT(2) each have
+ * one DataDescription; INPUT_OUTPUT(3) has input then output.
+ * Wireshark dissect_ExpectedSubmoduleBlockReq case 0x00: one Input
+ * DataDescription follows. p-net reads at least one descriptor (two
+ * only when Type is INPUT_OUTPUT). */
 static void parse_expected_submodules(const uint8_t *body, uint16_t blen,
                                       pn_ar_t *ar)
 {
@@ -414,7 +417,7 @@ static void parse_expected_submodules(const uint8_t *body, uint16_t blen,
             uint16_t props = pn_rd_be16(body + off + 6);
             off += 8;
             unsigned type = props & 3u;
-            int ndesc = (type == 0) ? 0 : (type == 3) ? 2 : 1;
+            int ndesc = (type == 3) ? 2 : 1;
             pn_exp_sub_t *e = NULL;
             if (ar->exp_sub_n < PN_EXP_SUB_MAX) {
                 e = &ar->exp_sub[ar->exp_sub_n++];
@@ -466,6 +469,12 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         if (blen >= 42) {
             memcpy(ar->initiator_uuid, body + 26, PN_UUID_LEN);
             ar->have_initiator_uuid = 1;
+        }
+        /* ARProperties is 4 bytes at body offset 42. Bit 30 is
+         * StartupMode (1 = Advanced). A short AR block is Legacy. */
+        if (blen >= 46) {
+            uint32_t props = pn_rd_be32(body + 42);
+            ar->startup_advanced = (props & (1u << 30)) != 0;
         }
     } else if (type == PN_BLOCK_IOCR_REQ && blen >= 18) {
         uint16_t iocr_type = pn_rd_be16(body);
@@ -830,11 +839,16 @@ static size_t build_connect_res_blocks(pn_stack_t *s, uint8_t *out, size_t cap)
         }
     }
 
-    uint8_t server[2 + PN_STATION_NAME_MAX + 4];
-    uint16_t sn = ar_server_body(s, server, sizeof(server));
-    if (sn > 0) {
-        if (append_block(out, cap, &n, PN_BLOCK_AR_SERVER, server, sn) != 0) {
-            return 0;
+    /* ARServerBlock only in advanced startup mode. A Legacy Connect
+     * response that carries it is rejected by the controller. */
+    if (s->ar.startup_advanced) {
+        uint8_t server[2 + PN_STATION_NAME_MAX + 4];
+        uint16_t sn = ar_server_body(s, server, sizeof(server));
+        if (sn > 0) {
+            if (append_block(out, cap, &n, PN_BLOCK_AR_SERVER, server, sn) !=
+                0) {
+                return 0;
+            }
         }
     }
 

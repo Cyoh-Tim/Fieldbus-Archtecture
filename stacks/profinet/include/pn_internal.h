@@ -67,6 +67,7 @@ typedef struct {
     uint8_t initiator_mac[6];
     uint8_t initiator_uuid[PN_UUID_LEN]; /* CMInitiatorObjectUUID */
     int have_initiator_uuid;
+    int startup_advanced; /* ARProperties bit 30; ARServerBlock only then */
     uint32_t owner_ip; /* host-order IPv4 of Connect sender; 0 = unset */
     int established;
     int prm_end;
