@@ -267,7 +267,7 @@ void pn_rt_send_if_due(pn_stack_t *s)
     pn_wr_be16(pay + n, s->cycle_counter++);
     n += 2;
     pay[n++] = (uint8_t)(PN_DATASTATUS_PRIMARY | PN_DATASTATUS_VALID |
-                         PN_DATASTATUS_RUN);
+                         PN_DATASTATUS_RUN | PN_DATASTATUS_NO_PROBLEM);
     pay[n++] = 0; /* TransferStatus */
 
     uint8_t dst[6];

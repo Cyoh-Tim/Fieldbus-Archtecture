@@ -10,6 +10,21 @@
 
 static int g_fail;
 
+static uint8_t g_tx[PN_FRAME_MAX];
+static size_t g_txlen;
+static int g_ntx;
+
+static int capture_send(void *ctx, const uint8_t *frame, size_t len)
+{
+    (void)ctx;
+    if (len <= PN_FRAME_MAX) {
+        memcpy(g_tx, frame, len);
+        g_txlen = len;
+        g_ntx++;
+    }
+    return (int)len;
+}
+
 static void expect(int cond, const char *msg)
 {
     if (!cond) {
@@ -808,17 +823,17 @@ static void test_t12_3_rw_res_headers_and_write_data(void)
  * fixed copy from C_SDU byte 0 is visibly wrong. ExpectedSubmodule slot 1
  * ModuleIdent 0xDEADBEEF must produce ModuleDiffBlock 0x8104, and every
  * Connect.rsp must carry ARServerBlock 0x8106 with the station name. */
-static uint8_t g_tx[4][PN_FRAME_MAX];
-static size_t g_txlen[4];
-static int g_ntx;
+static uint8_t g_t124_tx[4][PN_FRAME_MAX];
+static size_t g_t124_txlen[4];
+static int g_t124_ntx;
 
-static int cap_send(void *ctx, const uint8_t *frame, size_t len)
+static int t124_cap_send(void *ctx, const uint8_t *frame, size_t len)
 {
     (void)ctx;
-    if (g_ntx < 4 && len <= sizeof(g_tx[0])) {
-        memcpy(g_tx[g_ntx], frame, len);
-        g_txlen[g_ntx] = len;
-        g_ntx++;
+    if (g_t124_ntx < 4 && len <= sizeof(g_t124_tx[0])) {
+        memcpy(g_t124_tx[g_t124_ntx], frame, len);
+        g_t124_txlen[g_t124_ntx] = len;
+        g_t124_ntx++;
     }
     return (int)len;
 }
@@ -978,10 +993,10 @@ static void test_t12_4_iocr_offsets_and_blocks(void)
 {
     pn_stack_t *s = make_stack();
     expect(s != NULL, "t12-4 create");
-    pn_eth_ops_t ops = {.send = cap_send, .recv = NULL, .ctx = NULL};
+    pn_eth_ops_t ops = {.send = t124_cap_send, .recv = NULL, .ctx = NULL};
     pn_stack_set_eth_ops(s, ops);
     expect(pn_stack_start(s) == 0, "t12-4 start");
-    g_ntx = 0;
+    g_t124_ntx = 0;
 
     uint8_t pdu[768];
     uint8_t resp[2048];
@@ -1009,17 +1024,17 @@ static void test_t12_4_iocr_offsets_and_blocks(void)
         pat[i] = (uint8_t)(0x10 + i);
     }
     expect(pn_stack_write_input(s, 0, pat, sizeof(pat)) == 0, "t12-4 write input");
-    g_ntx = 0;
+    g_t124_ntx = 0;
     pn_rt_send_if_due(s);
 
     const uint8_t *pay = NULL;
     size_t paylen = 0;
     int saw = 0;
-    for (int i = 0; i < g_ntx; i++) {
-        if (g_txlen[i] >= 16 && pn_rd_be16(g_tx[i] + 12) == PN_ETHTYPE_PN &&
-            pn_rd_be16(g_tx[i] + 14) == 0x8001) {
-            pay = g_tx[i] + 14;
-            paylen = g_txlen[i] - 14;
+    for (int i = 0; i < g_t124_ntx; i++) {
+        if (g_t124_txlen[i] >= 16 && pn_rd_be16(g_t124_tx[i] + 12) == PN_ETHTYPE_PN &&
+            pn_rd_be16(g_t124_tx[i] + 14) == 0x8001) {
+            pay = g_t124_tx[i] + 14;
+            paylen = g_t124_txlen[i] - 14;
             saw = 1;
             break;
         }
@@ -1115,8 +1130,58 @@ static void test_t12_4_iocr_offsets_and_blocks(void)
     pn_stack_destroy(s);
 }
 
+/* T12-6: RTC1 APDUStatus DataStatus must be 0x35
+ * (Primary 0x01 | DataValid 0x04 | ProviderState Run 0x10 |
+ * StationProblemIndicator no-problem 0x20). PN_DATASTATUS_RUN 0x20 was
+ * the no-problem bit; that yields 0x25 = ProviderState Stop. */
+static void test_t12_6_rtc1_datastatus_run(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "t12-6 create");
+    if (!s) {
+        return;
+    }
+    pn_eth_ops_t ops = {.send = capture_send, .recv = NULL, .ctx = NULL};
+    pn_stack_set_eth_ops(s, ops);
+
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = build_connect(pdu);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "t12-6 connect");
+    expect(pn_stack_ar_up(s) == 1, "t12-6 ar up");
+
+    g_ntx = 0;
+    g_txlen = 0;
+    pn_rt_send_if_due(s);
+    expect(g_ntx >= 1 && g_txlen >= 18, "t12-6 RTC1 frame sent");
+    if (g_txlen >= 18) {
+        uint16_t et = pn_rd_be16(g_tx + 12);
+        uint16_t fid = pn_rd_be16(g_tx + 14);
+        uint8_t ds = g_tx[g_txlen - 2];
+        uint8_t ts = g_tx[g_txlen - 1];
+        expect(et == PN_ETHTYPE_PN, "t12-6 ethertype 0x8892");
+        expect(fid == 0x8001, "t12-6 input FrameID 0x8001");
+        expect(ts == 0, "t12-6 TransferStatus 0");
+        if (ds != 0x35) {
+            fprintf(stderr,
+                    "FAIL: RTC1 DataStatus got 0x%02x want 0x35 "
+                    "(Primary|Valid|Run 0x10|NoProblem; 0x25 is Stop)\n",
+                    ds);
+            g_fail = 1;
+        }
+        expect((ds & 0x10) != 0, "t12-6 ProviderState Run bit 0x10");
+        expect(PN_DATASTATUS_RUN == 0x10u,
+               "PN_DATASTATUS_RUN is ProviderState 0x10, not 0x20");
+    }
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
+    test_t12_6_rtc1_datastatus_run();
     test_t12_4_iocr_offsets_and_blocks();
     test_t12_3_rw_res_headers_and_write_data();
     test_connect_response_ndr_pniostatus();
