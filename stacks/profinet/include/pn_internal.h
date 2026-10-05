@@ -120,6 +120,11 @@ void pn_lldp_send(pn_stack_t *s);
 
 void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen);
 void pn_rt_send_if_due(pn_stack_t *s);
+/* RT Class 1 minimum C_SDU: 40 octets, or 36 when the frame has an
+ * 802.1Q tag, so the frame without FCS is at least 60 octets.
+ * Zero padding is inserted before APDUStatus. Other frame types are
+ * unchanged. Returns 0 when the pad does not fit in cap. */
+size_t pn_rtc1_pad_min_csdu(uint8_t *frame, size_t len, size_t cap);
 void pn_ar_abort(pn_stack_t *s, const char *why);
 void pn_ar_watchdog(pn_stack_t *s);
 

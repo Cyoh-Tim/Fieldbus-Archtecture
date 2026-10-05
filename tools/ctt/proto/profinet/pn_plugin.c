@@ -1048,29 +1048,21 @@ typedef struct {
     int contains_hits;
 } rtc1_harvest_t;
 
-static uint16_t rtc1_data_len(pn_priv_t *priv)
+static int rtc1_cycle_counter(const uint8_t *frame, int n, uint16_t *cc)
 {
-    const pn_cfg_t *cfg = pn_stack_cfg(priv->stack);
-    uint16_t n = cfg->input_len;
-    return n ? n : 32;
-}
-
-static int rtc1_cycle_counter(const uint8_t *frame, int n, uint16_t data_len,
-                              uint16_t *cc)
-{
-    /* eth(14) + FrameID(2) + data + IOPS(1) + CycleCounter(2) */
-    size_t off = 16u + (size_t)data_len + 1u;
-    if (n < (int)(off + 2u)) {
+    /* APDUStatus is the last 4 octets (CycleCounter, DataStatus,
+     * TransferStatus). T12-7 inserts C_SDU padding before that, so the
+     * counter is not at eth + FrameID + input_len + IOPS. */
+    if (n < 4) {
         return 0;
     }
-    *cc = pn_rd_be16(frame + off);
+    *cc = pn_rd_be16(frame + (size_t)n - 4u);
     return 1;
 }
 
 static void drain_io_frames(ctt_run_t *run, int *got_rtc1, uint64_t *last_ts,
                             uint16_t want_et, int count_unexpected,
-                            rtc1_harvest_t *h, uint16_t data_len,
-                            const char *needle)
+                            rtc1_harvest_t *h, const char *needle)
 {
     uint8_t buf[CTT_FRAME_MAX];
     uint64_t ts = 0;
@@ -1090,7 +1082,7 @@ static void drain_io_frames(ctt_run_t *run, int *got_rtc1, uint64_t *last_ts,
                 memcpy(h->last, buf, (size_t)n);
                 h->last_n = (size_t)n;
                 uint16_t cc = 0;
-                if (rtc1_cycle_counter(buf, n, data_len, &cc)) {
+                if (rtc1_cycle_counter(buf, n, &cc)) {
                     if (h->cc_samples == 0) {
                         h->first_cc = cc;
                     } else {
@@ -1236,7 +1228,6 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
     uint64_t deadline = ctt_now_ns() + budget_ns;
     rtc1_harvest_t harvest;
     memset(&harvest, 0, sizeof(harvest));
-    uint16_t data_len = rtc1_data_len(priv);
     const char *needle =
         expect && yaml_has(expect, "contains")
             ? yaml_cstr(expect, "contains", NULL)
@@ -1247,8 +1238,7 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
             inject_ot_rtc1(priv);
         }
         pump(run, priv);
-        drain_io_frames(run, &got, &last_ts, want_et, 0, &harvest, data_len,
-                        needle);
+        drain_io_frames(run, &got, &last_ts, want_et, 0, &harvest, needle);
         if (!prove_none && !hold_for_max && got >= min_frames) {
             break;
         }
@@ -1986,8 +1976,7 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
             last_cmi_refresh = ctt_now_ns();
         }
         pump(run, priv);
-        drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1, NULL,
-                        rtc1_data_len(priv), NULL);
+        drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1, NULL, NULL);
         if (!pn_stack_ar_up(priv->stack)) {
             run->metrics.ar_drops++;
             break;
@@ -1996,8 +1985,7 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
     }
     /* catch frames that arrived on the last poll */
     pump(run, priv);
-    drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1, NULL,
-                    rtc1_data_len(priv), NULL);
+    drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1, NULL, NULL);
 
     unsigned unexp = run->metrics.unexpected_frames - unexp_before;
     unsigned drops = run->metrics.ar_drops - drops_before;

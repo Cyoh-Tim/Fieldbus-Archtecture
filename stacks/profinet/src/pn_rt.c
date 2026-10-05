@@ -90,6 +90,54 @@ void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen)
     s->ar.last_rt_rx_ns = pn_now_ns();
 }
 
+/* Untagged: 14 + FrameID(2) + C_SDU + APDU(4) >= 60 => C_SDU >= 40.
+ * One 802.1Q tag: 18 + 2 + C_SDU + 4 >= 60 => C_SDU >= 36. */
+_Static_assert(60u - 14u - 2u - 4u == 40u, "untagged RTC1 C_SDU minimum");
+_Static_assert(60u - 18u - 2u - 4u == 36u, "VLAN RTC1 C_SDU minimum");
+
+size_t pn_rtc1_pad_min_csdu(uint8_t *frame, size_t len, size_t cap)
+{
+    if (!frame || len == 0 || cap < len) {
+        return 0;
+    }
+    if (len < 14) {
+        return len;
+    }
+    size_t l2 = 14;
+    if (pn_rd_be16(frame + 12) == PN_ETHTYPE_VLAN) {
+        if (len < 18) {
+            return len;
+        }
+        l2 = 18;
+    }
+    if (pn_rd_be16(frame + l2 - 2) != PN_ETHTYPE_PN) {
+        return len;
+    }
+    if (len < l2 + 2u + 4u) {
+        return len;
+    }
+    uint16_t fid = pn_rd_be16(frame + l2);
+    /* RTC1 unicast range. Alarm, DCP, and RT multicast stay as built. */
+    if (fid < 0x8000u || fid > 0xBBFFu) {
+        return len;
+    }
+    size_t csdu = len - l2 - 2u - 4u;
+    size_t min_csdu = 60u - l2 - 2u - 4u;
+    if (csdu >= min_csdu) {
+        return len;
+    }
+    size_t pad = min_csdu - csdu;
+    if (len + pad > cap) {
+        LOG_ERROR("pn_rt",
+                  "RTC1 C_SDU pad does not fit (len=%zu pad=%zu cap=%zu)",
+                  len, pad, cap);
+        return 0;
+    }
+    memmove(frame + (len - 4u) + pad, frame + (len - 4u), 4);
+    memset(frame + (len - 4u), 0, pad);
+    return len + pad;
+}
+
 void pn_rt_send_if_due(pn_stack_t *s)
 {
     if (!s->ar.established) {
@@ -134,6 +182,12 @@ void pn_rt_send_if_due(pn_stack_t *s)
     uint8_t frame[PN_FRAME_MAX];
     size_t flen =
         pn_eth_build(frame, sizeof(frame), dst, s->cfg.mac, PN_ETHTYPE_PN, pay, n);
+    if (flen) {
+        /* pn_eth_send forwards this buffer. Do not pad after APDUStatus:
+         * a short frame's trailer zeros are what the controller reads as
+         * the status. */
+        flen = pn_rtc1_pad_min_csdu(frame, flen, sizeof(frame));
+    }
     if (flen) {
         pn_eth_send(s, frame, flen);
     }

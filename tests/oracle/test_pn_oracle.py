@@ -257,7 +257,6 @@ def test_rtc1_data_status_run(pn_dut):
     assert tail[2] == 0x35
 
 
-@known_defect("T12-7", "C_SDU 최소 길이 패딩이 없어 프레임이 60바이트 미만이다")
 def test_rtc1_minimum_frame_length(pn_dut):
     frames = rtc1_frames(pn_dut)
     assert frames
