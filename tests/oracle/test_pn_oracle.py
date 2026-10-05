@@ -250,7 +250,6 @@ def cycle_counter(f):
     return struct.unpack(">H", raw(f[ProfinetIO])[-4:-2])[0]
 
 
-@known_defect("T12-6", "DataStatus 를 0x25 로 보낸다 (ProviderState=Stop). 정상 운전값은 0x35")
 def test_rtc1_data_status_run(pn_dut):
     frames = rtc1_frames(pn_dut)
     assert frames, "AR 수립 후 RTC1 프레임 없음"
@@ -414,6 +413,24 @@ def test_record_read_im0(pn_dut):
     im0 = IM0Block(read_res_record(blocks))
     assert im0.block_type == 0x0020
     assert (im0.VendorIDHigh << 8 | im0.VendorIDLow) == 0xABCD
+
+
+@known_defect("A20261004-1", "I&M0 OrderID 20번째 바이트가 NUL 이다 (19자 리터럴 + 종단 NUL). "
+              "사양: VisibleString[20], 남는 자리는 공백 0x20")
+def test_record_read_im0_visible_strings(pn_dut):
+    # I&M0 OrderID 는 VisibleString 20옥텟, IM_Serial_Number 는 16옥텟 고정 길이 (Wireshark packet-dcerpc-pn-io.c
+    # dissect_IandM0_block: OrderID c8[20], IMSerialNumber c8[16]). VisibleString 은 0x20–0x7E 만 허용하고,
+    # 독립 구현 p-net pf_put_str(pf_block_writer.c) 은 짧은 문자열 뒤를 공백으로 채운다 (NUL 을 쓰지 않음).
+    # GSDML DeviceAccessPointItem OrderNumber "FB-ARCH-PN-DEV" 와 같은 값이어야 한다.
+    pn_dut.rpc(raw(connect_pdu()))
+    status, blocks = record_read(pn_dut, IM0_INDEX, seqnum=1)
+    assert status == 0
+    im0 = IM0Block(read_res_record(blocks))
+    assert im0.block_type == 0x0020
+    for name, n in (("OrderID", 20), ("IMSerialNumber", 16)):
+        v = bytes(getattr(im0, name))
+        assert len(v) == n and all(0x20 <= b <= 0x7E for b in v), f"{name} {v!r}"
+    assert bytes(im0.OrderID) == b"FB-ARCH-PN-DEV".ljust(20)
 
 
 def test_record_write_im1_roundtrip(pn_dut):

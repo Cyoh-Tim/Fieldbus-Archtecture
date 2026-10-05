@@ -86,9 +86,10 @@
 #define PN_IOCR_OUTPUT        0x0002u
 
 #define PN_IOPS_GOOD          0x80u
-#define PN_DATASTATUS_PRIMARY 0x01u
-#define PN_DATASTATUS_VALID   0x04u
-#define PN_DATASTATUS_RUN     0x20u
+#define PN_DATASTATUS_PRIMARY    0x01u /* bit 0: State = Primary */
+#define PN_DATASTATUS_VALID      0x04u /* bit 2: DataValid */
+#define PN_DATASTATUS_RUN        0x10u /* bit 4: ProviderState = Run */
+#define PN_DATASTATUS_NO_PROBLEM 0x20u /* bit 5: StationProblemIndicator (1=OK) */
 
 #define PN_STATION_NAME_MAX   240
 #define PN_IO_MAX             256

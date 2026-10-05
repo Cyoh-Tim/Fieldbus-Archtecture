@@ -83,6 +83,10 @@
 | 59 | A20261002-1 | PN 다른 컨트롤러 Connect 거부 PNIOStatus `DB 81 40 04` (현재 `81 00 00 00` = ErrorCode 0) | `stacks/profinet/`, `tests/` | A20261002-1 | 출처 #74 제안, 보고서 [audits/20261002-pn-rpc-reject.md](audits/20261002-pn-rpc-reject.md). T12-1 이후 |
 | 60 | A20261003-1 | scale 이 있는 uint32/int32 읽기가 float32 공학값 비트를 정수로 해석 (6553.6 → 1171050701) | `core/`, `tests/` | A20261003-1 ×2 | 출처 #80 제안, 보고서 [audits/20261003-core-scaled-decode.md](audits/20261003-core-scaled-decode.md) |
 | 61 | A20261003-2 | PN DCP Get 이 요청한 블록 대신 Identify 블록 7개 전체를 Success 로 돌려준다 (지원하지 않는 옵션도 NegRes `05 04` 없음) | `stacks/profinet/`, `tests/` | A20261003-2 ×2 | 출처 #81 제안, 보고서 [audits/20261003-pn-dcp-get.md](audits/20261003-pn-dcp-get.md) |
+| 62 | A20261004-1 | PN I&M0 OrderID 20번째 바이트가 NUL (19자 리터럴, VisibleString 공백 패딩 아님) | `stacks/profinet/`, `tests/` | A20261004-1 | 출처 #86 제안, 보고서 [audits/20261004-pn-im0.md](audits/20261004-pn-im0.md) |
+| 63 | A20261004-2 | Modbus 클라이언트가 요청 수량과 Byte Count 가 다른 FC01~04 응답을 rc 0 으로 받음 (없는 값은 이전 미러·초기화 안 된 스택 메모리) | `stacks/modbus/`, `tests/` | A20261004-2 ×3 | 출처 12단계 감사, 보고서 [audits/20261004-modbus.md](audits/20261004-modbus.md) |
+| 64 | A20261004-3 | Modbus 클라이언트가 요청과 Unit ID 가 다른 응답을 받음 (pymodbus 는 버림) | `stacks/modbus/`, `tests/` | A20261004-3 | 출처 12단계 감사, 보고서 [audits/20261004-modbus.md](audits/20261004-modbus.md). 읽기·쓰기 세 응답 경로 모두 |
+| 65 | A20261004-4 | Modbus 클라이언트 모드에서 실패한 쓰기(PLC 예외, input 거부)의 값이 로컬 미러에 남아 fb_read 가 PLC 가 받지 않은 값을 돌려줌 | `adapters/modbus/`, `tests/` | A20261004-4 ×2 | 출처 12단계 감사, 보고서 [audits/20261004-modbus.md](audits/20261004-modbus.md) |
 
 ## 이슈 본문 템플릿
 
