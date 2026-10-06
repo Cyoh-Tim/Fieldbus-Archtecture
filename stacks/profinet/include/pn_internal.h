@@ -68,6 +68,7 @@ typedef struct {
     uint8_t initiator_uuid[PN_UUID_LEN]; /* CMInitiatorObjectUUID */
     int have_initiator_uuid;
     int startup_advanced; /* ARProperties bit 30; ARServerBlock only then */
+    uint16_t initiator_udp_rt_port; /* CMInitiatorUDPRTPort; RT marker, not RPC dest */
     uint32_t owner_ip; /* host-order IPv4 of Connect sender; 0 = unset */
     int established;
     int prm_end;
@@ -127,6 +128,7 @@ struct pn_stack {
     int rpc_peer_set;
     uint8_t pending_rpc_tx[PN_FRAME_MAX];
     size_t pending_rpc_tx_len;
+    uint64_t pending_rpc_tx_ns; /* last ApplicationReady send; 0 = not yet */
 
     pthread_mutex_t io_lock;
 

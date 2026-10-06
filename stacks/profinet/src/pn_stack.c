@@ -232,6 +232,7 @@ int pn_stack_take_rpc_tx(pn_stack_t *s, uint8_t *out, size_t cap, size_t *out_le
     memcpy(out, s->pending_rpc_tx, s->pending_rpc_tx_len);
     *out_len = s->pending_rpc_tx_len;
     s->pending_rpc_tx_len = 0;
+    s->pending_rpc_tx_ns = 0;
     return 0;
 }
 

@@ -31,8 +31,8 @@
 | 07 | T12-1 | PN RPC 응답 NDR 첫 워드 = PNIOStatus | `stacks/profinet/`, `tests/`, `tools/ctt/`, `tests/golden/` | T12-1 | |
 | 08 | T12-2 | PN DCP 응답 블록 BlockInfo | `stacks/profinet/`, `tests/`, `tools/ctt/`, `tests/golden/` | T12-2 | T12-22 테스트는 이 수정 뒤에야 블록 해석 가능 |
 | 09 | T12-3 | PN Read/Write 응답 헤더 블록, I&M BlockHeader, Write 데이터 위치 | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-3 ×2 | T12-1 이후 (응답 NDR 해석이 전제) |
-| 10 | T12-5 | PN PrmEnd 응답 0x8110/Done, ApplicationReady 형식 | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-5 ×2 | T12-1 이후 |
-| 11 | T12-4 | PN IOCR 프레임 오프셋·ExpectedSubmodule·ModuleDiff/ARServer 블록 | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-4 ×3 | 큰 작업. T12-1 이후. IOCR `DataLength` 를 따르면 C_SDU 가 40바이트가 되어 T12-7 테스트도 통과할 수 있다. 그러면 T12-7 표시도 이 PR 에서 지운다 (허용) |
+| 10 | T12-5 | PN PrmEnd 응답 0x8110/Done, ApplicationReady 형식 | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-5 ×2 | T12-1 이후. ApplicationReady 목적지는 컨트롤러 IP 의 UDP 34964 고정 (인수인계의 "`CMInitiatorUDPRTPort` 로 전송" 은 틀림 — [audits/20261005-pn-oracle-connect.md](audits/20261005-pn-oracle-connect.md) 3절) |
+| 11 | T12-4 | PN IOCR 프레임 오프셋·ExpectedSubmodule·ModuleDiff/ARServer 블록 | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-4 ×3 | 큰 작업. T12-1 이후. IOCR `DataLength` 를 따르면 C_SDU 가 40바이트가 되어 T12-7 테스트도 통과할 수 있다. 그러면 T12-7 표시도 이 PR 에서 지운다 (허용). 2026-10-05 오라클 정정: Connect 의 NO_IO 서브모듈에 DataDescription 1개, ARServerBlock 은 Advanced startup 에서만 (`test_connect_legacy_response_has_no_ar_server_block` 추가 — 이 표시 없이 통과해야 함) |
 | 12 | T12-6 | PN DataStatus 0x35 | `stacks/profinet/`, `tests/`, `tests/golden/` | T12-6 | |
 | 13 | T12-7 | PN RTC1 최소 길이 패딩 | `stacks/profinet/`, `tests/` | T12-7 | |
 | 14 | T12-8 | PN RTC1·알람 VLAN 태그 | `stacks/profinet/`, `tests/` | T12-8 | 오라클은 RTC1 만 본다 (알람은 PR 테스트로) |
