@@ -478,7 +478,6 @@ def prm_end(pn):
     return ndr_response(rsp)
 
 
-@known_defect("T12-5", "PrmEnd 응답이 블록 0x0111 + 커맨드 echo 다. 사양은 0x8110 + ControlCommand Done(0x0008)")
 def test_prm_end_response_done(pn_dut):
     pn_dut.rpc(raw(connect_pdu()))
     status, blocks = prm_end(pn_dut)
@@ -490,8 +489,6 @@ def test_prm_end_response_done(pn_dut):
     assert raw(res)[28:30] == b"\x00\x08", f"ControlCommand {raw(res)[28:30].hex()} (Done 0x0008 기대)"
 
 
-@known_defect("T12-5", "ApplicationReady 요청이 rpc_vers=1, UUID 0, 블록 0x0110 이다. "
-              "사양: rpc_vers=4, object=CMInitiatorObjectUUID, 인터페이스=PNIO Controller, 블록 0x0112")
 def test_application_ready_request(pn_dut):
     pn_dut.rpc(raw(connect_pdu()))
     prm_end(pn_dut)

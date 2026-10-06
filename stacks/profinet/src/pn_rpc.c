@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 
 #include "logger.h"
@@ -25,6 +26,13 @@
 static const uint8_t k_pnio_if[16] = {0x01, 0x00, 0xA0, 0xDE, 0x97, 0x6C,
                                       0xD1, 0x11, 0x82, 0x71, 0x00, 0xA0,
                                       0x24, 0x42, 0xDF, 0x7D};
+
+/* PNIO Controller interface UUID: DEA00002-6C97-11D1-8271-00A02442DF7D */
+static const uint8_t k_pnio_controller_if[16] = {
+    0x02, 0x00, 0xA0, 0xDE, 0x97, 0x6C, 0xD1, 0x11,
+    0x82, 0x71, 0x00, 0xA0, 0x24, 0x42, 0xDF, 0x7D};
+
+#define PN_APP_READY_RETRY_NS 1000000000ull
 
 static int walk_blocks(const uint8_t *p, size_t n,
                        int (*cb)(uint16_t type, const uint8_t *body,
@@ -98,6 +106,21 @@ typedef struct {
 static void copy_uuid(uint8_t *dst, const uint8_t *src)
 {
     memcpy(dst, src, PN_UUID_LEN);
+}
+
+/* PNIO Block UUIDField is canonical (big-endian time fields). DCE/RPC
+ * object/interface UUIDs are mixed-endian (time_low/mid/hi little-endian). */
+static void uuid_pnio_to_dcerpc(uint8_t out[PN_UUID_LEN], const uint8_t in[PN_UUID_LEN])
+{
+    out[0] = in[3];
+    out[1] = in[2];
+    out[2] = in[1];
+    out[3] = in[0];
+    out[4] = in[5];
+    out[5] = in[4];
+    out[6] = in[7];
+    out[7] = in[6];
+    memcpy(out + 8, in + 8, 8);
 }
 
 static int aruuid_eq(const uint8_t *a, const uint8_t *b)
@@ -286,6 +309,10 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         if (blen >= 42) {
             memcpy(ar->initiator_uuid, body + 26, PN_UUID_LEN);
             ar->have_initiator_uuid = 1;
+        }
+        /* ARProperties(4) + ActivityTimeoutFactor(2) + UDPRTPort(2) */
+        if (blen >= 50) {
+            ar->initiator_udp_rt_port = pn_rd_be16(body + 48);
         }
     } else if (type == PN_BLOCK_IOCR_REQ && blen >= 18) {
         uint16_t iocr_type = pn_rd_be16(body);
@@ -516,16 +543,47 @@ static size_t ndr_res(uint8_t *out, const uint8_t status[4],
     return 20u + n;
 }
 
+static void fill_activity_uuid(uint8_t *u)
+{
+    static uint32_t seq;
+    uint64_t t = pn_now_ns();
+    memset(u, 0, PN_UUID_LEN);
+    pn_wr_be32(u, (uint32_t)(t >> 32));
+    pn_wr_be32(u + 4, (uint32_t)t);
+    pn_wr_be32(u + 8, ++seq);
+    u[12] = 0x80;
+    u[13] = 0x00;
+    u[14] = 0x40;
+    u[15] = 0x04;
+}
+
+static void clear_pending_rpc(pn_stack_t *s)
+{
+    s->pending_rpc_tx_len = 0;
+    s->pending_rpc_tx_ns = 0;
+}
+
 static size_t wrap_rpc_req(uint8_t *out, size_t cap, uint16_t op,
-                           const uint8_t *stub, size_t stub_len)
+                           const uint8_t *stub, size_t stub_len,
+                           const uint8_t *object_uuid)
 {
     if (cap < RPC_HDR + stub_len) {
         return 0;
     }
     memset(out, 0, RPC_HDR);
-    out[0] = 1;
+    out[0] = 4; /* DCE/RPC connectionless */
     out[1] = RPC_PT_REQUEST;
+    out[2] = 0x20; /* idempotent */
+    out[4] = 0x10; /* drep: little-endian integers */
+    if (object_uuid) {
+        uuid_pnio_to_dcerpc(out + 8, object_uuid);
+    }
+    memcpy(out + 24, k_pnio_controller_if, PN_UUID_LEN);
+    fill_activity_uuid(out + 40);
+    pn_wr_le32(out + 60, 1); /* if_vers */
     pn_wr_le16(out + 68, op);
+    pn_wr_le16(out + 70, 0xFFFF);
+    pn_wr_le16(out + 72, 0xFFFF);
     pn_wr_le16(out + 74, (uint16_t)stub_len);
     memcpy(out + RPC_HDR, stub, stub_len);
     return RPC_HDR + stub_len;
@@ -539,12 +597,15 @@ static void queue_app_ready(pn_stack_t *s)
     pn_wr_be16(body + 18, s->ar.session_key);
     pn_wr_be16(body + 22, PN_CONTROL_APP_READY);
     uint8_t blocks[64];
-    size_t bn = wr_block(blocks, PN_BLOCK_CONTROL_REQ, body, sizeof(body));
+    size_t bn = wr_block(blocks, PN_BLOCK_APP_READY_REQ, body, sizeof(body));
     uint8_t stub[128];
     size_t sn = ndr_wrap(stub, blocks, bn);
+    const uint8_t *obj =
+        s->ar.have_initiator_uuid ? s->ar.initiator_uuid : NULL;
     s->pending_rpc_tx_len =
         wrap_rpc_req(s->pending_rpc_tx, sizeof(s->pending_rpc_tx), OP_CONTROL,
-                     stub, sn);
+                     stub, sn, obj);
+    s->pending_rpc_tx_ns = 0;
     s->ar.app_ready = 1;
     LOG_INFO("pn_rpc", "queued ApplicationReady indication");
 }
@@ -561,14 +622,62 @@ static int reply_pnio_err(const uint8_t *pdu, uint8_t *resp, size_t cap,
     return 0;
 }
 
+static int consume_app_ready_res(pn_stack_t *s, const uint8_t *stub, size_t slen)
+{
+    if (s->pending_rpc_tx_len == 0) {
+        return -EINVAL;
+    }
+    size_t blen = 0;
+    const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
+    if (!blocks || blen < 2) {
+        return -EINVAL;
+    }
+    if (pn_rd_be16(blocks) != PN_BLOCK_APP_READY_RES) {
+        return -EINVAL;
+    }
+    clear_pending_rpc(s);
+    LOG_INFO("pn_rpc", "ApplicationReady confirmed (0x8112)");
+    return 0;
+}
+
+static void app_ready_dest(const pn_stack_t *s, struct sockaddr_in *dst)
+{
+    memset(dst, 0, sizeof(*dst));
+    dst->sin_family = AF_INET;
+    /* ApplicationReady is DCE/RPC to the controller PNIO RPC server.
+     * The UDP port is always PN_RPC_PORT (34964 / 0x8894).
+     * CMInitiatorUDPRTPort is an RT marker, not this destination. */
+    uint16_t port = PN_RPC_PORT;
+    dst->sin_port = htons(port);
+    if (s->ar.owner_ip != 0) {
+        dst->sin_addr.s_addr = htonl(s->ar.owner_ip);
+    } else if (s->rpc_peer_set) {
+        dst->sin_addr = s->rpc_peer.sin_addr;
+    }
+}
+
 static void flush_pending_rpc(pn_stack_t *s)
 {
-    if (s->fd_rpc < 0 || !s->rpc_peer_set || s->pending_rpc_tx_len == 0) {
+    if (s->fd_rpc < 0 || s->pending_rpc_tx_len == 0) {
+        return;
+    }
+    if (!s->ar.established) {
+        clear_pending_rpc(s);
+        return;
+    }
+    struct sockaddr_in dst;
+    app_ready_dest(s, &dst);
+    if (dst.sin_addr.s_addr == 0) {
+        return;
+    }
+    uint64_t now = pn_now_ns();
+    if (s->pending_rpc_tx_ns != 0 &&
+        now - s->pending_rpc_tx_ns < PN_APP_READY_RETRY_NS) {
         return;
     }
     sendto(s->fd_rpc, s->pending_rpc_tx, s->pending_rpc_tx_len, 0,
-           (struct sockaddr *)&s->rpc_peer, sizeof(s->rpc_peer));
-    s->pending_rpc_tx_len = 0;
+           (struct sockaddr *)&dst, sizeof(dst));
+    s->pending_rpc_tx_ns = now;
 }
 
 int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
@@ -578,15 +687,22 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         return -EINVAL;
     }
     uint8_t ptype = pdu[1];
-    if (ptype != RPC_PT_REQUEST) {
-        return -EINVAL;
-    }
     uint16_t op = pn_rd_le16(pdu + 68);
     const uint8_t *stub = pdu + RPC_HDR;
     size_t slen = len - RPC_HDR;
     uint16_t declared = pn_rd_le16(pdu + 74);
     if (declared < slen) {
         slen = declared;
+    }
+    if (ptype == RPC_PT_RESPONSE) {
+        *out_len = 0;
+        if (op != OP_CONTROL) {
+            return -EINVAL;
+        }
+        return consume_app_ready_res(s, stub, slen);
+    }
+    if (ptype != RPC_PT_REQUEST) {
+        return -EINVAL;
     }
 
     uint8_t stub_out[2048];
@@ -638,6 +754,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         }
         s->ar = parsed;
         s->last_rt_ns = 0;
+        clear_pending_rpc(s);
         uint8_t blocks_res[512];
         size_t bn = build_connect_res_blocks(s, blocks_res, sizeof(blocks_res));
         so = ndr_res(stub_out, NULL, blocks_res, bn);
@@ -670,6 +787,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         }
         s->ar.established = 0;
         memset(&s->ar, 0, sizeof(s->ar));
+        clear_pending_rpc(s);
         uint8_t z[4] = {0};
         so = ndr_res(stub_out, NULL, z, 4);
         LOG_INFO("pn_rpc", "AR released");
@@ -701,7 +819,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         memset(cres, 0, sizeof(cres));
         memcpy(cres + 2, s->ar.uuid, 16);
         pn_wr_be16(cres + 18, s->ar.session_key);
-        pn_wr_be16(cres + 22, cw.command);
+        pn_wr_be16(cres + 22, PN_CONTROL_DONE);
         uint8_t blocks_res[64];
         size_t bn = wr_block(blocks_res, PN_BLOCK_CONTROL_RES, cres,
                              sizeof(cres));
