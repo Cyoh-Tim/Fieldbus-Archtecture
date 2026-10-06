@@ -93,12 +93,13 @@ DEFAULT_LAYOUT = (IN_LAYOUT_DATA, IN_LAYOUT_IOCS, OUT_LAYOUT_DATA, OUT_LAYOUT_IO
 
 
 def connect_pdu(station=b"controller", scf=32, rr=16, slot1_module=0x00000010,
-                alarm_ref=1, layout=DEFAULT_LAYOUT):
+                alarm_ref=1, layout=DEFAULT_LAYOUT, startup_mode=0):
     """사양 형태의 Connect.req (ARBlockReq + 입력/출력 IOCR + AlarmCR + ExpectedSubmodule).
 
     기본 주기는 SCF=32 × RR=16 × 31.25µs = 16ms (GSDML 이 허용해야 하는 값, 장치 최소 8ms 이상).
     alarm_ref 는 컨트롤러의 LocalAlarmReference (장치 알람의 AlarmDstEndpoint 가 된다).
     layout 은 (입력 IODataObjects, 입력 IOCS, 출력 IODataObjects, 출력 IOCS) 의 (slot, subslot, FrameOffset) 목록.
+    startup_mode 는 ARProperties.StartupMode (bit 30): 0 Legacy, 1 Advanced.
     """
     in_data, in_iocs, out_data, out_iocs = layout
     common = dict(LT=0x8892, IOCRProperties_RTClass=2, DataLength=C_SDU_LEN,
@@ -117,19 +118,25 @@ def connect_pdu(station=b"controller", scf=32, rr=16, slot1_module=0x00000010,
                     CMInitiatorMacAdd=CONTROLLER_MAC,
                     CMInitiatorObjectUUID=CM_INITIATOR_OBJECT_UUID,
                     ARProperties_State=1, ARProperties_ParametrizationServer=0,
+                    ARProperties_StartupMode=startup_mode,
                     CMInitiatorActivityTimeoutFactor=600, CMInitiatorUDPRTPort=0x8892,
                     CMInitiatorStationName=station)
     alarm = AlarmCRBlockReq(AlarmCRType=1, LT=0x8892, RTATimeoutFactor=1, RTARetries=3,
                             LocalAlarmReference=alarm_ref, MaxAlarmDataLength=200,
                             AlarmCRTagHeaderHigh=0xC000, AlarmCRTagHeaderLow=0xA000)
+    # NO_IO(Type 0) 서브모듈에도 Input DataDescription 1개(길이 0, IOCS 1, IOPS 1)가 따라온다:
+    # Wireshark dissect_ExpectedSubmoduleBlockReq case 0x00 "one Input DataDescription Block follows",
+    # p-net pf_get_exp_submodule "At least one submodule data descriptor", scapy count_from (2 if Type==3 else 1).
+    # scapy 는 빌드할 때 count_from 을 쓰지 않으므로 직접 넣어야 한다 (없으면 scapy 자신도 되읽지 못한다).
+    no_io = [ExpectedSubmoduleDataDescription(DataDescription=1, SubmoduleDataLength=0, LengthIOCS=1, LengthIOPS=1)]
     exp = ExpectedSubmoduleBlockReq(APIs=[
         ExpectedSubmoduleAPI(API=0, SlotNumber=0, ModuleIdentNumber=0x00000001, Submodules=[
             ExpectedSubmodule(SubslotNumber=1, SubmoduleIdentNumber=0x00000001,
-                              SubmoduleProperties_Type=0),
+                              SubmoduleProperties_Type=0, DataDescription=list(no_io)),
             ExpectedSubmodule(SubslotNumber=0x8000, SubmoduleIdentNumber=0x00000002,
-                              SubmoduleProperties_Type=0),
+                              SubmoduleProperties_Type=0, DataDescription=list(no_io)),
             ExpectedSubmodule(SubslotNumber=0x8001, SubmoduleIdentNumber=0x00000003,
-                              SubmoduleProperties_Type=0)]),
+                              SubmoduleProperties_Type=0, DataDescription=list(no_io))]),
         ExpectedSubmoduleAPI(API=0, SlotNumber=1, ModuleIdentNumber=slot1_module, Submodules=[
             ExpectedSubmodule(SubslotNumber=1, SubmoduleIdentNumber=0x00000011,
                               SubmoduleProperties_Type=3,
@@ -312,15 +319,26 @@ def connect_blocks(pn, **connect_kw):
     return status, split_blocks(blocks)
 
 
+# ARServerBlock(0x8106)은 ARProperties.StartupMode=Advanced 일 때만 Connect.res 에 들어간다 (Advanced 에서는 필수,
+# Legacy 에서는 넣지 않는다). p-net pf_cmrpc.c "Additional blocks in advanced start mode: {ARServerBlockRes, …}",
+# Siemens CM 컨트롤러 cm_cl30.c cm_cl_parse_connect_response: Legacy 에 이 블록이 오면 CM_AR_REASON_PROT 로 AR 중단,
+# Advanced 에 없으면 역시 중단. (2026-10-05 오라클 수정: 전에는 Legacy Connect 에 이 블록을 요구했다.)
 @known_defect("T12-4", "Connect 응답에 ARServerBlock(0x8106)이 없다 (T12-1 전에는 NDR 해석부터 틀린다)")
 def test_connect_response_has_ar_server_block(pn_dut):
-    status, blocks = connect_blocks(pn_dut)
+    status, blocks = connect_blocks(pn_dut, startup_mode=1)
     assert status == 0
     servers = [b for t, b in blocks if t == 0x8106]
     assert len(servers) == 1, f"블록 타입 {[hex(t) for t, _ in blocks]}"
     # ARServerBlock: BlockHeader(6) StationNameLength(2) CMResponderStationName
     name_len = struct.unpack(">H", servers[0][6:8])[0]
     assert servers[0][8:8 + name_len] == b"oracle-dut"
+
+
+def test_connect_legacy_response_has_no_ar_server_block(pn_dut):
+    """Legacy(StartupMode=0) Connect.res 에는 ARServerBlock 이 없어야 한다 (위 근거, Siemens 컨트롤러는 AR 을 끊는다)."""
+    status, blocks = connect_blocks(pn_dut, startup_mode=0)
+    assert status == 0
+    assert 0x8106 not in [t for t, _ in blocks], f"블록 타입 {[hex(t) for t, _ in blocks]}"
 
 
 @known_defect("T12-4", "ExpectedSubmodule 과 실제 모듈이 달라도 ModuleDiffBlock(0x8104)을 보내지 않는다")
@@ -459,7 +477,6 @@ def prm_end(pn):
     return ndr_response(rsp)
 
 
-@known_defect("T12-5", "PrmEnd 응답이 블록 0x0111 + 커맨드 echo 다. 사양은 0x8110 + ControlCommand Done(0x0008)")
 def test_prm_end_response_done(pn_dut):
     pn_dut.rpc(raw(connect_pdu()))
     status, blocks = prm_end(pn_dut)
@@ -471,8 +488,6 @@ def test_prm_end_response_done(pn_dut):
     assert raw(res)[28:30] == b"\x00\x08", f"ControlCommand {raw(res)[28:30].hex()} (Done 0x0008 기대)"
 
 
-@known_defect("T12-5", "ApplicationReady 요청이 rpc_vers=1, UUID 0, 블록 0x0110 이다. "
-              "사양: rpc_vers=4, object=CMInitiatorObjectUUID, 인터페이스=PNIO Controller, 블록 0x0112")
 def test_application_ready_request(pn_dut):
     pn_dut.rpc(raw(connect_pdu()))
     prm_end(pn_dut)

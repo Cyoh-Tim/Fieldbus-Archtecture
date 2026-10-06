@@ -25,6 +25,7 @@ typedef struct {
     uint8_t psk[PN_PSK_LEN];
     int psk_set;
     int udp_rpc;
+    int udp_rpc_listen; /* UDP 34964: Device-originated ApplicationReady */
     int udp_snmp;
     uint32_t dut_ip; /* host order; 0 = mock handle_rpc / handle_snmp */
 } pn_priv_t;
@@ -124,6 +125,28 @@ static int udp_ephemeral(void)
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port = 0;
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        int e = errno;
+        close(fd);
+        return -e;
+    }
+    fd_nonblock(fd);
+    return fd;
+}
+
+static int udp_bind_port(uint16_t port)
+{
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        return -errno;
+    }
+    int yes = 1;
+    (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(port);
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         int e = errno;
         close(fd);
@@ -1548,7 +1571,7 @@ static int pdu_has_app_ready(const uint8_t *pdu, size_t n)
         }
         const uint8_t *body = blocks + off + 6;
         uint16_t body_len = (uint16_t)(bl - 2);
-        if (type == PN_BLOCK_CONTROL_REQ && body_len >= 24) {
+        if (type == PN_BLOCK_APP_READY_REQ && body_len >= 24) {
             size_t cmd_off = (body_len >= 26) ? 22u : 20u;
             if (pn_rd_be16(body + cmd_off) == PN_CONTROL_APP_READY) {
                 return 1;
@@ -1572,20 +1595,30 @@ static int step_rpc_application_ready(ctt_run_t *run, pn_priv_t *priv,
     size_t plen = 0;
     int got = 0;
 
-    if (run->opts.transport == CTT_TRANSPORT_AF_PACKET && priv->udp_rpc >= 0 &&
+    int fds[2];
+    int nfd = 0;
+    if (priv->udp_rpc >= 0) {
+        fds[nfd++] = priv->udp_rpc;
+    }
+    if (priv->udp_rpc_listen >= 0) {
+        fds[nfd++] = priv->udp_rpc_listen;
+    }
+    if (run->opts.transport == CTT_TRANSPORT_AF_PACKET && nfd > 0 &&
         priv->dut_ip != 0) {
         for (int i = 0; i < 50 && !got; i++) {
             pump(run, priv);
-            struct sockaddr_in src;
-            socklen_t sl = sizeof(src);
-            ssize_t n = recvfrom(priv->udp_rpc, pdu, sizeof(pdu), MSG_DONTWAIT,
-                                 (struct sockaddr *)&src, &sl);
-            if (n > 0) {
-                plen = (size_t)n;
-                got = pdu_has_app_ready(pdu, plen);
-                if (got) {
-                    break;
+            for (int f = 0; f < nfd && !got; f++) {
+                struct sockaddr_in src;
+                socklen_t sl = sizeof(src);
+                ssize_t n = recvfrom(fds[f], pdu, sizeof(pdu), MSG_DONTWAIT,
+                                     (struct sockaddr *)&src, &sl);
+                if (n > 0) {
+                    plen = (size_t)n;
+                    got = pdu_has_app_ready(pdu, plen);
                 }
+            }
+            if (got) {
+                break;
             }
             sleep_ms(2);
         }
@@ -2276,6 +2309,7 @@ static int pn_setup(ctt_run_t *run)
         return -ENOMEM;
     }
     priv->udp_rpc = -1;
+    priv->udp_rpc_listen = -1;
     priv->udp_snmp = -1;
     priv->dut_ip = cfg.ip;
 
@@ -2330,9 +2364,21 @@ static int pn_setup(ctt_run_t *run)
     if (run->opts.transport == CTT_TRANSPORT_AF_PACKET && priv->dut_ip != 0) {
         priv->udp_rpc = udp_ephemeral();
         priv->udp_snmp = udp_ephemeral();
+        priv->udp_rpc_listen = udp_bind_port(PN_RPC_PORT);
+        if (priv->udp_rpc_listen < 0) {
+            LOG_WARN("ctt_pn",
+                     "lab UDP %d bind failed (%d) — ApplicationReady receive "
+                     "falls back to the CM client socket",
+                     PN_RPC_PORT, priv->udp_rpc_listen);
+            priv->udp_rpc_listen = -1;
+        }
         if (priv->udp_rpc < 0 || priv->udp_snmp < 0) {
             LOG_WARN("ctt_pn",
                      "lab UDP sockets failed — CM/SNMP will not use :34964/:161");
+            if (priv->udp_rpc_listen >= 0) {
+                close(priv->udp_rpc_listen);
+                priv->udp_rpc_listen = -1;
+            }
             if (priv->udp_rpc >= 0) {
                 close(priv->udp_rpc);
                 priv->udp_rpc = -1;
@@ -2359,6 +2405,10 @@ static void pn_teardown(ctt_run_t *run)
         if (priv->udp_rpc >= 0) {
             close(priv->udp_rpc);
             priv->udp_rpc = -1;
+        }
+        if (priv->udp_rpc_listen >= 0) {
+            close(priv->udp_rpc_listen);
+            priv->udp_rpc_listen = -1;
         }
         if (priv->udp_snmp >= 0) {
             close(priv->udp_snmp);
