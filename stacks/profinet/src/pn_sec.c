@@ -51,8 +51,15 @@ int pn_alarm_send_dummy(pn_stack_t *s, uint16_t frame_id)
     pn_wr_be16(pay + 20, 0x8000); /* manufacturer-specific USI */
 
     uint8_t frame[PN_FRAME_MAX];
-    size_t flen = pn_eth_build(frame, sizeof(frame), s->ar.initiator_mac,
-                               s->cfg.mac, PN_ETHTYPE_PN, pay, sizeof(pay));
+    /* AlarmCRTagHeaderHigh for 0xFC01, Low for 0xFE01. TCI 0 stays untagged. */
+    uint16_t tci = 0;
+    if (s->ar.have_alarm_tag) {
+        tci = (frame_id == PN_FRAMEID_ALARM_LOW) ? s->ar.alarm_tag_low
+                                                 : s->ar.alarm_tag_high;
+    }
+    size_t flen = pn_eth_build_vlan(frame, sizeof(frame), s->ar.initiator_mac,
+                                    s->cfg.mac, tci, PN_ETHTYPE_PN, pay,
+                                    sizeof(pay));
     if (!flen) {
         return -EMSGSIZE;
     }

@@ -132,8 +132,11 @@ void pn_rt_send_if_due(pn_stack_t *s)
     uint8_t dst[6];
     memcpy(dst, s->ar.initiator_mac, 6);
     uint8_t frame[PN_FRAME_MAX];
-    size_t flen =
-        pn_eth_build(frame, sizeof(frame), dst, s->cfg.mac, PN_ETHTYPE_PN, pay, n);
+    /* Input-CR IOCRTagHeader. TCI 0 (or no header) stays untagged.
+     * No minimum-length pad here (T12-7). */
+    uint16_t tci = s->ar.have_in_iocr_tag ? s->ar.in_iocr_tag : 0;
+    size_t flen = pn_eth_build_vlan(frame, sizeof(frame), dst, s->cfg.mac, tci,
+                                    PN_ETHTYPE_PN, pay, n);
     if (flen) {
         pn_eth_send(s, frame, flen);
     }

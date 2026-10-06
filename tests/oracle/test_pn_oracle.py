@@ -287,7 +287,6 @@ def test_rtc1_frame_offsets_follow_iocr(pn_dut):
     assert sdu[data_off + IO_DATA_LEN] == iops_good, "IOPS (1,1)"
 
 
-@known_defect("T12-8", "RTC1 프레임에 802.1Q VLAN 태그(PCP 6, VID 0)가 없다")
 def test_rtc1_vlan_priority_tag(pn_dut):
     frames = rtc1_frames(pn_dut)
     assert frames, "AR 수립 후 RTC1 프레임 없음"
