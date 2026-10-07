@@ -531,12 +531,6 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         } else if (is_in) {
             ar->in_frame_id = frame_id;
             ar->in_csdu_len = data_len;
-            /* IOCRTagHeader @30: PCP(15..13) | DEI(12) | VID(11..0).
-             * Only the input CR is applied to RTC1 TX. */
-            if (blen >= 32) {
-                ar->in_iocr_tag = pn_rd_be16(body + 30);
-                ar->have_in_iocr_tag = 1;
-            }
         }
         if (is_in || is_out) {
             int laid = parse_iocr_layout(body, blen, ar, is_in);
@@ -557,13 +551,6 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
                 }
             }
         }
-    } else if (type == PN_BLOCK_ALARMCR_REQ && blen >= 20) {
-        /* AlarmCRType(2) LT(2) Properties(4) RTATimeout(2) RTARetries(2)
-         * LocalAlarmReference(2) MaxAlarmDataLength(2)
-         * TagHeaderHigh(2) @16, TagHeaderLow(2) @18. */
-        ar->alarm_tag_high = pn_rd_be16(body + 16);
-        ar->alarm_tag_low = pn_rd_be16(body + 18);
-        ar->have_alarm_tag = 1;
     } else if (type == PN_BLOCK_EXPSUB_REQ) {
         parse_expected_submodules(body, blen, ar);
     }

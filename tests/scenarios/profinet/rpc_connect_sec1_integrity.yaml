@@ -28,3 +28,4 @@ steps:
       min_frames: 8
       period_max_ms: 20
       ethertype: 0x8892
+      vlan_tci: 0xC000          # PCP 6, VID 0

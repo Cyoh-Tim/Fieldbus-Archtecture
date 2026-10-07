@@ -7,6 +7,11 @@
 #define PN_ETHTYPE_PN         0x8892u
 #define PN_ETHTYPE_LLDP       0x88CCu
 #define PN_ETHTYPE_VLAN       0x8100u
+/* RT_CLASS_1 priority tag. PCP is bits 15..13, VID is 0.
+ * Not copied from Connect: RTC1 and alarm high are PCP 6, alarm low is PCP 5. */
+#define PN_VLAN_TCI_RTC1       0xC000u
+#define PN_VLAN_TCI_ALARM_HIGH 0xC000u
+#define PN_VLAN_TCI_ALARM_LOW  0xA000u
 
 #define PN_FRAMEID_DCP_HELLO  0xFEFCu
 #define PN_FRAMEID_DCP_GETSET 0xFEFDu

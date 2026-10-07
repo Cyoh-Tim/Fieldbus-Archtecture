@@ -1,7 +1,11 @@
 /*
- * T12-8: RTC1 and RTA alarm frames carry an 802.1Q priority tag from
- * Connect IOCRTagHeader (input CR) and AlarmCRTagHeaderHigh/Low.
- * A missing header or TCI 0 leaves the frame untagged.
+ * T12-8: RTC1 and RTA alarm frames are always sent with an 802.1Q tag.
+ * TCI is a fixed value, not a copy of the Connect header:
+ *   RTC1 and Alarm High  0xC000 (PCP 6, VID 0)
+ *   Alarm Low            0xA000 (PCP 5, VID 0)
+ * A missing block or TCI 0 still carries that tag. A Connect value
+ * such as 0xE005 is not put on the wire (Connect rejection of a bad
+ * tag header is outside this test).
  * Minimum-length padding (T12-7) is not applied; a tagged 32-byte
  * input frame is 57 bytes, still under 60.
  */
@@ -177,12 +181,10 @@ static void tx_reset(void)
     g_txlen = 0;
 }
 
-/* RTC1 C_SDU for input_len 32: FrameID(2)+data(32)+IOPS(1)+APDU(4) = 39.
- * Untagged Ethernet is 14+39 = 53. Tagged is 18+39 = 57 (still < 60). */
-static const size_t k_rtc1_untagged = 53;
+/* RTC1 for input_len 32: FrameID(2)+data(32)+IOPS(1)+APDU(4) = 39.
+ * Tagged Ethernet is 18+39 = 57 (still < 60; T12-7 does not pad). */
 static const size_t k_rtc1_tagged = 57;
-/* Alarm dummy payload is 32 bytes. Untagged 46, tagged 50. */
-static const size_t k_alarm_untagged = 46;
+/* Alarm dummy payload is 32 bytes. Tagged Ethernet is 18+32 = 50. */
 static const size_t k_alarm_tagged = 50;
 
 static void expect_tagged(const char *what, uint16_t want_tci, uint16_t want_fid,
@@ -231,25 +233,6 @@ static void expect_tagged(const char *what, uint16_t want_tci, uint16_t want_fid
     }
 }
 
-static void expect_untagged(const char *what, uint16_t want_fid, size_t want_len)
-{
-    if (g_ntx < 1 || g_txlen < 16) {
-        fprintf(stderr, "FAIL: %s no frame (ntx=%d len=%zu)\n", what, g_ntx,
-                g_txlen);
-        g_fail = 1;
-        return;
-    }
-    uint16_t et = pn_rd_be16(g_tx + 12);
-    uint16_t fid = pn_rd_be16(g_tx + 14);
-    if (et != PN_ETHTYPE_PN || fid != want_fid || g_txlen != want_len) {
-        fprintf(stderr,
-                "FAIL: %s untagged got et=0x%04x fid=0x%04x len=%zu; "
-                "want et=0x8892 fid=0x%04x len=%zu\n",
-                what, et, fid, g_txlen, want_fid, want_len);
-        g_fail = 1;
-    }
-}
-
 static void test_rtc1_input_tag_pcp6(void)
 {
     pn_stack_t *s = make_stack();
@@ -258,9 +241,8 @@ static void test_rtc1_input_tag_pcp6(void)
         return;
     }
     uint8_t pdu[512];
-    /* Output CR tag is PCP 5. The device transmits the input CR, so
-     * RTC1 must use the input IOCRTagHeader (PCP 6, VID 0), not the
-     * output CR's header. */
+    /* Output CR header is PCP 5. RTC1 still uses the fixed PCP 6 / VID 0
+     * tag; the output CR header is not copied. */
     size_t plen = build_connect(pdu, 1, 0xC000, 0xA000, 0, 0, 0);
     if (!connect_ok(s, pdu, plen, "rtc1 pcp6")) {
         pn_stack_destroy(s);
@@ -273,27 +255,28 @@ static void test_rtc1_input_tag_pcp6(void)
     pn_stack_destroy(s);
 }
 
-static void test_rtc1_tag_not_hardcoded(void)
+static void test_rtc1_ignores_connect_tci(void)
 {
     pn_stack_t *s = make_stack();
-    expect(s != NULL, "rtc1 custom create");
+    expect(s != NULL, "rtc1 fixed create");
     if (!s) {
         return;
     }
     uint8_t pdu[512];
-    /* PCP 7, VID 5. A hardcoded PCP 6 / VID 0 tag would not match. */
+    /* PCP 7, VID 5 in Connect. TX TCI stays the fixed 0xC000. */
     size_t plen = build_connect(pdu, 1, 0xE005, 0xC000, 0, 0, 0);
-    if (!connect_ok(s, pdu, plen, "rtc1 custom")) {
+    if (!connect_ok(s, pdu, plen, "rtc1 fixed")) {
         pn_stack_destroy(s);
         return;
     }
     tx_reset();
     pn_rt_send_if_due(s);
-    expect_tagged("RTC1 IOCRTagHeader 0xE005", 0xE005, 0x8001, k_rtc1_tagged);
+    expect_tagged("RTC1 ignores Connect TCI 0xE005", 0xC000, 0x8001,
+                  k_rtc1_tagged);
     pn_stack_destroy(s);
 }
 
-static void test_rtc1_without_iocr_untagged(void)
+static void test_rtc1_without_iocr_still_tagged(void)
 {
     pn_stack_t *s = make_stack();
     expect(s != NULL, "rtc1 notag create");
@@ -308,11 +291,11 @@ static void test_rtc1_without_iocr_untagged(void)
     }
     tx_reset();
     pn_rt_send_if_due(s);
-    expect_untagged("RTC1 no IOCRTagHeader", 0x8001, k_rtc1_untagged);
+    expect_tagged("RTC1 no IOCRTagHeader", 0xC000, 0x8001, k_rtc1_tagged);
     pn_stack_destroy(s);
 }
 
-static void test_rtc1_zero_tag_untagged(void)
+static void test_rtc1_zero_tag_still_tagged(void)
 {
     pn_stack_t *s = make_stack();
     expect(s != NULL, "rtc1 zero create");
@@ -327,7 +310,7 @@ static void test_rtc1_zero_tag_untagged(void)
     }
     tx_reset();
     pn_rt_send_if_due(s);
-    expect_untagged("RTC1 IOCRTagHeader 0", 0x8001, k_rtc1_untagged);
+    expect_tagged("RTC1 IOCRTagHeader 0", 0xC000, 0x8001, k_rtc1_tagged);
     pn_stack_destroy(s);
 }
 
@@ -358,7 +341,7 @@ static void test_alarm_low_pcp5_high_from_header(void)
     pn_stack_destroy(s);
 }
 
-static void test_alarm_without_header_untagged(void)
+static void test_alarm_without_header_still_tagged(void)
 {
     pn_stack_t *s = make_stack();
     expect(s != NULL, "alarm notag create");
@@ -374,19 +357,52 @@ static void test_alarm_without_header_untagged(void)
     tx_reset();
     int rc = pn_stack_send_alarm_ex(s, PN_FRAMEID_ALARM_LOW);
     expect(rc == 0, "alarm low send without header");
-    expect_untagged("Alarm Low no AlarmCRTagHeader", PN_FRAMEID_ALARM_LOW,
-                    k_alarm_untagged);
+    expect_tagged("Alarm Low no AlarmCRTagHeader", 0xA000, PN_FRAMEID_ALARM_LOW,
+                  k_alarm_tagged);
+    tx_reset();
+    rc = pn_stack_send_alarm_ex(s, PN_FRAMEID_ALARM_HIGH);
+    expect(rc == 0, "alarm high send without header");
+    expect_tagged("Alarm High no AlarmCRTagHeader", 0xC000,
+                  PN_FRAMEID_ALARM_HIGH, k_alarm_tagged);
+    pn_stack_destroy(s);
+}
+
+static void test_alarm_ignores_connect_tci(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "alarm fixed create");
+    if (!s) {
+        return;
+    }
+    uint8_t pdu[512];
+    /* Non-zero headers that are not the fixed PCP 6 / PCP 5 values. */
+    size_t plen = build_connect(pdu, 1, 0xC000, 0xC000, 1, 0xE005, 0x0000);
+    if (!connect_ok(s, pdu, plen, "alarm fixed")) {
+        pn_stack_destroy(s);
+        return;
+    }
+    tx_reset();
+    int rc = pn_stack_send_alarm_ex(s, PN_FRAMEID_ALARM_LOW);
+    expect(rc == 0, "alarm low send ignores Connect TCI");
+    expect_tagged("Alarm Low ignores Connect TCI 0", 0xA000,
+                  PN_FRAMEID_ALARM_LOW, k_alarm_tagged);
+    tx_reset();
+    rc = pn_stack_send_alarm_ex(s, PN_FRAMEID_ALARM_HIGH);
+    expect(rc == 0, "alarm high send ignores Connect TCI");
+    expect_tagged("Alarm High ignores Connect TCI 0xE005", 0xC000,
+                  PN_FRAMEID_ALARM_HIGH, k_alarm_tagged);
     pn_stack_destroy(s);
 }
 
 int main(void)
 {
     test_rtc1_input_tag_pcp6();
-    test_rtc1_tag_not_hardcoded();
-    test_rtc1_without_iocr_untagged();
-    test_rtc1_zero_tag_untagged();
+    test_rtc1_ignores_connect_tci();
+    test_rtc1_without_iocr_still_tagged();
+    test_rtc1_zero_tag_still_tagged();
     test_alarm_low_pcp5_high_from_header();
-    test_alarm_without_header_untagged();
+    test_alarm_without_header_still_tagged();
+    test_alarm_ignores_connect_tci();
     if (g_fail) {
         fprintf(stderr, "test_pn_t12_8: FAILED\n");
         return 1;

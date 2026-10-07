@@ -62,14 +62,6 @@ typedef struct {
     uint8_t out_iocs_n;
     pn_exp_sub_t exp_sub[PN_EXP_SUB_MAX];
     uint8_t exp_sub_n;
-    /* Input-CR IOCRTagHeader (the CR this device transmits). 0 = no tag.
-     * Output-CR tag is the controller's, not copied onto RTC1. */
-    uint16_t in_iocr_tag;
-    int have_in_iocr_tag;
-    /* AlarmCRTagHeaderHigh / Low. 0 = no 802.1Q on that priority. */
-    uint16_t alarm_tag_high;
-    uint16_t alarm_tag_low;
-    int have_alarm_tag;
     uint16_t send_clock_factor; /* O→T IOCR; 0 = not negotiated */
     uint16_t reduction_ratio;   /* O→T IOCR; 0 = not negotiated */
     uint8_t initiator_mac[6];
@@ -157,7 +149,8 @@ size_t pn_eth_build(uint8_t *out, size_t cap, const uint8_t dst[6],
                     const uint8_t src[6], uint16_t ethertype,
                     const uint8_t *payload, size_t plen);
 /* tci == 0: same bytes as pn_eth_build. Otherwise 802.1Q (TPID 0x8100,
- * TCI, then ethertype). TCI is PCP(15..13) | DEI(12) | VID(11..0). */
+ * TCI, then ethertype). TCI is PCP(15..13) | DEI(12) | VID(11..0).
+ * RTC1 and alarms always pass a non-zero fixed TCI. */
 size_t pn_eth_build_vlan(uint8_t *out, size_t cap, const uint8_t dst[6],
                          const uint8_t src[6], uint16_t tci, uint16_t ethertype,
                          const uint8_t *payload, size_t plen);
