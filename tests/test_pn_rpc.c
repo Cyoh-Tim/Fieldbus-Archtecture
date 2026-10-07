@@ -675,7 +675,8 @@ static void test_cmi_ignores_own_tx(void)
 
 /* T12-1: response NDR is PNIOStatus, ArgsLength, MaxCount, Offset,
  * ActualCount, then blocks. A successful Connect.rsp starts with status 0,
- * not the block length (build_connect_res_blocks is 0x48 bytes). */
+ * not the block length. This Connect has no ARProperties, so StartupMode
+ * is Legacy and ARServerBlock is not appended (blocks stay 0x48). */
 static void test_connect_response_ndr_pniostatus(void)
 {
     pn_stack_t *s = make_stack();
