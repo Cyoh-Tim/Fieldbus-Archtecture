@@ -70,6 +70,8 @@
 #define PN_BLOCK_AR_RES        0x8101u
 #define PN_BLOCK_IOCR_RES      0x8102u
 #define PN_BLOCK_ALARMCR_RES   0x8103u
+#define PN_BLOCK_MOD_DIFF      0x8104u
+#define PN_BLOCK_AR_SERVER     0x8106u
 #define PN_BLOCK_SEC_INT       0x0E01u /* stack Security Class 1 integrity block */
 
 #define PN_CONTROL_PRM_END    0x0001u

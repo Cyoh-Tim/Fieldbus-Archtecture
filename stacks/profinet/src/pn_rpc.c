@@ -295,6 +295,189 @@ static int strip_sec_cb(uint16_t type, const uint8_t *body, uint16_t blen,
     return 0;
 }
 
+/* GSDML-V2.35: DAP ModuleIdent 0x00000001 carries the interface submodule
+ * (subslot 0x8000, ident 0x0002). MOD_IO 0x00000010 / subslot 1 ident
+ * 0x00000011 is the single IO image. DAP subslot 1 and port 0x8001 are
+ * not in the GSDML (T12-13), so they are not plugged. */
+static const struct {
+    uint16_t slot;
+    uint32_t mod_ident;
+    uint16_t subslot;
+    uint32_t sub_ident;
+    int is_io;
+} k_plugs[] = {
+    {0, 0x00000001u, 0x8000, 0x00000002u, 0},
+    {1, 0x00000010u, 1, 0x00000011u, 1},
+};
+
+int pn_real_mod_ident(uint16_t slot, uint32_t *mod_ident)
+{
+    for (size_t i = 0; i < sizeof(k_plugs) / sizeof(k_plugs[0]); i++) {
+        if (k_plugs[i].slot == slot) {
+            if (mod_ident) {
+                *mod_ident = k_plugs[i].mod_ident;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int pn_real_sub_find(uint16_t slot, uint16_t subslot, uint32_t *sub_ident,
+                     int *is_io)
+{
+    for (size_t i = 0; i < sizeof(k_plugs) / sizeof(k_plugs[0]); i++) {
+        if (k_plugs[i].slot == slot && k_plugs[i].subslot == subslot) {
+            if (sub_ident) {
+                *sub_ident = k_plugs[i].sub_ident;
+            }
+            if (is_io) {
+                *is_io = k_plugs[i].is_io;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void store_iocr_ref(pn_iocr_ref_t *tab, uint8_t *n, uint32_t api,
+                           uint16_t slot, uint16_t subslot, uint16_t off)
+{
+    if (*n >= PN_IOCR_REF_MAX) {
+        LOG_WARN("pn_rpc", "IOCR object table full (slot %u subslot 0x%04x)",
+                 slot, subslot);
+        return;
+    }
+    tab[*n].api = api;
+    tab[*n].slot = slot;
+    tab[*n].subslot = subslot;
+    tab[*n].frame_off = off;
+    (*n)++;
+}
+
+/* IOCRBlockReq body after BlockVersion. API list starts at offset 38:
+ * NumberOfAPIs, then API, NumberOfIODataObjects, (Slot, Subslot,
+ * FrameOffset)*, NumberOfIOCS, (Slot, Subslot, FrameOffset)*.
+ * Returns 1 when at least one object was stored. */
+static int parse_iocr_layout(const uint8_t *body, uint16_t blen, pn_ar_t *ar,
+                             int is_input)
+{
+    if (blen < 40) {
+        return 0;
+    }
+    uint16_t napis = pn_rd_be16(body + 38);
+    size_t off = 40;
+    pn_iocr_ref_t *data = is_input ? ar->in_io : ar->out_io;
+    uint8_t *data_n = is_input ? &ar->in_io_n : &ar->out_io_n;
+    pn_iocr_ref_t *iocs = is_input ? ar->in_iocs : ar->out_iocs;
+    uint8_t *iocs_n = is_input ? &ar->in_iocs_n : &ar->out_iocs_n;
+    uint8_t before = (uint8_t)(*data_n + *iocs_n);
+    for (uint16_t a = 0; a < napis; a++) {
+        if (off + 6 > blen) {
+            break;
+        }
+        uint32_t api = pn_rd_be32(body + off);
+        off += 4;
+        uint16_t nobj = pn_rd_be16(body + off);
+        off += 2;
+        for (uint16_t i = 0; i < nobj; i++) {
+            if (off + 6 > blen) {
+                return (*data_n + *iocs_n) > before;
+            }
+            store_iocr_ref(data, data_n, api, pn_rd_be16(body + off),
+                           pn_rd_be16(body + off + 2), pn_rd_be16(body + off + 4));
+            off += 6;
+        }
+        if (off + 2 > blen) {
+            break;
+        }
+        uint16_t niocs = pn_rd_be16(body + off);
+        off += 2;
+        for (uint16_t i = 0; i < niocs; i++) {
+            if (off + 6 > blen) {
+                return (*data_n + *iocs_n) > before;
+            }
+            store_iocr_ref(iocs, iocs_n, api, pn_rd_be16(body + off),
+                           pn_rd_be16(body + off + 2), pn_rd_be16(body + off + 4));
+            off += 6;
+        }
+    }
+    return (*data_n + *iocs_n) > before;
+}
+
+/* ExpectedSubmoduleBlockReq. NO_IO(0), INPUT(1) and OUTPUT(2) each have
+ * one DataDescription; INPUT_OUTPUT(3) has input then output.
+ * Wireshark dissect_ExpectedSubmoduleBlockReq case 0x00: one Input
+ * DataDescription follows. p-net reads at least one descriptor (two
+ * only when Type is INPUT_OUTPUT). */
+static void parse_expected_submodules(const uint8_t *body, uint16_t blen,
+                                      pn_ar_t *ar)
+{
+    if (blen < 2) {
+        return;
+    }
+    uint16_t napis = pn_rd_be16(body);
+    size_t off = 2;
+    for (uint16_t a = 0; a < napis; a++) {
+        if (off + 14 > blen) {
+            return;
+        }
+        uint32_t api = pn_rd_be32(body + off);
+        off += 4;
+        uint16_t slot = pn_rd_be16(body + off);
+        off += 2;
+        uint32_t mod = pn_rd_be32(body + off);
+        off += 4;
+        off += 2; /* ModuleProperties */
+        uint16_t nsub = pn_rd_be16(body + off);
+        off += 2;
+        for (uint16_t s = 0; s < nsub; s++) {
+            if (off + 8 > blen) {
+                return;
+            }
+            uint16_t sub = pn_rd_be16(body + off);
+            uint32_t sident = pn_rd_be32(body + off + 2);
+            uint16_t props = pn_rd_be16(body + off + 6);
+            off += 8;
+            unsigned type = props & 3u;
+            int ndesc = (type == 3) ? 2 : 1;
+            pn_exp_sub_t *e = NULL;
+            if (ar->exp_sub_n < PN_EXP_SUB_MAX) {
+                e = &ar->exp_sub[ar->exp_sub_n++];
+                e->api = api;
+                e->slot = slot;
+                e->mod_ident = mod;
+                e->subslot = sub;
+                e->sub_ident = sident;
+                e->props = props;
+            } else {
+                LOG_WARN("pn_rpc", "ExpectedSubmodule table full");
+            }
+            for (int d = 0; d < ndesc; d++) {
+                if (off + 6 > blen) {
+                    return;
+                }
+                uint16_t dir = pn_rd_be16(body + off);
+                uint16_t dlen = pn_rd_be16(body + off + 2);
+                uint8_t liops = body[off + 5];
+                off += 6;
+                if (!e) {
+                    continue;
+                }
+                if (dir == 1) {
+                    e->has_in = 1;
+                    e->in_len = dlen;
+                    e->in_iops = liops;
+                } else if (dir == 2) {
+                    e->has_out = 1;
+                    e->out_len = dlen;
+                    e->out_iops = liops;
+                }
+            }
+        }
+    }
+}
+
 static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
                          void *u)
 {
@@ -310,6 +493,12 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
             memcpy(ar->initiator_uuid, body + 26, PN_UUID_LEN);
             ar->have_initiator_uuid = 1;
         }
+        /* ARProperties is 4 bytes at body offset 42. Bit 30 is
+         * StartupMode (1 = Advanced). A short AR block is Legacy. */
+        if (blen >= 46) {
+            uint32_t props = pn_rd_be32(body + 42);
+            ar->startup_advanced = (props & (1u << 30)) != 0;
+        }
         /* ARProperties(4) + ActivityTimeoutFactor(2) + UDPRTPort(2) */
         if (blen >= 50) {
             ar->initiator_udp_rt_port = pn_rd_be16(body + 48);
@@ -320,9 +509,11 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         uint16_t frame_id = pn_rd_be16(body + 12);
         uint16_t sc = pn_rd_be16(body + 14);
         uint16_t rr = pn_rd_be16(body + 16);
+        int is_out = (iocr_type == PN_IOCR_OUTPUT);
+        int is_in = (iocr_type == PN_IOCR_INPUT);
         /* Data-hold watches O→T, so only the output CR supplies the
          * negotiated send clock. A following input CR must not clobber it. */
-        if (iocr_type == PN_IOCR_OUTPUT) {
+        if (is_out) {
             ar->send_clock_factor = sc;
             ar->reduction_ratio = rr;
             /* IOCRBlockReq: WatchdogFactor @26, DataHoldFactor @28. */
@@ -336,15 +527,34 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
                 }
             }
             ar->out_frame_id = frame_id;
-            ar->out_data_len = data_len > 1 ? (uint16_t)(data_len - 1) : 0;
-        } else if (iocr_type == PN_IOCR_INPUT) {
+            ar->out_csdu_len = data_len;
+        } else if (is_in) {
             ar->in_frame_id = frame_id;
-            ar->in_data_len = data_len > 1 ? (uint16_t)(data_len - 1) : 0;
+            ar->in_csdu_len = data_len;
             /* IOCRTagHeader @30: PCP(15..13) | DEI(12) | VID(11..0).
              * Only the input CR is applied to RTC1 TX. */
             if (blen >= 32) {
                 ar->in_iocr_tag = pn_rd_be16(body + 30);
                 ar->have_in_iocr_tag = 1;
+            }
+        }
+        if (is_in || is_out) {
+            int laid = parse_iocr_layout(body, blen, ar, is_in);
+            if (laid) {
+                if (is_in) {
+                    ar->have_in_layout = 1;
+                } else {
+                    ar->have_out_layout = 1;
+                }
+            } else {
+                /* No IODataObject list: keep the previous fixed-layout
+                 * length (DataLength minus the single IOPS byte). */
+                uint16_t legacy = data_len > 1 ? (uint16_t)(data_len - 1) : 0;
+                if (is_out) {
+                    ar->out_data_len = legacy;
+                } else {
+                    ar->in_data_len = legacy;
+                }
             }
         }
     } else if (type == PN_BLOCK_ALARMCR_REQ && blen >= 20) {
@@ -354,6 +564,8 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         ar->alarm_tag_high = pn_rd_be16(body + 16);
         ar->alarm_tag_low = pn_rd_be16(body + 18);
         ar->have_alarm_tag = 1;
+    } else if (type == PN_BLOCK_EXPSUB_REQ) {
+        parse_expected_submodules(body, blen, ar);
     }
     return 0;
 }
@@ -451,6 +663,170 @@ static size_t iod_rw_res(uint8_t *out, size_t cap, uint16_t type, uint16_t seq,
     return n;
 }
 
+/* SubmoduleState: format indicator (bit 15) and IdentInfo (bits 11..14).
+ * ARInfo OWN is 0. See PN services Table 215/216. */
+#define PN_SUBSTATE_WRONG ((uint16_t)(0x8000u | (2u << 11)))
+#define PN_SUBSTATE_NO    ((uint16_t)(0x8000u | (3u << 11)))
+#define PN_MOD_NO         0u
+#define PN_MOD_PROPER     2u
+#define PN_MOD_SUBSTITUTE 3u /* Table 214: avoid WRONG_MODULE when one is plugged */
+
+static int append_block(uint8_t *out, size_t cap, size_t *n, uint16_t type,
+                        const uint8_t *body, uint16_t body_len)
+{
+    size_t add = 6u + (size_t)body_len;
+    if (add & 1u) {
+        add++;
+    }
+    if (*n + add > cap) {
+        LOG_WARN("pn_rpc", "Connect response block 0x%04x does not fit", type);
+        return -1;
+    }
+    *n += wr_block(out + *n, type, body, body_len);
+    return 0;
+}
+
+/* ModuleDiffBlock body. Omitted (return 0) when nothing differs.
+ * A plugged-but-wrong module is SUBSTITUTE and reports the real ident.
+ * NumberOfSubmodules is 0 when the slot is empty. */
+static size_t build_module_diff_body(const pn_ar_t *ar, uint8_t *body, size_t cap)
+{
+    if (ar->exp_sub_n == 0 || cap < 2) {
+        return 0;
+    }
+    uint8_t apis[640];
+    size_t an = 0;
+    uint16_t napi = 0;
+    uint8_t i = 0;
+    while (i < ar->exp_sub_n) {
+        uint32_t api = ar->exp_sub[i].api;
+        uint8_t api_end = i;
+        while (api_end < ar->exp_sub_n && ar->exp_sub[api_end].api == api) {
+            api_end++;
+        }
+        uint8_t mods[512];
+        size_t mn = 0;
+        uint16_t nmod = 0;
+        uint8_t m = i;
+        while (m < api_end) {
+            uint16_t slot = ar->exp_sub[m].slot;
+            uint32_t exp_mod = ar->exp_sub[m].mod_ident;
+            uint8_t mend = m;
+            while (mend < api_end && ar->exp_sub[mend].slot == slot &&
+                   ar->exp_sub[mend].mod_ident == exp_mod) {
+                mend++;
+            }
+            uint32_t real_mod = 0;
+            int have_mod = pn_real_mod_ident(slot, &real_mod);
+            uint8_t subs[256];
+            size_t sn = 0;
+            uint16_t nsub = 0;
+            uint16_t mod_state;
+            uint32_t report_ident;
+            if (!have_mod) {
+                mod_state = PN_MOD_NO;
+                report_ident = 0;
+            } else if (real_mod != exp_mod) {
+                mod_state = PN_MOD_SUBSTITUTE;
+                report_ident = real_mod;
+                for (uint8_t s = m; s < mend; s++) {
+                    uint32_t real_sub = 0;
+                    int is_io = 0;
+                    int have_sub = pn_real_sub_find(slot, ar->exp_sub[s].subslot,
+                                                    &real_sub, &is_io);
+                    if (sn + 8 > sizeof(subs)) {
+                        break;
+                    }
+                    pn_wr_be16(subs + sn, ar->exp_sub[s].subslot);
+                    pn_wr_be32(subs + sn + 2, have_sub ? real_sub : 0);
+                    pn_wr_be16(subs + sn + 6,
+                               have_sub ? PN_SUBSTATE_WRONG : PN_SUBSTATE_NO);
+                    sn += 8;
+                    nsub++;
+                }
+            } else {
+                mod_state = PN_MOD_PROPER;
+                report_ident = real_mod;
+                for (uint8_t s = m; s < mend; s++) {
+                    uint32_t real_sub = 0;
+                    int is_io = 0;
+                    int have_sub = pn_real_sub_find(slot, ar->exp_sub[s].subslot,
+                                                    &real_sub, &is_io);
+                    int differ = !have_sub || real_sub != ar->exp_sub[s].sub_ident;
+                    if (!differ) {
+                        continue;
+                    }
+                    if (sn + 8 > sizeof(subs)) {
+                        break;
+                    }
+                    pn_wr_be16(subs + sn, ar->exp_sub[s].subslot);
+                    pn_wr_be32(subs + sn + 2, have_sub ? real_sub : 0);
+                    pn_wr_be16(subs + sn + 6,
+                               have_sub ? PN_SUBSTATE_WRONG : PN_SUBSTATE_NO);
+                    sn += 8;
+                    nsub++;
+                }
+                if (nsub == 0) {
+                    m = mend;
+                    continue;
+                }
+            }
+            if (mn + 10u + sn > sizeof(mods)) {
+                LOG_WARN("pn_rpc", "ModuleDiff truncated");
+                break;
+            }
+            pn_wr_be16(mods + mn, slot);
+            pn_wr_be32(mods + mn + 2, report_ident);
+            pn_wr_be16(mods + mn + 6, mod_state);
+            mn += 8;
+            pn_wr_be16(mods + mn, nsub);
+            mn += 2;
+            if (sn > 0) {
+                memcpy(mods + mn, subs, sn);
+                mn += sn;
+            }
+            nmod++;
+            m = mend;
+        }
+        if (nmod > 0 && an + 6u + mn <= sizeof(apis)) {
+            pn_wr_be32(apis + an, api);
+            an += 4;
+            pn_wr_be16(apis + an, nmod);
+            an += 2;
+            memcpy(apis + an, mods, mn);
+            an += mn;
+            napi++;
+        }
+        i = api_end;
+    }
+    if (napi == 0 || 2u + an > cap) {
+        return 0;
+    }
+    pn_wr_be16(body, napi);
+    memcpy(body + 2, apis, an);
+    return 2u + an;
+}
+
+/* ARServerBlock body. The whole block (header included) is a multiple of
+ * 4; wr_block's total is 6 + body, so body ≡ 2 (mod 4). */
+static uint16_t ar_server_body(const pn_stack_t *s, uint8_t *body, size_t cap)
+{
+    size_t name_len = strlen(s->cfg.station_name);
+    if (name_len > PN_STATION_NAME_MAX) {
+        name_len = PN_STATION_NAME_MAX;
+    }
+    if (cap < 2u + name_len + 3u) {
+        return 0;
+    }
+    pn_wr_be16(body, (uint16_t)name_len);
+    memcpy(body + 2, s->cfg.station_name, name_len);
+    size_t n = 2u + name_len;
+    while ((n % 4u) != 2u) {
+        body[n++] = 0;
+    }
+    return (uint16_t)n;
+}
+
 static size_t build_connect_res_blocks(pn_stack_t *s, uint8_t *out, size_t cap)
 {
     size_t n = 0;
@@ -461,19 +837,27 @@ static size_t build_connect_res_blocks(pn_stack_t *s, uint8_t *out, size_t cap)
     pn_wr_be16(ar + 18, s->ar.session_key);
     memcpy(ar + 20, s->cfg.mac, 6);
     pn_wr_be16(ar + 26, PN_RPC_PORT);
-    n += wr_block(out + n, PN_BLOCK_AR_RES, ar, sizeof(ar));
+    if (append_block(out, cap, &n, PN_BLOCK_AR_RES, ar, sizeof(ar)) != 0) {
+        return 0;
+    }
 
     uint8_t iocr_in[6];
     pn_wr_be16(iocr_in, PN_IOCR_INPUT);
     pn_wr_be16(iocr_in + 2, 1);
     pn_wr_be16(iocr_in + 4, s->ar.in_frame_id ? s->ar.in_frame_id : 0x8001);
-    n += wr_block(out + n, PN_BLOCK_IOCR_RES, iocr_in, sizeof(iocr_in));
+    if (append_block(out, cap, &n, PN_BLOCK_IOCR_RES, iocr_in, sizeof(iocr_in)) !=
+        0) {
+        return 0;
+    }
 
     uint8_t iocr_out[6];
     pn_wr_be16(iocr_out, PN_IOCR_OUTPUT);
     pn_wr_be16(iocr_out + 2, 2);
     pn_wr_be16(iocr_out + 4, s->ar.out_frame_id ? s->ar.out_frame_id : 0x8002);
-    n += wr_block(out + n, PN_BLOCK_IOCR_RES, iocr_out, sizeof(iocr_out));
+    if (append_block(out, cap, &n, PN_BLOCK_IOCR_RES, iocr_out,
+                     sizeof(iocr_out)) != 0) {
+        return 0;
+    }
 
     uint8_t alarm[8];
     memset(alarm, 0, sizeof(alarm));
@@ -481,11 +865,33 @@ static size_t build_connect_res_blocks(pn_stack_t *s, uint8_t *out, size_t cap)
     pn_wr_be16(alarm + 2, 1);
     pn_wr_be16(alarm + 4, 200);
     pn_wr_be16(alarm + 6, 0x00A0);
-    n += wr_block(out + n, PN_BLOCK_ALARMCR_RES, alarm, sizeof(alarm));
-
-    if (n > cap) {
+    if (append_block(out, cap, &n, PN_BLOCK_ALARMCR_RES, alarm, sizeof(alarm)) !=
+        0) {
         return 0;
     }
+
+    uint8_t diff[768];
+    size_t dn = build_module_diff_body(&s->ar, diff, sizeof(diff));
+    if (dn > 0 && dn <= 0xFFFFu) {
+        if (append_block(out, cap, &n, PN_BLOCK_MOD_DIFF, diff, (uint16_t)dn) !=
+            0) {
+            return 0;
+        }
+    }
+
+    /* ARServerBlock only in advanced startup mode. A Legacy Connect
+     * response that carries it is rejected by the controller. */
+    if (s->ar.startup_advanced) {
+        uint8_t server[2 + PN_STATION_NAME_MAX + 4];
+        uint16_t sn = ar_server_body(s, server, sizeof(server));
+        if (sn > 0) {
+            if (append_block(out, cap, &n, PN_BLOCK_AR_SERVER, server, sn) !=
+                0) {
+                return 0;
+            }
+        }
+    }
+
     (void)strip_sec_cb;
     (void)k_pnio_if;
     return n;
@@ -753,10 +1159,12 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         if (parsed.out_frame_id == 0) {
             parsed.out_frame_id = 0x8002;
         }
-        if (parsed.in_data_len == 0) {
+        /* A parsed IODataObject list owns the C_SDU length. Without one,
+         * keep the fixed layout sized from config. */
+        if (!parsed.have_in_layout && parsed.in_data_len == 0) {
             parsed.in_data_len = s->cfg.input_len;
         }
-        if (parsed.out_data_len == 0) {
+        if (!parsed.have_out_layout && parsed.out_data_len == 0) {
             parsed.out_data_len = s->cfg.output_len;
         }
         parsed.established = 1;
@@ -768,13 +1176,14 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         s->ar = parsed;
         s->last_rt_ns = 0;
         clear_pending_rpc(s);
-        uint8_t blocks_res[512];
+        uint8_t blocks_res[1280];
         size_t bn = build_connect_res_blocks(s, blocks_res, sizeof(blocks_res));
         so = ndr_res(stub_out, NULL, blocks_res, bn);
         LOG_INFO("pn_rpc",
                  "AR established in_fid=0x%04x out_fid=0x%04x in=%u out=%u",
-                 s->ar.in_frame_id, s->ar.out_frame_id, s->ar.in_data_len,
-                 s->ar.out_data_len);
+                 s->ar.in_frame_id, s->ar.out_frame_id,
+                 s->ar.have_in_layout ? s->ar.in_csdu_len : s->ar.in_data_len,
+                 s->ar.have_out_layout ? s->ar.out_csdu_len : s->ar.out_data_len);
     } else if (op == OP_RELEASE) {
         if (s->ar.established) {
             if (!ar_owner_ok(s, src_ip)) {
