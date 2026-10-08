@@ -85,8 +85,13 @@ def apt_packages(workflow):
     return sorted(pkgs)
 
 
+# ci.yml 의 apt 줄에는 없지만 로컬 실행에 필요한 패키지. GitHub 러너는 actions/setup-python 으로 venv·pip 를
+# 얻지만, 로컬은 시스템 python3 로 venv 를 만들므로 Ubuntu 에서 python3-venv(ensurepip)가 필요하다 (#97).
+LOCAL_EXTRA_APT = ["python3-venv"]
+
+
 def install_deps(workflow):
-    pkgs = apt_packages(workflow)
+    pkgs = sorted(set(apt_packages(workflow)) | set(LOCAL_EXTRA_APT))
     prefix = [] if os.geteuid() == 0 else ["sudo"]
     print(f"[local-ci] apt 패키지 설치: {' '.join(pkgs)}", flush=True)
     sh(prefix + ["apt-get", "update", "-q"])
