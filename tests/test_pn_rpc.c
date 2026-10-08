@@ -420,8 +420,10 @@ static size_t build_connect_ex(uint8_t *pdu, uint16_t session, int with_init,
         memset(iocr, 0, sizeof(iocr));
         pn_wr_be16(iocr, PN_IOCR_INPUT);
         pn_wr_be16(iocr + 12, in_fid);
-        pn_wr_be16(iocr + 14, 1);
-        pn_wr_be16(iocr + 16, 1);
+        /* 16 ms (SCF 32 × RR 16). A 31.25 µs clock is below cycle_us and
+         * is rejected (T5); this path only needs a legal input period. */
+        pn_wr_be16(iocr + 14, 32);
+        pn_wr_be16(iocr + 16, 16);
         bn += wr_block(blocks + bn, PN_BLOCK_IOCR_REQ, iocr, sizeof(iocr));
     }
     if (bad_sec) {
@@ -513,13 +515,14 @@ static size_t build_connect_iocr(uint8_t *pdu, uint16_t scf, uint16_t rr,
     pn_wr_be16(outb + 28, dhold);
     bn += wr_block(blocks + bn, PN_BLOCK_IOCR_REQ, outb, sizeof(outb));
 
-    /* Later input CR with a 31.25 µs clock must not replace the O→T clock. */
+    /* Later input CR (16 ms) must not replace the O→T clock (32 ms).
+     * A sub-minimum input period is rejected (T5). */
     uint8_t inb[18];
     memset(inb, 0, sizeof(inb));
     pn_wr_be16(inb, PN_IOCR_INPUT);
     pn_wr_be16(inb + 12, 0x8001);
-    pn_wr_be16(inb + 14, 1);
-    pn_wr_be16(inb + 16, 1);
+    pn_wr_be16(inb + 14, 32);
+    pn_wr_be16(inb + 16, 16);
     bn += wr_block(blocks + bn, PN_BLOCK_IOCR_REQ, inb, sizeof(inb));
 
     uint8_t stub[384];
@@ -705,8 +708,10 @@ static void test_connect_response_ndr_pniostatus(void)
     pn_stack_destroy(s);
 }
 
-/* T12-1: a rejected Connect still answers, but the first NDR word is the
- * PNIOStatus (the existing 81 00 00 00 indicator) and there are no blocks. */
+/* T12-1: a rejected Connect still answers. The first NDR word is the
+ * PNIOStatus and there are no blocks. Other-controller rejection is still
+ * the legacy value 0x81000000 (queue 59 owns DB 81 40 04). The integer is
+ * little-endian on the wire, so the bytes are 00 00 00 81. */
 static void test_connect_error_ndr_pniostatus(void)
 {
     pn_stack_t *s = make_stack();
@@ -728,7 +733,7 @@ static void test_connect_error_ndr_pniostatus(void)
     expect(s->ar.owner_ip == 0x0a000001, "ndr-err owner kept");
     expect(rlen == 100, "error rsp is 80-byte RPC + 20-byte NDR");
     const uint8_t *stub = resp + 80;
-    expect_u32(pn_rd_be32(stub), 0x81u << 24, "error PNIOStatus bytes 81 00 00 00");
+    expect_u32(pn_rd_le32(stub), 0x81u << 24, "error PNIOStatus LE 0x81000000");
     expect_u32(pn_rd_le32(stub + 4), 0, "error ArgsLength");
     expect_u32(pn_rd_le32(stub + 8), 0, "error MaxCount");
     expect_u32(pn_rd_le32(stub + 12), 0, "error Offset");

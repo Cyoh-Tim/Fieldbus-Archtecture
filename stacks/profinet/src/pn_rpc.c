@@ -1016,15 +1016,83 @@ static void queue_app_ready(pn_stack_t *s)
     LOG_INFO("pn_rpc", "queued ApplicationReady indication");
 }
 
+/* PNIOStatus as ErrorCode<<24 | ErrorDecode<<16 | ErrorCode1<<8 | ErrorCode2.
+ * Written in little-endian drep order (this stack always emits LE NDR;
+ * a big-endian request is T12-14). Logical DB 81 02 0E is bytes 0E 02 81 DB.
+ *
+ * Cycle rejects use the IOCR codes below. Other rejects still pass
+ * PN_PNIO_ERR_LEGACY (0x81000000). Queue 59 owns the other-controller
+ * status DB 81 40 04 and must stay xfail after this change. */
+#define PN_PNIO_ERR_LEGACY  (0x81u << 24)
+#define PN_PNIO_ERR_IOCR_SCF 0xDB81020Du /* unsupported SendClockFactor */
+#define PN_PNIO_ERR_IOCR_RR  0xDB81020Eu /* ReductionRatio / below min period */
+
+/* GSDML TimingProperties SendClock. 32 × 31.25 µs = 1 ms. */
+#define PN_IOCR_SEND_CLOCK 32u
+
 static int reply_pnio_err(const uint8_t *pdu, uint8_t *resp, size_t cap,
-                          size_t *out_len, uint8_t *stub_out)
+                          size_t *out_len, uint8_t *stub_out,
+                          uint32_t pnio_status)
 {
-    /* Same 4-byte indicator as before (81 00 00 00), now in PNIOStatus.
-     * The stub carries no blocks. */
+    /* Connect.rsp stub: PNIOStatus, ArgsLength=0, MaxCount=0, Offset=0,
+     * ActualCount=0. No blocks. */
     uint8_t status[4];
-    pn_wr_be32(status, 0x81u << 24);
+    pn_wr_le32(status, pnio_status);
     size_t so = ndr_res(stub_out, status, NULL, 0);
     *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so);
+    return 0;
+}
+
+/* Input IOCR only. cfg.cycle_us is the fastest update the device can
+ * produce; a shorter SCF×RR×31.25 µs is ReductionRatio (0x0E). A
+ * SendClock other than the GSDML value is SendClockFactor (0x0D).
+ * ReductionRatio must be a power of two. Output CR timing is the
+ * controller's send clock and is not limited here. No input IOCR
+ * (AR-only Connect) is not a short-cycle request. */
+typedef struct {
+    uint32_t min_us;
+    uint32_t err;
+} iocr_min_t;
+
+static int check_input_iocr_min(uint16_t type, const uint8_t *body,
+                                uint16_t blen, void *u)
+{
+    iocr_min_t *c = u;
+    if (c->err != 0 || type != PN_BLOCK_IOCR_REQ || blen < 18) {
+        return 0;
+    }
+    if (pn_rd_be16(body) != PN_IOCR_INPUT) {
+        return 0;
+    }
+    uint16_t sc = pn_rd_be16(body + 14);
+    uint16_t rr = pn_rd_be16(body + 16);
+    if (sc != PN_IOCR_SEND_CLOCK) {
+        c->err = PN_PNIO_ERR_IOCR_SCF;
+        LOG_WARN("pn_rpc",
+                 "Connect rejected: SendClockFactor %u (supported %u) "
+                 "PNIOStatus DB 81 02 0D",
+                 sc, PN_IOCR_SEND_CLOCK);
+        return 0;
+    }
+    int pow2 = (rr != 0) && ((rr & (uint16_t)(rr - 1u)) == 0);
+    uint64_t period_ns = (uint64_t)sc * (uint64_t)rr * PN_SEND_CLOCK_BASE_NS;
+    uint64_t min_ns = (uint64_t)c->min_us * 1000ull;
+    if (!pow2) {
+        c->err = PN_PNIO_ERR_IOCR_RR;
+        LOG_WARN("pn_rpc",
+                 "Connect rejected: ReductionRatio %u is not a power of two "
+                 "PNIOStatus DB 81 02 0E",
+                 rr);
+        return 0;
+    }
+    if (period_ns < min_ns) {
+        c->err = PN_PNIO_ERR_IOCR_RR;
+        LOG_WARN("pn_rpc",
+                 "Connect rejected: input period %u*%u*31.25us < cycle_us %u "
+                 "PNIOStatus DB 81 02 0E",
+                 sc, rr, c->min_us);
+        return 0;
+    }
     return 0;
 }
 
@@ -1123,12 +1191,21 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         /* Security, block parse, and ownership all finish against a
          * temporary AR. A rejected Connect does not touch s->ar. */
         if (verify_connect_sec(s, blocks, blen) != 0) {
-            return reply_pnio_err(pdu, resp, cap, out_len, stub_out);
+            return reply_pnio_err(pdu, resp, cap, out_len, stub_out,
+                                  PN_PNIO_ERR_LEGACY);
         }
         pn_ar_t parsed;
         memset(&parsed, 0, sizeof(parsed));
         if (walk_blocks(blocks, blen, parse_ar_iocr, &parsed) != 0) {
-            return reply_pnio_err(pdu, resp, cap, out_len, stub_out);
+            return reply_pnio_err(pdu, resp, cap, out_len, stub_out,
+                                  PN_PNIO_ERR_LEGACY);
+        }
+        iocr_min_t min_ck;
+        memset(&min_ck, 0, sizeof(min_ck));
+        min_ck.min_us = s->cfg.cycle_us;
+        (void)walk_blocks(blocks, blen, check_input_iocr_min, &min_ck);
+        if (min_ck.err != 0) {
+            return reply_pnio_err(pdu, resp, cap, out_len, stub_out, min_ck.err);
         }
         connect_ident_t ident;
         memset(&ident, 0, sizeof(ident));
@@ -1138,7 +1215,8 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         }
         if (s->ar.established && !ar_same_controller(s, src_ip, &ident)) {
             LOG_WARN("pn_rpc", "Connect rejected: AR already established");
-            return reply_pnio_err(pdu, resp, cap, out_len, stub_out);
+            return reply_pnio_err(pdu, resp, cap, out_len, stub_out,
+                                  PN_PNIO_ERR_LEGACY);
         }
         if (parsed.in_frame_id == 0) {
             parsed.in_frame_id = 0x8001;

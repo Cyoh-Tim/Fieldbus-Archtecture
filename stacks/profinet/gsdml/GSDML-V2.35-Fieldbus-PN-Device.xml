@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Minimal GSDML for the Fieldbus Architecture PROFINET Device.
+  GSDML for the Fieldbus Architecture PROFINET Device.
   Conformance Class B, RT_CLASS_1. Not IRT. Not PI-certified.
-  Import is a starting point for engineering; expect to extend before a real PLC project.
+
+  Timing matches the stack default cycle_us=8000 (8 ms):
+    MinDeviceInterval 256 × 31.25 µs = 8 ms
+    SendClock 32 (1 ms) × ReductionRatio 8 = 8 ms
+  A faster cycle_us needs a matching GSDML (T5).
 -->
 <ISO15745Profile xmlns="http://www.profibus.com/GSDML/2003/11/DeviceProfile">
   <ProfileHeader>
@@ -28,9 +32,12 @@
     <ApplicationProcess>
       <DeviceAccessPointList>
         <DeviceAccessPointItem ID="DAP1" PhysicalSlots="0..1" ModuleIdentNumber="0x00000001"
-                               MinDeviceInterval="32" DNS_CompatibleName="fb-arch-pn"
+                               MinDeviceInterval="256" DNS_CompatibleName="fb-arch-pn"
                                FixedInSlots="0" ObjectUUID_LocalIndex="1"
-                               RequiredSchemaVersion="2.35">
+                               RequiredSchemaVersion="2.35" PNIO_Version="V2.35"
+                               ImplementationType="software" DeviceAccessSupported="false"
+                               NumberOfDeviceAccessAR="0" SharedDeviceSupported="false"
+                               SharedInputSupported="false">
           <ModuleInfo>
             <Name TextId="T_DAP"/>
             <InfoText TextId="T_DAP_INFO"/>
@@ -39,13 +46,48 @@
             <HardwareRelease Value="1"/>
             <SoftwareRelease Value="V1.0.0"/>
           </ModuleInfo>
+          <CertificationInfo ConformanceClass="B" ApplicationClass="" NetloadClass="I"/>
           <SubslotList>
             <SubslotItem SubslotNumber="1" TextId="T_DAP_SUB"/>
           </SubslotList>
-          <SystemDefinedSubmoduleList>
-            <SubmoduleItem ID="PORT1" SubmoduleIdentNumber="0x0002" SubslotNumber="32768">
+          <IOConfigData MaxInputLength="32" MaxOutputLength="8"/>
+          <UseableModules>
+            <ModuleItemRef ModuleItemTarget="MOD_IO" AllowedInSlots="1"/>
+          </UseableModules>
+          <VirtualSubmoduleList>
+            <VirtualSubmoduleItem ID="DAP_VSM" SubmoduleIdentNumber="0x00000001"
+                                  FixedInSubslots="1" Writeable_IM_Records="1 2 3"
+                                  MayIssueProcessAlarm="false">
               <IOData/>
-            </SubmoduleItem>
+              <ModuleInfo>
+                <Name TextId="T_DAP"/>
+                <InfoText TextId="T_DAP_INFO"/>
+              </ModuleInfo>
+            </VirtualSubmoduleItem>
+          </VirtualSubmoduleList>
+          <SystemDefinedSubmoduleList>
+            <InterfaceSubmoduleItem ID="IF1" SubslotNumber="32768"
+                                    SubmoduleIdentNumber="0x00000002"
+                                    SupportedRT_Classes="RT_CLASS_1"
+                                    TextId="T_IFACE" SupportedProtocols="LLDP;SNMP"
+                                    DCP_HelloSupported="true"
+                                    NetworkComponentDiagnosisSupported="false">
+              <ApplicationRelations StartupMode="Legacy"
+                                    NumberOfAdditionalInputCR="0"
+                                    NumberOfAdditionalOutputCR="0"
+                                    NumberOfAdditionalMulticastProviderCR="0"
+                                    NumberOfMulticastConsumerCR="0">
+                <TimingProperties SendClock="32"
+                                  ReductionRatio="8 16 32 64 128 256 512"/>
+              </ApplicationRelations>
+            </InterfaceSubmoduleItem>
+            <PortSubmoduleItem ID="PORT1" SubslotNumber="32769"
+                               SubmoduleIdentNumber="0x00000003"
+                               TextId="T_PORT" MAUTypes="16"
+                               PortDeactivationSupported="false"
+                               LinkStateDiagnosisCapability="Up+Down"
+                               CheckMAUTypeSupported="false"
+                               CheckMAUTypeDifferenceSupported="false"/>
           </SystemDefinedSubmoduleList>
         </DeviceAccessPointItem>
       </DeviceAccessPointList>
@@ -77,8 +119,10 @@
         <PrimaryLanguage>
           <Text TextId="T_ID" Value="FB-ARCH PN Device"/>
           <Text TextId="T_DAP" Value="DAP"/>
-          <Text TextId="T_DAP_INFO" Value="Device access point, RT Class 1"/>
+          <Text TextId="T_DAP_INFO" Value="Device access point, RT Class 1, minimum 8 ms"/>
           <Text TextId="T_DAP_SUB" Value="Interface"/>
+          <Text TextId="T_IFACE" Value="Interface"/>
+          <Text TextId="T_PORT" Value="Port 1"/>
           <Text TextId="T_IO" Value="IO module"/>
           <Text TextId="T_IO_INFO" Value="32 byte input, 8 byte output"/>
           <Text TextId="T_IN" Value="Input image"/>
