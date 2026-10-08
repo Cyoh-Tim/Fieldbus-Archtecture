@@ -155,17 +155,23 @@ static int connect_ok(pn_stack_t *s, uint16_t in_scf, uint16_t in_rr,
     return pn_stack_ar_up(s) == 1;
 }
 
-/* Legacy RTC1: eth(14) FrameID(2) data(input_len) IOPS(1) CycleCounter(2). */
+/* RTC1: eth(14), then 802.1Q (4) when offset 12 is TPID 0x8100.
+ * FrameID follows EtherType. APDU is FrameID(2) data(input_len) IOPS(1)
+ * CycleCounter(2). Same skip as tests/test_pn_t12_4.c and test_pn_rpc.c. */
 static int frame_cc(const uint8_t *frame, size_t len, uint16_t *cc)
 {
-    size_t off = 14u + 2u + 32u + 1u;
+    size_t fid_off = 14;
+    if (len >= 18 && pn_rd_be16(frame + 12) == PN_ETHTYPE_VLAN) {
+        fid_off = 18;
+    }
+    size_t off = fid_off + 2u + 32u + 1u;
     if (len < off + 2u) {
         return 0;
     }
-    if (pn_rd_be16(frame + 12) != PN_ETHTYPE_PN) {
+    if (pn_rd_be16(frame + fid_off - 2) != PN_ETHTYPE_PN) {
         return 0;
     }
-    if (pn_rd_be16(frame + 14) != 0x8001) {
+    if (pn_rd_be16(frame + fid_off) != 0x8001) {
         return 0;
     }
     *cc = pn_rd_be16(frame + off);
