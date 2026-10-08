@@ -220,39 +220,33 @@ void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen)
     s->ar.last_rt_rx_ns = pn_now_ns();
 }
 
-/* Untagged: 14 + FrameID(2) + C_SDU + APDU(4) >= 60 => C_SDU >= 40.
- * One 802.1Q tag: 18 + 2 + C_SDU + 4 >= 60 => C_SDU >= 36. */
-_Static_assert(60u - 14u - 2u - 4u == 40u, "untagged RTC1 C_SDU minimum");
-_Static_assert(60u - 18u - 2u - 4u == 36u, "VLAN RTC1 C_SDU minimum");
+/* Tagged RTC1: 18 + FrameID(2) + C_SDU + APDU(4) >= 60 => C_SDU >= 36.
+ * TX always has the tag, so the untagged C_SDU 40 rule is not used. */
+_Static_assert(60u - 18u - 2u - 4u == 36u, "tagged RTC1 C_SDU minimum");
 
 size_t pn_rtc1_pad_min_csdu(uint8_t *frame, size_t len, size_t cap)
 {
     if (!frame || len == 0 || cap < len) {
         return 0;
     }
-    if (len < 14) {
+    /* Offset 12 must be TPID 0x8100. An untagged RTC1 frame is left
+     * as built: the 40-octet minimum is not applied on this path. */
+    if (len < 18 || pn_rd_be16(frame + 12) != PN_ETHTYPE_VLAN) {
         return len;
     }
-    size_t l2 = 14;
-    if (pn_rd_be16(frame + 12) == PN_ETHTYPE_VLAN) {
-        if (len < 18) {
-            return len;
-        }
-        l2 = 18;
-    }
-    if (pn_rd_be16(frame + l2 - 2) != PN_ETHTYPE_PN) {
+    if (pn_rd_be16(frame + 16) != PN_ETHTYPE_PN) {
         return len;
     }
-    if (len < l2 + 2u + 4u) {
+    if (len < 18u + 2u + 4u) {
         return len;
     }
-    uint16_t fid = pn_rd_be16(frame + l2);
+    uint16_t fid = pn_rd_be16(frame + 18);
     /* RTC1 unicast range. Alarm, DCP, and RT multicast stay as built. */
     if (fid < 0x8000u || fid > 0xBBFFu) {
         return len;
     }
-    size_t csdu = len - l2 - 2u - 4u;
-    size_t min_csdu = 60u - l2 - 2u - 4u;
+    size_t csdu = len - 18u - 2u - 4u;
+    const size_t min_csdu = 36u;
     if (csdu >= min_csdu) {
         return len;
     }
@@ -321,12 +315,13 @@ void pn_rt_send_if_due(pn_stack_t *s)
     uint8_t dst[6];
     memcpy(dst, s->ar.initiator_mac, 6);
     uint8_t frame[PN_FRAME_MAX];
-    size_t flen =
-        pn_eth_build(frame, sizeof(frame), dst, s->cfg.mac, PN_ETHTYPE_PN, pay, n);
+    /* Always 802.1Q. TCI is PCP 6 / VID 0, not the Connect IOCRTagHeader.
+     * A short C_SDU is padded to 36 so the tagged frame is 60 octets
+     * without FCS. The pad is before APDUStatus: trailer zeros after
+     * the status are what a controller would read as DataStatus. */
+    size_t flen = pn_eth_build_vlan(frame, sizeof(frame), dst, s->cfg.mac,
+                                    PN_VLAN_TCI_RTC1, PN_ETHTYPE_PN, pay, n);
     if (flen) {
-        /* pn_eth_send forwards this buffer. Do not pad after APDUStatus:
-         * a short frame's trailer zeros are what the controller reads as
-         * the status. */
         flen = pn_rtc1_pad_min_csdu(frame, flen, sizeof(frame));
     }
     if (flen) {

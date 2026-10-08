@@ -1025,19 +1025,50 @@ static int step_rpc_connect(ctt_run_t *run, pn_priv_t *priv,
 #define CTT_PN_ALARM  3
 #define CTT_PN_DCP    4
 
-static int classify_pn_frame(const uint8_t *frame, int n)
+/* EtherType at 12, or at 16 when offset 12 is TPID 0x8100.
+ * *hdr is the FrameID offset: 14 untagged, 18 tagged. DCP and LLDP
+ * stay untagged, so their hdr stays 14. */
+static int pn_frame_hdr(const uint8_t *frame, int n, size_t *hdr, uint16_t *et)
 {
     if (n < 14) {
+        return -1;
+    }
+    uint16_t tpid = pn_rd_be16(frame + 12);
+    if (tpid == PN_ETHTYPE_VLAN) {
+        if (n < 18) {
+            return -1;
+        }
+        if (hdr) {
+            *hdr = 18;
+        }
+        if (et) {
+            *et = pn_rd_be16(frame + 16);
+        }
+        return 0;
+    }
+    if (hdr) {
+        *hdr = 14;
+    }
+    if (et) {
+        *et = tpid;
+    }
+    return 0;
+}
+
+static int classify_pn_frame(const uint8_t *frame, int n)
+{
+    size_t hdr = 14;
+    uint16_t et = 0;
+    if (pn_frame_hdr(frame, n, &hdr, &et) != 0) {
         return CTT_PN_OTHER;
     }
-    uint16_t et = pn_rd_be16(frame + 12);
     if (et == PN_ETHTYPE_LLDP) {
         return CTT_PN_LLDP;
     }
-    if (et != PN_ETHTYPE_PN || n < 16) {
+    if (et != PN_ETHTYPE_PN || n < (int)(hdr + 2)) {
         return CTT_PN_OTHER;
     }
-    uint16_t fid = pn_rd_be16(frame + 14);
+    uint16_t fid = pn_rd_be16(frame + hdr);
     if (fid >= 0x8000u && fid <= 0xBBFFu) {
         return CTT_PN_RTC1;
     }
@@ -1053,11 +1084,12 @@ static int classify_pn_frame(const uint8_t *frame, int n)
 
 static int is_rtc1(const uint8_t *frame, int n, uint16_t want_et)
 {
-    if (n < 16) {
+    size_t hdr = 14;
+    uint16_t et = 0;
+    if (pn_frame_hdr(frame, n, &hdr, &et) != 0 || n < (int)(hdr + 2)) {
         return 0;
     }
-    uint16_t et = pn_rd_be16(frame + 12);
-    uint16_t fid = pn_rd_be16(frame + 14);
+    uint16_t fid = pn_rd_be16(frame + hdr);
     return et == want_et && fid >= 0x8000u && fid <= 0xBBFFu;
 }
 
@@ -1071,12 +1103,30 @@ typedef struct {
     int contains_hits;
 } rtc1_harvest_t;
 
-static int rtc1_cycle_counter(const uint8_t *frame, int n, uint16_t *cc)
+static uint16_t rtc1_data_len(pn_priv_t *priv)
 {
-    /* APDUStatus is the last 4 octets (CycleCounter, DataStatus,
-     * TransferStatus). T12-7 inserts C_SDU padding before that, so the
-     * counter is not at eth + FrameID + input_len + IOPS. */
-    if (n < 4) {
+    const pn_cfg_t *cfg = pn_stack_cfg(priv->stack);
+    uint16_t n = cfg->input_len;
+    return n ? n : 32;
+}
+
+static int rtc1_cycle_counter(const uint8_t *frame, int n, uint16_t data_len,
+                              uint16_t *cc)
+{
+    /* RTC1 TX is tagged: offset 12 is TPID 0x8100 and FrameID is at 18.
+     * T12-7 pads C_SDU to 36 before APDUStatus, so CycleCounter is the
+     * first of the last 4 octets, not data_len + IOPS. */
+    (void)data_len;
+    size_t hdr = 14;
+    uint16_t et = 0;
+    if (n < 18 || pn_rd_be16(frame + 12) != PN_ETHTYPE_VLAN) {
+        return 0;
+    }
+    if (pn_frame_hdr(frame, n, &hdr, &et) != 0 || et != PN_ETHTYPE_PN ||
+        hdr != 18u) {
+        return 0;
+    }
+    if (n < (int)(hdr + 2u + 4u)) {
         return 0;
     }
     *cc = pn_rd_be16(frame + (size_t)n - 4u);
@@ -1085,7 +1135,8 @@ static int rtc1_cycle_counter(const uint8_t *frame, int n, uint16_t *cc)
 
 static void drain_io_frames(ctt_run_t *run, int *got_rtc1, uint64_t *last_ts,
                             uint16_t want_et, int count_unexpected,
-                            rtc1_harvest_t *h, const char *needle)
+                            rtc1_harvest_t *h, uint16_t data_len,
+                            const char *needle)
 {
     uint8_t buf[CTT_FRAME_MAX];
     uint64_t ts = 0;
@@ -1105,7 +1156,7 @@ static void drain_io_frames(ctt_run_t *run, int *got_rtc1, uint64_t *last_ts,
                 memcpy(h->last, buf, (size_t)n);
                 h->last_n = (size_t)n;
                 uint16_t cc = 0;
-                if (rtc1_cycle_counter(buf, n, &cc)) {
+                if (rtc1_cycle_counter(buf, n, data_len, &cc)) {
                     if (h->cc_samples == 0) {
                         h->first_cc = cc;
                     } else {
@@ -1251,6 +1302,7 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
     uint64_t deadline = ctt_now_ns() + budget_ns;
     rtc1_harvest_t harvest;
     memset(&harvest, 0, sizeof(harvest));
+    uint16_t data_len = rtc1_data_len(priv);
     const char *needle =
         expect && yaml_has(expect, "contains")
             ? yaml_cstr(expect, "contains", NULL)
@@ -1261,7 +1313,8 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
             inject_ot_rtc1(priv);
         }
         pump(run, priv);
-        drain_io_frames(run, &got, &last_ts, want_et, 0, &harvest, needle);
+        drain_io_frames(run, &got, &last_ts, want_et, 0, &harvest, data_len,
+                        needle);
         if (!prove_none && !hold_for_max && got >= min_frames) {
             break;
         }
@@ -1292,6 +1345,20 @@ static int step_io_cycle(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *ste
         rc |= ctt_check(run, idx, action, harvest.contains_hits > 0,
                         "RTC1 payload contains '%s' hits=%d frames=%d",
                         needle ? needle : "", harvest.contains_hits, got);
+    }
+    if (expect && yaml_has(expect, "vlan_tci")) {
+        unsigned long want_tci = yaml_ulong(expect, "vlan_tci", 0);
+        uint16_t got_tci = 0;
+        int tag_ok = harvest.last_n >= 18 &&
+                     pn_rd_be16(harvest.last + 12) == PN_ETHTYPE_VLAN;
+        if (tag_ok) {
+            got_tci = pn_rd_be16(harvest.last + 14);
+            tag_ok = got_tci == (uint16_t)want_tci;
+        }
+        rc |= ctt_check(run, idx, action, tag_ok,
+                        "vlan_tci expect=0x%04lx actual=0x%04x (PCP %u VID %u)",
+                        want_tci, got_tci, (unsigned)((got_tci >> 13) & 7u),
+                        (unsigned)(got_tci & 0x0fffu));
     }
     if (expect && yaml_has(expect, "cycle_counter")) {
         const char *mode = yaml_cstr(expect, "cycle_counter", "increasing");
@@ -1672,12 +1739,14 @@ static int step_alarm(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
         pump(run, priv);
         while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), NULL)) >
                0) {
-            if (n >= 16) {
-                uint16_t fid = pn_rd_be16(buf + 14);
-                if (fid == (uint16_t)want_fid) {
-                    found = 1;
-                    break;
-                }
+            size_t hdr = 14;
+            if (pn_frame_hdr(buf, n, &hdr, NULL) != 0 || n < (int)(hdr + 2)) {
+                continue;
+            }
+            uint16_t fid = pn_rd_be16(buf + hdr);
+            if (fid == (uint16_t)want_fid) {
+                found = 1;
+                break;
             }
         }
         int out = 0;
@@ -1718,11 +1787,12 @@ static int step_alarm(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
     int last_n = 0;
     while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), NULL)) > 0) {
         last_n = n;
-        if (n < 16) {
+        size_t hdr = 14;
+        uint16_t et = 0;
+        if (pn_frame_hdr(buf, n, &hdr, &et) != 0 || n < (int)(hdr + 2)) {
             continue;
         }
-        uint16_t et = pn_rd_be16(buf + 12);
-        uint16_t fid = pn_rd_be16(buf + 14);
+        uint16_t fid = pn_rd_be16(buf + hdr);
         if (et == (uint16_t)want_et && fid == (uint16_t)want_fid) {
             found = 1;
             last_n = n;
@@ -1732,6 +1802,20 @@ static int step_alarm(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
     int rc = ctt_check(run, idx, action, found,
                        "expect Alarm TX et=0x%04lx fid=0x%04lx (CC-B RTA, not IRT)",
                        want_et, want_fid);
+    if (expect && yaml_has(expect, "vlan_tci")) {
+        unsigned long want_tci = yaml_ulong(expect, "vlan_tci", 0);
+        uint16_t got_tci = 0;
+        int tag_ok = found && last_n >= 18 &&
+                     pn_rd_be16(buf + 12) == PN_ETHTYPE_VLAN;
+        if (tag_ok) {
+            got_tci = pn_rd_be16(buf + 14);
+            tag_ok = got_tci == (uint16_t)want_tci;
+        }
+        rc |= ctt_check(run, idx, action, tag_ok,
+                        "vlan_tci expect=0x%04lx actual=0x%04x (PCP %u VID %u)",
+                        want_tci, got_tci, (unsigned)((got_tci >> 13) & 7u),
+                        (unsigned)(got_tci & 0x0fffu));
+    }
     rc |= finish_eth_step(run, step, idx, action, found, buf, (size_t)last_n);
     return rc;
 }
@@ -2009,7 +2093,8 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
             last_cmi_refresh = ctt_now_ns();
         }
         pump(run, priv);
-        drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1, NULL, NULL);
+        drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1, NULL,
+                        rtc1_data_len(priv), NULL);
         if (!pn_stack_ar_up(priv->stack)) {
             run->metrics.ar_drops++;
             break;
@@ -2018,7 +2103,8 @@ static int step_soak(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step,
     }
     /* catch frames that arrived on the last poll */
     pump(run, priv);
-    drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1, NULL, NULL);
+    drain_io_frames(run, &got, &last_ts, PN_ETHTYPE_PN, 1, NULL,
+                    rtc1_data_len(priv), NULL);
 
     unsigned unexp = run->metrics.unexpected_frames - unexp_before;
     unsigned drops = run->metrics.ar_drops - drops_before;

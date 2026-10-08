@@ -106,10 +106,10 @@ static size_t build_connect(uint8_t *pdu)
     return wrap_rpc(pdu, 0, stub, sn);
 }
 
-/* T12-7: RT Class 1 C_SDU is at least 40 octets (36 when an 802.1Q tag is
- * present). Padding is zero bytes between IO data/IOPS and APDUStatus, so
- * a short frame is 60 octets without FCS and the last 4 bytes stay
- * CycleCounter, DataStatus, TransferStatus. */
+/* T12-7 after T12-8: RTC1 is always 802.1Q-tagged, so C_SDU is at least
+ * 36 octets (18 + FrameID(2) + 36 + APDU(4) = 60). Padding is zero bytes
+ * between IO data/IOPS and APDUStatus. The untagged 40-octet rule is not
+ * used on the send path. */
 static void t12_7_arm(pn_stack_t *s)
 {
     pn_eth_ops_t ops = {.send = capture_send, .recv = NULL, .ctx = NULL};
@@ -132,6 +132,17 @@ static void t12_7_send(pn_stack_t *s)
     pn_rt_send_if_due(s);
 }
 
+static void expect_tag(const char *what)
+{
+    if (g_txlen < 18) {
+        return;
+    }
+    expect(pn_rd_be16(g_tx + 12) == PN_ETHTYPE_VLAN, what);
+    expect(pn_rd_be16(g_tx + 14) == PN_VLAN_TCI_RTC1, "t12-7 TCI PCP 6 VID 0");
+    expect(pn_rd_be16(g_tx + 16) == PN_ETHTYPE_PN, "t12-7 ethertype after tag");
+    expect(pn_rd_be16(g_tx + 18) == 0x8001, "t12-7 FrameID 0x8001");
+}
+
 static void test_t12_7_short_input_pads_before_apdu(void)
 {
     pn_stack_t *s = make_stack();
@@ -144,32 +155,29 @@ static void test_t12_7_short_input_pads_before_apdu(void)
     }
     t12_7_arm(s);
     /* IOCR DataLength is not what this rule follows. A stored length above
-     * the image is clamped, then the emitted C_SDU is still padded to 40. */
+     * the image is clamped, then the emitted C_SDU is still padded to 36. */
     s->ar.in_data_len = 200;
     t12_7_send(s);
     expect(g_ntx == 1, "t12-7 short sent");
     if (g_txlen != 60) {
         fprintf(stderr,
                 "FAIL: RTC1 frame length got %zu want 60 "
-                "(32B IO + IOPS, C_SDU padded to 40; got a short frame)\n",
+                "(32B IO + IOPS, tagged C_SDU padded to 36; got a short frame)\n",
                 g_txlen);
         g_fail = 1;
     }
-    if (g_txlen >= 16) {
-        expect(pn_rd_be16(g_tx + 12) == PN_ETHTYPE_PN, "t12-7 ethertype");
-        expect(pn_rd_be16(g_tx + 14) == 0x8001, "t12-7 FrameID 0x8001");
-    }
+    expect_tag("t12-7 tag at offset 12");
     if (g_txlen >= 60) {
         int data_ok = 1;
         for (int i = 0; i < 32; i++) {
-            if (g_tx[16 + i] != (uint8_t)(0x10 + i)) {
+            if (g_tx[20 + i] != (uint8_t)(0x10 + i)) {
                 data_ok = 0;
             }
         }
         expect(data_ok, "t12-7 IO data unchanged at C_SDU start");
-        expect(g_tx[48] == PN_IOPS_GOOD, "t12-7 IOPS immediately after IO data");
+        expect(g_tx[52] == PN_IOPS_GOOD, "t12-7 IOPS immediately after IO data");
         int pad_ok = 1;
-        for (size_t i = 49; i < 56; i++) {
+        for (size_t i = 53; i < 56; i++) {
             if (g_tx[i] != 0) {
                 pad_ok = 0;
             }
@@ -178,14 +186,14 @@ static void test_t12_7_short_input_pads_before_apdu(void)
         expect(pn_rd_be16(g_tx + 56) == 0, "t12-7 CycleCounter is the first APDU byte");
         expect(g_tx[58] == 0x35, "t12-7 DataStatus 0x35 at end-1, not NIC trailer");
         expect(g_tx[59] == 0, "t12-7 TransferStatus is the last byte");
-        expect(g_txlen - 14 - 2 - 4 == 40, "t12-7 C_SDU is 40");
+        expect(g_txlen - 18 - 2 - 4 == 36, "t12-7 C_SDU is 36");
     }
 
     t12_7_send(s);
     if (g_txlen >= 60) {
         expect(pn_rd_be16(g_tx + 56) == 1, "t12-7 next CycleCounter is +1 at the APDU");
         int pad_ok = 1;
-        for (size_t i = 49; i < 56; i++) {
+        for (size_t i = 53; i < 56; i++) {
             if (g_tx[i] != 0) {
                 pad_ok = 0;
             }
@@ -197,37 +205,40 @@ static void test_t12_7_short_input_pads_before_apdu(void)
 
 static void test_t12_7_one_byte_short_of_minimum(void)
 {
-    /* 38B data + IOPS = 39. One pad octet makes C_SDU 40 and the frame 60. */
+    /* 34B data + IOPS = 35. One pad octet makes C_SDU 36 and the frame 60. */
     pn_stack_t *s = make_stack();
     expect(s != NULL, "t12-7 boundary create");
     if (!s) {
         return;
     }
-    s->cfg.input_len = 38;
-    for (int i = 0; i < 38; i++) {
+    s->cfg.input_len = 34;
+    for (int i = 0; i < 34; i++) {
         s->input_image[i] = (uint8_t)i;
     }
     t12_7_arm(s);
     t12_7_send(s);
     if (g_txlen != 60) {
         fprintf(stderr,
-                "FAIL: RTC1 38B input frame length got %zu want 60 "
-                "(C_SDU 39 needs 1 pad octet)\n",
+                "FAIL: RTC1 34B input frame length got %zu want 60 "
+                "(C_SDU 35 needs 1 pad octet)\n",
                 g_txlen);
         g_fail = 1;
     }
     if (g_txlen >= 60) {
-        expect(g_tx[16 + 38] == PN_IOPS_GOOD, "t12-7 boundary IOPS");
-        expect(g_tx[16 + 39] == 0, "t12-7 single pad octet before APDU");
+        expect(pn_rd_be16(g_tx + 12) == PN_ETHTYPE_VLAN, "t12-7 boundary tag");
+        expect(g_tx[20 + 34] == PN_IOPS_GOOD, "t12-7 boundary IOPS");
+        expect(g_tx[20 + 35] == 0, "t12-7 single pad octet before APDU");
         expect(g_tx[58] == 0x35, "t12-7 boundary DataStatus at end");
-        expect(g_txlen - 14 - 2 - 4 == 40, "t12-7 boundary C_SDU 40");
+        expect(g_txlen - 18 - 2 - 4 == 36, "t12-7 boundary C_SDU 36");
     }
     pn_stack_destroy(s);
 }
 
 static void test_t12_7_long_csdu_is_not_padded(void)
 {
-    /* 48B + IOPS = 49 >= 40. APDUStatus follows IOPS with no gap. */
+    /* 48B + IOPS = 49 >= 36. APDUStatus follows IOPS with no gap.
+     * 38B + IOPS = 39 is above 36, so the old untagged minimum of 40
+     * must not add another octet. */
     pn_stack_t *s = make_stack();
     expect(s != NULL, "t12-7 long create");
     if (!s) {
@@ -240,12 +251,27 @@ static void test_t12_7_long_csdu_is_not_padded(void)
     t12_7_arm(s);
     s->ar.in_data_len = 48;
     t12_7_send(s);
-    expect(g_txlen == 69, "t12-7 long frame is 14+2+49+4");
-    if (g_txlen >= 69) {
-        expect(g_tx[16 + 48] == PN_IOPS_GOOD, "t12-7 long IOPS");
-        expect(pn_rd_be16(g_tx + 16 + 49) == 0, "t12-7 long CycleCounter follows IOPS");
+    expect(g_txlen == 73, "t12-7 long frame is 18+2+49+4");
+    if (g_txlen >= 73) {
+        expect(pn_rd_be16(g_tx + 12) == PN_ETHTYPE_VLAN, "t12-7 long tag");
+        expect(g_tx[20 + 48] == PN_IOPS_GOOD, "t12-7 long IOPS");
+        expect(pn_rd_be16(g_tx + 20 + 49) == 0, "t12-7 long CycleCounter follows IOPS");
         expect(g_tx[g_txlen - 2] == 0x35, "t12-7 long DataStatus");
-        expect(g_txlen - 14 - 2 - 4 == 49, "t12-7 long C_SDU stays 49");
+        expect(g_txlen - 18 - 2 - 4 == 49, "t12-7 long C_SDU stays 49");
+    }
+
+    s->cfg.input_len = 38;
+    s->ar.in_data_len = 38;
+    for (int i = 0; i < 38; i++) {
+        s->input_image[i] = (uint8_t)i;
+    }
+    t12_7_send(s);
+    expect(g_txlen == 63, "t12-7 39-octet C_SDU is not padded to 40");
+    if (g_txlen >= 63) {
+        expect(g_tx[20 + 38] == PN_IOPS_GOOD, "t12-7 38B IOPS");
+        expect(pn_rd_be16(g_tx + 20 + 39) == 1, "t12-7 38B CycleCounter follows IOPS");
+        expect(g_tx[g_txlen - 2] == 0x35, "t12-7 38B DataStatus");
+        expect(g_txlen - 18 - 2 - 4 == 39, "t12-7 38B C_SDU stays 39");
     }
     pn_stack_destroy(s);
 }
@@ -253,7 +279,7 @@ static void test_t12_7_long_csdu_is_not_padded(void)
 static void test_t12_7_short_image_ignores_larger_iocr_length(void)
 {
     /* in_data_len 4 is the IO image the stack will copy. Padding reaches
-     * the 40-octet minimum and does not grow to an IOCR DataLength. */
+     * the 36-octet minimum and does not grow to an IOCR DataLength. */
     pn_stack_t *s = make_stack();
     expect(s != NULL, "t12-7 image create");
     if (!s) {
@@ -269,37 +295,27 @@ static void test_t12_7_short_image_ignores_larger_iocr_length(void)
     if (g_txlen != 60) {
         fprintf(stderr,
                 "FAIL: RTC1 4B image frame length got %zu want 60 "
-                "(pad C_SDU to 40, not to an IOCR length)\n",
+                "(pad C_SDU to 36, not to an IOCR length)\n",
                 g_txlen);
         g_fail = 1;
     }
     if (g_txlen >= 60) {
-        expect(g_tx[16] == 0x11 && g_tx[17] == 0x22 && g_tx[18] == 0x33 &&
-                   g_tx[19] == 0x44,
+        expect(pn_rd_be16(g_tx + 12) == PN_ETHTYPE_VLAN, "t12-7 4B image tag");
+        expect(g_tx[20] == 0x11 && g_tx[21] == 0x22 && g_tx[22] == 0x33 &&
+                   g_tx[23] == 0x44,
                "t12-7 4B image kept");
-        expect(g_tx[20] == PN_IOPS_GOOD, "t12-7 IOPS after 4B image");
+        expect(g_tx[24] == PN_IOPS_GOOD, "t12-7 IOPS after 4B image");
         int pad_ok = 1;
-        for (size_t i = 21; i < 56; i++) {
+        for (size_t i = 25; i < 56; i++) {
             if (g_tx[i] != 0) {
                 pad_ok = 0;
             }
         }
-        expect(pad_ok, "t12-7 pad fills the rest of the 40-octet C_SDU");
+        expect(pad_ok, "t12-7 pad fills the rest of the 36-octet C_SDU");
         expect(g_tx[58] == 0x35, "t12-7 4B image DataStatus at end");
-        expect(g_txlen - 14 - 2 - 4 == 40, "t12-7 4B image C_SDU is the minimum 40");
+        expect(g_txlen - 18 - 2 - 4 == 36, "t12-7 4B image C_SDU is the minimum 36");
     }
     pn_stack_destroy(s);
-}
-
-static size_t t12_7_insert_vlan(uint8_t *frame, size_t len, size_t cap)
-{
-    if (len < 14 || len + 4 > cap) {
-        return 0;
-    }
-    memmove(frame + 16, frame + 12, len - 12);
-    pn_wr_be16(frame + 12, PN_ETHTYPE_VLAN);
-    pn_wr_be16(frame + 14, 0xC000); /* PCP 6, VID 0 */
-    return len + 4;
 }
 
 static size_t t12_7_raw_rtc1(uint8_t *frame, size_t cap, uint16_t fid,
@@ -318,25 +334,26 @@ static size_t t12_7_raw_rtc1(uint8_t *frame, size_t cap, uint16_t fid,
     pay[n++] = 0x35;
     pay[n++] = 0x00;
     uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
-    size_t flen = pn_eth_build(frame, cap, mac, mac, PN_ETHTYPE_PN, pay, n);
-    if (vlan && flen) {
-        flen = t12_7_insert_vlan(frame, flen, cap);
+    if (vlan) {
+        return pn_eth_build_vlan(frame, cap, mac, mac, PN_VLAN_TCI_RTC1,
+                                 PN_ETHTYPE_PN, pay, n);
     }
-    return flen;
+    return pn_eth_build(frame, cap, mac, mac, PN_ETHTYPE_PN, pay, n);
 }
 
 static void test_t12_7_vlan_minimum_is_36(void)
 {
     uint8_t frame[PN_FRAME_MAX];
-    /* 8B IO + IOPS = 9. VLAN header is 4 octets, so C_SDU minimum is 36
-     * and the frame is still 60. */
+    /* 8B IO + IOPS = 9. The tag is already on the frame, so C_SDU
+     * minimum is 36 and the frame is 60. */
     size_t n = t12_7_raw_rtc1(frame, sizeof(frame), 0x8001, 8, 1);
     expect(n == 18 + 2 + 9 + 4, "t12-7 vlan raw length before pad");
+    expect(pn_rd_be16(frame + 12) == PN_ETHTYPE_VLAN, "t12-7 raw tag at offset 12");
     n = pn_rtc1_pad_min_csdu(frame, n, sizeof(frame));
     expect(n == 60, "t12-7 vlan padded frame is 60");
     if (n == 60) {
         expect(pn_rd_be16(frame + 12) == PN_ETHTYPE_VLAN, "t12-7 vlan tag kept");
-        expect(pn_rd_be16(frame + 14) == 0xC000, "t12-7 vlan TCI kept");
+        expect(pn_rd_be16(frame + 14) == PN_VLAN_TCI_RTC1, "t12-7 vlan TCI kept");
         expect(pn_rd_be16(frame + 16) == PN_ETHTYPE_PN, "t12-7 vlan ethertype");
         expect(pn_rd_be16(frame + 18) == 0x8001, "t12-7 vlan FrameID");
         expect(frame[20 + 8] == PN_IOPS_GOOD, "t12-7 vlan IOPS after IO data");
@@ -352,24 +369,24 @@ static void test_t12_7_vlan_minimum_is_36(void)
         expect(n - 18 - 2 - 4 == 36, "t12-7 vlan C_SDU minimum is 36");
     }
 
-    /* Already 40 octets of C_SDU: a tag does not shrink it to 36. */
+    /* Already 40 octets of C_SDU: the minimum does not shrink it to 36. */
     n = t12_7_raw_rtc1(frame, sizeof(frame), 0x8001, 39, 1);
     size_t raw = n;
     n = pn_rtc1_pad_min_csdu(frame, n, sizeof(frame));
     expect(n == raw && n == 18 + 2 + 40 + 4, "t12-7 vlan does not shrink a 40-octet C_SDU");
 
-    /* Untagged short payload through the same function pads to 40. */
+    /* Untagged short payload is not padded to 40. That rule is not used. */
     n = t12_7_raw_rtc1(frame, sizeof(frame), 0x8001, 8, 0);
+    size_t untagged = n;
     n = pn_rtc1_pad_min_csdu(frame, n, sizeof(frame));
-    expect(n == 60, "t12-7 untagged helper frame is 60");
-    expect(n - 14 - 2 - 4 == 40, "t12-7 untagged helper C_SDU is 40");
-    expect(pn_rd_be16(frame + 56) == 0x0007, "t12-7 untagged helper CycleCounter");
+    expect(n == untagged && n == 14 + 2 + 9 + 4, "t12-7 untagged frame is not padded to 40");
+    expect(pn_rd_be16(frame + 12) == PN_ETHTYPE_PN, "t12-7 untagged ethertype stays");
 
     /* DCP and a too-small buffer are not rewritten into a padded RTC1. */
-    n = t12_7_raw_rtc1(frame, sizeof(frame), PN_FRAMEID_DCP_ID_REQ, 8, 0);
+    n = t12_7_raw_rtc1(frame, sizeof(frame), PN_FRAMEID_DCP_ID_REQ, 8, 1);
     size_t dcp = pn_rtc1_pad_min_csdu(frame, n, sizeof(frame));
     expect(dcp == n, "t12-7 DCP frame is not padded");
-    n = t12_7_raw_rtc1(frame, sizeof(frame), 0x8001, 8, 0);
+    n = t12_7_raw_rtc1(frame, sizeof(frame), 0x8001, 8, 1);
     expect(pn_rtc1_pad_min_csdu(frame, n, n) == 0, "t12-7 pad that does not fit returns 0");
 }
 

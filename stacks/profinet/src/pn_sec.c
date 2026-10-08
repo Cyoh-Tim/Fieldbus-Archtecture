@@ -51,8 +51,12 @@ int pn_alarm_send_dummy(pn_stack_t *s, uint16_t frame_id)
     pn_wr_be16(pay + 20, 0x8000); /* manufacturer-specific USI */
 
     uint8_t frame[PN_FRAME_MAX];
-    size_t flen = pn_eth_build(frame, sizeof(frame), s->ar.initiator_mac,
-                               s->cfg.mac, PN_ETHTYPE_PN, pay, sizeof(pay));
+    /* Always tagged. High is PCP 6, Low is PCP 5. Not the Connect header. */
+    uint16_t tci = (frame_id == PN_FRAMEID_ALARM_LOW) ? PN_VLAN_TCI_ALARM_LOW
+                                                      : PN_VLAN_TCI_ALARM_HIGH;
+    size_t flen = pn_eth_build_vlan(frame, sizeof(frame), s->ar.initiator_mac,
+                                    s->cfg.mac, tci, PN_ETHTYPE_PN, pay,
+                                    sizeof(pay));
     if (!flen) {
         return -EMSGSIZE;
     }

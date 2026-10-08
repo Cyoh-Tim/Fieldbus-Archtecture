@@ -16,5 +16,6 @@ steps:
       ar: up
   - action: alarm
     expect:
-      ethertype: 0x8892
+      ethertype: 0x8892         # inner EtherType, after 802.1Q
+      vlan_tci: 0xC000          # alarm high: PCP 6, VID 0
       frame_id: 0xFC01          # PN_FRAMEID_ALARM_HIGH

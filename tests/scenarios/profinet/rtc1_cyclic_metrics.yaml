@@ -31,3 +31,4 @@ steps:
       max_missed: 0             # dt > 2 * cycle_us
       jitter_max_ms: 16         # max |dt - cycle_us|
       ethertype: 0x8892
+      vlan_tci: 0xC000          # PCP 6, VID 0

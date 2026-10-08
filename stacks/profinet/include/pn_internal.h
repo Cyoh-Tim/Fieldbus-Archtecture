@@ -148,6 +148,12 @@ int pn_eth_recv(pn_stack_t *s, uint8_t *frame, size_t cap);
 size_t pn_eth_build(uint8_t *out, size_t cap, const uint8_t dst[6],
                     const uint8_t src[6], uint16_t ethertype,
                     const uint8_t *payload, size_t plen);
+/* tci == 0: same bytes as pn_eth_build. Otherwise 802.1Q (TPID 0x8100,
+ * TCI, then ethertype). TCI is PCP(15..13) | DEI(12) | VID(11..0).
+ * RTC1 and alarms always pass a non-zero fixed TCI. */
+size_t pn_eth_build_vlan(uint8_t *out, size_t cap, const uint8_t dst[6],
+                         const uint8_t src[6], uint16_t tci, uint16_t ethertype,
+                         const uint8_t *payload, size_t plen);
 int pn_eth_parse(const uint8_t *frame, size_t len, const uint8_t **payload,
                  size_t *plen, uint16_t *ethertype, const uint8_t **dst,
                  const uint8_t **src);
@@ -165,10 +171,11 @@ void pn_lldp_send(pn_stack_t *s);
 
 void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen);
 void pn_rt_send_if_due(pn_stack_t *s);
-/* RT Class 1 minimum C_SDU: 40 octets, or 36 when the frame has an
- * 802.1Q tag, so the frame without FCS is at least 60 octets.
- * Zero padding is inserted before APDUStatus. Other frame types are
- * unchanged. Returns 0 when the pad does not fit in cap. */
+/* RTC1 TX is always one 802.1Q tag, so the minimum C_SDU is 36
+ * (18 + FrameID(2) + 36 + APDU(4) = 60 without FCS). The untagged
+ * 40-octet rule is not applied. Zero padding is inserted before
+ * APDUStatus. Other frame types are unchanged. Returns 0 when the
+ * pad does not fit in cap. */
 size_t pn_rtc1_pad_min_csdu(uint8_t *frame, size_t len, size_t cap);
 void pn_ar_abort(pn_stack_t *s, const char *why);
 void pn_ar_watchdog(pn_stack_t *s);

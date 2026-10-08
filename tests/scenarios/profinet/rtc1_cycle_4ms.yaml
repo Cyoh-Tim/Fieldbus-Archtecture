@@ -30,4 +30,5 @@ steps:
       max_late: 16
       max_missed: 0
       jitter_max_ms: 16
-      ethertype: 0x8892
+      ethertype: 0x8892         # inner EtherType, after 802.1Q
+      vlan_tci: 0xC000          # PCP 6, VID 0
