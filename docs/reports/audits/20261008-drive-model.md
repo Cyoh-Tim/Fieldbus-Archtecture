@@ -3,7 +3,7 @@
 - 영역: 코어 사이클 루프 + Modbus·SLMP 서버/클라이언트 구동
 - 출처: 저장소 담당자 지시 (2026-10-08). 설계 원칙은 [`docs/design.md`](../../design.md) 1장 5항.
 - 기준 커밋: `2a211d1` (main)
-- 큐 추가: 3개 (A20261008-1, -2, -3). 순서대로 한다 (-2, -3 은 -1 이후).
+- 큐 추가: 3개 (A20261008-1 → 큐 20, -2 → 21, -3 → 22). 담당자 결정으로 기존 20 번 앞에 넣었다. -2, -3 은 -1 이후.
 - 판정 근거: Modbus Application Protocol V1.1b3 / Messaging on TCP/IP Implementation Guide V1.0b
   (요청-응답, 주기 없음), MELSEC SLMP Reference Manual (요청-응답, 3E), pymodbus 3.15.0 / pymcprotocol 0.3.0 으로 잰
   응답 시간. 기대값은 스택 코드에서 만들지 않았다.
