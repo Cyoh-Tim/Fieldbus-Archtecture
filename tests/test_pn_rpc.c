@@ -1113,10 +1113,12 @@ static void test_t12_6_rtc1_datastatus_run(void)
     g_ntx = 0;
     g_txlen = 0;
     pn_rt_send_if_due(s);
-    expect(g_ntx >= 1 && g_txlen >= 18, "t12-6 RTC1 frame sent");
-    if (g_txlen >= 18) {
-        uint16_t et = pn_rd_be16(g_tx + 12);
-        uint16_t fid = pn_rd_be16(g_tx + 14);
+    expect(g_ntx >= 1 && g_txlen >= 22, "t12-6 RTC1 frame sent");
+    if (g_txlen >= 22) {
+        /* RTC1 is 802.1Q-tagged: EtherType and FrameID follow the TCI. */
+        size_t fid_off = (pn_rd_be16(g_tx + 12) == PN_ETHTYPE_VLAN) ? 18u : 14u;
+        uint16_t et = pn_rd_be16(g_tx + fid_off - 2);
+        uint16_t fid = pn_rd_be16(g_tx + fid_off);
         uint8_t ds = g_tx[g_txlen - 2];
         uint8_t ts = g_tx[g_txlen - 1];
         expect(et == PN_ETHTYPE_PN, "t12-6 ethertype 0x8892");

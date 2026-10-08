@@ -25,4 +25,5 @@ steps:
     expect:
       min_frames: 16
       period_max_ms: 20         # mock soft bound. IRT/µs 아님
-      ethertype: 0x8892
+      ethertype: 0x8892         # inner EtherType, after 802.1Q
+      vlan_tci: 0xC000          # PCP 6, VID 0

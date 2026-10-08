@@ -48,6 +48,25 @@ size_t pn_eth_build(uint8_t *out, size_t cap, const uint8_t dst[6],
     return 14 + plen;
 }
 
+size_t pn_eth_build_vlan(uint8_t *out, size_t cap, const uint8_t dst[6],
+                         const uint8_t src[6], uint16_t tci, uint16_t ethertype,
+                         const uint8_t *payload, size_t plen)
+{
+    if (tci == 0) {
+        return pn_eth_build(out, cap, dst, src, ethertype, payload, plen);
+    }
+    if (cap < 18 + plen) {
+        return 0;
+    }
+    memcpy(out, dst, 6);
+    memcpy(out + 6, src, 6);
+    pn_wr_be16(out + 12, PN_ETHTYPE_VLAN);
+    pn_wr_be16(out + 14, tci);
+    pn_wr_be16(out + 16, ethertype);
+    memcpy(out + 18, payload, plen);
+    return 18 + plen;
+}
+
 int pn_eth_parse(const uint8_t *frame, size_t len, const uint8_t **payload,
                  size_t *plen, uint16_t *ethertype, const uint8_t **dst,
                  const uint8_t **src)

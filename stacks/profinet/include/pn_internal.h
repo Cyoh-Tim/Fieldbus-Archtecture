@@ -148,6 +148,12 @@ int pn_eth_recv(pn_stack_t *s, uint8_t *frame, size_t cap);
 size_t pn_eth_build(uint8_t *out, size_t cap, const uint8_t dst[6],
                     const uint8_t src[6], uint16_t ethertype,
                     const uint8_t *payload, size_t plen);
+/* tci == 0: same bytes as pn_eth_build. Otherwise 802.1Q (TPID 0x8100,
+ * TCI, then ethertype). TCI is PCP(15..13) | DEI(12) | VID(11..0).
+ * RTC1 and alarms always pass a non-zero fixed TCI. */
+size_t pn_eth_build_vlan(uint8_t *out, size_t cap, const uint8_t dst[6],
+                         const uint8_t src[6], uint16_t tci, uint16_t ethertype,
+                         const uint8_t *payload, size_t plen);
 int pn_eth_parse(const uint8_t *frame, size_t len, const uint8_t **payload,
                  size_t *plen, uint16_t *ethertype, const uint8_t **dst,
                  const uint8_t **src);
