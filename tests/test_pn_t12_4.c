@@ -333,10 +333,17 @@ static void test_t12_4_iocr_offsets_and_blocks(void)
     size_t paylen = 0;
     int saw = 0;
     for (int i = 0; i < g_t124_ntx; i++) {
-        if (g_t124_txlen[i] >= 16 && pn_rd_be16(g_t124_tx[i] + 12) == PN_ETHTYPE_PN &&
-            pn_rd_be16(g_t124_tx[i] + 14) == 0x8001) {
-            pay = g_t124_tx[i] + 14;
-            paylen = g_t124_txlen[i] - 14;
+        /* RTC1 is 802.1Q-tagged: TPID at 12, EtherType at 16, FrameID at 18. */
+        size_t fid_off = 14;
+        if (g_t124_txlen[i] >= 18 &&
+            pn_rd_be16(g_t124_tx[i] + 12) == PN_ETHTYPE_VLAN) {
+            fid_off = 18;
+        }
+        if (g_t124_txlen[i] >= fid_off + 2 &&
+            pn_rd_be16(g_t124_tx[i] + fid_off - 2) == PN_ETHTYPE_PN &&
+            pn_rd_be16(g_t124_tx[i] + fid_off) == 0x8001) {
+            pay = g_t124_tx[i] + fid_off;
+            paylen = g_t124_txlen[i] - fid_off;
             saw = 1;
             break;
         }

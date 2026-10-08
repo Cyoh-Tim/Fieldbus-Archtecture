@@ -36,6 +36,7 @@ steps:
       contains: CYC-PAYLOAD
       cycle_counter: increasing
       ethertype: 0x8892
+      vlan_tci: 0xC000          # PCP 6, VID 0
   - action: rt_output
     fill: 0x5A
     frame_id: 0x8002

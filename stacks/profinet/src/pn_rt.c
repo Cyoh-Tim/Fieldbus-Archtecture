@@ -313,8 +313,11 @@ void pn_rt_send_if_due(pn_stack_t *s)
     uint8_t dst[6];
     memcpy(dst, s->ar.initiator_mac, 6);
     uint8_t frame[PN_FRAME_MAX];
-    size_t flen =
-        pn_eth_build(frame, sizeof(frame), dst, s->cfg.mac, PN_ETHTYPE_PN, pay, n);
+    /* Always 802.1Q. TCI is PCP 6 / VID 0, not the Connect IOCRTagHeader.
+     * No minimum-length pad here (T12-7). With this tag a 60-byte frame
+     * needs C_SDU >= 36; that pad belongs to T12-7. */
+    size_t flen = pn_eth_build_vlan(frame, sizeof(frame), dst, s->cfg.mac,
+                                    PN_VLAN_TCI_RTC1, PN_ETHTYPE_PN, pay, n);
     if (flen) {
         pn_eth_send(s, frame, flen);
     }

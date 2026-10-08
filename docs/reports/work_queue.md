@@ -87,6 +87,7 @@
 | 63 | A20261004-2 | Modbus 클라이언트가 요청 수량과 Byte Count 가 다른 FC01~04 응답을 rc 0 으로 받음 (없는 값은 이전 미러·초기화 안 된 스택 메모리) | `stacks/modbus/`, `tests/` | A20261004-2 ×3 | 출처 12단계 감사, 보고서 [audits/20261004-modbus.md](audits/20261004-modbus.md) |
 | 64 | A20261004-3 | Modbus 클라이언트가 요청과 Unit ID 가 다른 응답을 받음 (pymodbus 는 버림) | `stacks/modbus/`, `tests/` | A20261004-3 | 출처 12단계 감사, 보고서 [audits/20261004-modbus.md](audits/20261004-modbus.md). 읽기·쓰기 세 응답 경로 모두 |
 | 65 | A20261004-4 | Modbus 클라이언트 모드에서 실패한 쓰기(PLC 예외, input 거부)의 값이 로컬 미러에 남아 fb_read 가 PLC 가 받지 않은 값을 돌려줌 | `adapters/modbus/`, `tests/` | A20261004-4 ×2 | 출처 12단계 감사, 보고서 [audits/20261004-modbus.md](audits/20261004-modbus.md) |
+| 66 | A20261007-1 | PN Connect 의 IOCRTagHeader·AlarmCRTagHeader 값을 검사하지 않음 (사양: `DB 81 02 11`, `DB 81 04 11/12` 로 거부) | `stacks/profinet/`, `tests/` | A20261007-1 ×2 | 출처 #96 검증, 보고서 [audits/20261007-pn-tag-header.md](audits/20261007-pn-tag-header.md). 큐 59 또는 16 (`reply_pnio_err` 원인 코드) 이후 |
 
 ## 이슈 본문 템플릿
 

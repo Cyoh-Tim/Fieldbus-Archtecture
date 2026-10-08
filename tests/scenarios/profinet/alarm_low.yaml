@@ -17,6 +17,7 @@ steps:
   - action: alarm
     priority: low
     expect:
-      ethertype: 0x8892
+      ethertype: 0x8892         # inner EtherType, after 802.1Q
+      vlan_tci: 0xA000          # alarm low: PCP 5, VID 0
       frame_id: 0xFE01
     golden: tests/golden/profinet/alarm_low.pcap
