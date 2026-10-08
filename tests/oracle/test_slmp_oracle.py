@@ -225,12 +225,12 @@ def slmp_app(tmp_path):
     """points 로 서버 모드 SLMP 어댑터를 띄우고 (앱, pymcprotocol 클라이언트) 를 돌려준다."""
     apps = []
 
-    def make(points):
+    def make(points, cycle_ms=5):
         port = free_port()
         cfg = {
             "protocol": "slmp",
             "device": {"name": "oracle", "role": "server"},
-            "cycle_ms": 5,
+            "cycle_ms": cycle_ms,
             "protocol_params": {"role": "server", "ip": "127.0.0.1", "port": port},
             "points": points,
         }
@@ -316,3 +316,22 @@ def test_adapter_32bit_default_is_low_word_first(slmp_app, data_type, write, exp
                           "address": {"slmp": {"device_code": "D", "start": 310}}}])
     assert app.cmd(write) == ["W", "0"]
     assert u16(plc.batchread_wordunits(headdevice="D310", readsize=2)) == expect
+
+
+# ---------------------------------------------------------------- 구동 모델 (docs/design.md 1장 5항)
+# SLMP 는 요청-응답형이라 사이클이 없다. 서버(시뮬) 응답 지연은 cycle_ms 와 무관해야 한다.
+# 판정: pymcprotocol 이 잰 왕복 시간 (cycle_ms=1000, 상한 100ms — Modbus 오라클과 같은 기준).
+@known_defect("A20261008-3", "서버가 cycle_ms 마다만 요청을 확인한다 (cycle_ms=1000 이면 응답이 최대 ~1초 늦음). 요청-응답형은 도착 즉시 응답해야 한다")
+def test_server_response_does_not_wait_for_cycle(slmp_app):
+    app, plc = slmp_app([
+        {"name": "p", "access": "readwrite", "data_type": "uint16",
+         "address": {"slmp": {"device_code": "D", "start": 400}}},
+    ], cycle_ms=1000)
+    plc.soc_timeout = 3
+    worst = 0.0
+    for _ in range(5):
+        time.sleep(0.137)  # 요청 시점을 사이클 경계와 어긋나게
+        t0 = time.monotonic()
+        plc.batchread_wordunits(headdevice="D400", readsize=1)
+        worst = max(worst, time.monotonic() - t0)
+    assert worst < 0.1, f"cycle_ms=1000 에서 최대 응답 {worst * 1000:.0f} ms"

@@ -87,6 +87,9 @@
 | 63 | A20261004-2 | Modbus 클라이언트가 요청 수량과 Byte Count 가 다른 FC01~04 응답을 rc 0 으로 받음 (없는 값은 이전 미러·초기화 안 된 스택 메모리) | `stacks/modbus/`, `tests/` | A20261004-2 ×3 | 출처 12단계 감사, 보고서 [audits/20261004-modbus.md](audits/20261004-modbus.md) |
 | 64 | A20261004-3 | Modbus 클라이언트가 요청과 Unit ID 가 다른 응답을 받음 (pymodbus 는 버림) | `stacks/modbus/`, `tests/` | A20261004-3 | 출처 12단계 감사, 보고서 [audits/20261004-modbus.md](audits/20261004-modbus.md). 읽기·쓰기 세 응답 경로 모두 |
 | 65 | A20261004-4 | Modbus 클라이언트 모드에서 실패한 쓰기(PLC 예외, input 거부)의 값이 로컬 미러에 남아 fb_read 가 PLC 가 받지 않은 값을 돌려줌 | `adapters/modbus/`, `tests/` | A20261004-4 ×2 | 출처 12단계 감사, 보고서 [audits/20261004-modbus.md](audits/20261004-modbus.md) |
+| 66 | A20261008-1 | 코어 이벤트 구동 지원: 어댑터 선택 함수 `wait_fds` + `poll()` 대기, reload 시 대기 스레드 quiesce, `thread_stop` atomic | `include/protocol_adapter.h`, `core/`, `tests/` | 없음 | 출처 담당자 지시(2026-10-08), 설계 [design.md](../design.md) 1장 5항, 보고서 [audits/20261008-drive-model.md](audits/20261008-drive-model.md). 참고 diff 가 보고서에 있음. `include/protocol_adapter.h` 변경은 이 항목에서 허용 |
+| 67 | A20261008-2 | Modbus 서버 이벤트 구동 (cycle_ms=1000 에서 응답 최대 863ms), 클라이언트 `poll_interval_ms` | `stacks/modbus/`, `adapters/modbus/`, `tests/`, `docs/modbus_stack.md` | A20261008-2 | A20261008-1 이후. 보고서 [audits/20261008-drive-model.md](audits/20261008-drive-model.md) |
+| 68 | A20261008-3 | SLMP 서버(시뮬) 이벤트 구동 (cycle_ms=1000 에서 응답 최대 863ms), 클라이언트 `poll_interval_ms` | `stacks/slmp/`, `adapters/slmp/`, `tests/`, `docs/slmp_stack.md` | A20261008-3 | A20261008-1 이후. 보고서 [audits/20261008-drive-model.md](audits/20261008-drive-model.md) |
 
 ## 이슈 본문 템플릿
 
