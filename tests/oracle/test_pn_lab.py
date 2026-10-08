@@ -194,7 +194,7 @@ def test_pnlab_device_uses_interface_mac(session):
     assert srcs == {session["iface_mac"]}, f"RTC1 출발지 {srcs}"
 
 
-@known_defect("T12-8", "RTC1 에 802.1Q 태그(PCP 6, VID 0)가 없다 (선로 위 확인)")
+# T12-8 (#96): RTC1 은 항상 802.1Q 태그 0xC000 (p-net pf_ppm.c, Siemens EDDS).
 def test_pnlab_rtc1_vlan_tag(session):
     f = session["rtc1"][-1]
     assert f.haslayer(Dot1Q) and f[Dot1Q].prio == 6 and f[Dot1Q].vlan == 0
