@@ -36,6 +36,18 @@
    IRT / CC-C 는 켜지 않는다 (permanent non-goal). 인증/CRA 는 제품 프로세스.
 6. CC-Link 스텁은 사양이 확정되기 전까지 건드리지 않는다.
 
+## 구동 모델 (cycle vs event) — docs/design.md 1장 5항
+- **Modbus / SLMP 에서는 고정 사이클(`cycle_ms`, 8ms) 기반 구동을 지양한다.**
+  요청-응답형이라 프로토콜에 사이클이 없다.
+  - 서버 역할: 소켓 이벤트로 구동 (요청 도착 즉시 처리, 없으면 잠듦).
+  - 클라이언트 역할: 쓰기는 즉시 전송, 읽기만 필요한 갱신 주기로 폴링.
+- 고정 사이클은 주기 I/O 프로토콜(PROFINET, EtherNet/IP)에만 쓴다.
+- 이벤트 구동은 어댑터 인터페이스의 선택 함수(`wait_fds`)로 코어에 알린다.
+  코어에 프로토콜 분기를 넣지 않는다. 대기는 `poll()` (프로세스당 프로토콜
+  하나라 fd 가 적음 — `epoll` 불필요).
+- Modbus/SLMP 어댑터에서 새로 "매 사이클마다 확인/전송" 로직을 추가하지 않는다.
+  기존 `poll_cycle` 기반 구현은 위 방향으로 옮겨갈 대상이다.
+
 ## 코딩 컨벤션
 - C11, 각 어댑터는 `protocol_adapter_t*`를 반환하는 `<name>_adapter_create()`
   하나만 공개 API로 노출한다.
@@ -47,7 +59,7 @@
 
 ## 테스트 관련 메모
 - 8ms 사이클 기준 에이징 테스트(1~2시간, PREEMPT_RT 미적용) 결과 최대 지연
-  편차 0.1ms 확인됨. 스케줄러(`core/scheduler.c`) 관련 변경 시 이 여유 폭을
+  편차 0.1ms 확인됨 (주기 구동 프로토콜 기준). 스케줄러(`core/scheduler.c`) 관련 변경 시 이 여유 폭을
   참고해 회귀 여부를 판단할 것.
 - CTT: `cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON` 후
   `ctest --test-dir build --output-on-failure -LE soak_ci`.
