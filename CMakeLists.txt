@@ -327,6 +327,8 @@ if(BUILD_ORACLE_DUTS)
     target_link_libraries(eip_oracle_originator PRIVATE eip_stack)
     add_executable(pn_oracle_pipe tests/oracle/dut/pn_oracle_pipe.c)
     target_link_libraries(pn_oracle_pipe PRIVATE pn_stack)
+    add_executable(pn_oracle_lab tests/oracle/dut/pn_oracle_lab.c)
+    target_link_libraries(pn_oracle_lab PRIVATE pn_stack)
     add_executable(mb_oracle_client tests/oracle/dut/mb_oracle_client.c)
     target_link_libraries(mb_oracle_client PRIVATE mb_stack)
     # 어댑터 수준 DUT (fb_api + adapters/*). 코어·어댑터가 cJSON 을 쓰므로 BUILD_DAEMON=ON 일 때만.
