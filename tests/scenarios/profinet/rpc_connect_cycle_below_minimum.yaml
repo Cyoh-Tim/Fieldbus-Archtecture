@@ -1,0 +1,31 @@
+# T5: 8 ms device rejects a 4 ms input IOCR (SCF=32, RR=4).
+# PNIOStatus DB 81 02 0B (ReductionRatio). Rejected Connect sends no RTC1.
+name: rpc_connect_cycle_below_minimum
+id: PN-B-NEG-009
+suite: PN-B-v1
+protocol: profinet
+tags: [rpc, connect, negative, cycle]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  cycle_us: 8000
+  input_len: 32
+  output_len: 8
+steps:
+  - action: rpc_connect
+    integrity: false
+    send_clock_factor: 32
+    reduction_ratio: 4
+    expect:
+      rpc_response: true
+      ar: rejected
+      pniostatus: 0xDB81020B
+  - action: io_cycle
+    require_ar: false
+    count: 8
+    cycle_ms: 8
+    expect:
+      ar: down
+      min_frames: 0
+      max_frames: 0

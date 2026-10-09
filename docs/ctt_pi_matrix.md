@@ -52,6 +52,7 @@
 | `dcp_set_name_boundary.yaml` | DCP NameOfStation boundary | mock | — | `PN-B-NEG-006`. 240 DNS-label accept; oversize / IP / `port-xyz` reject |
 | `dcp_malformed.yaml` | DCP truncated / unknown option | mock | — | `PN-B-NEG-007`. name unchanged |
 | `rpc_cm_without_ar.yaml` | CM/Alarm/output without AR | mock | — | `PN-B-NEG-008`. Control fail-closed |
+| `rpc_connect_cycle_below_minimum.yaml` | CM Connect reject (cycle below minimum) | mock | — | `PN-B-NEG-009`. 8 ms device, SCF=32 RR=4, PNIOStatus `DB 81 02 0B`, no RTC1 |
 | `lldp.yaml` | LLDP (CC-B) | mock | veth 가능 | `PN-B-NBR-001`. ethertype `0x88CC` |
 | `snmp_get_sysname.yaml` | SNMP (CC-B) | mock (`handle_snmp`) | **UDP 161** when `device.ip` set | `PN-B-NBR-002` |
 | `soak_short.yaml` | RTC1 soak (내부) | mock (`ctest`) | 권장하지 않음 | `PN-B-CYC-010`. 회귀 길이 + metrics |

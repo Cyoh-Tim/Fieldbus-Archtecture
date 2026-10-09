@@ -1,24 +1,24 @@
 {
-  "generated_at": "2026-09-09T15:01:07Z",
+  "generated_at": "2026-10-09T05:54:20Z",
   "generator": "tools/ctt/gen_board_data.py",
   "disclaimer": "내부 CTT 보드입니다. 내부 bundle-grade 게이트 ≠ PI / ODVA / Modbus.org / Mitsubishi 공식 인증. 배지는 시나리오가 기본 mock CI(`ctest -LE soak_ci`)에 등록되는지·매트릭스에 갭/범위 밖으로 적혀 있는지를 분류한 것이며, 이 페이지가 ctest 를 실행하지는 않습니다.",
   "ci_default": "ctest --test-dir build --output-on-failure -LE soak_ci",
   "note": "pass = YAML registered in CMake and included in default mock CI. skip = soak_ci / nightly / lab (opt-in). gap = matrix DUT-not-implemented or not-yet. out_of_scope = CC-C/IRT, official cert labs, EtherCAT, etc. Internal bundle-grade gate != PI / ODVA certification. PROFINET catalog: docs/ctt_pn_bundle.md (PN-B-* ids). EtherNet/IP catalog: docs/ctt_eip_bundle.md (EIP-A-* ids). Modbus TCP catalog: docs/ctt_mb_bundle.md (MB-T-* ids). SLMP Binary 3E catalog: docs/ctt_slmp_bundle.md (SLMP-3E-* ids).",
   "counts": {
-    "pass": 72,
+    "pass": 73,
     "skip": 7,
     "gap": 9,
     "out_of_scope": 13,
-    "total": 101,
-    "scenarios": 77
+    "total": 102,
+    "scenarios": 78
   },
   "by_protocol": {
     "profinet": {
-      "pass": 31,
+      "pass": 32,
       "skip": 4,
       "gap": 2,
       "out_of_scope": 3,
-      "total": 40
+      "total": 41
     },
     "ethernetip": {
       "pass": 18,
@@ -680,6 +680,38 @@
         "security",
         "negative",
         "bundle"
+      ],
+      "source": "yaml",
+      "matrix": "docs/ctt_pi_matrix.md",
+      "kind": "scenario",
+      "golden": false,
+      "protocol_label": "PROFINET",
+      "status_label_ko": "통과",
+      "cover": null
+    },
+    {
+      "id": "rpc_connect_cycle_below_minimum",
+      "bundle_id": "PN-B-NEG-009",
+      "suite": "PN-B-v1",
+      "protocol": "profinet",
+      "filename": "rpc_connect_cycle_below_minimum.yaml",
+      "path": "tests/scenarios/profinet/rpc_connect_cycle_below_minimum.yaml",
+      "title": "CM Connect reject (cycle below minimum)",
+      "title_ko": "CM Connect reject (cycle below minimum)",
+      "description": "PN-B-NEG-009. 8 ms device, SCF=32 RR=4, PNIOStatus DB 81 02 0B, no RTC1",
+      "status": "pass",
+      "reason": "covered in default mock CI (ctest -LE soak_ci)",
+      "ctest_name": "ctt_pn_rpc_connect_cycle_below_minimum",
+      "ctest_registered": true,
+      "ci_default": true,
+      "labels": [
+        "profinet"
+      ],
+      "tags": [
+        "rpc",
+        "connect",
+        "negative",
+        "cycle"
       ],
       "source": "yaml",
       "matrix": "docs/ctt_pi_matrix.md",

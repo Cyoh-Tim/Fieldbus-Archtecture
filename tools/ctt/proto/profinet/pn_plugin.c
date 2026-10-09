@@ -845,9 +845,12 @@ static size_t ndr_wrap(uint8_t *out, const uint8_t *blocks, size_t n)
     return 20 + n;
 }
 
+/* with_iocr: optional input IOCR. Absent YAML keys keep the AR-only
+ * Connect (no IOCR). SCF/RR are SendClockFactor and ReductionRatio. */
 static size_t build_connect_pdu(uint8_t *pdu, size_t cap, int integrity,
                                 int integrity_bad, const uint8_t *psk,
-                                int psk_set, const uint8_t initiator_mac[6])
+                                int psk_set, const uint8_t initiator_mac[6],
+                                int with_iocr, uint16_t scf, uint16_t rr)
 {
     if (cap < 80 + 20 + 64) {
         return 0;
@@ -866,6 +869,16 @@ static size_t build_connect_pdu(uint8_t *pdu, size_t cap, int integrity,
     pn_wr_be16(ar + 18, 1);
     memcpy(ar + 20, initiator_mac, 6);
     bn += wr_pn_block(blocks + bn, PN_BLOCK_AR_REQ, ar, sizeof(ar));
+
+    if (with_iocr) {
+        uint8_t inb[18];
+        memset(inb, 0, sizeof(inb));
+        pn_wr_be16(inb, PN_IOCR_INPUT);
+        pn_wr_be16(inb + 12, 0x8001);
+        pn_wr_be16(inb + 14, scf);
+        pn_wr_be16(inb + 16, rr);
+        bn += wr_pn_block(blocks + bn, PN_BLOCK_IOCR_REQ, inb, sizeof(inb));
+    }
 
     if (integrity) {
         if (!psk_set) {
@@ -959,10 +972,17 @@ static int step_rpc_connect(ctt_run_t *run, pn_priv_t *priv,
     parse_integrity(step, &integrity, &integrity_bad);
     const yaml_node_t *expect = yaml_map_get(step, "expect");
     const pn_cfg_t *cfg = pn_stack_cfg(priv->stack);
+    /* Either key adds an input IOCR. A missing partner defaults to
+     * SCF 32 / RR 8 (8 ms). Neither key: AR-only, same as before. */
+    int with_iocr = yaml_has(step, "send_clock_factor") ||
+                    yaml_has(step, "reduction_ratio");
+    uint16_t scf = (uint16_t)yaml_ulong(step, "send_clock_factor", 32);
+    uint16_t rr = (uint16_t)yaml_ulong(step, "reduction_ratio", 8);
 
     uint8_t pdu[512];
     size_t plen = build_connect_pdu(pdu, sizeof(pdu), integrity, integrity_bad,
-                                    cfg->psk, cfg->psk_set, priv->ctl_mac);
+                                    cfg->psk, cfg->psk_set, priv->ctl_mac,
+                                    with_iocr, scf, rr);
     if (plen == 0) {
         ctt_failf(run, idx, action, "failed to build Connect PDU");
         return -1;
@@ -1015,6 +1035,15 @@ static int step_rpc_connect(ctt_run_t *run, pn_priv_t *priv,
                              "out_frame_id expect=0x%04lx actual=0x%04x",
                              want_out, out_fid);
         }
+    }
+    if (expect && yaml_has(expect, "pniostatus")) {
+        unsigned long want = yaml_ulong(expect, "pniostatus", 0);
+        uint32_t got = 0xffffffffu;
+        if (rlen >= 84) {
+            got = pn_rd_le32(resp + 80);
+        }
+        out |= ctt_check(run, idx, action, got == (uint32_t)want,
+                         "pniostatus expect=0x%08lx actual=0x%08x", want, got);
     }
     return out;
 }

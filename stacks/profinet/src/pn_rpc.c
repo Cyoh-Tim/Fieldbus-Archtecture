@@ -1018,17 +1018,16 @@ static void queue_app_ready(pn_stack_t *s)
 
 /* PNIOStatus as ErrorCode<<24 | ErrorDecode<<16 | ErrorCode1<<8 | ErrorCode2.
  * Written in little-endian drep order (this stack always emits LE NDR;
- * a big-endian request is T12-14). Logical DB 81 02 0E is bytes 0E 02 81 DB.
+ * a big-endian request is T12-14). Logical DB 81 02 0B is bytes 0B 02 81 DB.
  *
  * Cycle rejects use the IOCR codes below. Other rejects still pass
  * PN_PNIO_ERR_LEGACY (0x81000000). Queue 59 owns the other-controller
  * status DB 81 40 04 and must stay xfail after this change. */
 #define PN_PNIO_ERR_LEGACY  (0x81u << 24)
-#define PN_PNIO_ERR_IOCR_SCF 0xDB81020Du /* unsupported SendClockFactor */
-#define PN_PNIO_ERR_IOCR_RR  0xDB81020Eu /* ReductionRatio / below min period */
-
-/* GSDML TimingProperties SendClock. 32 × 31.25 µs = 1 ms. */
-#define PN_IOCR_SEND_CLOCK 32u
+/* ErrorCode2 10 = GatingCycle / SendClockFactor (Wireshark pn_io_error_code2_pnio_2). */
+#define PN_PNIO_ERR_IOCR_SCF 0xDB81020Au
+/* ErrorCode2 11 = ReductionRatio, including a period below cycle_us. */
+#define PN_PNIO_ERR_IOCR_RR  0xDB81020Bu
 
 static int reply_pnio_err(const uint8_t *pdu, uint8_t *resp, size_t cap,
                           size_t *out_len, uint8_t *stub_out,
@@ -1043,16 +1042,30 @@ static int reply_pnio_err(const uint8_t *pdu, uint8_t *resp, size_t cap,
     return 0;
 }
 
-/* Input IOCR only. cfg.cycle_us is the fastest update the device can
- * produce; a shorter SCF×RR×31.25 µs is ReductionRatio (0x0E). A
- * SendClock other than the GSDML value is SendClockFactor (0x0D).
- * ReductionRatio must be a power of two. Output CR timing is the
- * controller's send clock and is not limited here. No input IOCR
- * (AR-only Connect) is not a short-cycle request. */
+/* Input IOCR only. This device is RT Class 1, so the same rules apply
+ * whether or not the request filled IOCRProperties.RTClass.
+ *
+ * p-net pf_cmdev_check_iocr_param / pf_cmdev_check_iocr_param_full:
+ * - SCF not in {1,2,4,8,16,32,64,128} → ErrorCode2 10 (DB 81 02 0A).
+ * - RR outside 1..512, or RR >= 256 with SCF > 64, or RR == 512 with
+ *   SCF > 32 → ErrorCode2 11 (DB 81 02 0B). RR need not be a power of two.
+ * - If those pass and SCF×RR×31.25 µs < cfg.cycle_us → ErrorCode2 11.
+ *   cfg.cycle_us is the fastest update the device can produce.
+ *
+ * Output CR timing is the controller's send clock and is not limited
+ * here. No input IOCR (AR-only Connect) is not a short-cycle request.
+ * GSDML SendClock="32" is what we advertise; a factor still inside the
+ * RT Class 1 set is not rejected for that advertisement. */
 typedef struct {
     uint32_t min_us;
     uint32_t err;
 } iocr_min_t;
+
+/* 1, 2, 4, ..., 128. Zero and values above 128 are not in the set. */
+static int scf_rt_class_1(uint16_t sc)
+{
+    return sc >= 1 && sc <= 128 && (sc & (uint16_t)(sc - 1u)) == 0;
+}
 
 static int check_input_iocr_min(uint16_t type, const uint8_t *body,
                                 uint16_t blen, void *u)
@@ -1066,30 +1079,29 @@ static int check_input_iocr_min(uint16_t type, const uint8_t *body,
     }
     uint16_t sc = pn_rd_be16(body + 14);
     uint16_t rr = pn_rd_be16(body + 16);
-    if (sc != PN_IOCR_SEND_CLOCK) {
+    if (!scf_rt_class_1(sc)) {
         c->err = PN_PNIO_ERR_IOCR_SCF;
         LOG_WARN("pn_rpc",
-                 "Connect rejected: SendClockFactor %u (supported %u) "
-                 "PNIOStatus DB 81 02 0D",
-                 sc, PN_IOCR_SEND_CLOCK);
+                 "Connect rejected: SendClockFactor %u not in 1/2/4/.../128 "
+                 "PNIOStatus DB 81 02 0A",
+                 sc);
         return 0;
     }
-    int pow2 = (rr != 0) && ((rr & (uint16_t)(rr - 1u)) == 0);
-    uint64_t period_ns = (uint64_t)sc * (uint64_t)rr * PN_SEND_CLOCK_BASE_NS;
-    uint64_t min_ns = (uint64_t)c->min_us * 1000ull;
-    if (!pow2) {
+    if (rr < 1 || rr > 512 || (rr >= 256 && sc > 64) || (rr == 512 && sc > 32)) {
         c->err = PN_PNIO_ERR_IOCR_RR;
         LOG_WARN("pn_rpc",
-                 "Connect rejected: ReductionRatio %u is not a power of two "
-                 "PNIOStatus DB 81 02 0E",
-                 rr);
+                 "Connect rejected: ReductionRatio %u SendClockFactor %u "
+                 "outside RT Class 1 range PNIOStatus DB 81 02 0B",
+                 rr, sc);
         return 0;
     }
+    uint64_t period_ns = (uint64_t)sc * (uint64_t)rr * PN_SEND_CLOCK_BASE_NS;
+    uint64_t min_ns = (uint64_t)c->min_us * 1000ull;
     if (period_ns < min_ns) {
         c->err = PN_PNIO_ERR_IOCR_RR;
         LOG_WARN("pn_rpc",
                  "Connect rejected: input period %u*%u*31.25us < cycle_us %u "
-                 "PNIOStatus DB 81 02 0E",
+                 "PNIOStatus DB 81 02 0B",
                  sc, rr, c->min_us);
         return 0;
     }
