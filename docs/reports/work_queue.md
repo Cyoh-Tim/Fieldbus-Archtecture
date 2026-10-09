@@ -88,6 +88,8 @@
 | 64 | A20261004-3 | Modbus 클라이언트가 요청과 Unit ID 가 다른 응답을 받음 (pymodbus 는 버림) | `stacks/modbus/`, `tests/` | A20261004-3 | 출처 12단계 감사, 보고서 [audits/20261004-modbus.md](audits/20261004-modbus.md). 읽기·쓰기 세 응답 경로 모두 |
 | 65 | A20261004-4 | Modbus 클라이언트 모드에서 실패한 쓰기(PLC 예외, input 거부)의 값이 로컬 미러에 남아 fb_read 가 PLC 가 받지 않은 값을 돌려줌 | `adapters/modbus/`, `tests/` | A20261004-4 ×2 | 출처 12단계 감사, 보고서 [audits/20261004-modbus.md](audits/20261004-modbus.md) |
 | 66 | A20261007-1 | PN Connect 의 IOCRTagHeader·AlarmCRTagHeader 값을 검사하지 않음 (사양: `DB 81 02 11`, `DB 81 04 11/12` 로 거부) | `stacks/profinet/`, `tests/` | A20261007-1 ×2 | 출처 #96 검증, 보고서 [audits/20261007-pn-tag-header.md](audits/20261007-pn-tag-header.md). 큐 59 또는 16 (`reply_pnio_err` 원인 코드) 이후 |
+| 67 | A20261007-2 | PN 장치가 실제 인터페이스에서도 인터페이스 MAC 대신 고정 `02:FB:00:00:00:01` 을 쓴다 (실 NIC 에서 O→T 유실 → AR 끊김, 장치 간 MAC 충돌) | `stacks/profinet/`, `tests/` | A20261007-2 (랩) | 출처 랩 감사, 보고서 [audits/20261007-lab.md](audits/20261007-lab.md). 랩 테스트는 CI 에서 건너뛰므로 검증 담당이 랩으로 확인한다 |
+| 68 | A20261008-4 | PN 입문서(`docs/protocols/profinet.md`)를 T12-4~T12-8 이후 동작으로 갱신: RTC1·알람 항상 802.1Q 태그(0.6절 "태그 없이" 서술·[사양 확인 필요] 정리), 태그 시 최소 C_SDU 36, 예제 프레임 길이, DataStatus `0x35` (`:331`, `:1396`) | `docs/protocols/` | 없음 | 출처 #96 "발견한 다른 문제", #101. 문서만. 근거는 [audits/20261007-pn-tag-header.md](audits/20261007-pn-tag-header.md), PR #91·#96 검증 코멘트 |
 
 ## 이슈 본문 템플릿
 

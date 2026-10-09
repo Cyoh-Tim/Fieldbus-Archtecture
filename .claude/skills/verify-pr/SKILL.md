@@ -322,6 +322,8 @@ PROFINET RPC·레코드 → PROFINET RT·알람 → 코어(fb_api, config_loader
   확인된 경우만, PR 본문에 근거를 적는다)
 - `CMakeLists.txt` 의 `BUILD_ORACLE_DUTS` 블록에 DUT 타깃 추가, `.github/workflows/ci.yml` 의 oracle job `--target` 목록에 그 타깃 이름 추가
 - `docs/reports/audits/**`, `docs/reports/work_queue.md` (표에 행 추가, 오라클 표시·비고 갱신만. 기존 행 삭제·순서 변경 금지)
+- `tools/ci/local_ci.py` 의 `LOCAL_EXTRA_APT` 목록에 로컬 CI 실행에 필요한 **가벼운** apt 패키지 추가 (저장소 담당자가
+  2026-10-08 승인). 툴체인·수백 MB 급 패키지, `local_ci.py` 의 동작 로직, `ci.yml` 의 job 구성 변경은 여전히 사람 몫이다.
 
 **자체 병합 조건** (모두):
 1. PR 을 연 지 20시간 이상 지났다 (이전 실행에서 열었다).
@@ -336,7 +338,7 @@ API 로 병합만 한다. `main` 과 충돌하면 그 PR 은 닫고, 그 실행�
 병합하지 못한 자체 PR 이 아직 열려 있으면(조건 미충족, 보류) 그날은 11·12단계 결과를 새 PR 로 올리지 않는다 —
 큐 표 충돌을 피하려는 것이다. 이 경우 11단계의 제안 선별 답글만 달고, 감사는 다음 실행으로 미룬다.
 
-**절대 하지 않는 것:** 자체 PR 로 `CLAUDE.md`, `.claude/`, `tools/ci/`, 병합 정책, 스택·어댑터·코어 코드를 바꾸지 않는다.
+**절대 하지 않는 것:** 자체 PR 로 `CLAUDE.md`, `.claude/`, `tools/ci/` (위 `LOCAL_EXTRA_APT` 패키지 추가는 예외), 병합 정책, 스택·어댑터·코어 코드를 바꾸지 않는다.
 그런 변경이 필요하면 요약에 제안으로 올린다.
 
 ## 14. main 점검과 멈춤 조건
