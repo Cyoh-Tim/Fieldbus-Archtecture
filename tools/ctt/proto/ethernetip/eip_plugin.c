@@ -21,7 +21,6 @@ typedef struct {
     uint16_t conn_serial;
     uint16_t orig_vendor;
     uint32_t orig_serial;
-    int o2t_run_idle; /* Forward Open O->T size was data+2+4 */
     uint8_t psk[EIP_PSK_LEN];
     int psk_set;
     uint8_t last_resp[2048];
@@ -764,8 +763,6 @@ static int step_forward_open(ctt_run_t *run, eip_priv_t *priv,
             priv->conn_serial = serial;
             priv->orig_vendor = orig_vendor;
             priv->orig_serial = orig_serial;
-            priv->o2t_run_idle =
-                (o2t_size == (uint16_t)(cfg->output_size + 6u));
         }
         if (t2o) {
             priv->t2o_conn_id = t2o;
@@ -815,7 +812,6 @@ static int step_forward_close(ctt_run_t *run, eip_priv_t *priv,
         orig_serial == priv->orig_serial) {
         priv->o2t_conn_id = 0;
         priv->t2o_conn_id = 0;
-        priv->o2t_run_idle = 0;
     }
     return out;
 }
@@ -847,13 +843,10 @@ static int step_encap_inject(ctt_run_t *run, eip_priv_t *priv,
                               yaml_map_get(step, "expect"), rc);
 }
 
-/* run_idle: -1 modeless, 0 Idle (bit0 clear), 1 Run (bit0 set). */
 static size_t build_class1_io(uint8_t *io, uint32_t o2t, uint32_t seq,
-                              const uint8_t *payload, uint16_t plen,
-                              int run_idle)
+                              const uint8_t *payload, uint16_t plen)
 {
     size_t ioff = 0;
-    uint16_t extra = run_idle >= 0 ? 4u : 0u;
     eip_wr_le16(io + ioff, 2);
     ioff += 2;
     eip_wr_le16(io + ioff, EIP_ITEM_SEQ_ADDR);
@@ -866,26 +859,13 @@ static size_t build_class1_io(uint8_t *io, uint32_t o2t, uint32_t seq,
     ioff += 4;
     eip_wr_le16(io + ioff, EIP_ITEM_CONNECTED_DATA);
     ioff += 2;
-    eip_wr_le16(io + ioff, (uint16_t)(2u + extra + plen));
+    eip_wr_le16(io + ioff, (uint16_t)(2 + plen));
     ioff += 2;
     eip_wr_le16(io + ioff, (uint16_t)(seq & 0xffff));
     ioff += 2;
-    if (run_idle >= 0) {
-        eip_wr_le32(io + ioff, run_idle ? 1u : 0u);
-        ioff += 4;
-    }
     memcpy(io + ioff, payload, plen);
     ioff += plen;
     return ioff;
-}
-
-/* Connection opened at data+6 uses the header. A step may force Run or Idle. */
-static int class1_run_idle(const eip_priv_t *priv, const yaml_node_t *step)
-{
-    if (yaml_has(step, "run_idle")) {
-        return yaml_bool(step, "run_idle", 1) ? 1 : 0;
-    }
-    return priv->o2t_run_idle ? 1 : -1;
 }
 
 static int step_require_class1(const yaml_node_t *step)
@@ -963,9 +943,8 @@ static int step_class1_io(ctt_run_t *run, eip_priv_t *priv,
         }
         o2t = 0xDEADBEEFu;
     }
-    uint8_t io[32 + EIP_ASSEMBLY_SIZE_MAX];
-    size_t ioff = build_class1_io(io, o2t, seq, payload, plen,
-                                  class1_run_idle(priv, step));
+    uint8_t io[16 + EIP_ASSEMBLY_SIZE_MAX];
+    size_t ioff = build_class1_io(io, o2t, seq, payload, plen);
     int rc = eip_stack_handle_io(priv->stack, io, ioff);
     pump(priv);
     const yaml_node_t *expect = yaml_map_get(step, "expect");
@@ -1060,7 +1039,7 @@ static int step_class1_cyclic(ctt_run_t *run, eip_priv_t *priv,
     uint64_t start = ctt_now_ns();
     uint64_t deadline =
         duration_s ? start + (uint64_t)duration_s * 1000000000ull : 0;
-    uint8_t io[32 + EIP_ASSEMBLY_SIZE_MAX];
+    uint8_t io[16 + EIP_ASSEMBLY_SIZE_MAX];
     uint8_t buf[CTT_FRAME_MAX];
     ctt_cycle_clock_t clk;
     ctt_cycle_clock_init(&clk, (uint64_t)cycle_ms * 1000000ull);
@@ -1074,8 +1053,7 @@ static int step_class1_cyclic(ctt_run_t *run, eip_priv_t *priv,
             break;
         }
         seq++;
-        size_t ioff = build_class1_io(io, o2t, seq, payload, plen,
-                                      priv->o2t_run_idle ? 1 : -1);
+        size_t ioff = build_class1_io(io, o2t, seq, payload, plen);
         int iorc = eip_stack_handle_io(priv->stack, io, ioff);
         if (iorc != 0 && require_c1) {
             run->metrics.unexpected_frames++;
