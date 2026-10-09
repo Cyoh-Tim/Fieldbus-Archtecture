@@ -39,3 +39,4 @@
 | 2026-10-07 | PROFINET RPC·레코드 (PR #96 검증 중, opus) | [20261007-pn-tag-header.md](20261007-pn-tag-header.md) | 66 (A20261007-1) | Connect 태그 헤더 미검증. 송신 태그·CTT VLAN 은 PR #96 에서 처리 |
 | 2026-10-07 | 랩 상호운용 (veth, EIPScanner·scapy 컨트롤러) | [20261007-lab.md](20261007-lab.md) | 67 (A20261007-2) | PN 장치 MAC 고정값. T11-1·T11-6·T12-8·T4 의 랩 증거. ApplicationReady 34964 는 실제 경로에서도 맞음 |
 | 2026-10-08 | PROFINET 문서 (11단계 제안 선별) | — | 68 (A20261008-4) | #96 "발견한 다른 문제"·#101: 입문서가 T12-4~T12-8 이후 동작(태그, C_SDU 36, DataStatus 0x35)과 어긋남. 문서만 |
+| 2026-10-09 | PROFINET RPC (오라클 반론, 루틴 발견 + fable 동의) | [20261009-pnio-errorcode2.md](20261009-pnio-errorcode2.md) | — (큐 16·66 비고) | T5 주기 미달 `DB 81 02 0E`→`0B`, 알람 Low 태그 `04 12`→`04 0C` (10진 서수). 인수인계 T5 의 0x0D/0x0E 오류 |
