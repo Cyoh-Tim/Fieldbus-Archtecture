@@ -296,7 +296,6 @@ def test_rtc1_vlan_priority_tag(pn_dut):
     assert f[Dot1Q].type == 0x8892
 
 
-@known_defect("T12-15", "CycleCounter 가 프레임마다 +1 이다. 사양은 SendClockFactor × ReductionRatio 씩 증가")
 def test_rtc1_cycle_counter_step(pn_dut):
     frames = rtc1_frames(pn_dut, poll_ms=80, scf=32, rr=16)
     assert len(frames) >= 2, "비교할 RTC1 프레임이 2개 미만"
@@ -304,7 +303,6 @@ def test_rtc1_cycle_counter_step(pn_dut):
     assert steps == {32 * 16}
 
 
-@known_defect("T4", "RT 송신 주기가 협상값(SCF×RR×31.25µs)이 아니라 config cycle_us(8ms) 이다")
 def test_rtc1_send_interval_is_negotiated(pn_dut):
     # 16ms 로 협상하고 400ms 동안 센다. 16ms 면 약 25개, 8ms 로 보내면 약 50개.
     frames = rtc1_frames(pn_dut, poll_ms=400, scf=32, rr=16)

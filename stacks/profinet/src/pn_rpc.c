@@ -511,8 +511,9 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         uint16_t rr = pn_rd_be16(body + 16);
         int is_out = (iocr_type == PN_IOCR_OUTPUT);
         int is_in = (iocr_type == PN_IOCR_INPUT);
-        /* Data-hold watches O→T, so only the output CR supplies the
-         * negotiated send clock. A following input CR must not clobber it. */
+        /* Data-hold watches O→T, so only the output CR supplies that
+         * clock. The input CR clock is the RTC1 transmit period and
+         * CycleCounter step. Neither CR may replace the other. */
         if (is_out) {
             ar->send_clock_factor = sc;
             ar->reduction_ratio = rr;
@@ -531,6 +532,8 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         } else if (is_in) {
             ar->in_frame_id = frame_id;
             ar->in_csdu_len = data_len;
+            ar->in_send_clock_factor = sc;
+            ar->in_reduction_ratio = rr;
         }
         if (is_in || is_out) {
             int laid = parse_iocr_layout(body, blen, ar, is_in);

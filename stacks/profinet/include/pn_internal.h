@@ -64,6 +64,8 @@ typedef struct {
     uint8_t exp_sub_n;
     uint16_t send_clock_factor; /* O→T IOCR; 0 = not negotiated */
     uint16_t reduction_ratio;   /* O→T IOCR; 0 = not negotiated */
+    uint16_t in_send_clock_factor; /* input IOCR; 0 = not negotiated */
+    uint16_t in_reduction_ratio;   /* input IOCR; 0 = not negotiated */
     uint8_t initiator_mac[6];
     uint8_t initiator_uuid[PN_UUID_LEN]; /* CMInitiatorObjectUUID */
     int have_initiator_uuid;
@@ -86,7 +88,11 @@ typedef struct {
  * Factor is IOCR DataHoldFactor, else WatchdogFactor, else 3.
  * cfg.cycle_us is not used. A zero SendClockFactor or ReductionRatio
  * keeps the 2 s CMI window (O→T refreshes it) so the AR is still
- * reclaimed. */
+ * reclaimed.
+ * RTC1 transmit uses the input CR (in_send_clock_factor ×
+ * in_reduction_ratio × 31.25 µs) when that period is at least
+ * cfg.cycle_us. A missing input clock, or one shorter than
+ * cfg.cycle_us, keeps cfg.cycle_us as the send interval. */
 #define PN_SEND_CLOCK_BASE_NS        31250ull
 #define PN_AR_DATA_HOLD_CYCLES       3
 #define PN_CMI_ACTIVITY_TIMEOUT_NS   2000000000ull

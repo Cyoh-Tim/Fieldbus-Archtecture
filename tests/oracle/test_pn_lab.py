@@ -200,7 +200,6 @@ def test_pnlab_rtc1_vlan_tag(session):
     assert f.haslayer(Dot1Q) and f[Dot1Q].prio == 6 and f[Dot1Q].vlan == 0
 
 
-@known_defect("T4", "RT 송신 간격이 협상값(SCF×RR×31.25µs = 16 ms)이 아니라 cycle_us(8 ms)다 (선로 위 측정)")
 def test_pnlab_rtc1_interval_negotiated(session):
     ts = [float(f.time) for f in session["rtc1"]]
     dt = sorted(b - a for a, b in zip(ts, ts[1:]))
