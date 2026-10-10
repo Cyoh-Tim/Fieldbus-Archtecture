@@ -174,7 +174,6 @@ def test_forward_open_modeless_and_class1_io(sess, eip_dut):
     assert pkt[20:20 + IN_SIZE] == bytes(range(1, 9))
 
 
-@known_defect("T11-1", "O→T 32-bit Run/Idle 헤더 형식(데이터+6)을 크기 오류로 거부한다")
 def test_forward_open_logix_run_idle_format(sess):
     rsp = sess.cip(forward_open(OUT_SIZE + 6, IN_SIZE + 2, next(_serial)))
     assert rsp[0] == 0xD4 and rsp[2] == 0x00, rsp.hex()

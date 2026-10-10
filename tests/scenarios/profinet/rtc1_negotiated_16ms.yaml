@@ -1,0 +1,38 @@
+# T4: Connect negotiates 16 ms (SCF 32 × RR 16 × 31.25 µs) while
+# device.cycle_us stays 8 ms. RTC1 must leave about every 16 ms.
+# rpc_connect does not carry an IOCR, so this step injects a Connect
+# whose input and output IOCRBlockReq both set SCF=32, RR=16.
+# count×cycle_ms×4 = 400 ms. At 16 ms that is about 25 frames
+# (oracle bound 15..32). At the old 8 ms clock it is about 50.
+# late/jitter stay tied to device.cycle_us inside CTT, so this
+# scenario does not gate them. cycle_counter: increasing treats a
+# step above 64 as a jump, so SCF×RR = 512 is not checked here.
+name: rtc1_negotiated_16ms
+id: PN-B-CYC-005
+suite: PN-B-v1
+protocol: profinet
+tags: [rtc1, cyclic, metrics, bundle]
+device:
+  station_name: sensor-line1
+  security_class: 0
+  iface: mock
+  ip: 192.168.200.2
+  netmask: 255.255.255.0
+  cycle_us: 8000
+  input_len: 32
+  output_len: 8
+steps:
+  - action: rpc_inject
+    pdu_hex: "010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000064000000000050000000500000005000000000000000500000000101001c01000001000000000000000000000000000000000001000000000000010200140100000100010000000000000000800100200010010200140100000200020000000000000000800200200010"
+    expect:
+      rpc_response: true
+      ar: up
+  - action: io_cycle
+    count: 25
+    cycle_ms: 4
+    expect:
+      min_frames: 15
+      max_frames: 32
+      min_period_samples: 10
+      period_max_ms: 48
+      ethertype: 0x8892

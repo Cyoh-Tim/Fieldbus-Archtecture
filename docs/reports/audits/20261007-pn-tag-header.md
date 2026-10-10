@@ -21,7 +21,7 @@ Connect 의 검증이다.
 
 ```
 test_pn_oracle.py:379: AssertionError: PNIOStatus 00000000 (기대 db810211)
-test_pn_oracle.py:379: AssertionError: PNIOStatus 00000000 (기대 db810412)
+test_pn_oracle.py:379: AssertionError: PNIOStatus 00000000 (기대 db810412)   ← 2026-10-09 정정: 기대값은 db81040c
 ```
 
 **기대값과 출처:**
@@ -29,13 +29,13 @@ test_pn_oracle.py:379: AssertionError: PNIOStatus 00000000 (기대 db810412)
 | 입력 | PNIOStatus | 출처 |
 |---|---|---|
 | IOCRTagHeader VID ≠ 0 또는 우선순위 ≠ 6 | `DB 81 02 11` (CONNECT, PNIO, FaultyIOCRBlockReq, 17) | p-net `src/device/pf_cmdev.c` IOCR 검사 (`iocr_tag_header.vlan_id != 0` / `iocr_user_priority != 6` → 17), Siemens CM `cm_argr.c` (`!= 0xC000` → 17) |
-| AlarmCRTagHeaderHigh VID ≠ 0 또는 우선순위 ≠ 6 | `DB 81 04 11` (FaultyAlarmCRBlockReq, 11) | p-net `pf_cmdev.c` 알람 CR 검사, Siemens CM `cm_argr.c` (`!= 0xC000` → 11) |
-| AlarmCRTagHeaderLow VID ≠ 0 또는 우선순위 ≠ 5 | `DB 81 04 12` (FaultyAlarmCRBlockReq, 12) | p-net `pf_cmdev.c`, Siemens CM `cm_argr.c` (`!= 0xA000` → 12) |
+| AlarmCRTagHeaderHigh VID ≠ 0 또는 우선순위 ≠ 6 | `DB 81 04 0B` (FaultyAlarmCRBlockReq, 11 = 0x0B) | p-net `pf_cmdev.c` 알람 CR 검사, Siemens CM `cm_argr.c` (`!= 0xC000` → 11) |
+| AlarmCRTagHeaderLow VID ≠ 0 또는 우선순위 ≠ 5 | `DB 81 04 0C` (FaultyAlarmCRBlockReq, 12 = 0x0C) | p-net `pf_cmdev.c`, Siemens CM `cm_argr.c` (`!= 0xA000` → 12) |
 
 - 상수: p-net `include/pnet_api.h` `PNET_ERROR_CODE_CONNECT 0xDB`, `PNET_ERROR_DECODE_PNIO 0x81`,
   `PNET_ERROR_CODE_1_CONN_FAULTY_IOCR_BLOCK_REQ 0x02`, `PNET_ERROR_CODE_1_CONN_FAULTY_ALARM_BLOCK_REQ 0x04`.
 - PNIOStatus 는 drep 순서 정수 (A20261002-1 과 같은 규칙). 오라클 판정 헬퍼 `ndr_response` 가 scapy 로 만든 LE drep 거부
-  응답(`0xDB810211`, `0xDB810412`)을 그대로 읽는 것을 자체 시험으로 확인했다.
+  응답(`0xDB810211`, 당시 `0xDB810412`)을 그대로 읽는 것을 자체 시험으로 확인했다.
 - Siemens 컨트롤러는 항상 `0xC000`/`0xC000`/`0xA000` 을 보낸다 (`cm_cl30.c`). 표준 컨트롤러와의 상호운용에는 영향이 없고,
   잘못된 Connect 를 받아들여 엉뚱한 우선순위로 보내는 것을 막는 검증이다.
 
@@ -58,3 +58,10 @@ test_pn_oracle.py:379: AssertionError: PNIOStatus 00000000 (기대 db810412)
 - **CTT 플러그인의 VLAN 미인식** (`tools/ctt/proto/profinet/pn_plugin.c` EtherType/FrameID 오프셋 12/14 고정): PR #96 에서
   CTT 원칙(결함 PR 에서 함께 고침)으로 처리한다.
 - **AlarmCRTagHeaderHigh 오라클**: 이번 테스트는 IOCR 과 알람 Low 만 넣었다 (High 는 같은 코드 경로).
+
+## 정정 (2026-10-09)
+
+알람 CR 태그 헤더 거부의 ErrorCode2 를 16진으로 잘못 옮겼다. Wireshark `pn_io_error_code2_pnio_4` 와 p-net 의 번호
+11·12 는 **10진**이므로 High = `DB 81 04 0B`, Low = `DB 81 04 0C` 다 (처음 보고서와 오라클은 `0x11`/`0x12`). IOCR 태그의
+17 은 `0x11` 로 처음부터 맞았다. 오라클은 [20261009-pnio-errorcode2.md](20261009-pnio-errorcode2.md) 의 자체 PR 에서 고쳤고,
+알람 High 경우를 추가했다.

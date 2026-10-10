@@ -78,7 +78,7 @@ test_pn_oracle.py:375: AssertionError: PNIOStatus 00000081
 **수정 범위:** `stacks/profinet/`, `tests/`.
 - `reply_pnio_err` 가 원인별 PNIOStatus(ErrorCode, ErrorDecode, ErrorCode1, ErrorCode2)를 받아 **drep 순서 정수**로
   쓴다 (T12-14 의 BE drep 지원 전까지는 LE). AR 점유 거부는 `DB 81 40 04`.
-- 큐 16 T5 (PN) 이 같은 함수에 `DB 81 02 0E` 를 넣을 예정이므로, 원인 코드를 인자로 받는 형태로 한 번에 정리하는 것이 좋다.
+- 큐 16 T5 (PN) 이 같은 함수에 `DB 81 02 0B` (2026-10-09 정정, 처음에는 `0E` 로 적었다) 를 넣을 예정이므로, 원인 코드를 인자로 받는 형태로 한 번에 정리하는 것이 좋다.
 - `tests/test_pn_rpc.c` `test_connect_error_ndr_pniostatus` 의 기대값을 `0xDB814004` (LE 읽기)로 바꾸고,
   `tests/fuzz/fuzz_pn_rpc.c` `last_connect_rejected` 가 바이트 `81 00 00 00` 대신 ErrorCode(정수 최상위 바이트)가
   0 이 아닌지로 거부를 판별하게 바꾼다.

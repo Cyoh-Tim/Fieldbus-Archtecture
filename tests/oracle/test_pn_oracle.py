@@ -94,14 +94,14 @@ DEFAULT_LAYOUT = (IN_LAYOUT_DATA, IN_LAYOUT_IOCS, OUT_LAYOUT_DATA, OUT_LAYOUT_IO
 
 def connect_pdu(station=b"controller", scf=32, rr=16, slot1_module=0x00000010,
                 alarm_ref=1, layout=DEFAULT_LAYOUT, startup_mode=0,
-                iocr_prio=6, alarm_tag_low=0xA000):
+                iocr_prio=6, alarm_tag_low=0xA000, alarm_tag_high=0xC000):
     """사양 형태의 Connect.req (ARBlockReq + 입력/출력 IOCR + AlarmCR + ExpectedSubmodule).
 
     기본 주기는 SCF=32 × RR=16 × 31.25µs = 16ms (GSDML 이 허용해야 하는 값, 장치 최소 8ms 이상).
     alarm_ref 는 컨트롤러의 LocalAlarmReference (장치 알람의 AlarmDstEndpoint 가 된다).
     layout 은 (입력 IODataObjects, 입력 IOCS, 출력 IODataObjects, 출력 IOCS) 의 (slot, subslot, FrameOffset) 목록.
     startup_mode 는 ARProperties.StartupMode (bit 30): 0 Legacy, 1 Advanced.
-    iocr_prio / alarm_tag_low 는 IOCRTagHeader 우선순위와 AlarmCRTagHeaderLow (사양 고정값 6 / 0xA000, 거부 시험용).
+    iocr_prio / alarm_tag_low / alarm_tag_high 는 IOCRTagHeader 우선순위와 AlarmCRTagHeaderLow/High (사양 고정값 6 / 0xA000 / 0xC000, 거부 시험용).
     """
     in_data, in_iocs, out_data, out_iocs = layout
     common = dict(LT=0x8892, IOCRProperties_RTClass=2, DataLength=C_SDU_LEN,
@@ -125,7 +125,7 @@ def connect_pdu(station=b"controller", scf=32, rr=16, slot1_module=0x00000010,
                     CMInitiatorStationName=station)
     alarm = AlarmCRBlockReq(AlarmCRType=1, LT=0x8892, RTATimeoutFactor=1, RTARetries=3,
                             LocalAlarmReference=alarm_ref, MaxAlarmDataLength=200,
-                            AlarmCRTagHeaderHigh=0xC000, AlarmCRTagHeaderLow=alarm_tag_low)
+                            AlarmCRTagHeaderHigh=alarm_tag_high, AlarmCRTagHeaderLow=alarm_tag_low)
     # NO_IO(Type 0) 서브모듈에도 Input DataDescription 1개(길이 0, IOCS 1, IOPS 1)가 따라온다:
     # Wireshark dissect_ExpectedSubmoduleBlockReq case 0x00 "one Input DataDescription Block follows",
     # p-net pf_get_exp_submodule "At least one submodule data descriptor", scapy count_from (2 if Type==3 else 1).
@@ -296,7 +296,6 @@ def test_rtc1_vlan_priority_tag(pn_dut):
     assert f[Dot1Q].type == 0x8892
 
 
-@known_defect("T12-15", "CycleCounter 가 프레임마다 +1 이다. 사양은 SendClockFactor × ReductionRatio 씩 증가")
 def test_rtc1_cycle_counter_step(pn_dut):
     frames = rtc1_frames(pn_dut, poll_ms=80, scf=32, rr=16)
     assert len(frames) >= 2, "비교할 RTC1 프레임이 2개 미만"
@@ -304,7 +303,6 @@ def test_rtc1_cycle_counter_step(pn_dut):
     assert steps == {32 * 16}
 
 
-@known_defect("T4", "RT 송신 주기가 협상값(SCF×RR×31.25µs)이 아니라 config cycle_us(8ms) 이다")
 def test_rtc1_send_interval_is_negotiated(pn_dut):
     # 16ms 로 협상하고 400ms 동안 센다. 16ms 면 약 25개, 8ms 로 보내면 약 50개.
     frames = rtc1_frames(pn_dut, poll_ms=400, scf=32, rr=16)
@@ -352,7 +350,9 @@ def test_connect_rejects_cycle_below_device_minimum(pn_dut):
     rsp = rpc_response(pn_dut.rpc(raw(connect_pdu(scf=32, rr=4))))
     assert rsp is not None, "Connect 응답 없음"
     status, _ = ndr_response(rsp)
-    assert status == 0xDB81020E, f"PNIOStatus {status:08x}"
+    # ErrorCode2 11 (0x0B) "ReductionRatio": Wireshark packet-pn.c pn_io_error_code2_pnio_2, p-net pf_cmdev.c
+    # (MinDeviceInterval > SCF×RR → FAULTY_IOCR_BLOCK_REQ, 11). 0x0E(14) 는 FrameSendOffset 이다 (2026-10-09 정정).
+    assert status == 0xDB81020B, f"PNIOStatus {status:08x}"
     out = pn_dut.cmd("POLL 50")
     assert not [f for f in tx_frames(out) if is_rtc1(f)], "거부한 Connect 뒤에 RTC1 을 보낸다"
 
@@ -363,12 +363,15 @@ def test_connect_rejects_cycle_below_device_minimum(pn_dut):
 #   FAULTY_IOCR_BLOCK_REQ(0x02) / 17, alarm_cr_tag_header_high/low 의 VID·우선순위(6/5) 불일치 → FAULTY_ALARM_BLOCK_REQ(0x04) / 11·12.
 #   상수 include/pnet_api.h: CONNECT 0xDB, PNIO 0x81, FAULTY_IOCR_BLOCK_REQ 0x02, FAULTY_ALARM_BLOCK_REQ 0x04.
 # - Siemens CM cm_argr.c: IOCRTagHeader != 0xC000 → 17, AlarmCRTagHeaderHigh != 0xC000 → 11, Low != 0xA000 → 12.
+# ErrorCode2 번호는 10진이다 (Wireshark packet-pn.c 표): 17 = 0x11, 11 = 0x0B, 12 = 0x0C.
+# (2026-10-09 정정: 알람 Low 를 0x12 로 잘못 옮겼었다.)
 @known_defect("A20261007-1", "Connect 의 IOCRTagHeader·AlarmCRTagHeader 값을 검사하지 않고 받아들인다. "
-              "사양: 우선순위 6 이 아닌 IOCR 태그는 DB 81 02 11, 0xA000 이 아닌 알람 Low 태그는 DB 81 04 12 로 거부")
+              "사양: 우선순위 6 이 아닌 IOCR 태그는 DB 81 02 11, 0xA000 이 아닌 알람 Low 태그는 DB 81 04 0C 로 거부")
 @pytest.mark.parametrize("kw,expected", [
     (dict(iocr_prio=5), 0xDB810211),          # IOCRTagHeader 0xA000 (우선순위 5)
-    (dict(alarm_tag_low=0xC000), 0xDB810412),  # AlarmCRTagHeaderLow 우선순위 6
-], ids=["iocr-prio5", "alarm-low-prio6"])
+    (dict(alarm_tag_low=0xC000), 0xDB81040C),  # AlarmCRTagHeaderLow 우선순위 6 → ErrorCode2 12 (0x0C)
+    (dict(alarm_tag_high=0xA000), 0xDB81040B), # AlarmCRTagHeaderHigh 우선순위 5 → ErrorCode2 11 (0x0B)
+], ids=["iocr-prio5", "alarm-low-prio6", "alarm-high-prio5"])
 def test_connect_rejects_nonstandard_tag_header(pn_dut, kw, expected):
     rsp = rpc_response(pn_dut.rpc(raw(connect_pdu(**kw))))
     assert rsp is not None, "Connect 응답 없음"
