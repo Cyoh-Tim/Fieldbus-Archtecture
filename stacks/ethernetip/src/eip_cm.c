@@ -39,7 +39,23 @@ static uint16_t conn_size_from_net(uint32_t net_params, int large)
     return (uint16_t)(net_params & 0x1ff);
 }
 
-static int conn_size_matches(uint16_t net, uint16_t asm_sz)
+/* Class 1 size is assembly data plus a 2-byte sequence, and O->T may add
+ * the 4-byte Run/Idle header (data+6). T->O stays modeless (data or data+2).
+ */
+static int o2t_size_ok(uint16_t net, uint16_t asm_sz, int *run_idle)
+{
+    *run_idle = 0;
+    if (net == asm_sz || net == (uint16_t)(asm_sz + 2u)) {
+        return 1;
+    }
+    if (net == (uint16_t)(asm_sz + 6u)) {
+        *run_idle = 1;
+        return 1;
+    }
+    return 0;
+}
+
+static int t2o_size_ok(uint16_t net, uint16_t asm_sz)
 {
     return net == asm_sz || net == (uint16_t)(asm_sz + 2u);
 }
@@ -197,12 +213,14 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
 
     uint16_t o2t_size = conn_size_from_net(o2t_params, large);
     uint16_t t2o_size = conn_size_from_net(t2o_params, large);
-    if (!conn_size_matches(o2t_size, s->output_size) ||
-        !conn_size_matches(t2o_size, s->input_size)) {
+    int o2t_run_idle = 0;
+    if (!o2t_size_ok(o2t_size, s->output_size, &o2t_run_idle) ||
+        !t2o_size_ok(t2o_size, s->input_size)) {
         LOG_WARN("ethernetip",
-                 "Forward Open rejected: size o2t=%u (need %u[+2]) t2o=%u "
-                 "(need %u[+2])",
-                 o2t_size, s->output_size, t2o_size, s->input_size);
+                 "Forward Open rejected: size o2t=%u (need %u, %u+2, or "
+                 "%u+6 run/idle) t2o=%u (need %u[+2])",
+                 o2t_size, s->output_size, s->output_size, s->output_size,
+                 t2o_size, s->input_size);
         *resp_len =
             cm_err(resp, resp_cap, service, CIP_STATUS_INVALID_PARAM,
                    CIP_EXT_CONN_SIZE);
@@ -235,6 +253,7 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     c->t2o_conn_id = t2o_id;
     c->o2t_size = o2t_size;
     c->t2o_size = t2o_size;
+    c->o2t_run_idle = o2t_run_idle ? 1u : 0u;
     c->o2t_rpi_us = o2t_rpi;
     c->t2o_rpi_us = t2o_rpi;
     c->conn_serial = conn_serial;

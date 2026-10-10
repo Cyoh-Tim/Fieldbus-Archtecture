@@ -22,6 +22,7 @@ typedef struct {
     uint32_t t2o_conn_id;
     uint16_t o2t_size;
     uint16_t t2o_size;
+    uint8_t o2t_run_idle; /* 1 = O->T real-time format is 32-bit Run/Idle */
     uint32_t o2t_rpi_us;
     uint32_t t2o_rpi_us;
     uint32_t peer_ip; /* host order */
