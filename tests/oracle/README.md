@@ -28,6 +28,29 @@ ORACLE_BUILD_DIR=build-oracle .venv/bin/python -m pytest tests/oracle
 CI 정의는 `.github/workflows/ci.yml` 의 `oracle` job 이다. GitHub Actions 는 2026-09-30 부터 꺼져 있어서,
 검증 담당이 `python3 tools/ci/local_ci.py --jobs oracle` (또는 전체 job) 로 같은 명령을 돌린다.
 
+## 랩 테스트 (veth + network namespace)
+
+`test_pn_lab.py`, `test_eip_lab.py` 는 mock 이 아니라 **실제 전송 경로**(AF_PACKET, UDP)를 veth 위에서 돌린다.
+DUT 는 namespace 안 veth 에, 상대(컨트롤러·스캐너)는 바깥 veth 에 둔다. 장치 MAC, UDP 목적지 포트, 선로 위 프레임
+길이·태그·송신 간격처럼 mock 에서 보이지 않는 동작을 본다.
+
+- **root 와 `ip` 가 필요**하다. 없으면 건너뛴다 (GitHub 러너의 `oracle` job 은 건너뛴다). `tools/ci/local_ci.py` 를
+  root 로 돌리면 **PN 랩은 oracle job 안에서 실행된다** (EIP 랩은 `EIP_LAB_SCANNER` 가 있을 때만).
+- `test_pn_lab.py`: 컨트롤러는 scapy (`test_pn_oracle.py` 의 요청 인코더 재사용). DUT `pn_oracle_lab`.
+- `test_eip_lab.py`: 스캐너는 독립 오픈소스 [EIPScanner](https://github.com/nimbuscontrols/EIPScanner) (MIT, 고정 커밋).
+  `tests/oracle/lab/build_eipscanner.sh <dir>` 로 빌드하고 `EIP_LAB_SCANNER=<dir>/eipscanner_originator` 를 준다.
+
+```bash
+sudo ORACLE_BUILD_DIR=build-oracle .venv/bin/python -m pytest tests/oracle/test_pn_lab.py
+tests/oracle/lab/build_eipscanner.sh /tmp/eiplab
+sudo EIP_LAB_SCANNER=/tmp/eiplab/eipscanner_originator ORACLE_BUILD_DIR=build-oracle \
+     .venv/bin/python -m pytest tests/oracle/test_eip_lab.py
+```
+
+구현 PR 은 자기 T 항목의 표시를 mock 오라클(`test_pn_oracle.py` 등)과 **랩(`test_pn_lab.py`, `test_eip_lab.py`) 양쪽에서** 지운다
+(root 로컬 CI 에서 PN 랩이 XPASS 로 실패한다). EIP 랩은 기본 실행에서 건너뛰므로, 검증 담당이 PR 검증 때 돌려 XPASS 를 확인하고
+남은 표시가 있으면 PR 에 알리거나 자체 PR 로 지운다.
+
 ## 알려진 결함 (`known_defect`)
 
 인수인계 문서의 결함은 `@known_defect("T..", "이유")` 로 표시한 strict xfail 이다.

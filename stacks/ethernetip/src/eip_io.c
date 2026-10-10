@@ -65,6 +65,24 @@ int eip_io_handle_udp(eip_stack_t *s, const uint8_t *frame, size_t len,
         data += 2;
         dlen -= 2;
     }
+    if (c->o2t_run_idle) {
+        /* 32-bit header, little-endian. Bit 0 = 1 Run, 0 Idle (PROGRAM). */
+        if (dlen < 4) {
+            LOG_WARN("ethernetip",
+                     "Class1 O->T run/idle header short (%zu bytes)", dlen);
+            return 0;
+        }
+        uint32_t hdr = eip_rd_le32(data);
+        data += 4;
+        dlen -= 4;
+        if ((hdr & 1u) == 0) {
+            /* Idle must not leave the last Run image driving outputs. */
+            if (s->output_data && s->output_size > 0) {
+                memset(s->output_data, 0, s->output_size);
+            }
+            return 0;
+        }
+    }
     if (s->output_data && dlen > 0) {
         size_t n = dlen;
         if (n > s->output_size) {

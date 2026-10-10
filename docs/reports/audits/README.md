@@ -37,3 +37,6 @@
 | 2026-10-04 | Modbus 스택·어댑터 (12단계 일요일 감사, opus) | [20261004-modbus.md](20261004-modbus.md) | 63–65 (A20261004-2, -3, -4) | 클라이언트 응답 검증(Byte Count·Unit)과 실패 쓰기 미러. 서버 경로는 결함 없음. 쓰기 에코·BCD·다중 coil 매핑은 "확인 필요" |
 | 2026-10-05 | PROFINET RPC·레코드 (PR 검증 중 오라클 반론, opus + fable) | [20261005-pn-oracle-connect.md](20261005-pn-oracle-connect.md) | — (큐 10·11 비고) | 오라클 Connect ExpectedSubmodule NO_IO DataDescription·ARServerBlock 조건 정정, T12-5 ApplicationReady 목적지 정정 |
 | 2026-10-07 | PROFINET RPC·레코드 (PR #96 검증 중, opus) | [20261007-pn-tag-header.md](20261007-pn-tag-header.md) | 66 (A20261007-1) | Connect 태그 헤더 미검증. 송신 태그·CTT VLAN 은 PR #96 에서 처리 |
+| 2026-10-07 | 랩 상호운용 (veth, EIPScanner·scapy 컨트롤러) | [20261007-lab.md](20261007-lab.md) | 67 (A20261007-2) | PN 장치 MAC 고정값. T11-1·T11-6·T12-8·T4 의 랩 증거. ApplicationReady 34964 는 실제 경로에서도 맞음 |
+| 2026-10-08 | PROFINET 문서 (11단계 제안 선별) | — | 68 (A20261008-4) | #96 "발견한 다른 문제"·#101: 입문서가 T12-4~T12-8 이후 동작(태그, C_SDU 36, DataStatus 0x35)과 어긋남. 문서만 |
+| 2026-10-09 | PROFINET RPC (오라클 반론, 루틴 발견 + fable 동의) | [20261009-pnio-errorcode2.md](20261009-pnio-errorcode2.md) | — (큐 16·66 비고) | T5 주기 미달 `DB 81 02 0E`→`0B`, 알람 Low 태그 `04 12`→`04 0C` (10진 서수). 인수인계 T5 의 0x0D/0x0E 오류 |

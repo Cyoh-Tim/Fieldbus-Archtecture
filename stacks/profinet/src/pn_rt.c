@@ -262,16 +262,55 @@ size_t pn_rtc1_pad_min_csdu(uint8_t *frame, size_t len, size_t cap)
     return len + pad;
 }
 
+/* Input CR period, or 0 when that CR did not negotiate a clock. */
+static uint64_t input_cr_period_ns(const pn_stack_t *s)
+{
+    if (s->ar.in_send_clock_factor == 0 || s->ar.in_reduction_ratio == 0) {
+        return 0;
+    }
+    return (uint64_t)s->ar.in_send_clock_factor *
+           (uint64_t)s->ar.in_reduction_ratio * PN_SEND_CLOCK_BASE_NS;
+}
+
+static uint64_t cfg_period_ns(const pn_stack_t *s)
+{
+    uint64_t cfg = (uint64_t)s->cfg.cycle_us * 1000ull;
+    return cfg ? cfg : 8000000ull;
+}
+
+/* Negotiated input period when it is at least cfg.cycle_us. A shorter
+ * input period stays on cfg.cycle_us (rate ceiling / T5 rejects it). */
+static uint64_t rt_send_period_ns(const pn_stack_t *s)
+{
+    uint64_t cfg = cfg_period_ns(s);
+    uint64_t neg = input_cr_period_ns(s);
+    if (neg == 0 || neg < cfg) {
+        return cfg;
+    }
+    return neg;
+}
+
+/* SCF×RR when the frame interval is the negotiated input period.
+ * Otherwise one count per frame, as before this clock existed. */
+static uint16_t rt_cycle_step(const pn_stack_t *s)
+{
+    uint64_t neg = input_cr_period_ns(s);
+    if (neg == 0 || neg < cfg_period_ns(s)) {
+        return 1;
+    }
+    uint32_t prod = (uint32_t)s->ar.in_send_clock_factor *
+                    (uint32_t)s->ar.in_reduction_ratio;
+    uint16_t step = (uint16_t)prod;
+    return step ? step : 1;
+}
+
 void pn_rt_send_if_due(pn_stack_t *s)
 {
     if (!s->ar.established) {
         return;
     }
     uint64_t now = pn_now_ns();
-    uint64_t period = (uint64_t)s->cfg.cycle_us * 1000ull;
-    if (period == 0) {
-        period = 8000000ull;
-    }
+    uint64_t period = rt_send_period_ns(s);
     /* last_rt_ns = next due (0 = due immediately). Phase += period so
      * poll jitter does not accumulate (soft CC-B / RT1; not IRT). */
     if (s->last_rt_ns != 0 && now < s->last_rt_ns) {
@@ -306,7 +345,8 @@ void pn_rt_send_if_due(pn_stack_t *s)
         n += data_len;
         pay[n++] = PN_IOPS_GOOD;
     }
-    pn_wr_be16(pay + n, s->cycle_counter++);
+    pn_wr_be16(pay + n, s->cycle_counter);
+    s->cycle_counter = (uint16_t)(s->cycle_counter + rt_cycle_step(s));
     n += 2;
     pay[n++] = (uint8_t)(PN_DATASTATUS_PRIMARY | PN_DATASTATUS_VALID |
                          PN_DATASTATUS_RUN | PN_DATASTATUS_NO_PROBLEM);
