@@ -220,6 +220,48 @@ void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen)
     s->ar.last_rt_rx_ns = pn_now_ns();
 }
 
+/* Tagged RTC1: 18 + FrameID(2) + C_SDU + APDU(4) >= 60 => C_SDU >= 36.
+ * TX always has the tag, so the untagged C_SDU 40 rule is not used. */
+_Static_assert(60u - 18u - 2u - 4u == 36u, "tagged RTC1 C_SDU minimum");
+
+size_t pn_rtc1_pad_min_csdu(uint8_t *frame, size_t len, size_t cap)
+{
+    if (!frame || len == 0 || cap < len) {
+        return 0;
+    }
+    /* Offset 12 must be TPID 0x8100. An untagged RTC1 frame is left
+     * as built: the 40-octet minimum is not applied on this path. */
+    if (len < 18 || pn_rd_be16(frame + 12) != PN_ETHTYPE_VLAN) {
+        return len;
+    }
+    if (pn_rd_be16(frame + 16) != PN_ETHTYPE_PN) {
+        return len;
+    }
+    if (len < 18u + 2u + 4u) {
+        return len;
+    }
+    uint16_t fid = pn_rd_be16(frame + 18);
+    /* RTC1 unicast range. Alarm, DCP, and RT multicast stay as built. */
+    if (fid < 0x8000u || fid > 0xBBFFu) {
+        return len;
+    }
+    size_t csdu = len - 18u - 2u - 4u;
+    const size_t min_csdu = 36u;
+    if (csdu >= min_csdu) {
+        return len;
+    }
+    size_t pad = min_csdu - csdu;
+    if (len + pad > cap) {
+        LOG_ERROR("pn_rt",
+                  "RTC1 C_SDU pad does not fit (len=%zu pad=%zu cap=%zu)",
+                  len, pad, cap);
+        return 0;
+    }
+    memmove(frame + (len - 4u) + pad, frame + (len - 4u), 4);
+    memset(frame + (len - 4u), 0, pad);
+    return len + pad;
+}
+
 /* Input CR period, or 0 when that CR did not negotiate a clock. */
 static uint64_t input_cr_period_ns(const pn_stack_t *s)
 {
@@ -314,10 +356,14 @@ void pn_rt_send_if_due(pn_stack_t *s)
     memcpy(dst, s->ar.initiator_mac, 6);
     uint8_t frame[PN_FRAME_MAX];
     /* Always 802.1Q. TCI is PCP 6 / VID 0, not the Connect IOCRTagHeader.
-     * No minimum-length pad here (T12-7). With this tag a 60-byte frame
-     * needs C_SDU >= 36; that pad belongs to T12-7. */
+     * A short C_SDU is padded to 36 so the tagged frame is 60 octets
+     * without FCS. The pad is before APDUStatus: trailer zeros after
+     * the status are what a controller would read as DataStatus. */
     size_t flen = pn_eth_build_vlan(frame, sizeof(frame), dst, s->cfg.mac,
                                     PN_VLAN_TCI_RTC1, PN_ETHTYPE_PN, pay, n);
+    if (flen) {
+        flen = pn_rtc1_pad_min_csdu(frame, flen, sizeof(frame));
+    }
     if (flen) {
         pn_eth_send(s, frame, flen);
     }

@@ -6,8 +6,9 @@
  * A missing block or TCI 0 still carries that tag. A Connect value
  * such as 0xE005 is not put on the wire (Connect rejection of a bad
  * tag header is outside this test).
- * Minimum-length padding (T12-7) is not applied; a tagged 32-byte
- * input frame is 57 bytes, still under 60.
+ * T12-7 pads a tagged 32-byte input (C_SDU 33) to C_SDU 36, so the
+ * RTC1 frame without FCS is 60 octets. Alarm FrameIDs are outside
+ * the RTC1 range and stay unpadded.
  */
 #include "pn_endian.h"
 #include "pn_internal.h"
@@ -181,10 +182,11 @@ static void tx_reset(void)
     g_txlen = 0;
 }
 
-/* RTC1 for input_len 32: FrameID(2)+data(32)+IOPS(1)+APDU(4) = 39.
- * Tagged Ethernet is 18+39 = 57 (still < 60; T12-7 does not pad). */
-static const size_t k_rtc1_tagged = 57;
-/* Alarm dummy payload is 32 bytes. Tagged Ethernet is 18+32 = 50. */
+/* RTC1 for input_len 32: C_SDU 33 padded to 36.
+ * Tagged Ethernet is 18+2+36+4 = 60. */
+static const size_t k_rtc1_tagged = 60;
+/* Alarm dummy payload is 32 bytes. Tagged Ethernet is 18+32 = 50.
+ * Not RTC1, so the C_SDU 36 pad does not apply. */
 static const size_t k_alarm_tagged = 50;
 
 static void expect_tagged(const char *what, uint16_t want_tci, uint16_t want_fid,
@@ -225,12 +227,6 @@ static void expect_tagged(const char *what, uint16_t want_tci, uint16_t want_fid
                 want_vid, want_fid, want_len);
         g_fail = 1;
     }
-    if (want_len >= 60) {
-        fprintf(stderr, "FAIL: %s expected length %zu is not under 60 "
-                        "(T12-7 padding does not belong in T12-8)\n",
-                what, want_len);
-        g_fail = 1;
-    }
 }
 
 static void test_rtc1_input_tag_pcp6(void)
@@ -251,7 +247,6 @@ static void test_rtc1_input_tag_pcp6(void)
     tx_reset();
     pn_rt_send_if_due(s);
     expect_tagged("RTC1 IOCRTagHeader 0xC000", 0xC000, 0x8001, k_rtc1_tagged);
-    expect(g_txlen < 60, "RTC1 tagged frame stays under 60 (no T12-7 pad)");
     pn_stack_destroy(s);
 }
 

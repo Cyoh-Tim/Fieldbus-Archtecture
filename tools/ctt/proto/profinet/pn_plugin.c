@@ -1113,17 +1113,23 @@ static uint16_t rtc1_data_len(pn_priv_t *priv)
 static int rtc1_cycle_counter(const uint8_t *frame, int n, uint16_t data_len,
                               uint16_t *cc)
 {
-    /* FrameID follows the Ethernet header (18 if 802.1Q, else 14),
-     * then data + IOPS(1) + CycleCounter(2). */
+    /* RTC1 TX is tagged: offset 12 is TPID 0x8100 and FrameID is at 18.
+     * T12-7 pads C_SDU to 36 before APDUStatus, so CycleCounter is the
+     * first of the last 4 octets, not data_len + IOPS. */
+    (void)data_len;
     size_t hdr = 14;
-    if (pn_frame_hdr(frame, n, &hdr, NULL) != 0) {
+    uint16_t et = 0;
+    if (n < 18 || pn_rd_be16(frame + 12) != PN_ETHTYPE_VLAN) {
         return 0;
     }
-    size_t off = hdr + 2u + (size_t)data_len + 1u;
-    if (n < (int)(off + 2u)) {
+    if (pn_frame_hdr(frame, n, &hdr, &et) != 0 || et != PN_ETHTYPE_PN ||
+        hdr != 18u) {
         return 0;
     }
-    *cc = pn_rd_be16(frame + off);
+    if (n < (int)(hdr + 2u + 4u)) {
+        return 0;
+    }
+    *cc = pn_rd_be16(frame + (size_t)n - 4u);
     return 1;
 }
 
