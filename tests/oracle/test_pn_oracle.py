@@ -346,8 +346,6 @@ def test_connect_response_module_diff_on_wrong_module(pn_dut):
 
 
 # ---------------------------------------------------------------- 최소 주기 (T5)
-@known_defect("T5 (PN)", "장치 최소 주기(8ms)보다 짧은 4ms 협상을 받아들인다. "
-              "사양: PNIOStatus DB 81 02 0B (IODConnectRes, PNIO, Faulty IOCRBlockReq, ErrorCode2 11 ReductionRatio)")
 def test_connect_rejects_cycle_below_device_minimum(pn_dut):
     rsp = rpc_response(pn_dut.rpc(raw(connect_pdu(scf=32, rr=4))))
     assert rsp is not None, "Connect 응답 없음"
@@ -539,8 +537,6 @@ def gsdml_root():
     return ET.parse(files[0]).getroot()
 
 
-@known_defect("T12-13", "GSDML 에 DAP VirtualSubmoduleItem, InterfaceSubmoduleItem(32768), "
-              "PortSubmoduleItem(32769), TimingProperties, CertificationInfo 가 없다")
 def test_gsdml_required_elements():
     dap = gsdml_root().find(".//{*}DeviceAccessPointItem")
     assert dap is not None
@@ -555,8 +551,6 @@ def test_gsdml_required_elements():
     assert dap.find("{*}CertificationInfo") is not None, "CertificationInfo"
 
 
-@known_defect("T5 (PN)", "GSDML MinDeviceInterval=32(1ms) 이 8ms 구현과 모순. 256(8ms) 이어야 하고 "
-              "TimingProperties 는 SCF 32 × RR ≥ 8 만 광고해야 한다")
 def test_gsdml_timing_matches_device_minimum():
     dap = gsdml_root().find(".//{*}DeviceAccessPointItem")
     assert dap.get("MinDeviceInterval") == "256"

@@ -92,6 +92,7 @@ protocol: profinet
 | PN-B-NEG-006 | `dcp_set_name_boundary.yaml` | **NEG** | pass | NameOfStation DNS/PN rules | **wave 2** 240 DNS-label accept; 260 / 64-label / IP / `port-xyz` reject |
 | PN-B-NEG-007 | `dcp_malformed.yaml` | **NEG** | pass | truncated / unknown DCP | **wave 2** name unchanged |
 | PN-B-NEG-008 | `rpc_cm_without_ar.yaml` | **NEG** | pass | CM/Alarm/output without AR | **wave 2** Control fail-closed |
+| PN-B-NEG-009 | `rpc_connect_cycle_below_minimum.yaml` | **NEG** | pass | Connect reject (cycle below minimum) | 8 ms device, SCF=32 RR=4, `DB 81 02 0B`, no RTC1 |
 | PN-B-ALM-001 | `alarm_tx.yaml` | catalog | pass | Alarm High | ID only |
 | PN-B-ALM-002 | `alarm_low.yaml` | catalog | pass + golden | Alarm Low | ID only |
 | PN-B-REC-001 | `record_read_im0.yaml` | catalog | pass | I&M0 | ID only |
