@@ -85,7 +85,7 @@ def _run(lab, run_idle, seconds=3):
 
 # Logix 기본 형식: O->T = 데이터 + 2(seq) + 4(32-bit Run/Idle 헤더). EIPScanner 의 o2tRealTimeFormat.
 # 장치는 Forward Open 을 받아들이고, 헤더를 벗긴 데이터(A1 A2 A3 A4)를 출력 이미지에 넣어야 한다.
-@known_defect("T11-1", "Logix 형식(O->T 32-bit Run/Idle 헤더) Forward Open 을 크기 오류(0x0109)로 거부한다")
+# T11-1 (#109): Logix 형식 Forward Open 수락, Run/Idle 헤더를 벗겨 출력 이미지에 넣는다.
 def test_lab_eipscanner_logix_run_idle_forward_open(lab):
     r = _run(lab, run_idle=1)
     assert r["fo_ok"], f"Forward Open 거부:\n{r['log']}"
