@@ -610,6 +610,10 @@ static int eip_init(protocol_adapter_t *self, const char *protocol_params_json,
         if (cJSON_IsNumber(pc)) {
             cfg.product_code = (uint16_t)pc->valueint;
         }
+        cJSON *minor = cJSON_GetObjectItemCaseSensitive(params, "minor_rev");
+        if (cJSON_IsNumber(minor)) {
+            cfg.minor_rev = (uint8_t)minor->valueint;
+        }
         cJSON *sn = cJSON_GetObjectItemCaseSensitive(params, "serial_number");
         if (cJSON_IsNumber(sn)) {
             cfg.serial_number = (uint32_t)sn->valuedouble;

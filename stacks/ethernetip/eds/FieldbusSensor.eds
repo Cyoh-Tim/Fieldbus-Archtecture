@@ -14,7 +14,7 @@ ProdType = 12;
 ProdTypeStr = "Communications Adapter";
 ProdCode = 1;
 MajRev = 1;
-MinRev = 1;
+MinRev = 0;
 ProdName = "FieldbusSensor";
 Catalog = "FB-EIP-SENSOR";
 
@@ -26,7 +26,7 @@ Param1 =
     0,                  $ first field shall equal 0
     6,0,                $ assembly link path size/path (placeholder)
     0x0000,             $ descriptor
-    0xC1,               $ data type = BYTE
+    0xC7,               $ data type = UINT
     2,                  $ data size in bytes
     "Input Size",       $ name
     "",                 $ units
@@ -35,6 +35,20 @@ Param1 =
     1,1,1,0,            $ mult,div,base,offset scaling
     0,0,0,0,            $ mult,div,base,offset links
     0;                  $ decimal places
+
+Param2 =
+    0,                  $ reserved
+    0,,                 $ link path size, link path (none)
+    0x0000,             $ descriptor
+    0xC8,               $ data type = UDINT
+    4,                  $ data size in bytes
+    "RPI",              $ name
+    "us",               $ units
+    "Requested Packet Interval",
+    8000,1000000,8000,  $ min,max,default (min = example cycle_ms 8 x 1000)
+    1,1,1,0,
+    0,0,0,0,
+    0;
 
 [Assembly]
 Assem100 =
@@ -54,25 +68,22 @@ Assem150 =
 
 [Connection Manager]
 Connection1 =
-    0x04010002,         $ Exclusive Owner
-    0x44640405,         $ trigger & transport
-    1000000,8000,       $ O->T RPI range (us) — example
-    128,                $ O->T size
-    1000000,8000,       $ T->O RPI
-    512,                $ T->O size
-    ,,                  $ proxy config
-    ,Assem100,,Assem101,Assem150,,
-    "Exclusive Owner",
-    "";
+    0x04010002,         $ trigger & transport: Class 1, cyclic, exclusive owner
+    0x44640405,         $ O->T 32-bit Run/Idle, T->O pure data
+    Param2,,Assem101,   $ O->T RPI, size, format
+    Param2,,Assem150,   $ T->O RPI, size, format
+    ,,                  $ config 1 size, format
+    ,,                  $ config 2 size, format
+    "Exclusive Owner",  $ name
+    "",                 $ help
+    "20 04 24 64 2C 65 2C 96";  $ path: Assembly, config 100, O->T 101, T->O 150
 
 [Port]
 Port1 =
-    TCP,
-    "EtherNet/IP",
-    "Twisted-pair",
-    0xF5,
-    0xF6,
-    0x48;
+    TCP,                $ port type
+    "EtherNet/IP",      $ name
+    "20 F5 24 01",      $ TCP/IP Interface object, instance 1
+    2;                  $ port number
 
 [Capacity]
 MaxCIPConnections = 64;

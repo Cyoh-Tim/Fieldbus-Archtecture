@@ -469,7 +469,6 @@ def unquote(s: str) -> str:
     return s[1:-1]
 
 
-@known_defect("T11-2", "Connection1 의 RPI 칸에 값 2개(1000000,8000)를 넣어 필드가 밀리고 연결 경로 문자열이 없다 (18필드). 사양은 15필드, 마지막이 경로")
 def test_eds_connection1_field_layout():
     conn = eds_file()["Connection Manager"]["Connection1"]
     # trigger&transport, conn params, O→T RPI/size/format, T→O RPI/size/format,
@@ -481,7 +480,6 @@ def test_eds_connection1_field_layout():
     assert "20042464" in path and "2C652C96" in path, conn[14]
 
 
-@known_defect("T11-2", "Param1 이 타입 0xC1(BOOL, 1바이트)인데 크기 2 로 선언됐다. 사양은 타입 코드와 크기가 일치")
 def test_eds_param_type_matches_size():
     params = eds_file()["Params"]
     assert params
@@ -490,7 +488,6 @@ def test_eds_param_type_matches_size():
         assert CIP_TYPE_SIZE.get(code) == size, f"{name}: type {code:#x} size {size}"
 
 
-@known_defect("T11-2", "Port1 이 TCP,이름,\"Twisted-pair\",0xF5,0xF6,0x48 로 비표준. 사양은 타입, 이름, 포트 객체 EPATH 문자열, 포트 번호")
 def test_eds_port_entry_format():
     port = eds_file()["Port"]["Port1"]
     assert port[0] == "TCP", port
@@ -499,7 +496,6 @@ def test_eds_port_entry_format():
     int(port[3], 0)
 
 
-@known_defect("T5 (EIP)", "EDS Connection1 RPI 칸이 숫자(1000000,8000)이고 Param 참조가 없다. 사양은 UDINT Param, 단위 µs, min = cycle_ms×1000")
 def test_eds_rpi_param_minimum_matches_cycle():
     eds = eds_file()
     conn = eds["Connection Manager"]["Connection1"]
@@ -657,7 +653,6 @@ def test_scaled_point_read_from_scanner(fbapi):
     assert rc == 0 and abs(v - 300.0) < 1e-3, (rc, v)
 
 
-@known_defect("T11-2", "어댑터가 protocol_params 의 minor_rev 를 읽지 않고 0 으로 고정한다")
 def test_adapter_minor_rev_from_config(tmp_path):
     d = FbApiDut(fbapi_cfg({"major_rev": 1, "minor_rev": 7}), tmp_path)
     try:
@@ -667,7 +662,6 @@ def test_adapter_minor_rev_from_config(tmp_path):
     assert ident["revision"] == {"major": 1, "minor": 7}, ident["revision"]
 
 
-@known_defect("T11-2", "EDS 는 MajRev 1 / MinRev 1 인데 예제 설정으로 뜬 장치의 Identity 는 1.0 이다 (전자 키 불일치)")
 def test_eds_revision_matches_example_identity(tmp_path):
     eds = eds_file()["Device"]
     cfg = json.loads(EXAMPLE_CFG.read_text())
