@@ -496,6 +496,22 @@ def test_eds_port_entry_format():
     int(port[3], 0)
 
 
+@known_defect("A20261011-1", "Param1 의 링크 경로가 크기 6, 경로 0 이다 (EPATH 문자열 아님). 사양: 크기 = 경로 바이트 수, "
+              "링크가 없으면 둘 다 비움 (OpENer 샘플 EDS `,,`)")
+def test_eds_param_link_path_consistent():
+    params = eds_file()["Params"]
+    assert params
+    for name, f in params.items():
+        size_s, path_s = f[1].strip(), f[2].strip()
+        size = int(size_s, 0) if size_s else 0
+        if size == 0:
+            assert path_s == "", f"{name}: 링크 경로 크기 0 인데 경로 {path_s!r}"
+            continue
+        octets = unquote(path_s).split()
+        assert len(octets) == size, f"{name}: 크기 {size} 인데 경로 {path_s!r}"
+        assert all(len(o) == 2 and int(o, 16) >= 0 for o in octets), f"{name}: 경로 {path_s!r}"
+
+
 def test_eds_rpi_param_minimum_matches_cycle():
     eds = eds_file()
     conn = eds["Connection Manager"]["Connection1"]
