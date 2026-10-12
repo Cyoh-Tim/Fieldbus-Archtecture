@@ -369,8 +369,10 @@ static void tls_service(eip_stack_t *s, eip_tls_client_t *c, int budget)
             size_t resp_len = 0;
             memset(resp, 0, sizeof(resp));
             pthread_mutex_lock(&s->lock);
+            s->encap_local_ip = eip_ipv4_local(c->fd);
             int rc = eip_encap_process(s, c->rx, need, resp, sizeof(resp),
                                        &resp_len, tls_client_owner(s, c));
+            s->encap_local_ip = 0;
             pthread_mutex_unlock(&s->lock);
             if (rc == 0 && resp_len > 0) {
                 int w = SSL_write(c->ssl, resp, (int)resp_len);

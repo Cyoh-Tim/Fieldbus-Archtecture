@@ -75,7 +75,10 @@ struct eip_stack {
 
     int listen_fd;
     int udp_fd;
+    int udp_encap_fd; /* UDP on the encapsulation port (ListIdentity browse) */
     int originator_fd;
+    uint32_t bind_ip_host;   /* host order; 0 when listening on 0.0.0.0 */
+    uint32_t encap_local_ip; /* host order; interface that received this encap */
     int running;
 
     uint32_t next_session;
@@ -139,6 +142,13 @@ struct eip_stack {
 int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
                       uint8_t *resp, size_t resp_cap, size_t *resp_len,
                       uint32_t owner_id);
+
+/* Identity attr 5 (Status) and attr 8 (State). ListIdentity must copy these. */
+uint16_t eip_identity_status(const eip_stack_t *s);
+uint8_t eip_identity_state(const eip_stack_t *s);
+
+/* Host-order IPv4 of a connected or bound socket. 0 if unknown. */
+uint32_t eip_ipv4_local(int fd);
 void eip_encap_drop_owner(eip_stack_t *s, uint32_t owner_id);
 
 #define EIP_ENCAP_OWNER_MOCK 0x80000001u

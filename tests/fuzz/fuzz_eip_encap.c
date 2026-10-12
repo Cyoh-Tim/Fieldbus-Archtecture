@@ -10,8 +10,9 @@
  *   - protected (protection_mode=1 → Set/Reset privilege reject)
  *   - integrity (security_class=1 + PSK; mutating UCMM needs HMAC)
  *
- * ListInterfaces and SendUnitData are not implemented (invalid-cmd). CIP
- * Multiple Service Packet is not a service here (0x0A = ATTR_READONLY status).
+ * SendUnitData is not implemented (invalid-cmd). ListInterfaces returns an
+ * empty interface list. CIP Multiple Service Packet is not a service here
+ * (0x0A = ATTR_READONLY status).
  * Unconnected Send 0x52 is defined but not handled (service not supported).
  *
  * Forward Open takes a Class 1 slot (EIP_CLASS1_CONN_MAX). Modes that open

@@ -36,6 +36,32 @@ static size_t cip_ok_header(uint8_t *resp, size_t cap, uint8_t service)
     return 4;
 }
 
+uint16_t eip_identity_status(const eip_stack_t *s)
+{
+    uint16_t st;
+
+    if (!s) {
+        return 0;
+    }
+    /* Same word Identity attr 5 already exposes. T11-10 owns the bit layout. */
+    st = eip_stack_class1_up(s) ? 0x0004u : 0x0000u;
+    if (s->acd_conflict) {
+        st = (uint16_t)(st | 0x0100u);
+    }
+    return st;
+}
+
+uint8_t eip_identity_state(const eip_stack_t *s)
+{
+    if (!s) {
+        return 0;
+    }
+    if (s->acd_conflict) {
+        return 2; /* Minor Recoverable Fault — CT23 ACD guidance */
+    }
+    return s->device_state ? s->device_state : 3;
+}
+
 static int identity_get_attr(eip_stack_t *s, uint16_t attr, uint8_t *out,
                              size_t cap, size_t *out_len)
 {
@@ -74,13 +100,7 @@ static int identity_get_attr(eip_stack_t *s, uint16_t attr, uint8_t *out,
         if (cap < 2) {
             return -ENOSPC;
         }
-        {
-            uint16_t st = eip_stack_class1_up(s) ? 0x0004 : 0x0000;
-            if (s->acd_conflict) {
-                st |= 0x0100; /* minor recoverable fault (ACD) */
-            }
-            eip_wr_le16(out, st);
-        }
+        eip_wr_le16(out, eip_identity_status(s));
         *out_len = 2;
         return 0;
     case 6: /* Serial Number */
@@ -107,11 +127,7 @@ static int identity_get_attr(eip_stack_t *s, uint16_t attr, uint8_t *out,
         if (cap < 1) {
             return -ENOSPC;
         }
-        if (s->acd_conflict) {
-            out[0] = 2; /* Minor Recoverable Fault — CT23 ACD guidance */
-        } else {
-            out[0] = s->device_state ? s->device_state : 3; /* operational */
-        }
+        out[0] = eip_identity_state(s);
         *out_len = 1;
         return 0;
     case 9: /* Configuration Consistency Value */

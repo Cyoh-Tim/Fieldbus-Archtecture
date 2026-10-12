@@ -124,7 +124,9 @@ eip_stack_t *eip_stack_create(const eip_cfg_t *cfg)
 
     s->listen_fd = -1;
     s->udp_fd = -1;
+    s->udp_encap_fd = -1;
     s->originator_fd = -1;
+    s->bind_ip_host = parse_ipv4_host(s->cfg.bind_ip);
     s->tls_listen_fd = -1;
     s->device_state = 3;
     s->config_consistency = 1;
@@ -212,6 +214,49 @@ static int bind_udp(eip_stack_t *s)
     set_nonblock(fd);
     s->udp_fd = fd;
     return 0;
+}
+
+/* Encapsulation UDP (same port as TCP). RSLinx broadcasts ListIdentity here. */
+static int bind_udp_encap(eip_stack_t *s)
+{
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        return -errno;
+    }
+    int yes = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    if (setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &yes, sizeof(yes)) != 0) {
+        LOG_WARN("ethernetip", "IP_PKTINFO unavailable (%d)", errno);
+    }
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)s->cfg.tcp_port);
+    addr.sin_addr.s_addr =
+        s->bind_ip_host ? htonl(s->bind_ip_host) : htonl(INADDR_ANY);
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        int e = errno;
+        close(fd);
+        return -e;
+    }
+    set_nonblock(fd);
+    s->udp_encap_fd = fd;
+    return 0;
+}
+
+uint32_t eip_ipv4_local(int fd)
+{
+    struct sockaddr_in local;
+    socklen_t llen = sizeof(local);
+    if (fd < 0) {
+        return 0;
+    }
+    memset(&local, 0, sizeof(local));
+    if (getsockname(fd, (struct sockaddr *)&local, &llen) != 0 ||
+        local.sin_family != AF_INET) {
+        return 0;
+    }
+    return ntohl(local.sin_addr.s_addr);
 }
 
 static int bind_tcp_listen(eip_stack_t *s)
@@ -335,10 +380,22 @@ int eip_stack_start(eip_stack_t *s)
             s->listen_fd = -1;
             return rc;
         }
+        rc = bind_udp_encap(s);
+        if (rc != 0) {
+            snprintf(s->last_error, sizeof(s->last_error),
+                     "UDP encapsulation bind failed (%d)", rc);
+            LOG_ERROR("ethernetip", "%s", s->last_error);
+            close(s->listen_fd);
+            s->listen_fd = -1;
+            close(s->udp_fd);
+            s->udp_fd = -1;
+            return rc;
+        }
         LOG_INFO("ethernetip",
-                 "adapter listening TCP:%d UDP-IO:%d in_asm=%u(%u) out_asm=%u(%u) sec=%d",
-                 s->cfg.tcp_port, s->cfg.udp_io_port, s->cfg.input_assembly,
-                 s->cfg.input_size, s->cfg.output_assembly, s->cfg.output_size,
+                 "adapter listening TCP:%d UDP-ENCAP:%d UDP-IO:%d in_asm=%u(%u) out_asm=%u(%u) sec=%d",
+                 s->cfg.tcp_port, s->cfg.tcp_port, s->cfg.udp_io_port,
+                 s->cfg.input_assembly, s->cfg.input_size,
+                 s->cfg.output_assembly, s->cfg.output_size,
                  s->cfg.security_class);
         rc = eip_sec_tls_start(s);
         if (rc != 0) {
@@ -349,6 +406,8 @@ int eip_stack_start(eip_stack_t *s)
             s->listen_fd = -1;
             close(s->udp_fd);
             s->udp_fd = -1;
+            close(s->udp_encap_fd);
+            s->udp_encap_fd = -1;
             return rc;
         }
     } else {
@@ -380,6 +439,10 @@ void eip_stack_stop(eip_stack_t *s)
     if (s->udp_fd >= 0) {
         close(s->udp_fd);
         s->udp_fd = -1;
+    }
+    if (s->udp_encap_fd >= 0) {
+        close(s->udp_encap_fd);
+        s->udp_encap_fd = -1;
     }
     pthread_mutex_lock(&s->lock);
     s->n_sessions = 0;
@@ -513,8 +576,10 @@ static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
             size_t resp_len = 0;
             memset(resp, 0, sizeof(resp));
             pthread_mutex_lock(&s->lock);
+            s->encap_local_ip = eip_ipv4_local(c->fd);
             int rc = eip_encap_process(s, c->rx, need, resp, sizeof(resp),
                                        &resp_len, owner);
+            s->encap_local_ip = 0;
             uint32_t sess = 0;
             uint16_t cmd = eip_rd_le16(c->rx + 0);
             if (rc == 0 && resp_len >= 8) {
@@ -533,6 +598,90 @@ static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
             }
             memmove(c->rx, c->rx + need, c->rx_len - need);
             c->rx_len -= need;
+        }
+    }
+}
+
+static int udp_discovery_cmd(uint16_t cmd)
+{
+    return cmd == EIP_CMD_LISTIDENTITY || cmd == EIP_CMD_LISTSERVICES ||
+           cmd == EIP_CMD_LISTINTERFACES;
+}
+
+static uint32_t pktinfo_spec_dst(struct msghdr *msg)
+{
+    struct cmsghdr *c;
+    for (c = CMSG_FIRSTHDR(msg); c != NULL; c = CMSG_NXTHDR(msg, c)) {
+        if (c->cmsg_level == IPPROTO_IP && c->cmsg_type == IP_PKTINFO) {
+            struct in_pktinfo *pi = (struct in_pktinfo *)CMSG_DATA(c);
+            return ntohl(pi->ipi_spec_dst.s_addr);
+        }
+    }
+    return 0;
+}
+
+static void service_udp_encap(eip_stack_t *s, int budget)
+{
+    if (s->udp_encap_fd < 0) {
+        return;
+    }
+    while (budget-- > 0) {
+        uint8_t buf[2048];
+        uint8_t resp[2048];
+        char cbuf[CMSG_SPACE(sizeof(struct in_pktinfo))];
+        struct sockaddr_in peer;
+        struct iovec iov;
+        struct msghdr msg;
+        ssize_t n;
+        uint16_t cmd;
+        uint16_t length;
+        uint32_t local_ip;
+        size_t resp_len = 0;
+        int rc;
+
+        memset(&peer, 0, sizeof(peer));
+        memset(&msg, 0, sizeof(msg));
+        memset(cbuf, 0, sizeof(cbuf));
+        iov.iov_base = buf;
+        iov.iov_len = sizeof(buf);
+        msg.msg_name = &peer;
+        msg.msg_namelen = sizeof(peer);
+        msg.msg_iov = &iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = cbuf;
+        msg.msg_controllen = sizeof(cbuf);
+
+        n = recvmsg(s->udp_encap_fd, &msg, 0);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+        if (n == 0 || (msg.msg_flags & MSG_TRUNC) != 0) {
+            continue;
+        }
+        if ((size_t)n < EIP_ENCAP_HDR_SIZE) {
+            continue;
+        }
+        cmd = eip_rd_le16(buf);
+        length = eip_rd_le16(buf + 2);
+        if (!udp_discovery_cmd(cmd) ||
+            (size_t)EIP_ENCAP_HDR_SIZE + (size_t)length > (size_t)n) {
+            continue;
+        }
+        local_ip = pktinfo_spec_dst(&msg);
+        pthread_mutex_lock(&s->lock);
+        s->encap_local_ip = local_ip;
+        rc = eip_encap_process(s, buf, (size_t)n, resp, sizeof(resp), &resp_len,
+                               0);
+        s->encap_local_ip = 0;
+        pthread_mutex_unlock(&s->lock);
+        if (rc == 0 && resp_len > 0 &&
+            sendto(s->udp_encap_fd, resp, resp_len, 0, (struct sockaddr *)&peer,
+                   sizeof(peer)) < 0) {
+            LOG_WARN("ethernetip", "UDP encapsulation sendto failed (%d)",
+                     errno);
         }
     }
 }
@@ -611,6 +760,7 @@ void eip_stack_poll(eip_stack_t *s)
             }
         }
         service_udp(s, EIP_POLL_UDP_BUDGET);
+        service_udp_encap(s, EIP_POLL_UDP_BUDGET);
         pthread_mutex_lock(&s->lock);
         eip_io_watchdog(s);
         eip_io_produce(s);
