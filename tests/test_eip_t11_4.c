@@ -293,23 +293,24 @@ static void test_list_interfaces_zero_items(void)
     expect(eip_stack_handle_encap(s, req, sizeof(req), resp, sizeof(resp),
                                   &n) == 0,
            "ListInterfaces rc");
-    expect(n >= EIP_ENCAP_HDR_SIZE + 2, "ListInterfaces has item count");
+    expect(n >= (size_t)EIP_ENCAP_HDR_SIZE + 2, "ListInterfaces has item count");
     expect(eip_rd_le16(resp) == EIP_CMD_LISTINTERFACES, "cmd 0x0064");
     uint32_t status = eip_rd_le32(resp + 8);
     expect(status == 0, "ListInterfaces encap status 0 (not 1)");
     uint16_t length = eip_rd_le16(resp + 2);
-    expect((size_t)EIP_ENCAP_HDR_SIZE + length == n, "length matches body");
+    expect((size_t)EIP_ENCAP_HDR_SIZE + (size_t)length == n, "length matches body");
     uint16_t count = eip_rd_le16(resp + EIP_ENCAP_HDR_SIZE);
-    size_t off = EIP_ENCAP_HDR_SIZE + 2;
+    size_t off = (size_t)EIP_ENCAP_HDR_SIZE + 2;
     for (uint16_t i = 0; i < count; i++) {
         if (off + 4 > n) {
             expect(0, "ListInterfaces CPF overrun");
             break;
         }
         uint16_t ln = eip_rd_le16(resp + off + 2);
-        off += 4 + ln;
+        off += 4 + (size_t)ln;
     }
-    expect(off == EIP_ENCAP_HDR_SIZE + length, "ListInterfaces CPF end");
+    expect(off == (size_t)EIP_ENCAP_HDR_SIZE + (size_t)length,
+           "ListInterfaces CPF end");
     eip_stack_destroy(s);
 }
 
