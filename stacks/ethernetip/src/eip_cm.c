@@ -5,18 +5,45 @@
 #include "logger.h"
 #include <string.h>
 
-static size_t cm_err(uint8_t *resp, size_t cap, uint8_t service, uint8_t status,
-                     uint16_t ext)
+/* Unsuccessful Connection Manager reply.
+ * General Status is always 0x01 with one extended-status word, then
+ * Connection Serial, Originator Vendor, Originator Serial, and a trailing
+ * USINT + reserved (10 bytes). Forward Open uses that USINT as Remaining
+ * Path Size; Forward Close uses it as Application Reply Size. A target
+ * that is not a router sets the size byte to 0.
+ */
+static size_t cm_err(uint8_t *resp, size_t cap, uint8_t service, uint16_t ext,
+                     uint16_t conn_serial, uint16_t vendor, uint32_t orig_serial,
+                     uint8_t size_byte)
 {
-    if (cap < 6) {
+    if (cap < 16) {
         return 0;
     }
     resp[0] = (uint8_t)(service | CIP_SVC_REPLY);
     resp[1] = 0;
-    resp[2] = status;
+    resp[2] = CIP_STATUS_CONN_FAILURE;
     resp[3] = 1;
     eip_wr_le16(resp + 4, ext);
-    return 6;
+    eip_wr_le16(resp + 6, conn_serial);
+    eip_wr_le16(resp + 8, vendor);
+    eip_wr_le32(resp + 10, orig_serial);
+    resp[14] = size_byte;
+    resp[15] = 0;
+    return 16;
+}
+
+/* Triad starts after priority, timeout, and the two connection IDs (10 bytes). */
+static void fo_triad_or_zero(const uint8_t *data, size_t len, uint16_t *serial,
+                             uint16_t *vendor, uint32_t *orig_serial)
+{
+    *serial = 0;
+    *vendor = 0;
+    *orig_serial = 0;
+    if (data && len >= 18) {
+        *serial = eip_rd_le16(data + 10);
+        *vendor = eip_rd_le16(data + 12);
+        *orig_serial = eip_rd_le32(data + 14);
+    }
 }
 
 static eip_class1_conn_t *alloc_conn(eip_stack_t *s)
@@ -119,12 +146,21 @@ static int parse_fo_path(const uint8_t *path, size_t path_bytes,
     return 0;
 }
 
-static int fo_path_matches_asm(eip_stack_t *s, const uint8_t *path,
-                               size_t path_bytes)
+/* 1 when the path names both configured assemblies.
+ * Otherwise *ext is 0x0315 (segment not understood) or 0x0117
+ * (produced/consumed application path does not match).
+ */
+static int fo_path_ok(eip_stack_t *s, const uint8_t *path, size_t path_bytes,
+                      uint16_t *ext)
 {
     uint16_t insts[8];
     int n = 0;
+    if (path_bytes == 0) {
+        *ext = CIP_EXT_INVALID_APP_PATH;
+        return 0;
+    }
     if (parse_fo_path(path, path_bytes, insts, &n, 8) != 0) {
+        *ext = CIP_EXT_INVALID_SEGMENT;
         return 0;
     }
     int saw_out = 0;
@@ -137,7 +173,11 @@ static int fo_path_matches_asm(eip_stack_t *s, const uint8_t *path,
             saw_in = 1;
         }
     }
-    return saw_out && saw_in;
+    if (!saw_out || !saw_in) {
+        *ext = CIP_EXT_INVALID_APP_PATH;
+        return 0;
+    }
+    return 1;
 }
 
 int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
@@ -149,7 +189,12 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     /* Minimum Forward Open body (no connection path) ~36 bytes + path */
     size_t min_len = large ? 40 : 36;
     if (len < min_len) {
-        *resp_len = cm_err(resp, resp_cap, service, CIP_STATUS_INVALID_PARAM, 0);
+        uint16_t cs = 0;
+        uint16_t vend = 0;
+        uint32_t os = 0;
+        fo_triad_or_zero(data, len, &cs, &vend, &os);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_PARAM_ERROR, cs,
+                           vend, os, 0);
         return 0;
     }
 
@@ -191,23 +236,26 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     }
     off += 1; /* transport type/trigger */
     if (off >= len) {
-        *resp_len = cm_err(resp, resp_cap, service, CIP_STATUS_INVALID_PARAM, 0);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_PARAM_ERROR,
+                           conn_serial, orig_vendor, orig_serial, 0);
         return 0;
     }
     uint8_t path_words = data[off++];
     size_t path_bytes = (size_t)path_words * 2u;
     if (off + path_bytes > len) {
-        *resp_len = cm_err(resp, resp_cap, service, CIP_STATUS_PATH_SEGMENT, 0);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_PARAM_ERROR,
+                           conn_serial, orig_vendor, orig_serial, 0);
         return 0;
     }
 
-    if (path_bytes == 0 ||
-        !fo_path_matches_asm(s, data + off, path_bytes)) {
+    uint16_t path_ext = 0;
+    if (!fo_path_ok(s, data + off, path_bytes, &path_ext)) {
         LOG_WARN("ethernetip",
-                 "Forward Open rejected: connection path missing configured "
-                 "assemblies in=%u out=%u",
-                 s->cfg.input_assembly, s->cfg.output_assembly);
-        *resp_len = cm_err(resp, resp_cap, service, CIP_STATUS_PATH_DEST, 0);
+                 "Forward Open rejected: connection path ext=0x%04x in=%u "
+                 "out=%u",
+                 path_ext, s->cfg.input_assembly, s->cfg.output_assembly);
+        *resp_len = cm_err(resp, resp_cap, service, path_ext, conn_serial,
+                           orig_vendor, orig_serial, 0);
         return 0;
     }
 
@@ -221,9 +269,8 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
                  "%u+6 run/idle) t2o=%u (need %u[+2])",
                  o2t_size, s->output_size, s->output_size, s->output_size,
                  t2o_size, s->input_size);
-        *resp_len =
-            cm_err(resp, resp_cap, service, CIP_STATUS_INVALID_PARAM,
-                   CIP_EXT_CONN_SIZE);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_CONN_SIZE,
+                           conn_serial, orig_vendor, orig_serial, 0);
         return 0;
     }
 
@@ -232,14 +279,15 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
                  "Forward Open rejected: duplicate triad serial=0x%04x "
                  "vendor=0x%04x orig=0x%08x",
                  conn_serial, orig_vendor, orig_serial);
-        *resp_len = cm_err(resp, resp_cap, service, CIP_STATUS_CONN_FAILURE,
-                           CIP_EXT_CONN_IN_USE);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_CONN_IN_USE,
+                           conn_serial, orig_vendor, orig_serial, 0);
         return 0;
     }
 
     eip_class1_conn_t *c = alloc_conn(s);
     if (!c) {
-        *resp_len = cm_err(resp, resp_cap, service, CIP_STATUS_RESOURCE, 0);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_OUT_OF_CONNECTIONS,
+                           conn_serial, orig_vendor, orig_serial, 0);
         return 0;
     }
 
@@ -272,7 +320,8 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     size_t need = large ? 30 : 26;
     if (resp_cap < need) {
         c->in_use = 0;
-        *resp_len = cm_err(resp, resp_cap, service, CIP_STATUS_RESOURCE, 0);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_NO_BUFFER,
+                           conn_serial, orig_vendor, orig_serial, 0);
         return 0;
     }
     size_t r = 0;
@@ -305,7 +354,8 @@ int eip_cm_forward_close(eip_stack_t *s, const uint8_t *data, size_t len,
 {
     uint8_t service = CIP_SVC_FORWARD_CLOSE;
     if (len < 10) {
-        *resp_len = cm_err(resp, resp_cap, service, CIP_STATUS_INVALID_PARAM, 0);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_PARAM_ERROR, 0, 0,
+                           0, 0);
         return 0;
     }
     /* priority/tick + timeout, then serial/vendor/serial */
@@ -313,6 +363,7 @@ int eip_cm_forward_close(eip_stack_t *s, const uint8_t *data, size_t len,
     uint16_t vendor = eip_rd_le16(data + 4);
     uint32_t orig_serial = eip_rd_le32(data + 6);
 
+    int found = 0;
     for (int i = 0; i < EIP_CLASS1_CONN_MAX; i++) {
         eip_class1_conn_t *c = &s->class1[i];
         if (!c->in_use) {
@@ -321,12 +372,23 @@ int eip_cm_forward_close(eip_stack_t *s, const uint8_t *data, size_t len,
         if (c->conn_serial == conn_serial && c->vendor_id == vendor &&
             c->originator_serial == orig_serial) {
             c->in_use = 0;
+            found = 1;
             break;
         }
     }
+    if (!found) {
+        LOG_WARN("ethernetip",
+                 "Forward Close rejected: connection not found serial=0x%04x "
+                 "vendor=0x%04x orig=0x%08x",
+                 conn_serial, vendor, orig_serial);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_CONN_NOT_FOUND,
+                           conn_serial, vendor, orig_serial, 0);
+        return 0;
+    }
 
     if (resp_cap < 14) {
-        *resp_len = cm_err(resp, resp_cap, service, CIP_STATUS_RESOURCE, 0);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_NO_BUFFER,
+                           conn_serial, vendor, orig_serial, 0);
         return 0;
     }
     size_t r = 0;

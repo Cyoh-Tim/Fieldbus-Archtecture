@@ -868,6 +868,35 @@ static uint8_t cip_status_from_encap(const uint8_t *resp, size_t n)
     return 0xFF;
 }
 
+static uint16_t cip_ext_from_encap(const uint8_t *resp, size_t n)
+{
+    if (!resp || n < EIP_ENCAP_HDR_SIZE + 8) {
+        return 0xFFFF;
+    }
+    const uint8_t *b = resp + EIP_ENCAP_HDR_SIZE;
+    size_t bl = n - EIP_ENCAP_HDR_SIZE;
+    size_t off = 6;
+    uint16_t items = eip_rd_le16(b + off);
+    off += 2;
+    for (uint16_t i = 0; i < items; i++) {
+        if (off + 4 > bl) {
+            return 0xFFFF;
+        }
+        uint16_t type = eip_rd_le16(b + off);
+        uint16_t length = eip_rd_le16(b + off + 2);
+        off += 4;
+        if (off + length > bl) {
+            return 0xFFFF;
+        }
+        if (type == EIP_ITEM_UNCONNECTED_DATA && length >= 6 &&
+            b[off + 3] >= 1) {
+            return eip_rd_le16(b + off + 4);
+        }
+        off += length;
+    }
+    return 0xFFFF;
+}
+
 static size_t pack_fo_sendrr(uint8_t *req, size_t req_cap, uint32_t sess,
                              const uint8_t *fo, size_t fo_len)
 {
@@ -990,8 +1019,10 @@ static void test_g2_watchdog_dup_path_size(void)
     expect(eip_stack_handle_encap(s, req, req_len, resp, sizeof(resp),
                                   &resp_len) == 0,
            "g2 bad path encap");
-    expect(cip_status_from_encap(resp, resp_len) == CIP_STATUS_PATH_DEST,
-           "g2 bad path dest");
+    expect(cip_status_from_encap(resp, resp_len) == CIP_STATUS_CONN_FAILURE,
+           "g2 bad path connection failure");
+    expect(cip_ext_from_encap(resp, resp_len) == CIP_EXT_INVALID_APP_PATH,
+           "g2 bad path extended 0x0117");
     expect(eip_stack_class1_up(s) == 1, "g2 class1 unchanged after bad path");
 
     fo_len = build_std_fo(fo, 0x88, 9, 8000, 99, 8, 4, 150);
@@ -1000,8 +1031,10 @@ static void test_g2_watchdog_dup_path_size(void)
     expect(eip_stack_handle_encap(s, req, req_len, resp, sizeof(resp),
                                   &resp_len) == 0,
            "g2 size encap");
-    expect(cip_status_from_encap(resp, resp_len) == CIP_STATUS_INVALID_PARAM,
-           "g2 size mismatch");
+    expect(cip_status_from_encap(resp, resp_len) == CIP_STATUS_CONN_FAILURE,
+           "g2 size connection failure");
+    expect(cip_ext_from_encap(resp, resp_len) == CIP_EXT_CONN_SIZE,
+           "g2 size extended 0x0109");
     expect(eip_stack_class1_up(s) == 1, "g2 class1 unchanged after size reject");
 
     /* Close the long-RPI conn, then FO with tiny RPI and no IO. */
