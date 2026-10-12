@@ -179,7 +179,6 @@ def test_forward_open_logix_run_idle_format(sess):
     assert rsp[0] == 0xD4 and rsp[2] == 0x00, rsp.hex()
 
 
-@known_defect("T11-3", "Forward Open 실패 응답이 General 0x01 + Extended + triad·Remaining Path Size 형식이 아니다")
 def test_forward_open_bad_size_error_format(sess):
     serial = next(_serial)
     rsp = sess.cip(forward_open(OUT_SIZE + 2, 99, serial))

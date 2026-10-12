@@ -341,7 +341,7 @@ static void test_t2o_run_idle_size_still_rejected(void)
     /* T→O size 10 = input+6. O→T stays modeless. T→O has no Run/Idle. */
     size_t n = forward_open(s, sess, 0, 0x1003, 0x4804, 0x480A, cip,
                             sizeof(cip), &o2t);
-    expect_cip(cip, n, CIP_STATUS_INVALID_PARAM, "t2o +6 rejected");
+    expect_cip(cip, n, CIP_STATUS_CONN_FAILURE, "t2o +6 rejected");
     expect(n >= 6 && eip_rd_le16(cip + 4) == CIP_EXT_CONN_SIZE,
            "t2o extended 0x0109");
     expect(eip_stack_class1_up(s) == 0, "t2o reject leaves class1 down");
