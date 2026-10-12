@@ -2,6 +2,7 @@
 #include "eip_internal.h"
 #include "eip_sec.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <string.h>
 
@@ -24,7 +25,7 @@ static int build_list_identity(eip_stack_t *s, uint8_t *payload, size_t cap,
                                size_t *out_len)
 {
     /* CPF: 1 item — Identity */
-    if (cap < 60) {
+    if (cap < 80) {
         return -ENOSPC;
     }
     size_t off = 0;
@@ -37,9 +38,27 @@ static int build_list_identity(eip_stack_t *s, uint8_t *payload, size_t cap,
 
     eip_wr_le16(payload + off, 1); /* encap protocol version */
     off += 2;
-    /* sockaddr stub (16 bytes) — zeros ok for unit tests */
-    memset(payload + off, 0, 16);
-    off += 16;
+    /* sockaddr_in, CIP Vol 2: sin_family/port/addr are big-endian. */
+    {
+        uint16_t port = (uint16_t)s->cfg.tcp_port;
+        uint32_t ip_host = 0;
+        if (s->cfg.bind_ip[0]) {
+            struct in_addr a;
+            if (inet_pton(AF_INET, s->cfg.bind_ip, &a) == 1) {
+                ip_host = ntohl(a.s_addr);
+            }
+        }
+        payload[off + 0] = 0x00;
+        payload[off + 1] = 0x02; /* AF_INET */
+        payload[off + 2] = (uint8_t)(port >> 8);
+        payload[off + 3] = (uint8_t)(port & 0xff);
+        payload[off + 4] = (uint8_t)((ip_host >> 24) & 0xff);
+        payload[off + 5] = (uint8_t)((ip_host >> 16) & 0xff);
+        payload[off + 6] = (uint8_t)((ip_host >> 8) & 0xff);
+        payload[off + 7] = (uint8_t)(ip_host & 0xff);
+        memset(payload + off + 8, 0, 8);
+        off += 16;
+    }
     eip_wr_le16(payload + off, s->cfg.vendor_id);
     off += 2;
     eip_wr_le16(payload + off, s->cfg.device_type);
@@ -48,7 +67,7 @@ static int build_list_identity(eip_stack_t *s, uint8_t *payload, size_t cap,
     off += 2;
     payload[off++] = s->cfg.major_rev;
     payload[off++] = s->cfg.minor_rev;
-    eip_wr_le16(payload + off, 0); /* status */
+    eip_wr_le16(payload + off, eip_identity_status(s));
     off += 2;
     eip_wr_le32(payload + off, s->cfg.serial_number);
     off += 4;
@@ -59,7 +78,7 @@ static int build_list_identity(eip_stack_t *s, uint8_t *payload, size_t cap,
     payload[off++] = (uint8_t)n;
     memcpy(payload + off, s->cfg.product_name, n);
     off += n;
-    payload[off++] = 0xFF; /* state */
+    payload[off++] = eip_identity_state(s);
 
     eip_wr_le16(payload + len_at, (uint16_t)(off - (len_at + 2)));
     *out_len = off;
@@ -357,6 +376,12 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
             status = EIP_ENCAP_STATUS_INVALID_CMD;
             body_len = 0;
         }
+        break;
+
+    case EIP_CMD_LISTINTERFACES:
+        /* CIP-only adapter: empty interface list (item count 0). */
+        eip_wr_le16(body_resp, 0);
+        body_len = 2;
         break;
 
     case EIP_CMD_LISTSERVICES:

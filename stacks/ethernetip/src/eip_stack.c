@@ -124,6 +124,7 @@ eip_stack_t *eip_stack_create(const eip_cfg_t *cfg)
 
     s->listen_fd = -1;
     s->udp_fd = -1;
+    s->udp_encap_fd = -1;
     s->originator_fd = -1;
     s->tls_listen_fd = -1;
     s->device_state = 3;
@@ -190,7 +191,7 @@ void eip_stack_set_transport_ops(eip_stack_t *s, eip_transport_ops_t ops)
     s->tops_set = 1;
 }
 
-static int bind_udp(eip_stack_t *s)
+static int bind_udp_fd(eip_stack_t *s, int port, int broadcast, int *out_fd)
 {
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) {
@@ -198,10 +199,13 @@ static int bind_udp(eip_stack_t *s)
     }
     int yes = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    if (broadcast) {
+        setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes));
+    }
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)s->cfg.udp_io_port);
+    addr.sin_port = htons((uint16_t)port);
     uint32_t ip = parse_ipv4_host(s->cfg.bind_ip);
     addr.sin_addr.s_addr = ip ? htonl(ip) : htonl(INADDR_ANY);
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
@@ -210,8 +214,35 @@ static int bind_udp(eip_stack_t *s)
         return -e;
     }
     set_nonblock(fd);
-    s->udp_fd = fd;
+    *out_fd = fd;
     return 0;
+}
+
+static int bind_udp(eip_stack_t *s)
+{
+    return bind_udp_fd(s, s->cfg.udp_io_port, 0, &s->udp_fd);
+}
+
+static int bind_udp_encap(eip_stack_t *s)
+{
+    /* Encapsulation UDP (ListIdentity browse). Same port as TCP. */
+    return bind_udp_fd(s, s->cfg.tcp_port, 1, &s->udp_encap_fd);
+}
+
+static void close_adapter_listen_sockets(eip_stack_t *s)
+{
+    if (s->listen_fd >= 0) {
+        close(s->listen_fd);
+        s->listen_fd = -1;
+    }
+    if (s->udp_fd >= 0) {
+        close(s->udp_fd);
+        s->udp_fd = -1;
+    }
+    if (s->udp_encap_fd >= 0) {
+        close(s->udp_encap_fd);
+        s->udp_encap_fd = -1;
+    }
 }
 
 static int bind_tcp_listen(eip_stack_t *s)
@@ -331,24 +362,29 @@ int eip_stack_start(eip_stack_t *s)
             snprintf(s->last_error, sizeof(s->last_error),
                      "UDP bind failed (%d)", rc);
             LOG_ERROR("ethernetip", "%s", s->last_error);
-            close(s->listen_fd);
-            s->listen_fd = -1;
+            close_adapter_listen_sockets(s);
+            return rc;
+        }
+        rc = bind_udp_encap(s);
+        if (rc != 0) {
+            snprintf(s->last_error, sizeof(s->last_error),
+                     "UDP encapsulation bind failed (%d)", rc);
+            LOG_ERROR("ethernetip", "%s", s->last_error);
+            close_adapter_listen_sockets(s);
             return rc;
         }
         LOG_INFO("ethernetip",
-                 "adapter listening TCP:%d UDP-IO:%d in_asm=%u(%u) out_asm=%u(%u) sec=%d",
-                 s->cfg.tcp_port, s->cfg.udp_io_port, s->cfg.input_assembly,
-                 s->cfg.input_size, s->cfg.output_assembly, s->cfg.output_size,
+                 "adapter listening TCP:%d UDP-encap:%d UDP-IO:%d in_asm=%u(%u) out_asm=%u(%u) sec=%d",
+                 s->cfg.tcp_port, s->cfg.tcp_port, s->cfg.udp_io_port,
+                 s->cfg.input_assembly, s->cfg.input_size,
+                 s->cfg.output_assembly, s->cfg.output_size,
                  s->cfg.security_class);
         rc = eip_sec_tls_start(s);
         if (rc != 0) {
             snprintf(s->last_error, sizeof(s->last_error),
                      "TLS secure port start failed (%d)", rc);
             LOG_ERROR("ethernetip", "%s", s->last_error);
-            close(s->listen_fd);
-            s->listen_fd = -1;
-            close(s->udp_fd);
-            s->udp_fd = -1;
+            close_adapter_listen_sockets(s);
             return rc;
         }
     } else {
@@ -373,14 +409,7 @@ void eip_stack_stop(eip_stack_t *s)
     }
     s->running = 0;
     eip_sec_tls_stop(s);
-    if (s->listen_fd >= 0) {
-        close(s->listen_fd);
-        s->listen_fd = -1;
-    }
-    if (s->udp_fd >= 0) {
-        close(s->udp_fd);
-        s->udp_fd = -1;
-    }
+    close_adapter_listen_sockets(s);
     pthread_mutex_lock(&s->lock);
     s->n_sessions = 0;
     pthread_mutex_unlock(&s->lock);
@@ -537,6 +566,33 @@ static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
     }
 }
 
+static void service_udp_encap(eip_stack_t *s, int budget)
+{
+    if (s->udp_encap_fd < 0) {
+        return;
+    }
+    while (budget-- > 0) {
+        uint8_t buf[EIP_TCP_BUF_MAX];
+        struct sockaddr_in peer;
+        socklen_t plen = sizeof(peer);
+        ssize_t n = recvfrom(s->udp_encap_fd, buf, sizeof(buf), 0,
+                             (struct sockaddr *)&peer, &plen);
+        if (n <= 0) {
+            break;
+        }
+        uint8_t resp[EIP_TCP_BUF_MAX];
+        size_t resp_len = 0;
+        pthread_mutex_lock(&s->lock);
+        int rc = eip_encap_process(s, buf, (size_t)n, resp, sizeof(resp),
+                                   &resp_len, EIP_ENCAP_OWNER_UDP);
+        pthread_mutex_unlock(&s->lock);
+        if (rc == 0 && resp_len > 0) {
+            (void)sendto(s->udp_encap_fd, resp, resp_len, 0,
+                         (struct sockaddr *)&peer, plen);
+        }
+    }
+}
+
 static void service_udp(eip_stack_t *s, int budget)
 {
     if (s->udp_fd < 0) {
@@ -610,6 +666,7 @@ void eip_stack_poll(eip_stack_t *s)
                 tcp_client_drop(s, &s->clients[i]);
             }
         }
+        service_udp_encap(s, EIP_POLL_UDP_BUDGET);
         service_udp(s, EIP_POLL_UDP_BUDGET);
         pthread_mutex_lock(&s->lock);
         eip_io_watchdog(s);

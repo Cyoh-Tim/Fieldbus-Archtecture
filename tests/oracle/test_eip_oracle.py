@@ -694,7 +694,6 @@ def test_eds_revision_matches_example_identity(tmp_path):
 
 
 # ---------------------------------------------------------------- 발견 (T11-4)
-@known_defect("T11-4", "UDP 44818(장치 encapsulation 포트)에 수신 소켓이 없어 UDP ListIdentity 에 무응답. 사양은 UDP 로도 응답 (RSLinx 브라우즈)")
 def test_list_identity_over_udp(eip_dut):
     u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     u.settimeout(1.0)
@@ -711,13 +710,11 @@ def test_list_identity_over_udp(eip_dut):
     assert list_identity_item(raw).productName == b"FieldbusOracle"
 
 
-@known_defect("T11-4", "ListIdentity 의 Socket Address 가 0 이다. 사양은 sin_family 2, sin_port = encapsulation 포트, sin_addr = 장치 IP (빅 엔디안)")
 def test_list_identity_socket_address(eip_dut):
     item = list_identity_item(encap_roundtrip(eip_dut.port, 0x0063))
     assert (item.sinFamily, item.sinPort, item.sinAddress) == (2, eip_dut.port, "127.0.0.1")
 
 
-@known_defect("T11-4", "ListIdentity 의 State 가 0xFF 고정이다. 사양은 Identity attr 5(Status)·attr 8(State) 와 같은 값")
 def test_list_identity_status_state_match_identity(eip_dut, driver):
     item = list_identity_item(encap_roundtrip(eip_dut.port, 0x0063))
     status = get_attr(driver, 0x01, 1, 5, UINT)
@@ -725,7 +722,6 @@ def test_list_identity_status_state_match_identity(eip_dut, driver):
     assert (item.status, item.state) == (status, state)
 
 
-@known_defect("T11-4", "ListInterfaces 에 encapsulation status 1(지원 안 함)로 응답한다. 사양은 status 0 + 항목 목록(보통 0개)")
 def test_list_interfaces_supported(eip_dut):
     raw = encap_roundtrip(eip_dut.port, 0x0064)
     cmd, length, _sess, status = struct.unpack_from("<HHII", raw, 0)

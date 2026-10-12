@@ -75,6 +75,7 @@ struct eip_stack {
 
     int listen_fd;
     int udp_fd;
+    int udp_encap_fd; /* UDP encapsulation (ListIdentity etc.), tcp_port */
     int originator_fd;
     int running;
 
@@ -144,6 +145,7 @@ void eip_encap_drop_owner(eip_stack_t *s, uint32_t owner_id);
 #define EIP_ENCAP_OWNER_MOCK 0x80000001u
 #define EIP_ENCAP_OWNER_TCP  0x10000000u
 #define EIP_ENCAP_OWNER_TLS  0x20000000u
+#define EIP_ENCAP_OWNER_UDP  0x40000000u
 
 static inline uint32_t eip_tcp_owner_id(int slot)
 {
@@ -158,6 +160,10 @@ static inline uint32_t eip_tls_owner_id(int slot)
 /* CIP request auth (SendRR fills these; originator mock Set uses both). */
 #define EIP_CIP_AUTH_SESSION 0x01u /* registered session owned by this conn */
 #define EIP_CIP_AUTH_SECURE  0x02u /* HMAC verified, TLS, or lab class 0 */
+
+/* Identity object attr 5 / attr 8 — ListIdentity copies the same values. */
+uint16_t eip_identity_status(const eip_stack_t *s);
+uint8_t eip_identity_state(const eip_stack_t *s);
 
 int eip_cip_route(eip_stack_t *s, const uint8_t *req, size_t req_len,
                   uint8_t *resp, size_t resp_cap, size_t *resp_len);
