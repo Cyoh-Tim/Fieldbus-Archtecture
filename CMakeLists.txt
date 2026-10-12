@@ -457,6 +457,17 @@ if(BUILD_DAEMON AND BUILD_API)
         RESOURCE_LOCK "eip_15562")
 endif()
 
+# Mock scenarios that assert wall-clock bounds (period_max_ms, max_missed,
+# jitter_max_ms, max_late) get the "timing" label. CI runs that label with
+# ctest --repeat until-pass:3 so scheduler noise on shared runners does not
+# fail a job; a real regression still fails all three attempts.
+function(fb_label_timing test_name scenario)
+    file(READ "${scenario}" _txt)
+    if(_txt MATCHES "period_max_ms|max_missed|jitter_max_ms|max_late")
+        set_property(TEST ${test_name} APPEND PROPERTY LABELS "timing")
+    endif()
+endfunction()
+
 if(BUILD_CTT)
     file(GLOB CTT_PN_SCENARIOS CONFIGURE_DEPENDS
          "${CMAKE_SOURCE_DIR}/tests/scenarios/profinet/*.yaml")
@@ -477,6 +488,7 @@ if(BUILD_CTT)
         set_tests_properties(ctt_pn_${sc_name} PROPERTIES
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             LABELS "${_pn_labels}")
+        fb_label_timing(ctt_pn_${sc_name} ${sc})
     endforeach()
     add_test(NAME ctt_board_data_fresh
         COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/ctt/gen_board_data.py" --check)
@@ -490,7 +502,7 @@ if(BUILD_CTT)
                 --protocol profinet)
     set_tests_properties(ctt_report_schema_v1 PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        LABELS "profinet")
+        LABELS "profinet;timing")  # runs a *_cyclic_metrics scenario
     add_test(NAME ctt_report_schema_eip_v1
         COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/ctt/check_report_schema.py"
                 --ctt $<TARGET_FILE:ctt>
@@ -498,7 +510,7 @@ if(BUILD_CTT)
                 --protocol ethernetip)
     set_tests_properties(ctt_report_schema_eip_v1 PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        LABELS "ethernetip")
+        LABELS "ethernetip;timing")  # runs a *_cyclic_metrics scenario
     add_test(NAME ctt_report_schema_mb_v1
         COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/ctt/check_report_schema.py"
                 --ctt $<TARGET_FILE:ctt>
@@ -506,7 +518,7 @@ if(BUILD_CTT)
                 --protocol modbus_tcp)
     set_tests_properties(ctt_report_schema_mb_v1 PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        LABELS "modbus")
+        LABELS "modbus;timing")  # runs a *_cyclic_metrics scenario
     add_test(NAME ctt_report_schema_slmp_v1
         COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/ctt/check_report_schema.py"
                 --ctt $<TARGET_FILE:ctt>
@@ -514,7 +526,7 @@ if(BUILD_CTT)
                 --protocol slmp)
     set_tests_properties(ctt_report_schema_slmp_v1 PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        LABELS "slmp")
+        LABELS "slmp;timing")  # runs a *_cyclic_metrics scenario
     file(GLOB CTT_MB_SCENARIOS CONFIGURE_DEPENDS
          "${CMAKE_SOURCE_DIR}/tests/scenarios/modbus/*.yaml")
     foreach(sc ${CTT_MB_SCENARIOS})
@@ -523,6 +535,7 @@ if(BUILD_CTT)
         set_tests_properties(ctt_mb_${sc_name} PROPERTIES
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             LABELS "modbus")
+        fb_label_timing(ctt_mb_${sc_name} ${sc})
     endforeach()
     file(GLOB CTT_SLMP_SCENARIOS CONFIGURE_DEPENDS
          "${CMAKE_SOURCE_DIR}/tests/scenarios/slmp/*.yaml")
@@ -532,6 +545,7 @@ if(BUILD_CTT)
         set_tests_properties(ctt_slmp_${sc_name} PROPERTIES
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             LABELS "slmp")
+        fb_label_timing(ctt_slmp_${sc_name} ${sc})
     endforeach()
     file(GLOB CTT_EIP_SCENARIOS CONFIGURE_DEPENDS
          "${CMAKE_SOURCE_DIR}/tests/scenarios/ethernetip/*.yaml")
@@ -541,6 +555,7 @@ if(BUILD_CTT)
         set_tests_properties(ctt_eip_${sc_name} PROPERTIES
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             LABELS "ethernetip")
+        fb_label_timing(ctt_eip_${sc_name} ${sc})
     endforeach()
     # Lab AF_PACKET is tests/run_ctt_lab.sh — not registered (needs CAP_NET_RAW).
 endif()

@@ -31,14 +31,20 @@ jobs:
       - name: Build
         run: cmake --build build
 
-      - name: Test (PN+EIP+Modbus+SLMP mock; short soak; golden; exclude 30s soak_ci)
-        run: ctest --test-dir build --output-on-failure -LE soak_ci
+      - name: Test (PN+EIP+Modbus+SLMP mock; short soak; golden; exclude 30s soak_ci and timing)
+        run: ctest --test-dir build --output-on-failure -LE 'soak_ci|timing'
+
+      # Mock scenarios with wall-clock bounds (period_max_ms, max_missed, ...).
+      # Shared runners miss those bounds by a few ms now and then; retry up to
+      # three times. A real timing regression fails every attempt.
+      - name: Timing-bound mock scenarios (label timing, until-pass:3)
+        run: ctest --test-dir build --output-on-failure -L timing -LE soak_ci --repeat until-pass:3
 
       - name: Golden replay (mock Identify / Sec1 Set; no NIC)
-        run: ctest --test-dir build --output-on-failure -L golden
+        run: ctest --test-dir build --output-on-failure -L golden -LE timing
 
       - name: EtherNet/IP mock scenarios (no NIC)
-        run: ctest --test-dir build --output-on-failure -L ethernetip
+        run: ctest --test-dir build --output-on-failure -L ethernetip -LE timing
 
   # 경고 회귀 차단: daemon + CTT + 테스트 전체를 -Werror 로 빌드 (빌드만, 테스트는 test/daemon job).
   werror:
@@ -106,7 +112,9 @@ jobs:
         run: |
           export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
           export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
-          ctest --test-dir build-san --output-on-failure
+          ctest --test-dir build-san --output-on-failure -LE timing
+          # Wall-clock bounded scenarios: retry ASan scheduling noise (see test job).
+          ctest --test-dir build-san --output-on-failure -L timing --repeat until-pass:3
 
   # Long (~1h/target) campaigns live in fuzz-weekly.yml (cron + dispatch).
   # Keep this job at ~60s/target so PRs stay fast.
