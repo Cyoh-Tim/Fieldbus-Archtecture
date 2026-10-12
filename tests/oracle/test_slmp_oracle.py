@@ -316,3 +316,279 @@ def test_adapter_32bit_default_is_low_word_first(slmp_app, data_type, write, exp
                           "address": {"slmp": {"device_code": "D", "start": 310}}}])
     assert app.cmd(write) == ["W", "0"]
     assert u16(plc.batchread_wordunits(headdevice="D310", readsize=2)) == expect
+
+
+# ======================================================================
+# 2026-10-11 감사 (A20261011-3, -4, -5) — docs/reports/audits/20261011-slmp.md
+# slmp_oracle_client 의 --start/--dev/--bit/--write 옵션을 쓴다 (기본값은 예전 동작 D1..DK 읽기).
+# ======================================================================
+
+
+# ---------------------------------------------------------------- 클라이언트: 큰 디바이스 번호
+# 3E (Q 호환 서브커맨드 0000/0001) 의 선두 디바이스 번호는 3바이트(0~0xFFFFFF)다. MELSEC Q 기본 디바이스 점수만 해도
+# D 12288, W 8192(W0~W1FFF) 이므로 D5000·W1000(16진)·ZR100000·M512 는 정상 주소다. 저장소 스택·어댑터의
+# 로컬 맵 크기(map_words 4096, map_bits 8192)는 PLC 의 디바이스 범위와 무관한 구현 상수라서,
+# 클라이언트가 PLC 에 정상 요청을 보내고 정상 응답을 받았다면 결과는 맵 크기와 상관없이 앱에 전달돼야 한다.
+class SpecPlc:
+    """Binary 3E 서버 (MELSEC 역할). 저장소 코드를 쓰지 않는다.
+
+    0401/0000: 워드 n = (0x1000 + n) & 0xFFFF (디바이스 무관)
+    0401/0001: 비트 n = n % 2 (사양 니블: 앞 점이 상위 니블)
+    1401: (subcommand, head, device, points, data hex) 를 writes 에 기록하고 0000 으로 답한다.
+    """
+
+    def __init__(self):
+        self.port = free_port()
+        self.writes = []
+        self._srv = socket.socket()
+        self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._srv.bind(("127.0.0.1", self.port))
+        self._srv.listen(4)
+        threading.Thread(target=self._accept_loop, daemon=True).start()
+
+    def _accept_loop(self):
+        while True:
+            try:
+                conn, _ = self._srv.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+
+    @staticmethod
+    def _recv_exact(conn, n):
+        buf = b""
+        while len(buf) < n:
+            chunk = conn.recv(n - len(buf))
+            if not chunk:
+                return None
+            buf += chunk
+        return buf
+
+    def _serve(self, conn):
+        with conn:
+            while True:
+                hdr = self._recv_exact(conn, 9)
+                if hdr is None:
+                    return
+                (length,) = struct.unpack_from("<H", hdr, 7)
+                body = self._recv_exact(conn, length)
+                if body is None:
+                    return
+                # body: timer(2) command(2) subcommand(2) head(3) device(1) points(2) data
+                command, sub = struct.unpack_from("<HH", body, 2)
+                head = int.from_bytes(body[6:9], "little")
+                device = body[9]
+                (points,) = struct.unpack_from("<H", body, 10)
+                end, data = 0, b""
+                if command == 0x0401 and sub == 0x0000:
+                    data = b"".join(struct.pack("<H", (0x1000 + head + i) & 0xFFFF) for i in range(points))
+                elif command == 0x0401 and sub == 0x0001:
+                    packed = bytearray((points + 1) // 2)
+                    for i in range(points):
+                        if (head + i) % 2:
+                            packed[i // 2] |= 0x10 if i % 2 == 0 else 0x01
+                    data = bytes(packed)
+                elif command == 0x1401:
+                    self.writes.append((sub, head, device, points, body[12:].hex()))
+                else:
+                    end = 0xC059
+                rsp = bytes([0xD0, 0x00]) + hdr[2:7] + struct.pack("<HH", 2 + len(data), end) + data
+                try:
+                    conn.sendall(rsp)
+                except OSError:
+                    return
+
+    def close(self):
+        self._srv.close()
+
+
+def run_client_one(port, *args):
+    """slmp_oracle_client 로 한 점을 읽거나 쓰고 출력 한 줄을 나눠 돌려준다."""
+    out = subprocess.run(
+        [str(dut_path("slmp_oracle_client")), "--port", str(port), "--count", "1",
+         "--interval-ms", "10", *args],
+        capture_output=True, text=True, timeout=30,
+    ).stdout
+    lines = [l.split() for l in out.splitlines() if l.startswith(("READ ", "WRITE "))]
+    assert len(lines) == 1, out
+    return lines[0]
+
+
+# 대조군 (지금도 통과): 스택 API 의 읽기는 맵 밖 주소에서도 PLC 값을 돌려준다.
+@pytest.mark.parametrize(
+    "args,expect",
+    [
+        (["--start", "5000"], ["READ", "5000", "0", "2388"]),                      # D5000 = 0x1000+5000
+        (["--start", "100000", "--dev", "B0"], ["READ", "100000", "0", "96a0"]),   # ZR100000
+        (["--start", "512", "--dev", "90"], ["READ", "512", "0", "1200"]),         # M512 워드 단위
+        (["--start", "8193", "--dev", "90", "--bit"], ["READ", "8193", "0", "0001"]),  # M8193 비트 = 1
+    ],
+    ids=["D5000", "ZR100000", "M512-word", "M8193-bit"],
+)
+def test_client_stack_reads_high_device_numbers(args, expect):
+    plc = SpecPlc()
+    try:
+        assert run_client_one(plc.port, *args) == expect
+    finally:
+        plc.close()
+
+
+@known_defect("A20261011-3", "클라이언트 batch_write 가 로컬 맵(워드 4096·비트 8192, 비트 디바이스 워드 단위 512) 밖 주소면 -ERANGE 로 PLC 에 보내지도 않는다")
+@pytest.mark.parametrize(
+    "args,expect_write",
+    [
+        (["--start", "5001", "--write", "1234"], (0x0000, 5001, 0xA8, 1, "3412")),
+        (["--start", "512", "--dev", "90", "--write", "1234"], (0x0000, 512, 0x90, 1, "3412")),
+        (["--start", "8193", "--dev", "90", "--bit", "--write", "1"], (0x0001, 8193, 0x90, 1, "10")),
+    ],
+    ids=["D5001-word", "M512-word", "M8193-bit"],
+)
+def test_client_stack_writes_high_device_numbers(args, expect_write):
+    plc = SpecPlc()
+    try:
+        line = run_client_one(plc.port, *args)
+        time.sleep(0.1)
+        writes = list(plc.writes)
+    finally:
+        plc.close()
+    # 사양: 1401 요청 = 서브커맨드, 선두 번호 3바이트, 디바이스 코드, 점수, 데이터(워드 LE / 비트 니블)
+    assert line == ["WRITE", args[1], "0"] and writes == [expect_write], (line, writes)
+
+
+# ---------------------------------------------------------------- 어댑터 (클라이언트 모드)
+@pytest.fixture
+def slmp_client_app(tmp_path):
+    """SpecPlc 에 붙는 클라이언트 모드 SLMP 어댑터 앱."""
+    made = []
+
+    def make(points):
+        plc = SpecPlc()
+        cfg = {
+            "protocol": "slmp",
+            "device": {"name": "oracle", "role": "client"},
+            "cycle_ms": 5,
+            "protocol_params": {"role": "client", "plc_ip": "127.0.0.1", "port": plc.port,
+                                "timeout_ms": 300},
+            "points": points,
+        }
+        path = tmp_path / "slmp_client.json"
+        path.write_text(json.dumps(cfg))
+        app = AppPipe(path)
+        made.extend([plc, app])
+        assert app.opened == ["OPEN", "0"], app.opened
+        assert app.cmd("START") == ["START", "0"]
+        return app, plc
+
+    yield make
+    for x in reversed(made):
+        x.close()
+
+
+def _u16_point(name, access, slmp):
+    return {"name": name, "access": access, "data_type": "uint16", "address": {"slmp": slmp}}
+
+
+# 대조군 (지금도 통과): 맵 안 주소는 클라이언트 어댑터가 읽고 쓴다.
+def test_adapter_client_low_device_numbers(slmp_client_app):
+    app, plc = slmp_client_app([
+        _u16_point("in", "write", {"device_code": "D", "start": 4095}),
+        _u16_point("out", "read", {"device_code": "D", "start": 4094}),
+    ])
+    assert app.cmd("POLL")[1] == "0"
+    assert app.cmd("RU32 in") == ["R", "0", str(0x1000 + 4095)]
+    assert app.cmd("WU32 out 0x1234") == ["W", "0"]
+    assert plc.writes == [(0x0000, 4094, 0xA8, 1, "3412")]
+
+
+@known_defect("A20261011-4", "클라이언트 어댑터가 PLC 응답을 로컬 맵을 거쳐 읽어, 맵 밖 주소(D5000·W1000·M512 워드)의 포인트는 fb_read 가 FB_ERR_IO")
+@pytest.mark.parametrize(
+    "slmp,expect",
+    [
+        ({"device_code": "D", "start": 5000}, 0x1000 + 5000),
+        ({"device_code": "W", "start": "1000"}, 0x1000 + 0x1000),       # W 는 16진 번호
+        ({"device_code": "M", "start": 512, "unit": "word"}, 0x1000 + 512),
+    ],
+    ids=["D5000", "W1000", "M512-word"],  # ZR 은 번호 기수(T10-7)가 미정이라 넣지 않는다
+)
+def test_adapter_client_reads_high_device_numbers(slmp_client_app, slmp, expect):
+    app, _ = slmp_client_app([_u16_point("p", "write", slmp)])
+    assert app.cmd("POLL")[1] == "0"
+    assert app.cmd("RU32 p") == ["R", "0", str(expect)]
+
+
+# 쓰기는 스택(A20261011-3)과 어댑터 둘 다 고쳐야 통과한다. 스택 PR 뒤에도 xfail 로 남는다.
+@known_defect("A20261011-4", "클라이언트 어댑터가 로컬 맵 밖 주소(D5001)의 포인트 쓰기를 PLC 로 보내지 않고 FB_ERR_IO")
+def test_adapter_client_writes_high_device_number(slmp_client_app):
+    app, plc = slmp_client_app([_u16_point("p", "read", {"device_code": "D", "start": 5001})])
+    wrote = app.cmd("WU32 p 0x1234")
+    time.sleep(0.1)
+    assert wrote == ["W", "0"] and plc.writes == [(0x0000, 5001, 0xA8, 1, "3412")], (wrote, plc.writes)
+
+
+# ---------------------------------------------------------------- 서버: 비트 단위 점수 상한
+# SLMP / MC 프로토콜 3E (Q 호환) 디바이스 일괄 읽기·쓰기(0401/1401) 처리 점수: 워드 단위 1~960, 비트 단위 1~7168.
+# 저장소도 SLMP_QTY_BIT_MAX = 7168 로 두고 7169 를 C051 로 거부한다 (tests/test_slmp_stack.c). 7168 이하는 받아야 한다.
+def raw_3e_frame(port, frame: bytes, timeout=2.0):
+    """3E 요청 프레임을 보내고 (end_code, data) 를 돌려준다. 연결이 끊기면 None."""
+    with socket.create_connection(("127.0.0.1", port), timeout=timeout) as s:
+        s.sendall(frame)
+        buf = b""
+        try:
+            while len(buf) < 9 or len(buf) < 9 + struct.unpack_from("<H", buf, 7)[0]:
+                chunk = s.recv(65536)
+                if not chunk:
+                    return None
+                buf += chunk
+        except (ConnectionResetError, socket.timeout):
+            return None
+        (end,) = struct.unpack_from("<H", buf, 9)
+        return end, buf[11:]
+
+
+def bit_batch_frame(command: int, points: int, data: bytes = b"") -> bytes:
+    """M0 부터 points 점 비트 단위(0001) 일괄 요청. 바이트 배치는 pymcprotocol 0.3.0 Type3E("Q") 와 같다."""
+    body = struct.pack("<HHH", 0x0010, command, 0x0001) + (0).to_bytes(3, "little") + bytes([0x90]) \
+        + struct.pack("<H", points) + data
+    return bytes([0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00]) + struct.pack("<H", len(body)) + body
+
+
+def nibbles(points):
+    out = bytearray((len(points) + 1) // 2)
+    for i, v in enumerate(points):
+        if v:
+            out[i // 2] |= 0x10 if i % 2 == 0 else 0x01
+    return bytes(out)
+
+
+# 대조군 (지금도 통과)
+@pytest.mark.parametrize("command,points", [(0x0401, 3840), (0x1401, 4054)], ids=["read-3840", "write-4054"])
+def test_server_bit_batch_within_buffer(slmp_dut, command, points):
+    data = nibbles([1] * points) if command == 0x1401 else b""
+    got = raw_3e_frame(slmp_dut.port, bit_batch_frame(command, points, data))
+    assert got is not None and got[0] == 0x0000, got
+
+
+@known_defect("A20261011-5", "서버가 비트 단위 읽기 3841~7168 점에 C051, 쓰기 4055~7168 점에 응답 없이 연결을 끊는다 (사양 상한 7168)")
+@pytest.mark.parametrize(
+    "command,points",
+    [(0x0401, 3841), (0x0401, 7168), (0x1401, 4055), (0x1401, 7168)],
+    ids=["read-3841", "read-7168", "write-4055", "write-7168"],
+)
+def test_server_bit_batch_up_to_7168(slmp_dut, command, points):
+    values = [i % 3 == 0 for i in range(points)]
+    if command == 0x1401:
+        got = raw_3e_frame(slmp_dut.port, bit_batch_frame(command, points, nibbles(values)))
+        assert got == (0x0000, b""), f"{points}점 쓰기 응답: {got and hex(got[0])}"
+        # 쓴 값을 pymcprotocol 로 되읽는다 (앞 3840 점, 응답이 한 번의 recv 에 들어오는 크기).
+        c = pymcprotocol.Type3E(plctype="Q")
+        c.soc_timeout = 2
+        c.connect("127.0.0.1", slmp_dut.port)
+        try:
+            assert c.batchread_bitunits(headdevice="M0", readsize=min(points, 3840)) == \
+                [int(v) for v in values[:3840]]
+        finally:
+            c.close()
+    else:
+        got = raw_3e_frame(slmp_dut.port, bit_batch_frame(command, points))
+        assert got is not None and got[0] == 0x0000 and len(got[1]) == (points + 1) // 2, \
+            f"{points}점 읽기 응답: {got and (hex(got[0]), len(got[1]))}"
