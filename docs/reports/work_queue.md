@@ -46,7 +46,7 @@
 | 22 | T11-6 | EIP Connection ID 선택·생산 목적지·출발지 검증 | `stacks/ethernetip/`, `tests/` | T11-6 ×4 | 보안 |
 | 23 | T11-7 | EIP transport class/trigger 검사 | `stacks/ethernetip/`, `tests/` | T11-7 | |
 | 24 | T5 (EIP) | EIP 최소 RPI 거부(`0x01/0x0112` + 허용 RPI)와 EDS RPI 범위 | `stacks/ethernetip/`, `tests/` | T5 (EIP) ×3 | T11-2 이후. 거부 응답 꼬리는 T11-3 형식에 의존 (T11-3 이후). T11-2 PR 이 EDS RPI Param 까지 넣으면 `test_eds_rpi_param_minimum_matches_cycle` 의 T5 (EIP) 표시도 그 PR 에서 지운다 (허용) |
-| 25 | T3 | Modbus/SLMP 클라이언트 모드 fail-fast·백오프 (1단계) | `adapters/modbus/`, `adapters/slmp/` (PR 2개) | T3 (Modbus 만) | #49 검증 코멘트의 connect 타임아웃 메모 참고. #49 검증 코멘트의 connect 타임아웃 메모 참고. SLMP 는 이미 백오프가 있어 오라클 없음 (완료 조건의 timeout 해석은 사람 결정). T9-1 수정에 백오프까지 넣으면 T3 표시도 그 PR 에서 지운다 (허용) |
+| 25 | T3 | Modbus/SLMP 클라이언트 모드 fail-fast·백오프 (1단계) | `adapters/modbus/`, `adapters/slmp/` (PR 2개) | T3 (Modbus 만) | #49 검증 코멘트의 connect 타임아웃 메모 참고. #49 검증 코멘트의 connect 타임아웃 메모 참고. SLMP 는 이미 백오프가 있어 오라클 없음 (완료 조건의 timeout 해석은 사람 결정). T9-1 수정에 백오프까지 넣으면 T3 표시도 그 PR 에서 지운다 (허용). **구동 모델 항목(큐 74~76) 이후에 진행 (2026-10-12): 그 뒤 이벤트 구동 클라이언트 기준으로 완료 조건을 다시 본다** |
 | 26 | T9-5 | Modbus 클라이언트 non-blocking connect | `stacks/modbus/`, `tests/` | T9-5 | |
 | 27 | T10-3 | SLMP A~F 로 시작하는 16진 번호 파싱 | `adapters/slmp/`, `tests/` | T10-3 (테스트 3개) | |
 | 28 | T10-4 | SLMP 문자열·32비트 기본 배치를 MELSEC 관례로 | `adapters/slmp/`, `config/`, `tests/` | T10-4 ×2 (테스트 3개) | 기존 설정 호환성 주의 |
@@ -95,6 +95,9 @@
 | 71 | A20261011-3 | SLMP 클라이언트 스택이 로컬 맵(워드 4096·비트 8192·비트 디바이스 워드 단위 512) 밖 주소의 쓰기를 PLC 로 보내지 않음 (`-ERANGE`), 읽기는 캐시 실패를 조용히 버림 | `stacks/slmp/`, `tests/` | A20261011-3 ×3 | 출처 12단계 감사, 보고서 [audits/20261011-slmp.md](audits/20261011-slmp.md). 큐 72 보다 먼저 |
 | 72 | A20261011-4 | SLMP 클라이언트 어댑터가 맵 밖 주소(D5000·W1000·M512 워드 등) 포인트를 읽지(FB_ERR_IO, poll 은 성공)·쓰지 못함 | `adapters/slmp/`, `tests/` | A20261011-4 ×4 | 같은 보고서. 큐 71 이후 (쓰기 테스트는 71 병합 뒤에만 통과) |
 | 73 | A20261011-5 | SLMP 서버 시뮬이 비트 단위 읽기 3841~7168 점에 `C051`, 쓰기 4055~7168 점에 응답 없이 연결을 끊음 (사양 7168) | `stacks/slmp/`, `tests/` | A20261011-5 ×4 | 같은 보고서 |
+| 74 | A20261008-1 | 코어 이벤트 구동 지원: 어댑터 선택 함수 `wait_fds` + `poll()` 대기, reload 시 대기 스레드 quiesce, `thread_stop` atomic | `include/protocol_adapter.h`, `core/`, `tests/` | 없음 | 출처 담당자 지시(2026-10-08), 설계 [design.md](../design.md) 1장 5항, 보고서 [audits/20261008-drive-model.md](audits/20261008-drive-model.md). 참고 diff 가 보고서에 있음. `include/protocol_adapter.h` 변경은 이 항목에서 허용. **우선 (담당자 결정 2026-10-12): 큐 이슈를 만들 때 다른 순번보다 먼저 만든다. 75·76 도 74 이슈가 닫히면 바로 다음에 만든다** |
+| 75 | A20261008-2 | Modbus 서버 이벤트 구동 (cycle_ms=1000 에서 응답 최대 863ms), 클라이언트 `poll_interval_ms` | `stacks/modbus/`, `adapters/modbus/`, `tests/`, `docs/modbus_stack.md` | A20261008-2 | A20261008-1 이후. 보고서 [audits/20261008-drive-model.md](audits/20261008-drive-model.md) |
+| 76 | A20261008-3 | SLMP 서버(시뮬) 이벤트 구동 (cycle_ms=1000 에서 응답 최대 863ms), 클라이언트 `poll_interval_ms` | `stacks/slmp/`, `adapters/slmp/`, `tests/`, `docs/slmp_stack.md` | A20261008-3 | A20261008-1 이후. 보고서 [audits/20261008-drive-model.md](audits/20261008-drive-model.md) |
 
 ## 이슈 본문 템플릿
 
