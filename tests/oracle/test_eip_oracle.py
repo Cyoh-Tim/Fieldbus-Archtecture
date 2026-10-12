@@ -1132,3 +1132,71 @@ def test_large_encapsulation_keeps_session(sess):
     assert struct.unpack_from("<H", first, 0)[0] == 0x006F
     rsp = sess.cip(mr(0x0E, 0x01, 1, 1))
     assert rsp[2] == 0x00 and reply_data(rsp) == struct.pack("<H", DUT_VENDOR)
+
+
+# ---------------------------------------------------------------- Forward Close 출발지 (A20261012-2)
+# Forward Close 는 triad 로 연결을 찾지만, 독립 Target 구현은 그 Forward Close 를 보낸 IP 가
+# Forward Open 을 보낸 originator IP 와 같은지도 본다. 다르면 연결을 닫지 않고 General 0x0F
+# (Privilege violation) — OpENer cipconnectionmanager.c ForwardClose (`WrongCloser` → 0x0F),
+# CIPster cipconnectionmanager.cc ("Vol2 3-3.10 Forward_Close" → kCipErrorPrivilegeViolation).
+# 같은 IP 의 다른 TCP 세션(스캐너 재접속)은 허용해야 한다 (Class 1 은 TCP 세션에 묶이지 않는다).
+class SessionFrom(Session):
+    """출발지 IP 를 지정한 세션 (loopback 127.0.0.0/8 은 어느 주소든 bind 된다)."""
+
+    def __init__(self, port, src_ip):
+        self.sock = socket.create_connection(("127.0.0.1", port), timeout=2,
+                                             source_address=(src_ip, 0))
+        self.sock.sendall(encap(0x0065, struct.pack("<HH", 1, 0)))
+        hdr = self._recv()
+        self.handle = struct.unpack_from("<I", hdr, 4)[0]
+        assert self.handle != 0
+
+
+def forward_close(serial, vendor=ORIG_VENDOR, orig_serial=ORIG_SERIAL,
+                  path=DEFAULT_FO_PATH):
+    """Forward_Close (0x4E) — CIP Vol 1 Table 3-5.21: priority, ticks, triad, path size, reserved, path."""
+    body = struct.pack("<BBHHIBB", 0x0A, 0x0E, serial, vendor, orig_serial, len(path) // 2, 0) + path
+    return bytes([0x4E, 0x02, 0x20, 0x06, 0x24, 0x01]) + body
+
+
+def _open_held(s):
+    """mult=7 (RPI 20 ms × 4 × 128 ≈ 10 s) 로 열어 I/O 없이도 테스트 동안 워치독이 회수하지 않게 한다."""
+    serial = next(_serial)
+    rsp = cip_with_items(s, fo_ex(serial, mult=7), [])
+    assert rsp[0] == 0xD4 and rsp[2] == 0x00, rsp.hex()
+    return serial
+
+
+def _still_open(s, serial):
+    """같은 triad 의 Forward Open 이 0x01/0x0100 (중복) 이면 연결이 살아 있다."""
+    rsp = s.cip(fo_ex(serial, mult=7))
+    return rsp[2] == 0x01 and ext_status(rsp) == 0x0100, rsp.hex()
+
+
+@known_defect("A20261012-2", "다른 IP 의 Forward Close 가 triad 만 맞으면 남의 Class 1 연결을 닫는다. "
+              "OpENer·CIPster 는 연결을 두고 General 0x0F")
+def test_forward_close_from_other_ip_rejected(sess, eip_dut):
+    serial = _open_held(sess)
+    other = SessionFrom(eip_dut.port, "127.0.0.2")
+    try:
+        rsp = other.cip(forward_close(serial))
+    finally:
+        other.close()
+    alive, raw = _still_open(sess, serial)
+    assert alive, f"연결이 닫힘 (다른 IP FC 응답 {rsp.hex()}, 중복 FO 응답 {raw})"
+    assert rsp[0] == 0xCE and rsp[2] == 0x0F, rsp.hex()
+
+
+def test_forward_close_same_ip_new_session_allowed(eip_dut):
+    """대조군: 같은 IP 의 새 TCP 세션(재접속)에서 온 Forward Close 는 성공한다."""
+    a = Session(eip_dut.port)
+    serial = _open_held(a)
+    a.close()
+    time.sleep(0.1)
+    b = Session(eip_dut.port)
+    try:
+        rsp = b.cip(forward_close(serial))
+    finally:
+        b.close()
+    assert rsp[0] == 0xCE and rsp[2] == 0x00, rsp.hex()
+    assert rsp[4:12] == struct.pack("<HHI", serial, ORIG_VENDOR, ORIG_SERIAL), rsp.hex()
