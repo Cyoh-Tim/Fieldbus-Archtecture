@@ -284,6 +284,12 @@ main
   → 앱/상위 로직이 read_point / write_point 호출
 ```
 
+> **구동 모델 방향**: SLMP 는 요청-응답형이라 사이클 개념이 없다. 위처럼
+> `cycle_ms`(8ms) 마다 batch read 하는 현재 방식은 지양한다. client 는 앱 쓰기를
+> 즉시 PLC 에 전송하고, PLC → 센서 값 읽기만 현장이 요구하는 갱신 주기로 폴링한다.
+> server(시뮬)는 소켓 이벤트로 즉시 응답한다. 근거와 인터페이스(`wait_fds`)는
+> `docs/design.md` 1장 5항.
+
 client 연결 실패 시 `connect()` 가 음수 errno 스타일로 실패한다.
 실 PLC 없이 `example.slmp.json` 을 띄우면 `plc_ip` 타임아웃이 정상이다.
 

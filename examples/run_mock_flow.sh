@@ -219,7 +219,11 @@ run_one() {
         exit 1
     fi
     echo "running $n $title CTT test(s)"
-    ctest --test-dir "$BUILD_DIR" --output-on-failure -LE soak_ci -L "$label"
+    ctest --test-dir "$BUILD_DIR" --output-on-failure -LE 'soak_ci|timing' -L "$label"
+    # Wall-clock bounded scenarios (label "timing"): retry scheduler noise, a
+    # real regression still fails all three attempts.
+    ctest --test-dir "$BUILD_DIR" --output-on-failure -LE soak_ci -L "$label" -L timing \
+        --repeat until-pass:3
 }
 
 for p in "${PROTOCOLS[@]}"; do

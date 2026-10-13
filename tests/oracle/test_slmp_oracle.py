@@ -225,12 +225,12 @@ def slmp_app(tmp_path):
     """points 로 서버 모드 SLMP 어댑터를 띄우고 (앱, pymcprotocol 클라이언트) 를 돌려준다."""
     apps = []
 
-    def make(points):
+    def make(points, cycle_ms=5):
         port = free_port()
         cfg = {
             "protocol": "slmp",
             "device": {"name": "oracle", "role": "server"},
-            "cycle_ms": 5,
+            "cycle_ms": cycle_ms,
             "protocol_params": {"role": "server", "ip": "127.0.0.1", "port": port},
             "points": points,
         }
@@ -318,7 +318,8 @@ def test_adapter_32bit_default_is_low_word_first(slmp_app, data_type, write, exp
     assert u16(plc.batchread_wordunits(headdevice="D310", readsize=2)) == expect
 
 
-# ======================================================================
+# ===============================================================
+
 # 2026-10-11 감사 (A20261011-3, -4, -5) — docs/reports/audits/20261011-slmp.md
 # slmp_oracle_client 의 --start/--dev/--bit/--write 옵션을 쓴다 (기본값은 예전 동작 D1..DK 읽기).
 # ======================================================================
@@ -592,3 +593,109 @@ def test_server_bit_batch_up_to_7168(slmp_dut, command, points):
         got = raw_3e_frame(slmp_dut.port, bit_batch_frame(command, points))
         assert got is not None and got[0] == 0x0000 and len(got[1]) == (points + 1) // 2, \
             f"{points}점 읽기 응답: {got and (hex(got[0]), len(got[1]))}"
+
+
+# ---------------------------------------------------------------- 구동 모델 (docs/design.md 1장 5항)
+# SLMP 는 요청-응답형이라 사이클이 없다. 서버(시뮬) 응답 지연은 cycle_ms 와 무관해야 한다.
+# 판정: pymcprotocol 이 잰 왕복 시간 (cycle_ms=1000, 상한 100ms — Modbus 오라클과 같은 기준).
+@known_defect("A20261008-3", "서버가 cycle_ms 마다만 요청을 확인한다 (cycle_ms=1000 이면 응답이 최대 ~1초 늦음). 요청-응답형은 도착 즉시 응답해야 한다")
+def test_server_response_does_not_wait_for_cycle(slmp_app):
+    app, plc = slmp_app([
+        {"name": "p", "access": "readwrite", "data_type": "uint16",
+         "address": {"slmp": {"device_code": "D", "start": 400}}},
+    ], cycle_ms=1000)
+    plc.soc_timeout = 3
+    worst = 0.0
+    for _ in range(5):
+        time.sleep(0.137)  # 요청 시점을 사이클 경계와 어긋나게
+        t0 = time.monotonic()
+        plc.batchread_wordunits(headdevice="D400", readsize=1)
+        worst = max(worst, time.monotonic() - t0)
+    assert worst < 0.1, f"cycle_ms=1000 에서 최대 응답 {worst * 1000:.0f} ms"
+
+
+# ---------------------------------------------------------------- 클라이언트 대기 vs 감시 타이머 (A20261012-1)
+# 감시 타이머(요청 오프셋 9-10, 250 ms 단위)는 요청을 받은 모듈이 접근 대상에 처리를 넘기면서 시작한다.
+# 그래서 모듈의 만료 이상 응답은 클라이언트 송신 뒤 항상 "타이머 + 왕복" 이후에 온다. 클라이언트가 타이머와
+# 같은 시간만 기다리면 그 응답(엔드 코드)을 원리상 받지 못하고 연결을 버린다.
+# 기대값 출처: pymcprotocol 0.3.0 type3e.py ("socket timeout is always set timer+1sec. To recieve Timeout
+# answer"), gomcprotocol·node mcprotocol·HslCommunication 도 대기 > 타이머 (+0.5~7.5 s).
+# 이 가짜 모듈은 요청의 타이머 필드를 읽어 첫 요청에만 "타이머 + late_s" 뒤 이상 응답(엔드 코드 + 에러 정보 9 B)을
+# 보내고, 이후 요청은 정상으로 답한다. 저장소 코드를 쓰지 않는다.
+class MonitorTimerPlc:
+    def __init__(self, late_s, end=0xC0B5):
+        self.late_s, self.end = late_s, end
+        self.accepts, self.timers, self._first = 0, [], True
+        self.port = free_port()
+        self._srv = socket.socket()
+        self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._srv.bind(("127.0.0.1", self.port))
+        self._srv.listen(4)
+        threading.Thread(target=self._accept_loop, daemon=True).start()
+
+    def _accept_loop(self):
+        while True:
+            try:
+                conn, _ = self._srv.accept()
+            except OSError:
+                return
+            self.accepts += 1
+            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+
+    @staticmethod
+    def _recv_exact(conn, n):
+        buf = b""
+        while len(buf) < n:
+            chunk = conn.recv(n - len(buf))
+            if not chunk:
+                return None
+            buf += chunk
+        return buf
+
+    def _serve(self, conn):
+        with conn:
+            while True:
+                hdr = self._recv_exact(conn, 9)
+                if hdr is None:
+                    return
+                body = self._recv_exact(conn, struct.unpack_from("<H", hdr, 7)[0])
+                if body is None:
+                    return
+                (timer,) = struct.unpack_from("<H", body, 0)
+                (points,) = struct.unpack_from("<H", body, 10)
+                self.timers.append(timer)
+                if self._first:
+                    self._first = False
+                    time.sleep(timer * 0.25 + self.late_s)  # 모듈의 감시 타이머가 만료된 뒤
+                    end, data = self.end, bytes(9)
+                else:
+                    end, data = 0, b"\x34\x12" * points
+                rsp = b"\xD0\x00" + hdr[2:7] + struct.pack("<HH", 2 + len(data), end) + data
+                try:
+                    conn.sendall(rsp)
+                except OSError:
+                    return
+
+    def close(self):
+        self._srv.close()
+
+
+# 대조군 (지금도 통과): 타이머 안에 온 이상 응답은 엔드 코드로 받고 (-EIO) 연결을 유지한다.
+def test_client_receives_abnormal_response_before_monitoring_timer():
+    plc = MonitorTimerPlc(late_s=-0.3)
+    try:
+        reads = run_client(plc.port, 2, interval_ms=50)
+    finally:
+        plc.close()
+    assert [rc for _, rc, _ in reads] == [-5, 0] and plc.accepts == 1, (reads, plc.accepts)
+
+
+@known_defect("A20261012-1", "클라이언트 응답 대기가 감시 타이머와 같아 모듈의 만료 이상 응답을 받지 못하고 "
+              "-ETIMEDOUT 으로 연결을 버린다 (다음 요청은 백오프 -EAGAIN)")
+def test_client_waits_past_monitoring_timer_for_abnormal_response():
+    plc = MonitorTimerPlc(late_s=0.15)
+    try:
+        reads = run_client(plc.port, 2, interval_ms=50)
+    finally:
+        plc.close()
+    assert [rc for _, rc, _ in reads] == [-5, 0] and plc.accepts == 1, (reads, plc.accepts, plc.timers)

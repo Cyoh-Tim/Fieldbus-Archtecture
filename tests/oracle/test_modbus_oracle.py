@@ -547,12 +547,12 @@ def test_client_rejects_response_from_other_unit(mb_client_dut):
 # 설정 JSON 은 테스트가 만든다. 서버 모드에서는 앱이 쓴 값을 pymodbus 로 읽어 실제 레지스터 주소와
 # 배치를 확인하고, 클라이언트 모드에서는 가짜 서버를 상대로 사이클 시간을 잰다.
 class MbApp(LinePipe):
-    def __init__(self, tmp_path, points, role="server", port=None, **params):
+    def __init__(self, tmp_path, points, role="server", port=None, cycle_ms=5, **params):
         self.port = port or free_port()
         cfg = {
             "protocol": "modbus_tcp",
             "device": {"name": "oracle", "role": role},
-            "cycle_ms": 5,
+            "cycle_ms": cycle_ms,
             "protocol_params": {"role": role, "ip": "127.0.0.1", "port": self.port,
                                 "unit_id": UNIT, **params},
             "points": points,
@@ -795,3 +795,26 @@ def test_adapter_scaled_32bit_write(mb_app_factory, data_type):
     app = mb_app_factory([_scaled_point("s32", 40, data_type)])
     assert app.cmd("WF32 s32 6553.6") == ["W", "0"]
     assert pymodbus_read(app.port, 40, 2) == [0x0001, 0x0000]
+
+
+# ================================================================ 구동 모델 (docs/design.md 1장 5항)
+# Modbus 는 요청-응답형이라 사이클이 없다. 서버 응답 지연은 cycle_ms 와 무관해야 한다.
+# 판정: pymodbus 가 잰 왕복 시간. cycle_ms 를 일부러 크게(1000) 잡아, 사이클에 묶여 있으면
+# 요청마다 최대 1초를 기다리게 한다. 루프백 왕복은 ms 미만이므로 100ms 는 넉넉한 상한이다.
+@known_defect("A20261008-2", "서버가 cycle_ms 마다만 요청을 확인한다 (cycle_ms=1000 이면 응답이 최대 ~1초 늦음). 요청-응답형은 도착 즉시 응답해야 한다")
+def test_server_response_does_not_wait_for_cycle(mb_app_factory):
+    app = mb_app_factory([holding_point("v", 0)], cycle_ms=1000)
+    c = ModbusTcpClient("127.0.0.1", port=app.port, timeout=3, retries=0)
+    assert c.connect()
+    worst = 0.0
+    try:
+        for _ in range(5):
+            time.sleep(0.137)  # 요청 시점을 사이클 경계와 어긋나게
+            t0 = time.monotonic()
+            rr = c.read_holding_registers(0, count=1, device_id=UNIT)
+            dt = time.monotonic() - t0
+            assert not rr.isError(), rr
+            worst = max(worst, dt)
+    finally:
+        c.close()
+    assert worst < 0.1, f"cycle_ms=1000 에서 최대 응답 {worst * 1000:.0f} ms"
