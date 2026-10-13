@@ -85,6 +85,7 @@
 #define CIP_STATUS_INVALID_PARAM    0x20
 #define CIP_STATUS_RESOURCE         0x02
 #define CIP_EXT_CONN_IN_USE         0x0100
+#define CIP_EXT_OWNERSHIP_CONFLICT  0x0106 /* second Exclusive Owner of the output */
 #define CIP_EXT_CONN_NOT_FOUND      0x0107 /* Forward Close: target connection not found */
 #define CIP_EXT_CONN_SIZE           0x0109
 #define CIP_EXT_OUT_OF_CONNECTIONS  0x0113

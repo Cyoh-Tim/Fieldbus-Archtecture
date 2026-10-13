@@ -447,6 +447,12 @@ static void test_forward_close_missing_and_present(void)
 
 static void test_out_of_connections(void)
 {
+    /* Filling EIP_CLASS1_CONN_MAX Exclusive Owners used to be how this
+     * reached 0x0113. T11-5 rejects a second owner of the same output, so
+     * that fill is the ownership bug, not a free-slot test. 0x0113 remains
+     * in eip_cm_forward_open for when a non-owning connection can occupy
+     * another slot. The 0x0106 reply itself is tests/test_eip_t11_5.c.
+     */
     eip_stack_t *s = make_stack();
     expect(s != NULL, "slots stack");
     if (!s) {
@@ -454,20 +460,12 @@ static void test_out_of_connections(void)
     }
     uint32_t sess = test_register(s);
     uint8_t cip[64];
-    for (uint16_t i = 0; i < EIP_CLASS1_CONN_MAX; i++) {
-        size_t n = forward_open(s, sess, 0, (uint16_t)(0x6000 + i), 6, 10, 150,
-                                cip, sizeof(cip));
-        if (!(n >= 4 && cip[2] == 0x00)) {
-            dump_cip("filling class1 slots", cip, n);
-            eip_stack_destroy(s);
-            return;
-        }
-    }
-    expect(eip_stack_class1_up(s) == 1, "slots full still reports class1");
-    size_t n = forward_open(s, sess, 0, 0x60FF, 6, 10, 150, cip, sizeof(cip));
-    expect_cm_fail(cip, n, 0xD4, EXT_OUT_OF_CONNS, 0x60FF,
-                   "no free slot is 0x01/0x0113");
-    expect(eip_stack_class1_up(s) == 1, "rejected FO keeps existing connections");
+    size_t n = forward_open(s, sess, 0, 0x6000, 6, 10, 150, cip, sizeof(cip));
+    expect(n >= 4 && cip[2] == 0x00, "first EO still opens");
+    expect(eip_stack_class1_up(s) == 1, "class1 up after one EO");
+    n = forward_open(s, sess, 0, 0x6001, 6, 10, 150, cip, sizeof(cip));
+    expect(n >= 4 && cip[2] != 0x00, "second EO does not take another slot");
+    expect(eip_stack_class1_up(s) == 1, "rejected FO keeps the owner");
     eip_stack_destroy(s);
 }
 

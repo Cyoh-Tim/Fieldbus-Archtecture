@@ -194,7 +194,6 @@ def test_forward_open_bad_size_error_format(sess):
     assert (conn_serial, vendor, orig_serial) == (serial, 0x1337, 0xCAFEBABE)
 
 
-@known_defect("T11-5", "두 번째 Exclusive Owner 연결(다른 triad)도 수락한다. 사양은 0x01/0x0106")
 def test_second_exclusive_owner_rejected(sess):
     first = sess.cip(forward_open(OUT_SIZE + 2, IN_SIZE + 2, next(_serial)))
     assert first[2] == 0x00, first.hex()

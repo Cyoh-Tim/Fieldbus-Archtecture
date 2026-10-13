@@ -100,6 +100,18 @@ static eip_class1_conn_t *find_dup_triad(eip_stack_t *s, uint16_t serial,
     return NULL;
 }
 
+/* True when an Exclusive Owner of the output assembly is already open. */
+static int exclusive_owner_active(const eip_stack_t *s)
+{
+    for (int i = 0; i < EIP_CLASS1_CONN_MAX; i++) {
+        const eip_class1_conn_t *c = &s->class1[i];
+        if (c->in_use && c->exclusive_owner) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Exclusive-owner path: Assembly class + config inst + O->T + T->O points. */
 static int parse_fo_path(const uint8_t *path, size_t path_bytes,
                          uint16_t *insts, int *n_insts, int insts_cap)
@@ -284,6 +296,23 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
         return 0;
     }
 
+    /* fo_path_ok requires the configured output assembly, so every
+     * connection accepted here is an Exclusive Owner of that assembly.
+     * A second owner (different triad) must not be installed: both would
+     * write the same output image. CIP: 0x01 / 0x0106 ownership conflict.
+     * Input Only and Listen Only do not own the output; they are not
+     * accepted by fo_path_ok.
+     */
+    if (exclusive_owner_active(s)) {
+        LOG_WARN("ethernetip",
+                 "Forward Open rejected: ownership conflict serial=0x%04x "
+                 "vendor=0x%04x orig=0x%08x",
+                 conn_serial, orig_vendor, orig_serial);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_OWNERSHIP_CONFLICT,
+                           conn_serial, orig_vendor, orig_serial, 0);
+        return 0;
+    }
+
     eip_class1_conn_t *c = alloc_conn(s);
     if (!c) {
         *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_OUT_OF_CONNECTIONS,
@@ -308,6 +337,7 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     c->vendor_id = orig_vendor;
     c->originator_serial = orig_serial;
     c->timeout_multiplier = timeout_mult;
+    c->exclusive_owner = 1;
     {
         uint32_t rpi = o2t_rpi ? o2t_rpi : s->cfg.rpi_us;
         c->watchdog_us = eip_class1_watchdog_us(rpi, timeout_mult);
@@ -320,6 +350,7 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     size_t need = large ? 30 : 26;
     if (resp_cap < need) {
         c->in_use = 0;
+        c->exclusive_owner = 0;
         *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_NO_BUFFER,
                            conn_serial, orig_vendor, orig_serial, 0);
         return 0;
