@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # EIPScanner (독립 오픈소스 EtherNet/IP 스캐너, MIT, https://github.com/nimbuscontrols/EIPScanner) 를
-# 고정 커밋으로 받아 빌드하고, 랩 테스트용 Class 1 originator(eipscanner_originator)를 만든다.
+# 고정 커밋으로 받아 빌드하고, 랩 테스트용 Class 1 originator(eipscanner_originator)와
+# UDP ListIdentity 탐색 도구(eipscanner_discover, 같은 디렉토리)를 만든다.
 #
 #   tests/oracle/lab/build_eipscanner.sh <출력 디렉토리>
 #   EIP_LAB_SCANNER=<출력 디렉토리>/eipscanner_originator pytest tests/oracle/test_eip_lab.py
@@ -21,4 +22,6 @@ cmake -S "$OUT/EIPScanner" -B "$OUT/EIPScanner/build" -DCMAKE_BUILD_TYPE=Release
 cmake --build "$OUT/EIPScanner/build" -j"$(nproc)" --target EIPScannerS >/dev/null
 g++ -std=c++14 -O1 -I"$OUT/EIPScanner/src" -o "$OUT/eipscanner_originator" \
     "$HERE/eipscanner_originator.cpp" "$OUT/EIPScanner/build/src/libEIPScannerS.a" -lpthread
+g++ -std=c++14 -O1 -I"$OUT/EIPScanner/src" -o "$OUT/eipscanner_discover" \
+    "$HERE/eipscanner_discover.cpp" "$OUT/EIPScanner/build/src/libEIPScannerS.a" -lpthread
 echo "$OUT/eipscanner_originator"

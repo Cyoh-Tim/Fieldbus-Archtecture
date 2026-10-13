@@ -102,3 +102,47 @@ def test_lab_eipscanner_class1_io_exchange(lab):
     assert ("1", OUT_DATA) in r["dut_out"], f"DUT 출력 이미지 {r['dut_out']}"
     assert r["rx"] >= 100 and r["last"] == IN_DATA and r["open_at_end"], \
         f"T->O rx={r['rx']} last={r['last']} open_at_end={r['open_at_end']}"
+
+
+# ---------------------------------------------------------------- UDP 탐색 (RSLinx 브라우즈)
+# EIPScanner DiscoveryManager 가 UDP 44818 로 ListIdentity 를 보낸다 (eipscanner_originator 와 같은 디렉토리의
+# eipscanner_discover). 응답의 Socket Address 는 장치 인터페이스 주소여야 한다 (T11-4, #121).
+DISCOVER = os.path.join(os.path.dirname(SCANNER), "eipscanner_discover") if SCANNER else ""
+
+
+def _discover(lab, bind_ip, target):
+    ns, dut_ip = lab
+    if not os.path.exists(DISCOVER):
+        pytest.skip("eipscanner_discover 가 없다 (tests/oracle/lab/build_eipscanner.sh 를 다시 실행)")
+    dut = subprocess.Popen(
+        ["ip", "netns", "exec", ns, str(dut_path("eip_oracle_adapter")), "--bind-ip", bind_ip,
+         "--tcp-port", "44818", "--udp-port", "2222", "--seconds", "5"],
+        stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(0.5)
+        out = subprocess.run([DISCOVER, target.replace("DUT", dut_ip).replace("BCAST", _bcast(dut_ip)),
+                              "44818"], capture_output=True, text=True, timeout=15).stdout
+    finally:
+        dut.terminate()
+        dut.wait(timeout=10)
+    return re.findall(r"DEV name=(\S+) .* addr=([\d.]+):(\d+)", out), dut_ip
+
+
+def _bcast(ip):
+    return ".".join(ip.split(".")[:3] + ["255"])  # 랩은 /24
+
+
+# 대조군: 와일드카드 bind (제품 예제 config 의 bind_ip 0.0.0.0) 는 브로드캐스트 탐색에 응답한다.
+def test_lab_eipscanner_discovers_wildcard_bound_device_by_broadcast(lab):
+    devs, dut_ip = _discover(lab, "0.0.0.0", "BCAST")
+    assert devs == [("FieldbusOracle", dut_ip, "44818")], devs
+
+
+# bind_ip 를 장치 주소로 지정해도 브로드캐스트 ListIdentity 를 받아야 한다. Linux 에서 유니캐스트 주소에 bind 한
+# UDP 소켓은 서브넷 브로드캐스트를 받지 못하므로, 독립 구현 OpENer 는 브로드캐스트 수신 소켓을 따로 INADDR_ANY 로
+# 둔다 (source/src/ports/generic_networkhandler.c `udp_global_broadcast_listener`).
+@known_defect("A20261013-1", "bind_ip 를 유니캐스트 주소로 주면 UDP encapsulation 소켓도 그 주소에 bind 되어 "
+              "브로드캐스트 ListIdentity(RSLinx 브라우즈)에 응답하지 않는다 (유니캐스트는 응답)")
+def test_lab_eipscanner_discovers_unicast_bound_device_by_broadcast(lab):
+    devs, dut_ip = _discover(lab, lab[1], "BCAST")
+    assert devs == [("FieldbusOracle", dut_ip, "44818")], devs
