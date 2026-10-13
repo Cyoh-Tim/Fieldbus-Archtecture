@@ -20,6 +20,20 @@ static void encap_hdr(uint8_t *out, uint16_t cmd, uint16_t length,
     eip_wr_le32(out + 20, 0);
 }
 
+/* Vol 2 socket address: sin_family, sin_port, sin_addr are big-endian. */
+static void wr_encap_sockaddr(uint8_t *p, uint16_t port, uint32_t ip_host)
+{
+    p[0] = 0x00;
+    p[1] = 0x02; /* AF_INET */
+    p[2] = (uint8_t)((port >> 8) & 0xff);
+    p[3] = (uint8_t)(port & 0xff);
+    p[4] = (uint8_t)((ip_host >> 24) & 0xff);
+    p[5] = (uint8_t)((ip_host >> 16) & 0xff);
+    p[6] = (uint8_t)((ip_host >> 8) & 0xff);
+    p[7] = (uint8_t)(ip_host & 0xff);
+    memset(p + 8, 0, 8);
+}
+
 static int build_list_identity(eip_stack_t *s, uint8_t *payload, size_t cap,
                                size_t *out_len)
 {
@@ -37,8 +51,16 @@ static int build_list_identity(eip_stack_t *s, uint8_t *payload, size_t cap,
 
     eip_wr_le16(payload + off, 1); /* encap protocol version */
     off += 2;
-    /* sockaddr stub (16 bytes) — zeros ok for unit tests */
-    memset(payload + off, 0, 16);
+    {
+        /* Arrival address when the request came in on a socket; otherwise
+         * the configured bind address. 0.0.0.0 stays 0 only if neither is
+         * a unicast address. */
+        uint32_t ip = s->encap_local_ip ? s->encap_local_ip : s->bind_ip_host;
+        if (ip == 0xffffffffu) {
+            ip = 0;
+        }
+        wr_encap_sockaddr(payload + off, (uint16_t)s->cfg.tcp_port, ip);
+    }
     off += 16;
     eip_wr_le16(payload + off, s->cfg.vendor_id);
     off += 2;
@@ -48,7 +70,7 @@ static int build_list_identity(eip_stack_t *s, uint8_t *payload, size_t cap,
     off += 2;
     payload[off++] = s->cfg.major_rev;
     payload[off++] = s->cfg.minor_rev;
-    eip_wr_le16(payload + off, 0); /* status */
+    eip_wr_le16(payload + off, eip_identity_status(s));
     off += 2;
     eip_wr_le32(payload + off, s->cfg.serial_number);
     off += 4;
@@ -59,7 +81,7 @@ static int build_list_identity(eip_stack_t *s, uint8_t *payload, size_t cap,
     payload[off++] = (uint8_t)n;
     memcpy(payload + off, s->cfg.product_name, n);
     off += n;
-    payload[off++] = 0xFF; /* state */
+    payload[off++] = eip_identity_state(s);
 
     eip_wr_le16(payload + len_at, (uint16_t)(off - (len_at + 2)));
     *out_len = off;
@@ -357,6 +379,12 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
             status = EIP_ENCAP_STATUS_INVALID_CMD;
             body_len = 0;
         }
+        break;
+
+    case EIP_CMD_LISTINTERFACES:
+        /* Non-CIP interfaces. A CIP device reports an empty list. */
+        eip_wr_le16(body_resp, 0);
+        body_len = 2;
         break;
 
     case EIP_CMD_LISTSERVICES:
