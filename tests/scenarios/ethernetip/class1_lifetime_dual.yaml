@@ -45,8 +45,10 @@ steps:
   - action: io_cycle
     count: 8
     cycle_ms: 8
+    # The owner is already on its RPI, so the first slot of this cycle can
+    # fall inside the previous period and produce 7 frames, not 8.
     expect:
-      min_frames: 8
+      min_frames: 7
       period_max_ms: 20
       class1: up
   - action: forward_close
