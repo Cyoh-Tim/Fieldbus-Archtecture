@@ -90,6 +90,8 @@
 #define CIP_EXT_CONN_SIZE           0x0109
 #define CIP_EXT_OUT_OF_CONNECTIONS  0x0113
 #define CIP_EXT_INVALID_APP_PATH    0x0117 /* produced/consumed application path */
+#define CIP_EXT_INVALID_O2T_TYPE    0x0123 /* O->T connection type multicast or reserved */
+#define CIP_EXT_INVALID_T2O_TYPE    0x0124 /* T->O connection type multicast or reserved */
 #define CIP_EXT_PARAM_ERROR         0x0205 /* parameter error in unconnected request */
 #define CIP_EXT_NO_BUFFER           0x0301
 #define CIP_EXT_INVALID_SEGMENT     0x0315 /* invalid segment in connection path */

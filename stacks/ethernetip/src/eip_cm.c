@@ -66,6 +66,18 @@ static uint16_t conn_size_from_net(uint32_t net_params, int large)
     return (uint16_t)(net_params & 0x1ff);
 }
 
+/* 0 Null, 1 Multicast, 2 Point-to-point, 3 Reserved.
+ * Forward Open stores the type in 16-bit NCP bits 13-14.
+ * Large Forward Open stores it in 32-bit NCP bits 29-30.
+ */
+static unsigned ncp_conn_type(uint32_t net_params, int large)
+{
+    if (large) {
+        return (unsigned)((net_params >> 29) & 3u);
+    }
+    return (unsigned)((net_params >> 13) & 3u);
+}
+
 /* Class 1 size is assembly data plus a 2-byte sequence, and O->T may add
  * the 4-byte Run/Idle header (data+6). T->O stays modeless (data or data+2).
  */
@@ -268,6 +280,33 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
                  path_ext, s->cfg.input_assembly, s->cfg.output_assembly);
         *resp_len = cm_err(resp, resp_cap, service, path_ext, conn_serial,
                            orig_vendor, orig_serial, 0);
+        return 0;
+    }
+
+    /* Multicast (1) and Reserved (3) are not produced. Null (0) stays
+     * accepted: CTT and the unit tests put only a size in the NCP.
+     * Point-to-point (2) is accepted. O->T is checked first because that
+     * field comes before T->O. A path that does not name both assemblies
+     * is already 0x0117 above.
+     */
+    unsigned o2t_type = ncp_conn_type(o2t_params, large);
+    unsigned t2o_type = ncp_conn_type(t2o_params, large);
+    if (o2t_type == 1u || o2t_type == 3u) {
+        LOG_WARN("ethernetip",
+                 "Forward Open rejected: O->T connection type %u "
+                 "serial=0x%04x vendor=0x%04x orig=0x%08x",
+                 o2t_type, conn_serial, orig_vendor, orig_serial);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_INVALID_O2T_TYPE,
+                           conn_serial, orig_vendor, orig_serial, 0);
+        return 0;
+    }
+    if (t2o_type == 1u || t2o_type == 3u) {
+        LOG_WARN("ethernetip",
+                 "Forward Open rejected: T->O connection type %u "
+                 "serial=0x%04x vendor=0x%04x orig=0x%08x",
+                 t2o_type, conn_serial, orig_vendor, orig_serial);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_INVALID_T2O_TYPE,
+                           conn_serial, orig_vendor, orig_serial, 0);
         return 0;
     }
 

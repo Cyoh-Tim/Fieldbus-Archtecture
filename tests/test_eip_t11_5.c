@@ -1,5 +1,5 @@
 /*
- * T11-5: Exclusive Owner ownership.
+ * T11-5: Exclusive Owner ownership, and NCP connection type.
  *
  * A second Exclusive Owner Forward Open for the same output assembly, from
  * a different connection triad, must be rejected with General Status 0x01
@@ -8,6 +8,12 @@
  * Path Size. The first owner stays up and keeps the output image. The same
  * triad is still 0x0100 (duplicate), not 0x0106. After Forward Close of the
  * owner, a new triad may open.
+ *
+ * Network connection type 1 (Multicast) and 3 (Reserved) are rejected:
+ * T->O with 0x0124, O->T with 0x0123, same reply shape. Type 0 (Null) and
+ * 2 (Point-to-point) are accepted. 16-bit NCP uses bits 13-14. Large
+ * Forward Open uses 32-bit NCP bits 29-30. The EDS Connection1 dword
+ * advertises T->O point-to-point only.
  *
  * Wire values are the CIP Vol 1 Connection Manager codes named in
  * docs/protocols/ethernetip.md (6.3, 6.6, C.2). This file does not include
@@ -22,6 +28,12 @@
 #define EXT_CONN_IN_USE 0x0100
 #define EXT_OWNERSHIP_CONFLICT 0x0106
 #define EXT_CONN_NOT_FOUND 0x0107
+#define EXT_INVALID_O2T_TYPE 0x0123
+#define EXT_INVALID_T2O_TYPE 0x0124
+
+#ifndef T11_5_EDS_PATH
+#define T11_5_EDS_PATH "stacks/ethernetip/eds/FieldbusSensor.eds"
+#endif
 
 #define VENDOR 0x1337
 #define ORIG_SERIAL 0xCAFEBABEu
@@ -301,7 +313,9 @@ static void test_second_owner_rejected(int large)
     /* O→T = output + seq = 6, T→O = input + seq = 10. P2P, as the oracle. */
     uint32_t o2t_ncp = large ? (uint32_t)ncp_p2p(6) : ncp_p2p(6);
     uint32_t t2o_ncp = large ? (uint32_t)ncp_p2p(10) : ncp_p2p(10);
-    /* Large Forward Open puts connection type in bits 20-21, not 13-14. */
+    /* Large Forward Open connection type is bits 29-30. This pattern
+     * leaves those bits 0 (Null), which is still accepted.
+     */
     if (large) {
         o2t_ncp = (0x2u << 20) | (0x2u << 17) | 6u;
         t2o_ncp = (0x2u << 20) | (0x2u << 17) | 10u;
@@ -384,11 +398,95 @@ static void test_size_only_ncp_second_owner(void)
     eip_stack_destroy(s);
 }
 
+/* type: 0 Null, 1 Multicast, 2 P2P, 3 Reserved. Size stays in the low bits. */
+static uint32_t ncp_type(int large, unsigned type, uint16_t size)
+{
+    if (large) {
+        return ((uint32_t)(type & 3u) << 29) | (uint32_t)size;
+    }
+    return ((uint32_t)(type & 3u) << 13) | (uint32_t)(size & 0x1ffu);
+}
+
+static void test_connection_type(int large)
+{
+    eip_stack_t *s = make_stack();
+    expect(s != NULL, large ? "type stack large" : "type stack");
+    if (!s) {
+        return;
+    }
+    uint32_t sess = test_register(s);
+    expect(sess != 0, large ? "type session large" : "type session");
+    uint8_t reply = (uint8_t)((large ? CIP_SVC_LARGE_FORWARD_OPEN
+                                     : CIP_SVC_FORWARD_OPEN) |
+                              0x80);
+    const char *kind = large ? "large" : "standard";
+    struct {
+        unsigned o2t;
+        unsigned t2o;
+        uint16_t ext;
+        const char *what;
+    } cases[] = {
+        {2, 1, EXT_INVALID_T2O_TYPE, "T->O multicast is 0x01/0x0124"},
+        {2, 3, EXT_INVALID_T2O_TYPE, "T->O reserved is 0x01/0x0124"},
+        {1, 2, EXT_INVALID_O2T_TYPE, "O->T multicast is 0x01/0x0123"},
+        {3, 2, EXT_INVALID_O2T_TYPE, "O->T reserved is 0x01/0x0123"},
+        {0, 0, 0, "Null connection type is accepted"},
+        {2, 2, 0, "P2P connection type is accepted"},
+    };
+    uint8_t cip[64];
+    uint16_t serial = 0x3100;
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        serial++;
+        char msg[96];
+        snprintf(msg, sizeof(msg), "%s %s", kind, cases[i].what);
+        size_t n = forward_open(s, sess, large, serial, ORIG_SERIAL,
+                                ncp_type(large, cases[i].o2t, 6),
+                                ncp_type(large, cases[i].t2o, 10), cip,
+                                sizeof(cip));
+        if (cases[i].ext == 0) {
+            expect(n >= 4 && cip[2] == 0x00, msg);
+            expect(eip_stack_class1_up(s) == 1, "accepted type brings class1 up");
+            n = forward_close(s, sess, serial, ORIG_SERIAL, cip, sizeof(cip));
+            expect(n >= 4 && cip[2] == 0x00, "close after accepted type");
+            expect(eip_stack_class1_up(s) == 0, "class1 down after accepted close");
+        } else {
+            expect_cm_fail(cip, n, reply, cases[i].ext, serial, ORIG_SERIAL, msg);
+            expect(eip_stack_class1_up(s) == 0,
+                   "rejected type leaves class1 down");
+        }
+    }
+    eip_stack_destroy(s);
+}
+
+/* Connection1 advertises T->O point-to-point only (bit 21 clear). */
+static void test_eds_t2o_p2p_only(void)
+{
+    FILE *f = fopen(T11_5_EDS_PATH, "rb");
+    expect(f != NULL, "open FieldbusSensor.eds");
+    if (!f) {
+        return;
+    }
+    char buf[8192];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    int extra = fgetc(f);
+    fclose(f);
+    buf[n] = '\0';
+    expect(extra == EOF, "EDS fits in the test buffer");
+    expect(strstr(buf, "Connection1") != NULL, "EDS has Connection1");
+    expect(strstr(buf, "Connection2") == NULL, "EDS keeps only Connection1");
+    expect(strstr(buf, "0x44440405") != NULL, "Connection1 dword is 0x44440405");
+    expect(strstr(buf, "0x44640405") == NULL, "T->O multicast bit stays clear");
+    expect(strstr(buf, "T->O P2P only") != NULL, "EDS comment is T->O P2P only");
+}
+
 int main(void)
 {
     test_second_owner_rejected(0);
     test_second_owner_rejected(1);
     test_size_only_ncp_second_owner();
+    test_connection_type(0);
+    test_connection_type(1);
+    test_eds_t2o_p2p_only();
     if (g_fail) {
         fprintf(stderr, "test_eip_t11_5: FAILED\n");
         return 1;
