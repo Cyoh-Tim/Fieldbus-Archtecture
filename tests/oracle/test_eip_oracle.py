@@ -736,14 +736,12 @@ def test_list_interfaces_supported(eip_dut):
 
 
 # ---------------------------------------------------------------- Connection ID·생산 목적지 (T11-6)
-@known_defect("T11-6", "요청의 O→T Connection ID(0 아님)를 그대로 에코한다. 사양은 P2P O→T ID 를 Target 이 고른다 (요청값 무의미)")
 def test_o2t_connection_id_chosen_by_target(sess):
     proposal = 0x13572468
     o2t_id, _, _ = open_class1(sess, o2t_id=proposal)
     assert o2t_id != proposal, f"요청값 {proposal:#x} 에코"
 
 
-@known_defect("T11-6", "T→O 생산이 첫 O→T 패킷을 받아야 시작하고 0x8001 Sockaddr Info(T→O)를 무시한다. 사양은 연결 직후 Sockaddr(없으면 Originator:2222)로 생산")
 def test_t2o_produced_to_sockaddr_without_o2t(sess):
     u = io_socket()
     try:
@@ -753,7 +751,6 @@ def test_t2o_produced_to_sockaddr_without_o2t(sess):
         u.close()
 
 
-@known_defect("T11-6", "Connection ID 만 맞으면 다른 IP(127.0.0.2)에서 온 O→T 패킷도 출력에 적용한다. 사양은 Originator IP 가 아닌 출발지 패킷 폐기")
 def test_o2t_from_other_ip_ignored(sess, eip_dut):
     legit, spoof = io_socket("127.0.0.1"), io_socket("127.0.0.2")
     try:
@@ -769,7 +766,6 @@ def test_o2t_from_other_ip_ignored(sess, eip_dut):
         spoof.close()
 
 
-@known_defect("T11-6", "O→T 패킷 출발지로 T→O 목적지를 매번 바꿔 다른 IP 가 T→O 를 가로챈다. 사양은 FO 에서 정한 목적지 유지")
 def test_t2o_not_redirected_by_other_ip(sess, eip_dut):
     legit, spoof = io_socket("127.0.0.1"), io_socket("127.0.0.2")
     try:

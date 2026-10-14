@@ -25,8 +25,10 @@ typedef struct {
     uint8_t o2t_run_idle; /* 1 = O->T real-time format is 32-bit Run/Idle */
     uint32_t o2t_rpi_us;
     uint32_t t2o_rpi_us;
-    uint32_t peer_ip; /* host order */
+    uint32_t originator_ip; /* host order; 0 when Forward Open had no TCP peer */
+    uint32_t peer_ip;       /* T->O destination, host order */
     uint16_t peer_udp_port;
+    int t2o_dst_fixed; /* 1 once the produce destination is chosen */
     uint32_t o2t_seq;
     uint32_t t2o_seq;
     uint64_t last_rx_ns;
@@ -86,6 +88,11 @@ struct eip_stack {
     eip_session_slot_t sessions[EIP_CLASS3_SESSIONS_MAX];
     int n_sessions;
     uint32_t next_conn_id;
+    /* SendRRData context for the CIP request currently being routed. */
+    uint32_t rr_originator_ip; /* host order; 0 for mock / unknown */
+    int rr_t2o_sockaddr;       /* 1 when CPF 0x8001 was present and valid */
+    uint32_t rr_t2o_ip;
+    uint16_t rr_t2o_port;
 
     eip_tcp_client_t clients[EIP_TCP_CLIENTS_MAX];
     eip_class1_conn_t class1[EIP_CLASS1_CONN_MAX];

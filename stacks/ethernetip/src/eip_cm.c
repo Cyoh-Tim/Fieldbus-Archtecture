@@ -87,6 +87,39 @@ static int t2o_size_ok(uint16_t net, uint16_t asm_sz)
     return net == asm_sz || net == (uint16_t)(asm_sz + 2u);
 }
 
+static int conn_id_used(const eip_stack_t *s, uint32_t id)
+{
+    if (id == 0) {
+        return 1;
+    }
+    for (int i = 0; i < EIP_CLASS1_CONN_MAX; i++) {
+        const eip_class1_conn_t *c = &s->class1[i];
+        if (!c->in_use) {
+            continue;
+        }
+        if (c->o2t_conn_id == id || c->t2o_conn_id == id) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Target connection IDs start at 0x20000001 and skip any ID still in use. */
+static uint32_t alloc_conn_id(eip_stack_t *s)
+{
+    for (int n = 0; n < EIP_CLASS1_CONN_MAX * 4; n++) {
+        uint32_t id = s->next_conn_id++;
+        if (id == 0) {
+            s->next_conn_id = 0x20000001u;
+            id = s->next_conn_id++;
+        }
+        if (!conn_id_used(s, id)) {
+            return id;
+        }
+    }
+    return 0;
+}
+
 static eip_class1_conn_t *find_dup_triad(eip_stack_t *s, uint16_t serial,
                                          uint16_t vendor, uint32_t orig_serial)
 {
@@ -291,14 +324,36 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
         return 0;
     }
 
-    if (o2t_id == 0) {
-        o2t_id = s->next_conn_id++;
+    /* Point-to-point O->T ID is chosen by the Target. The request value
+     * is meaningless (CIP Vol 1 connection ID rules). */
+    {
+        uint32_t chosen_o2t = alloc_conn_id(s);
+        uint32_t chosen_t2o = t2o_id;
+        if (chosen_o2t == 0) {
+            c->in_use = 0;
+            *resp_len = cm_err(resp, resp_cap, service,
+                               CIP_EXT_OUT_OF_CONNECTIONS, conn_serial,
+                               orig_vendor, orig_serial, 0);
+            return 0;
+        }
+        c->o2t_conn_id = chosen_o2t;
+        /* Point-to-point T->O uses the Originator's non-zero choice, even
+         * when another connection already produces with that id. Zero means
+         * the Target assigns one. */
+        if (chosen_t2o == 0) {
+            chosen_t2o = alloc_conn_id(s);
+            if (chosen_t2o == 0) {
+                c->in_use = 0;
+                *resp_len = cm_err(resp, resp_cap, service,
+                                   CIP_EXT_OUT_OF_CONNECTIONS, conn_serial,
+                                   orig_vendor, orig_serial, 0);
+                return 0;
+            }
+        }
+        c->t2o_conn_id = chosen_t2o;
+        o2t_id = chosen_o2t;
+        t2o_id = chosen_t2o;
     }
-    if (t2o_id == 0) {
-        t2o_id = s->next_conn_id++;
-    }
-    c->o2t_conn_id = o2t_id;
-    c->t2o_conn_id = t2o_id;
     c->o2t_size = o2t_size;
     c->t2o_size = t2o_size;
     c->o2t_run_idle = o2t_run_idle ? 1u : 0u;
@@ -315,6 +370,20 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     /* Arm watchdog at Forward Open so a connection without IO is reclaimed. */
     c->last_rx_ns = eip_now_ns();
     c->last_tx_ns = 0;
+    c->originator_ip = s->rr_originator_ip;
+    /* Produce as soon as the connection exists. 0x8001 names the consumer
+     * socket; otherwise T->O goes to the Originator at UDP 2222. A mock
+     * Forward Open has neither, and the test inject path learns a
+     * destination from the first O->T packet. */
+    if (s->rr_t2o_sockaddr) {
+        c->peer_ip = s->rr_t2o_ip;
+        c->peer_udp_port = s->rr_t2o_port;
+        c->t2o_dst_fixed = 1;
+    } else if (s->rr_originator_ip != 0) {
+        c->peer_ip = s->rr_originator_ip;
+        c->peer_udp_port = EIP_UDP_IO_PORT_DEFAULT;
+        c->t2o_dst_fixed = 1;
+    }
 
     /* Success reply */
     size_t need = large ? 30 : 26;

@@ -5,6 +5,8 @@
 #include <errno.h>
 #include <string.h>
 
+#include "logger.h"
+
 static void encap_hdr(uint8_t *out, uint16_t cmd, uint16_t length,
                       uint32_t session, uint32_t status, const uint8_t ctx[8])
 {
@@ -32,6 +34,58 @@ static void wr_encap_sockaddr(uint8_t *p, uint16_t port, uint32_t ip_host)
     p[6] = (uint8_t)((ip_host >> 8) & 0xff);
     p[7] = (uint8_t)(ip_host & 0xff);
     memset(p + 8, 0, 8);
+}
+
+/* Same layout as wr_encap_sockaddr. Port 0 or address 0 is not a destination. */
+static int rd_sockaddr_to(const uint8_t *p, size_t n, uint32_t *ip_host,
+                          uint16_t *port)
+{
+    if (n < 16 || p[0] != 0x00 || p[1] != 0x02) {
+        return -1;
+    }
+    *port = (uint16_t)(((uint16_t)p[2] << 8) | p[3]);
+    *ip_host = ((uint32_t)p[4] << 24) | ((uint32_t)p[5] << 16) |
+               ((uint32_t)p[6] << 8) | (uint32_t)p[7];
+    if (*port == 0 || *ip_host == 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static void rr_io_reset(eip_stack_t *s)
+{
+    s->rr_originator_ip = 0;
+    s->rr_t2o_sockaddr = 0;
+    s->rr_t2o_ip = 0;
+    s->rr_t2o_port = 0;
+}
+
+static uint32_t encap_owner_ip(const eip_stack_t *s, uint32_t owner_id)
+{
+    unsigned slot;
+    if (owner_id == 0 || owner_id == EIP_ENCAP_OWNER_MOCK) {
+        return 0;
+    }
+    slot = owner_id & 0x0fffffffu;
+    if ((owner_id & 0xF0000000u) == EIP_ENCAP_OWNER_TCP) {
+        if (slot == 0 || slot > EIP_TCP_CLIENTS_MAX) {
+            return 0;
+        }
+        if (!s->clients[slot - 1].active) {
+            return 0;
+        }
+        return s->clients[slot - 1].peer_ip;
+    }
+    if ((owner_id & 0xF0000000u) == EIP_ENCAP_OWNER_TLS) {
+        if (slot == 0 || slot > EIP_TLS_CLIENTS_MAX) {
+            return 0;
+        }
+        if (!s->tls_clients[slot - 1].active) {
+            return 0;
+        }
+        return s->tls_clients[slot - 1].peer_ip;
+    }
+    return 0;
 }
 
 static int build_list_identity(eip_stack_t *s, uint8_t *payload, size_t cap,
@@ -212,14 +266,22 @@ static int handle_sendrr(eip_stack_t *s, uint32_t session, uint32_t owner_id,
     size_t cip_len = 0;
     const uint8_t *mac = NULL;
     size_t mac_len = 0;
+    /* Originator of this TCP/TLS session, plus optional T->O sockaddr.
+     * Cleared before every return so a later request cannot reuse it. */
+    s->rr_originator_ip = encap_owner_ip(s, owner_id);
+    s->rr_t2o_sockaddr = 0;
+    s->rr_t2o_ip = 0;
+    s->rr_t2o_port = 0;
     for (uint16_t i = 0; i < items; i++) {
         if (off + 4 > body_len) {
+            rr_io_reset(s);
             return -EINVAL;
         }
         uint16_t type = eip_rd_le16(body + off);
         uint16_t length = eip_rd_le16(body + off + 2);
         off += 4;
         if (off + length > body_len) {
+            rr_io_reset(s);
             return -EINVAL;
         }
         if (type == EIP_ITEM_UNCONNECTED_DATA) {
@@ -228,10 +290,22 @@ static int handle_sendrr(eip_stack_t *s, uint32_t session, uint32_t owner_id,
         } else if (type == EIP_SEC_ITEM_INTEGRITY) {
             mac = body + off;
             mac_len = length;
+        } else if (type == EIP_ITEM_SOCKADDR_TO && !s->rr_t2o_sockaddr) {
+            uint32_t ip = 0;
+            uint16_t port = 0;
+            if (rd_sockaddr_to(body + off, length, &ip, &port) == 0) {
+                s->rr_t2o_sockaddr = 1;
+                s->rr_t2o_ip = ip;
+                s->rr_t2o_port = port;
+            } else {
+                LOG_WARN("ethernetip",
+                         "Sockaddr Info T->O ignored (len=%u)", length);
+            }
         }
         off += length;
     }
     if (!cip || cip_len < 2) {
+        rr_io_reset(s);
         return -EINVAL;
     }
 
@@ -260,6 +334,7 @@ static int handle_sendrr(eip_stack_t *s, uint32_t session, uint32_t owner_id,
         memcpy(resp_body + r, err, 4);
         r += 4;
         *resp_len = r;
+        rr_io_reset(s);
         return 0;
     }
 
@@ -280,6 +355,7 @@ static int handle_sendrr(eip_stack_t *s, uint32_t session, uint32_t owner_id,
 
     uint16_t item_count = mac_item_len ? 3 : 2;
     if (resp_cap < 6 + 2 + 8 + cip_resp_len + mac_item_len) {
+        rr_io_reset(s);
         return -ENOSPC;
     }
     size_t r = 0;
@@ -304,6 +380,7 @@ static int handle_sendrr(eip_stack_t *s, uint32_t session, uint32_t owner_id,
         r += mac_item_len;
     }
     *resp_len = r;
+    rr_io_reset(s);
     return 0;
 }
 
