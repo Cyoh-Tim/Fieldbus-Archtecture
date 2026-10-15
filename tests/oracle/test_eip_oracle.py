@@ -202,7 +202,6 @@ def test_second_exclusive_owner_rejected(sess):
     assert struct.unpack_from("<H", second, 4)[0] == 0x0106
 
 
-@known_defect("T11-7", "transport class 3 Forward Open 을 Class 1 슬롯으로 수락한다. 사양은 0x01/0x0103")
 def test_class3_transport_to_assembly_rejected(sess):
     rsp = sess.cip(forward_open(OUT_SIZE + 2, IN_SIZE + 2, next(_serial), transport=0xA3))
     assert rsp[2] == 0x01

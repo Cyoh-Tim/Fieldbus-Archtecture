@@ -258,7 +258,11 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
         t2o_params = eip_rd_le16(data + off);
         off += 2;
     }
-    off += 1; /* transport type/trigger */
+    /* Transport type/trigger (ethernetip.md 5.6.5): bits 0-3 class,
+     * bits 4-6 trigger, bit 7 direction. Read before the path.
+     */
+    uint8_t transport = data[off];
+    off += 1;
     if (off >= len) {
         *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_PARAM_ERROR,
                            conn_serial, orig_vendor, orig_serial, 0);
@@ -268,6 +272,21 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     size_t path_bytes = (size_t)path_words * 2u;
     if (off + path_bytes > len) {
         *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_PARAM_ERROR,
+                           conn_serial, orig_vendor, orig_serial, 0);
+        return 0;
+    }
+
+    /* Only Class 1 cyclic I/O is produced. Class 3 (and COS / Class 0)
+     * would otherwise be installed in a Class 1 slot, while SendUnitData
+     * (0x70) is not implemented. Direction is not this combination.
+     * Unsupported class/trigger → 0x01 / 0x0103 (ethernetip.md M5, 6.3).
+     */
+    if ((transport & 0x0Fu) != 1u || ((transport >> 4) & 0x07u) != 0u) {
+        LOG_WARN("ethernetip",
+                 "Forward Open rejected: transport class/trigger 0x%02x "
+                 "serial=0x%04x vendor=0x%04x orig=0x%08x",
+                 transport, conn_serial, orig_vendor, orig_serial);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_TRANSPORT_TRIGGER,
                            conn_serial, orig_vendor, orig_serial, 0);
         return 0;
     }
