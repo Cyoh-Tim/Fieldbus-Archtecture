@@ -356,6 +356,50 @@ static int forward_open(eip_stack_t *s, int fd, uint32_t session,
     return 0;
 }
 
+/* Close the Exclusive Owner so the next Forward Open is not 0x0106 (T11-5). */
+static int forward_close(eip_stack_t *s, int fd, uint32_t session,
+                        uint16_t serial)
+{
+    uint8_t fc[12];
+    uint8_t cip[32];
+    uint8_t req[128];
+    uint8_t resp[256];
+    size_t req_len;
+    size_t resp_len = 0;
+    size_t reply_len = 0;
+    const uint8_t *reply;
+
+    fc[0] = 0x0A;
+    fc[1] = 0x05;
+    eip_wr_le16(fc + 2, serial);
+    eip_wr_le16(fc + 4, 0x1337);
+    eip_wr_le32(fc + 6, 0xCAFEBABEu);
+    fc[10] = 0;
+    fc[11] = 0;
+    cip[0] = CIP_SVC_FORWARD_CLOSE;
+    cip[1] = 2;
+    cip[2] = 0x20;
+    cip[3] = CIP_CLASS_CONN_MANAGER;
+    cip[4] = 0x24;
+    cip[5] = 1;
+    memcpy(cip + 6, fc, sizeof(fc));
+    req_len = build_sendrr(req, session, cip, 6 + sizeof(fc), NULL);
+    if (encap_exchange(s, fd, req, req_len, resp, sizeof(resp), &resp_len) !=
+        0) {
+        fprintf(stderr, "FAIL: Forward Close exchange timed out\n");
+        g_fail = 1;
+        return -1;
+    }
+    reply = cip_in_reply(resp, resp_len, &reply_len);
+    if (!reply || reply_len < 4 ||
+        reply[0] != (CIP_SVC_FORWARD_CLOSE | CIP_SVC_REPLY) || reply[2] != 0) {
+        fprintf(stderr, "FAIL: Forward Close rejected\n");
+        g_fail = 1;
+        return -1;
+    }
+    return 0;
+}
+
 static int pump_for(eip_stack_t *s, int ms)
 {
     int waited = 0;
@@ -468,6 +512,10 @@ static void test_o2t_id_chosen_sequential(void)
              T2O_CHOICE);
     expect(t2o1 == T2O_CHOICE, msg);
 
+    /* A second Exclusive Owner of the same output is 0x0106 (T11-5).
+     * The next Target O->T ID is checked after that owner is closed. */
+    expect(forward_close(s, fd, session, 0x6101) == 0,
+           "close first owner before the next Connection ID");
     expect(forward_open(s, fd, session, O2T_PROPOSAL, T2O_CHOICE ^ 0x01000000u,
                         0x6102, NULL, &o2t2, &t2o2) == 0,
            "second Forward Open");
