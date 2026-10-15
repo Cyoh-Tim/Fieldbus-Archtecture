@@ -69,7 +69,7 @@ Assem150 =
 [Connection Manager]
 Connection1 =
     0x04010002,         $ trigger & transport: Class 1, cyclic, exclusive owner
-    0x44640405,         $ O->T 32-bit Run/Idle, T->O pure data
+    0x44440405,         $ O->T 32-bit Run/Idle, T->O P2P only
     Param2,,Assem101,   $ O->T RPI, size, format
     Param2,,Assem150,   $ T->O RPI, size, format
     ,,                  $ config 1 size, format
