@@ -37,6 +37,7 @@ typedef struct {
     uint16_t vendor_id;
     uint32_t originator_serial;
     uint8_t timeout_multiplier;
+    uint8_t exclusive_owner; /* 1 = this connection owns the output assembly */
     uint32_t watchdog_us; /* derived close timeout */
     /* CPF: item count(2) + seq addr(12) + connected hdr(4) + seq(2) + data */
     uint8_t last_produce[20 + EIP_ASSEMBLY_SIZE_MAX];

@@ -66,6 +66,18 @@ static uint16_t conn_size_from_net(uint32_t net_params, int large)
     return (uint16_t)(net_params & 0x1ff);
 }
 
+/* 0 Null, 1 Multicast, 2 Point-to-point, 3 Reserved.
+ * Forward Open stores the type in 16-bit NCP bits 13-14.
+ * Large Forward Open stores it in 32-bit NCP bits 29-30.
+ */
+static unsigned ncp_conn_type(uint32_t net_params, int large)
+{
+    if (large) {
+        return (unsigned)((net_params >> 29) & 3u);
+    }
+    return (unsigned)((net_params >> 13) & 3u);
+}
+
 /* Class 1 size is assembly data plus a 2-byte sequence, and O->T may add
  * the 4-byte Run/Idle header (data+6). T->O stays modeless (data or data+2).
  */
@@ -131,6 +143,18 @@ static eip_class1_conn_t *find_dup_triad(eip_stack_t *s, uint16_t serial,
         }
     }
     return NULL;
+}
+
+/* True when an Exclusive Owner of the output assembly is already open. */
+static int exclusive_owner_active(const eip_stack_t *s)
+{
+    for (int i = 0; i < EIP_CLASS1_CONN_MAX; i++) {
+        const eip_class1_conn_t *c = &s->class1[i];
+        if (c->in_use && c->exclusive_owner) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /* Exclusive-owner path: Assembly class + config inst + O->T + T->O points. */
@@ -292,6 +316,33 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
         return 0;
     }
 
+    /* Multicast (1) and Reserved (3) are not produced. Null (0) stays
+     * accepted: CTT and the unit tests put only a size in the NCP.
+     * Point-to-point (2) is accepted. O->T is checked first because that
+     * field comes before T->O. A path that does not name both assemblies
+     * is already 0x0117 above.
+     */
+    unsigned o2t_type = ncp_conn_type(o2t_params, large);
+    unsigned t2o_type = ncp_conn_type(t2o_params, large);
+    if (o2t_type == 1u || o2t_type == 3u) {
+        LOG_WARN("ethernetip",
+                 "Forward Open rejected: O->T connection type %u "
+                 "serial=0x%04x vendor=0x%04x orig=0x%08x",
+                 o2t_type, conn_serial, orig_vendor, orig_serial);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_INVALID_O2T_TYPE,
+                           conn_serial, orig_vendor, orig_serial, 0);
+        return 0;
+    }
+    if (t2o_type == 1u || t2o_type == 3u) {
+        LOG_WARN("ethernetip",
+                 "Forward Open rejected: T->O connection type %u "
+                 "serial=0x%04x vendor=0x%04x orig=0x%08x",
+                 t2o_type, conn_serial, orig_vendor, orig_serial);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_INVALID_T2O_TYPE,
+                           conn_serial, orig_vendor, orig_serial, 0);
+        return 0;
+    }
+
     uint16_t o2t_size = conn_size_from_net(o2t_params, large);
     uint16_t t2o_size = conn_size_from_net(t2o_params, large);
     int o2t_run_idle = 0;
@@ -313,6 +364,23 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
                  "vendor=0x%04x orig=0x%08x",
                  conn_serial, orig_vendor, orig_serial);
         *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_CONN_IN_USE,
+                           conn_serial, orig_vendor, orig_serial, 0);
+        return 0;
+    }
+
+    /* fo_path_ok requires the configured output assembly, so every
+     * connection accepted here is an Exclusive Owner of that assembly.
+     * A second owner (different triad) must not be installed: both would
+     * write the same output image. CIP: 0x01 / 0x0106 ownership conflict.
+     * Input Only and Listen Only do not own the output; they are not
+     * accepted by fo_path_ok.
+     */
+    if (exclusive_owner_active(s)) {
+        LOG_WARN("ethernetip",
+                 "Forward Open rejected: ownership conflict serial=0x%04x "
+                 "vendor=0x%04x orig=0x%08x",
+                 conn_serial, orig_vendor, orig_serial);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_OWNERSHIP_CONFLICT,
                            conn_serial, orig_vendor, orig_serial, 0);
         return 0;
     }
@@ -363,6 +431,7 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     c->vendor_id = orig_vendor;
     c->originator_serial = orig_serial;
     c->timeout_multiplier = timeout_mult;
+    c->exclusive_owner = 1;
     {
         uint32_t rpi = o2t_rpi ? o2t_rpi : s->cfg.rpi_us;
         c->watchdog_us = eip_class1_watchdog_us(rpi, timeout_mult);
@@ -389,6 +458,7 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     size_t need = large ? 30 : 26;
     if (resp_cap < need) {
         c->in_use = 0;
+        c->exclusive_owner = 0;
         *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_NO_BUFFER,
                            conn_serial, orig_vendor, orig_serial, 0);
         return 0;

@@ -1,4 +1,7 @@
-# Internal TC EIP-A-CM-003 — two Class1 conns; Close first, second stays.
+# Internal TC EIP-A-CM-003 — second Exclusive Owner is an ownership conflict.
+# The first connection stays up. Closing it brings Class 1 down.
+# General status only: CTT does not check the extended word. 0x0106 is
+# tests/test_eip_t11_5.c.
 name: class1_lifetime_dual
 id: EIP-A-CM-003
 suite: EIP-A-v1
@@ -37,13 +40,15 @@ steps:
     t2o_size: 8
     timeout_mult: 4
     expect:
-      cip_status: 0
+      cip_status: 1
       class1: up
   - action: io_cycle
     count: 8
     cycle_ms: 8
+    # The owner is already on its RPI, so the first slot of this cycle can
+    # fall inside the previous period and produce 7 frames, not 8.
     expect:
-      min_frames: 8
+      min_frames: 7
       period_max_ms: 20
       class1: up
   - action: forward_close
@@ -51,19 +56,20 @@ steps:
     orig_serial: 0xD1
     expect:
       cip_status: 0
-      class1: up
+      class1: down
   - action: io_cycle
-    count: 16
+    require_class1: false
+    count: 8
     cycle_ms: 8
     expect:
-      min_frames: 8
-      period_max_ms: 20
-      class1: up
+      class1: down
+      min_frames: 0
+      max_frames: 0
   - action: forward_close
     serial: 0xD002
     orig_serial: 0xD2
     expect:
-      cip_status: 0
+      cip_status: 1
       class1: down
   - action: io_cycle
     require_class1: false
