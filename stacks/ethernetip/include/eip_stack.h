@@ -46,7 +46,7 @@ typedef struct {
     uint16_t output_size;
     uint16_t config_size;
 
-    uint32_t rpi_us; /* Class 1 RPI hint (default 8000) */
+    uint32_t rpi_us; /* Minimum Class 1 RPI, µs (default 8000 = 8 ms cycle) */
     int mock;        /* 1 = no real sockets (unit tests) */
 
     /* Security — see docs/ethernetip_stack.md */

@@ -89,6 +89,7 @@
 #define CIP_EXT_OWNERSHIP_CONFLICT  0x0106 /* second Exclusive Owner of the output */
 #define CIP_EXT_CONN_NOT_FOUND      0x0107 /* Forward Close: target connection not found */
 #define CIP_EXT_CONN_SIZE           0x0109
+#define CIP_EXT_RPI_NOT_ACCEPTABLE  0x0112 /* RPI too short; additional status carries the minimum */
 #define CIP_EXT_OUT_OF_CONNECTIONS  0x0113
 #define CIP_EXT_INVALID_APP_PATH    0x0117 /* produced/consumed application path */
 #define CIP_EXT_INVALID_O2T_TYPE    0x0123 /* O->T connection type multicast or reserved */

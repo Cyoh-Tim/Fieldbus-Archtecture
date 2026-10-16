@@ -6,30 +6,89 @@
 #include <string.h>
 
 /* Unsuccessful Connection Manager reply.
- * General Status is always 0x01 with one extended-status word, then
- * Connection Serial, Originator Vendor, Originator Serial, and a trailing
- * USINT + reserved (10 bytes). Forward Open uses that USINT as Remaining
- * Path Size; Forward Close uses it as Application Reply Size. A target
- * that is not a router sets the size byte to 0.
+ * General Status is always 0x01, then `add_words` of additional status,
+ * then Connection Serial, Originator Vendor, Originator Serial, and a
+ * trailing USINT + reserved (10 bytes). Forward Open uses that USINT as
+ * Remaining Path Size; Forward Close uses it as Application Reply Size.
+ * A target that is not a router sets the size byte to 0.
  */
-static size_t cm_err(uint8_t *resp, size_t cap, uint8_t service, uint16_t ext,
-                     uint16_t conn_serial, uint16_t vendor, uint32_t orig_serial,
-                     uint8_t size_byte)
+static size_t cm_fail(uint8_t *resp, size_t cap, uint8_t service,
+                      const uint8_t *add, uint8_t add_words,
+                      uint16_t conn_serial, uint16_t vendor,
+                      uint32_t orig_serial, uint8_t size_byte)
 {
-    if (cap < 16) {
+    size_t add_bytes = (size_t)add_words * 2u;
+    size_t need = 4u + add_bytes + 10u;
+    if (!resp || cap < need || (add_bytes > 0 && !add)) {
         return 0;
     }
     resp[0] = (uint8_t)(service | CIP_SVC_REPLY);
     resp[1] = 0;
     resp[2] = CIP_STATUS_CONN_FAILURE;
-    resp[3] = 1;
-    eip_wr_le16(resp + 4, ext);
-    eip_wr_le16(resp + 6, conn_serial);
-    eip_wr_le16(resp + 8, vendor);
-    eip_wr_le32(resp + 10, orig_serial);
-    resp[14] = size_byte;
-    resp[15] = 0;
-    return 16;
+    resp[3] = add_words;
+    if (add_bytes > 0) {
+        memcpy(resp + 4, add, add_bytes);
+    }
+    size_t tail = 4u + add_bytes;
+    eip_wr_le16(resp + tail, conn_serial);
+    eip_wr_le16(resp + tail + 2, vendor);
+    eip_wr_le32(resp + tail + 4, orig_serial);
+    resp[tail + 8] = size_byte;
+    resp[tail + 9] = 0;
+    return need;
+}
+
+static size_t cm_err(uint8_t *resp, size_t cap, uint8_t service, uint16_t ext,
+                     uint16_t conn_serial, uint16_t vendor, uint32_t orig_serial,
+                     uint8_t size_byte)
+{
+    uint8_t add[2];
+    eip_wr_le16(add, ext);
+    return cm_fail(resp, cap, service, add, 1, conn_serial, vendor, orig_serial,
+                   size_byte);
+}
+
+/* CIP Vol 1 extended status 0x0112: RPI type 2 = minimum acceptable RPI. */
+#define EIP_RPI_TYPE_MINIMUM 2u
+
+/* Additional status is 6 words: 0x0112, O->T type + T->O type, both RPIs.
+ * Both directions report type 2 and the configured minimum. The tail is
+ * the same triad + Remaining Path Size that cm_err writes.
+ */
+static size_t cm_err_rpi(uint8_t *resp, size_t cap, uint8_t service,
+                         uint16_t conn_serial, uint16_t vendor,
+                         uint32_t orig_serial, uint32_t min_us)
+{
+    uint8_t add[12];
+    eip_wr_le16(add, CIP_EXT_RPI_NOT_ACCEPTABLE);
+    add[2] = EIP_RPI_TYPE_MINIMUM;
+    add[3] = EIP_RPI_TYPE_MINIMUM;
+    eip_wr_le32(add + 4, min_us);
+    eip_wr_le32(add + 8, min_us);
+    return cm_fail(resp, cap, service, add, 6, conn_serial, vendor, orig_serial,
+                   0);
+}
+
+/* 0 when `requested` can be produced at a multiple of `min_us`.
+ * *api is `requested` rounded up to that multiple. -1 when `requested`
+ * is shorter than the minimum, or the rounded value does not fit in a UDINT.
+ */
+static int rpi_actual_us(uint32_t requested, uint32_t min_us, uint32_t *api)
+{
+    if (min_us == 0 || requested < min_us) {
+        return -1;
+    }
+    if ((requested % min_us) == 0u) {
+        *api = requested;
+        return 0;
+    }
+    uint64_t units = ((uint64_t)requested / (uint64_t)min_us) + 1ull;
+    uint64_t v = units * (uint64_t)min_us;
+    if (v > 0xffffffffull) {
+        return -1;
+    }
+    *api = (uint32_t)v;
+    return 0;
 }
 
 /* Triad starts after priority, timeout, and the two connection IDs (10 bytes). */
@@ -302,6 +361,26 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
         return 0;
     }
 
+    /* Minimum packet interval is cfg.rpi_us (the device cycle). A shorter
+     * request in either direction is 0x01/0x0112 with the minimum in the
+     * additional status. A longer request that is not a multiple of the
+     * cycle is accepted at the next multiple; that value is the API.
+     */
+    uint32_t min_us = s->cfg.rpi_us ? s->cfg.rpi_us : 8000u;
+    uint32_t o2t_api = 0;
+    uint32_t t2o_api = 0;
+    if (rpi_actual_us(o2t_rpi, min_us, &o2t_api) != 0 ||
+        rpi_actual_us(t2o_rpi, min_us, &t2o_api) != 0) {
+        LOG_WARN("ethernetip",
+                 "Forward Open rejected: RPI O->T=%u T->O=%u not acceptable "
+                 "(minimum %u) serial=0x%04x vendor=0x%04x orig=0x%08x",
+                 o2t_rpi, t2o_rpi, min_us, conn_serial, orig_vendor,
+                 orig_serial);
+        *resp_len = cm_err_rpi(resp, resp_cap, service, conn_serial,
+                               orig_vendor, orig_serial, min_us);
+        return 0;
+    }
+
     /* Multicast (1) and Reserved (3) are not produced. Null (0) stays
      * accepted: CTT and the unit tests put only a size in the NCP.
      * Point-to-point (2) is accepted. O->T is checked first because that
@@ -389,17 +468,14 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     c->o2t_size = o2t_size;
     c->t2o_size = t2o_size;
     c->o2t_run_idle = o2t_run_idle ? 1u : 0u;
-    c->o2t_rpi_us = o2t_rpi;
-    c->t2o_rpi_us = t2o_rpi;
+    c->o2t_rpi_us = o2t_api;
+    c->t2o_rpi_us = t2o_api;
     c->conn_serial = conn_serial;
     c->vendor_id = orig_vendor;
     c->originator_serial = orig_serial;
     c->timeout_multiplier = timeout_mult;
     c->exclusive_owner = 1;
-    {
-        uint32_t rpi = o2t_rpi ? o2t_rpi : s->cfg.rpi_us;
-        c->watchdog_us = eip_class1_watchdog_us(rpi, timeout_mult);
-    }
+    c->watchdog_us = eip_class1_watchdog_us(o2t_api, timeout_mult);
     /* Arm watchdog at Forward Open so a connection without IO is reclaimed. */
     c->last_rx_ns = eip_now_ns();
     c->last_tx_ns = 0;
@@ -428,9 +504,9 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     r += 2;
     eip_wr_le32(resp + r, orig_serial);
     r += 4;
-    eip_wr_le32(resp + r, o2t_rpi);
+    eip_wr_le32(resp + r, o2t_api);
     r += 4;
-    eip_wr_le32(resp + r, t2o_rpi);
+    eip_wr_le32(resp + r, t2o_api);
     r += 4;
     resp[r++] = 0; /* application reply size */
     resp[r++] = 0; /* reserved */
