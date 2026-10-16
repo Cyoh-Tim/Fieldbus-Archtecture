@@ -45,3 +45,4 @@
 | 2026-10-11 | SLMP 스택·어댑터 (12단계 일요일 감사, opus) | [20261011-slmp.md](20261011-slmp.md) | 71–73 (A20261011-3, -4, -5) | 클라이언트 로컬 맵 용량 밖 주소(스택 쓰기 미송신, 어댑터 FB_ERR_IO), 서버 비트 7168 점. 실패 쓰기 미러는 결함 없음. 감시 타이머 = 소켓 타임아웃, 길이 불일치 C061 등은 "확인 필요" |
 | 2026-10-12 | SLMP 클라이언트 · EtherNet/IP CM (담당자 요청으로 "확인 필요" 재조사, opus ×2) | [20261012-pending-items.md](20261012-pending-items.md) | 77–78 (A20261012-1, -2) | 감시 타이머와 같은 응답 대기(만료 이상 응답 유실), 다른 IP 의 Forward Close 가 연결을 닫음. 중복 FO 검사 순서·FC 경로 0x0316 은 결함 아님/선택 |
 | 2026-10-13 | EtherNet/IP 스택 (PR #121 검증 중 랩, 루틴) | [20261013-eip-udp-broadcast.md](20261013-eip-udp-broadcast.md) | 79 (A20261013-1) | bind_ip 유니캐스트 시 브로드캐스트 ListIdentity 무응답 (EIPScanner DiscoveryManager 로 재현). Max Response Delay 는 "확인 필요" |
+| 2026-10-15 | EtherNet/IP 스택 (11단계 제안 선별) | [20261015-eip-cm-respcap.md](20261015-eip-cm-respcap.md) | 81 (A20261015-1) | #124 제안. FO 성공 응답 버퍼 검사 26 vs 30 (ASan 재현). PN 랩 O→T 송신을 별도 프로세스로 (하네스 GIL 지연 제거) |
