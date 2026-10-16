@@ -15,12 +15,12 @@ import shutil
 import socket
 import struct
 import subprocess
-import threading
+import multiprocessing
 import time
 import uuid
 
 import pytest
-from scapy.all import AsyncSniffer, Dot1Q, Ether, conf, raw, sendp
+from scapy.all import AsyncSniffer, Dot1Q, Ether, raw, sendp
 from scapy.contrib.pnio import ProfinetIO
 from scapy.contrib.pnio_dcp import ProfinetDCP
 from scapy.contrib.pnio_rpc import IODControlReq
@@ -31,6 +31,20 @@ from conftest import dut_path, known_defect
 
 SCF, RR = 32, 16                       # connect_pdu 기본값: 32 × 16 × 31.25 µs = 16 ms
 NEGOTIATED_MS = SCF * RR * 31.25 / 1000
+
+
+def _o2t_sender(iface, hdr, stop):
+    """O->T RTC1 를 협상 주기로 보낸다 (별도 프로세스). 프레임 = hdr + CycleCounter + DataStatus 0x35 + 0."""
+    sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
+    sock.bind((iface, 0))
+    cc = 0
+    nxt = time.monotonic()
+    while not stop.is_set():
+        sock.send(hdr + struct.pack(">HBB", cc & 0xFFFF, 0x35, 0))
+        cc += SCF * RR
+        nxt += NEGOTIATED_MS / 1000
+        time.sleep(max(0.0, nxt - time.monotonic()))
+    sock.close()
 RUN_S = 2.0
 
 
@@ -99,22 +113,13 @@ def session():
         data, src = u.recvfrom(4096)
         res["connect_status"], _ = pn.ndr_response(DceRpc4(data))
 
-        # 3) O->T RTC1 (출력 CR FrameID 0x8000, C_SDU 40, DataStatus 0x35) 를 협상 주기로
-        stop = threading.Event()
-
-        l2 = conf.L2socket(iface=outer)
-
-        def o2t():
-            cc = 0
-            nxt = time.monotonic()
-            while not stop.is_set():
-                l2.send(Ether(dst=dev_mac, src=pn.CONTROLLER_MAC, type=0x8892) / ProfinetIO(frameID=0x8000)
-                        / (bytes(pn.C_SDU_LEN) + struct.pack(">HBB", cc & 0xFFFF, 0x35, 0)))
-                cc += SCF * RR
-                nxt += NEGOTIATED_MS / 1000
-                time.sleep(max(0.0, nxt - time.monotonic()))
-
-        th = threading.Thread(target=o2t, daemon=True)
+        # 3) O->T RTC1 (출력 CR FrameID 0x8000, C_SDU 40, DataStatus 0x35) 를 협상 주기로.
+        # 별도 프로세스의 raw 소켓으로 보낸다. 같은 프로세스의 스레드로 보내면 스니퍼 스레드와 GIL 을
+        # 다투다 data-hold (DataHoldFactor 3 × 16 ms) 이상 멈춰 AR 이 끊길 수 있다 (판정과 무관한 하네스 지연).
+        hdr = raw(Ether(dst=dev_mac, src=pn.CONTROLLER_MAC, type=0x8892) / ProfinetIO(frameID=0x8000)) \
+            + bytes(pn.C_SDU_LEN)
+        stop = multiprocessing.Event()
+        th = multiprocessing.Process(target=_o2t_sender, args=(outer, hdr, stop), daemon=True)
         th.start()
         time.sleep(0.05)
 
@@ -139,7 +144,6 @@ def session():
         dut = None
         stop.set()
         th.join(timeout=2)
-        l2.close()
     finally:
         if dut:
             dut.terminate()
