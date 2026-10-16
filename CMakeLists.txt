@@ -297,6 +297,9 @@ if(ENABLE_EIP_TESTS)
     target_compile_definitions(test_eip_t11_5 PRIVATE
         "T11_5_EDS_PATH=\"${CMAKE_SOURCE_DIR}/stacks/ethernetip/eds/FieldbusSensor.eds\"")
     target_link_libraries(test_eip_t11_5 PRIVATE eip_stack)
+    add_executable(test_eip_t11_7 tests/test_eip_t11_7.c)
+    target_include_directories(test_eip_t11_7 PRIVATE stacks/ethernetip/include include core)
+    target_link_libraries(test_eip_t11_7 PRIVATE eip_stack)
     add_executable(test_eip_t11_2 tests/test_eip_t11_2.c)
     target_include_directories(test_eip_t11_2 PRIVATE stacks/ethernetip/include include core)
     target_compile_definitions(test_eip_t11_2 PRIVATE
@@ -398,6 +401,7 @@ if(ENABLE_EIP_TESTS)
     add_test(NAME test_eip_t11_3 COMMAND test_eip_t11_3)
     add_test(NAME test_eip_t11_4 COMMAND test_eip_t11_4)
     add_test(NAME test_eip_t11_5 COMMAND test_eip_t11_5)
+    add_test(NAME test_eip_t11_7 COMMAND test_eip_t11_7)
 endif()
 
 if(ENABLE_MB_TESTS)
