@@ -324,6 +324,9 @@ if(ENABLE_MB_TESTS)
     add_executable(test_mb_stack tests/test_mb_stack.c)
     target_include_directories(test_mb_stack PRIVATE stacks/modbus/include include core)
     target_link_libraries(test_mb_stack PRIVATE mb_stack)
+    add_executable(test_mb_t9_5 tests/test_mb_t9_5.c)
+    target_include_directories(test_mb_t9_5 PRIVATE stacks/modbus/include include core)
+    target_link_libraries(test_mb_t9_5 PRIVATE mb_stack)
     if(BUILD_DAEMON)
         add_executable(test_mb_adapter tests/test_mb_adapter.c)
         target_include_directories(test_mb_adapter PRIVATE
@@ -414,6 +417,10 @@ endif()
 
 if(ENABLE_MB_TESTS)
     add_test(NAME test_mb_stack COMMAND test_mb_stack)
+    add_test(NAME test_mb_t9_5 COMMAND test_mb_t9_5)
+    set_tests_properties(test_mb_t9_5 PROPERTIES
+        LABELS "modbus"
+        TIMEOUT 20)
     if(BUILD_DAEMON)
         add_test(NAME test_mb_adapter COMMAND test_mb_adapter)
     endif()
