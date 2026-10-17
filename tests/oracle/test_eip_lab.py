@@ -95,7 +95,6 @@ def test_lab_eipscanner_logix_run_idle_forward_open(lab):
 # T->O 는 originator 의 UDP 2222 로 보낸다 (sockaddr 정보 항목이 없을 때). 독립 구현 OpENer
 # cipioconnection.c 도 기본 목적지 포트가 kOpenerEipIoUdpPort(2222). EIPScanner 는 O->T 를 임의 포트에서
 # 보내고 2222 에서 받으므로, 출발지 포트로 되돌려 보내는 장치와는 I/O 가 성립하지 않는다.
-@known_defect("T11-6", "T->O 를 2222 가 아니라 O->T 의 출발지 포트로 보낸다 (EIPScanner 가 받지 못해 연결 타임아웃)")
 def test_lab_eipscanner_class1_io_exchange(lab):
     r = _run(lab, run_idle=0)
     assert r["fo_ok"], f"Forward Open 거부:\n{r['log']}"
