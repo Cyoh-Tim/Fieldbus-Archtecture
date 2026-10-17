@@ -418,10 +418,6 @@ endif()
 if(ENABLE_MB_TESTS)
     add_test(NAME test_mb_stack COMMAND test_mb_stack)
     add_test(NAME test_mb_t9_5 COMMAND test_mb_t9_5)
-    # No "modbus" label: examples/run_mock_flow.sh runs `ctest -L modbus`
-    # against a build that has ctt but not this unit-test binary. Same as
-    # test_mb_stack. The default ctest set (test/daemon jobs) still runs it.
-    set_tests_properties(test_mb_t9_5 PROPERTIES TIMEOUT 20)
     if(BUILD_DAEMON)
         add_test(NAME test_mb_adapter COMMAND test_mb_adapter)
     endif()
