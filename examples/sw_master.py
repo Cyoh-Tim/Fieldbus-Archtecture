@@ -35,6 +35,7 @@ EIP_CMD_UNREGISTERSESSION = 0x0066
 EIP_CMD_SENDRRDATA = 0x006F
 EIP_ITEM_NULL_ADDR = 0x0000
 EIP_ITEM_UNCONNECTED_DATA = 0x00B2
+EIP_ITEM_SOCKADDR_TO = 0x8001  # Sockaddr Info, T->O
 EIP_ITEM_SEQ_ADDR = 0x8002
 EIP_ITEM_CONNECTED_DATA = 0x00B1
 CIP_SVC_GET_ATTR_SINGLE = 0x0E
@@ -511,14 +512,21 @@ def eip_register_session(sock: socket.socket) -> int:
     return session
 
 
-def eip_sendrr(sock: socket.socket, session: int, cip: bytes) -> bytes:
+def eip_sendrr(
+    sock: socket.socket,
+    session: int,
+    cip: bytes,
+    extra_items: tuple[tuple[int, bytes], ...] = (),
+) -> bytes:
     body = bytearray()
     body += le32(0)  # interface handle
     body += le16(10)  # timeout ticks
-    body += le16(2)  # item count
+    body += le16(2 + len(extra_items))  # item count
     body += le16(EIP_ITEM_NULL_ADDR) + le16(0)
     body += le16(EIP_ITEM_UNCONNECTED_DATA) + le16(len(cip))
     body += cip
+    for item_type, item_data in extra_items:
+        body += le16(item_type) + le16(len(item_data)) + item_data
     resp = eip_send_recv(sock, eip_encap(EIP_CMD_SENDRRDATA, session, bytes(body)))
     # Walk CPF items for unconnected data.
     length = struct.unpack_from("<H", resp, 2)[0]
@@ -760,65 +768,79 @@ def run_eip_class1(args: argparse.Namespace, sock: socket.socket, session: int) 
         args.eip_output_asm,
         args.eip_input_asm,
     )
-    fo = eip_sendrr(sock, session, cip)
-    if len(fo) < 8:
-        raise IOError(f"short Forward Open reply {fo!r}")
-    o2t = struct.unpack_from("<I", fo, 0)[0]
-    t2o = struct.unpack_from("<I", fo, 4)[0]
-    if o2t == 0 or t2o == 0:
-        raise IOError(f"Forward Open conn ids o2t={o2t} t2o={t2o}")
-
+    # Bind first so Forward Open can name this socket. T→O is received here,
+    # not on UDP 2222 (that port is shared with other jobs on the same host).
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     udp.bind((args.host, 0))
     udp.settimeout(0.25)
-    dut = (args.host, args.eip_udp_port)
-    seq = 0
-    stats = Stats()
-
-    def cycle(n: int) -> str | None:
-        nonlocal seq
-        seq += 1
-        payload = struct.pack("<H", n & 0xFFFF) + bytes(args.eip_output_size - 2)
-        frame = class1_io_frame(o2t, seq, payload[: args.eip_output_size])
-        udp.sendto(frame, dut)
-        deadline = time.monotonic() + 0.4
-        data = b""
-        while time.monotonic() < deadline:
-            try:
-                pkt, _addr = udp.recvfrom(2048)
-            except socket.timeout:
-                udp.sendto(frame, dut)
-                continue
-            cid, data = parse_class1_io(pkt)
-            if cid == t2o and len(data) >= 36:
-                break
-            data = b""
-        if len(data) < 36:
-            return "no Class1 T->O (adapter produce)"
-        barcode, temp_c = parse_assembly_input(data)
-        err = check_sensor_barcode_temp(barcode, temp_c, stats.t0, args.wait_s)
-        if err:
-            return err
-        if not args.quiet:
-            print(
-                f"cycle={n} barcode={barcode!r} temperature={temp_c:.1f} "
-                f"o2t=0x{o2t:08x} t2o=0x{t2o:08x}  [tcp+udp Class1 loopback]",
-                flush=True,
-            )
-        return None
-
+    bound_ip, bound_port = udp.getsockname()[:2]
+    # CIP Vol 2 sockaddr: sin_family, sin_port, sin_addr are big-endian.
+    sockaddr = struct.pack(
+        ">HH4s8s", 2, bound_port, socket.inet_aton(bound_ip), b"\x00" * 8
+    )
     try:
-        run_until(args, cycle, stats)
-    finally:
+        fo = eip_sendrr(
+            sock,
+            session,
+            cip,
+            extra_items=((EIP_ITEM_SOCKADDR_TO, sockaddr),),
+        )
+        if len(fo) < 8:
+            raise IOError(f"short Forward Open reply {fo!r}")
+        o2t = struct.unpack_from("<I", fo, 0)[0]
+        t2o = struct.unpack_from("<I", fo, 4)[0]
+        if o2t == 0 or t2o == 0:
+            raise IOError(f"Forward Open conn ids o2t={o2t} t2o={t2o}")
+
+        dut = (args.host, args.eip_udp_port)
+        seq = 0
+        stats = Stats()
+
+        def cycle(n: int) -> str | None:
+            nonlocal seq
+            seq += 1
+            payload = struct.pack("<H", n & 0xFFFF) + bytes(args.eip_output_size - 2)
+            frame = class1_io_frame(o2t, seq, payload[: args.eip_output_size])
+            udp.sendto(frame, dut)
+            deadline = time.monotonic() + 0.4
+            data = b""
+            while time.monotonic() < deadline:
+                try:
+                    pkt, _addr = udp.recvfrom(2048)
+                except socket.timeout:
+                    udp.sendto(frame, dut)
+                    continue
+                cid, data = parse_class1_io(pkt)
+                if cid == t2o and len(data) >= 36:
+                    break
+                data = b""
+            if len(data) < 36:
+                return "no Class1 T->O (adapter produce)"
+            barcode, temp_c = parse_assembly_input(data)
+            err = check_sensor_barcode_temp(barcode, temp_c, stats.t0, args.wait_s)
+            if err:
+                return err
+            if not args.quiet:
+                print(
+                    f"cycle={n} barcode={barcode!r} temperature={temp_c:.1f} "
+                    f"o2t=0x{o2t:08x} t2o=0x{t2o:08x}  [tcp+udp Class1 loopback]",
+                    flush=True,
+                )
+            return None
+
         try:
-            eip_sendrr(
-                sock,
-                session,
-                cip_forward_close(conn_serial, orig_vendor, orig_serial),
-            )
-        except (OSError, IOError):
-            pass
+            run_until(args, cycle, stats)
+        finally:
+            try:
+                eip_sendrr(
+                    sock,
+                    session,
+                    cip_forward_close(conn_serial, orig_vendor, orig_serial),
+                )
+            except (OSError, IOError):
+                pass
+    finally:
         udp.close()
     print_result(
         "ethernetip",

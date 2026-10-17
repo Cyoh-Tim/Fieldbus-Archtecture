@@ -54,8 +54,28 @@ int eip_io_handle_udp(eip_stack_t *s, const uint8_t *frame, size_t len,
         return -ENOENT;
     }
 
-    c->peer_ip = src_ip;
-    c->peer_udp_port = src_port;
+    /* Drop a guessed Connection ID from anywhere but the Originator.
+     * Do not refresh the watchdog or move the T->O destination. */
+    if (c->originator_ip != 0 && src_ip != c->originator_ip) {
+        LOG_WARN("ethernetip",
+                 "Class1 O->T dropped: source %u.%u.%u.%u is not originator "
+                 "%u.%u.%u.%u (O->T id 0x%08x)",
+                 (src_ip >> 24) & 0xff, (src_ip >> 16) & 0xff,
+                 (src_ip >> 8) & 0xff, src_ip & 0xff,
+                 (c->originator_ip >> 24) & 0xff,
+                 (c->originator_ip >> 16) & 0xff,
+                 (c->originator_ip >> 8) & 0xff, c->originator_ip & 0xff,
+                 c->o2t_conn_id);
+        return 0;
+    }
+    /* Real connections fix the destination at Forward Open. Mock UCMM has
+     * no Originator address, so the first injected O->T supplies one and
+     * later packets do not move it. */
+    if (!c->t2o_dst_fixed) {
+        c->peer_ip = src_ip;
+        c->peer_udp_port = src_port;
+        c->t2o_dst_fixed = 1;
+    }
     c->o2t_seq = seq;
     c->last_rx_ns = eip_now_ns();
 
