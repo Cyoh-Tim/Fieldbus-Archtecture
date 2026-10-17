@@ -403,7 +403,6 @@ def _black_hole_port():
     return port, keep
 
 
-@known_defect("T9-5", "클라이언트 connect() 가 블로킹이고 타임아웃이 없어 SYN 무응답 상대에 커널 기본값(~2분)만큼 멈춘다")
 def test_client_connect_to_silent_host_is_bounded(mb_client_dut):
     """SYN 에 답하지 않는 상대로 시작·재연결해도 호출이 3 s 안에 돌아와야 한다 (사이클이 막히지 않음)."""
     port, keep = _black_hole_port()

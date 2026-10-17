@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -504,6 +505,62 @@ static int server_listen(mb_stack_t *s)
     return 0;
 }
 
+static int client_connect_timeout_ms(const mb_stack_t *s)
+{
+    /* Same budget as the response wait. mb_stack_create rewrites <=0 to 200. */
+    if (s->cfg.client_timeout_ms > 0) {
+        return s->cfg.client_timeout_ms;
+    }
+    return 200;
+}
+
+/* Non-blocking connect has finished when the fd is writable and SO_ERROR is 0. */
+static int wait_connect(int fd, int to_ms)
+{
+    struct pollfd pfd;
+    memset(&pfd, 0, sizeof(pfd));
+    pfd.fd = fd;
+    pfd.events = POLLOUT;
+    uint64_t start = mb_now_ns();
+    uint64_t budget_ns = 0;
+    if (to_ms > 0) {
+        budget_ns = (uint64_t)to_ms * 1000000ull;
+    }
+    for (;;) {
+        uint64_t now = mb_now_ns();
+        int left_ms = 0;
+        if (budget_ns > 0 && now < start + budget_ns) {
+            uint64_t rem_ms = (start + budget_ns - now) / 1000000ull;
+            if (rem_ms == 0) {
+                rem_ms = 1;
+            }
+            left_ms = rem_ms > 0x7fffffff ? 0x7fffffff : (int)rem_ms;
+        }
+        int rc = poll(&pfd, 1, left_ms);
+        if (rc < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -errno;
+        }
+        if (rc == 0) {
+            return -ETIMEDOUT;
+        }
+        int soerr = 0;
+        socklen_t sl = sizeof(soerr);
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &sl) < 0) {
+            return -errno;
+        }
+        if (soerr != 0) {
+            return -soerr;
+        }
+        if (pfd.revents & POLLOUT) {
+            return 0;
+        }
+        return -EIO;
+    }
+}
+
 static int client_connect(mb_stack_t *s)
 {
     if (!s->cfg.remote_ip[0]) {
@@ -512,7 +569,10 @@ static int client_connect(mb_stack_t *s)
     }
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
-        return -1;
+        int err = errno;
+        snprintf(s->last_error, sizeof(s->last_error), "socket: %s",
+                 strerror(err));
+        return -err;
     }
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -523,13 +583,38 @@ static int client_connect(mb_stack_t *s)
         snprintf(s->last_error, sizeof(s->last_error), "invalid remote_ip");
         return -EINVAL;
     }
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        snprintf(s->last_error, sizeof(s->last_error), "connect: %s",
-                 strerror(errno));
+    if (set_nonblock(fd) != 0) {
+        int err = errno;
         close(fd);
-        return -1;
+        snprintf(s->last_error, sizeof(s->last_error), "connect: %s",
+                 strerror(err));
+        return -err;
     }
-    set_nonblock(fd);
+    int rc;
+    do {
+        rc = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+    } while (rc != 0 && errno == EINTR);
+    if (rc != 0 && errno != EINPROGRESS && errno != EALREADY &&
+        errno != EISCONN) {
+        int err = errno;
+        close(fd);
+        snprintf(s->last_error, sizeof(s->last_error), "connect: %s",
+                 strerror(err));
+        LOG_WARN("modbus-stack", "connect %s:%d failed (%d)", s->cfg.remote_ip,
+                 s->cfg.port, -err);
+        return -err;
+    }
+    if (rc != 0 && errno != EISCONN) {
+        int w = wait_connect(fd, client_connect_timeout_ms(s));
+        if (w != 0) {
+            close(fd);
+            snprintf(s->last_error, sizeof(s->last_error), "connect: %s",
+                     strerror(-w));
+            LOG_WARN("modbus-stack", "connect %s:%d failed (%d)",
+                     s->cfg.remote_ip, s->cfg.port, w);
+            return w;
+        }
+    }
     s->client_fd = fd;
     s->connected = 1;
     LOG_INFO("modbus-stack", "connected to %s:%d", s->cfg.remote_ip,
