@@ -407,6 +407,19 @@ static int check_encap_expect(ctt_run_t *run, eip_priv_t *priv, int idx,
                          "cip_status expect=0x%02lx actual=0x%02x have_cip=%d",
                          want, st, have_cip);
     }
+    /* Optional extended-status word. A missing key keeps the previous check. */
+    if (expect && yaml_has(expect, "ext_status")) {
+        unsigned long want = yaml_ulong(expect, "ext_status", 0);
+        uint16_t got = 0;
+        int ok = 0;
+        if (have_cip && cip_len >= 6 && cip[3] >= 1) {
+            got = eip_rd_le16(cip + 4);
+            ok = got == (uint16_t)want;
+        }
+        out |= ctt_check(run, idx, action, ok,
+                         "ext_status expect=0x%04lx actual=0x%04x have_cip=%d",
+                         want, got, have_cip);
+    }
     if (expect && yaml_has(expect, "privilege")) {
         int want = yaml_bool(expect, "privilege", 1);
         int saw = 0;

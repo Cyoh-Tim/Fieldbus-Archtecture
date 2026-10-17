@@ -683,7 +683,9 @@ static void test_class1_watchdog_and_rt_stats(void)
     expect(s != NULL, "wd stack");
     expect(eip_stack_start(s) == 0, "wd start");
 
-    /* Forward Open with tiny RPI + timeout_mult=0 */
+    /* Forward Open at the configured minimum (1000 µs) + timeout_mult=0.
+     * Watchdog is 4 * RPI = 4000 µs. A shorter request is 0x0112.
+     */
     uint8_t fo[48];
     size_t off = 0;
     fo[off++] = 0x0A;
@@ -700,11 +702,11 @@ static void test_class1_watchdog_and_rt_stats(void)
     fo[off++] = 0;
     fo[off++] = 0;
     fo[off++] = 0;
-    eip_wr_le32(fo + off, 100); /* O->T RPI 100us */
+    eip_wr_le32(fo + off, 1000); /* O->T RPI = cfg.rpi_us */
     off += 4;
     eip_wr_le16(fo + off, 8);
     off += 2;
-    eip_wr_le32(fo + off, 100);
+    eip_wr_le32(fo + off, 1000);
     off += 4;
     eip_wr_le16(fo + off, 8);
     off += 2;
@@ -784,7 +786,7 @@ static void test_class1_watchdog_and_rt_stats(void)
     ioff += 8;
     expect(eip_stack_handle_io(s, io, ioff) == 0, "arm with first IO");
 
-    usleep(2000); /* > watchdog (~400us) */
+    usleep(20000); /* > watchdog (4 * 1000 µs) */
     eip_stack_poll(s);
     expect(eip_stack_class1_up(s) == 0, "class1 closed by watchdog");
 
@@ -1037,7 +1039,9 @@ static void test_g2_watchdog_dup_path_size(void)
            "g2 size extended 0x0109");
     expect(eip_stack_class1_up(s) == 1, "g2 class1 unchanged after size reject");
 
-    /* Close the long-RPI conn, then FO with tiny RPI and no IO. */
+    /* Close the long-RPI conn, then FO at the minimum RPI with no IO.
+     * timeout_mult 0 → watchdog 4 * 8000 µs. A shorter RPI is 0x0112.
+     */
     uint8_t fc[16];
     size_t foff = 0;
     fc[foff++] = 0x0A;
@@ -1087,14 +1091,14 @@ static void test_g2_watchdog_dup_path_size(void)
            "g2 close");
     expect(eip_stack_class1_up(s) == 0, "g2 closed");
 
-    fo_len = build_std_fo(fo, 0x79, 10, 100, 8, 8, 0, 150);
+    fo_len = build_std_fo(fo, 0x79, 10, 8000, 8, 8, 0, 150);
     req_len = pack_fo_sendrr(req, sizeof(req), sess, fo, fo_len);
     resp_len = 0;
     expect(eip_stack_handle_encap(s, req, req_len, resp, sizeof(resp),
                                   &resp_len) == 0,
            "g2 tiny FO");
-    expect(eip_stack_class1_up(s) == 1, "g2 class1 after tiny FO");
-    usleep(2000);
+    expect(eip_stack_class1_up(s) == 1, "g2 class1 after minimum-RPI FO");
+    usleep(160000); /* > watchdog (4 * 8000 µs) */
     eip_stack_poll(s);
     expect(eip_stack_class1_up(s) == 0, "g2 FO without IO timed out");
     eip_stack_destroy(s);

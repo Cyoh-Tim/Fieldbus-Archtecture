@@ -1,0 +1,23 @@
+# T5 (EIP): a Forward Open shorter than the device minimum RPI is rejected.
+# Internal TC — not an ODVA CT case. Minimum is device.rpi_us (here 8000 µs).
+name: rpi_below_minimum
+id: EIP-A-CM-005
+suite: EIP-A-v1
+protocol: ethernetip
+tags: [cm, forward_open, negative, rpi, bundle]
+device:
+  iface: mock
+  input_size: 8
+  output_size: 8
+  rpi_us: 8000
+steps:
+  - action: forward_open
+    serial: 0x0500
+    orig_serial: 0x119
+    rpi_us: 500
+    o2t_size: 8
+    t2o_size: 8
+    expect:
+      cip_status: 1
+      ext_status: 0x0112
+      class1: down

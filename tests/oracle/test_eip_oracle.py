@@ -779,7 +779,6 @@ def test_t2o_not_redirected_by_other_ip(sess, eip_dut):
 
 
 # ---------------------------------------------------------------- 최소 RPI (T5 EIP)
-@known_defect("T5 (EIP)", "최소 RPI(8000µs)보다 짧은 500µs Forward Open 을 수락한다. 사양은 0x01/0x0112 + 허용 RPI(추가 상태 6워드)")
 def test_rpi_below_minimum_rejected_with_acceptable_rpi(sess):
     serial = next(_serial)
     rsp = sess.cip(fo_ex(serial, o2t_rpi=500, t2o_rpi=500))
@@ -794,7 +793,6 @@ def test_rpi_below_minimum_rejected_with_acceptable_rpi(sess):
     assert struct.unpack_from("<HHI", tail) == (serial, ORIG_VENDOR, ORIG_SERIAL)
 
 
-@known_defect("T5 (EIP)", "RPI 10000µs 를 수락하고 T→O API 에 10000 을 에코한다. 사양은 실제 생산 주기(8000µs 배수로 올림) 16000")
 def test_accepted_rpi_api_is_actual_production_interval(sess):
     _, _, rsp = open_class1(sess, o2t_rpi=10000, t2o_rpi=10000)
     _o2t_api, t2o_api = struct.unpack_from("<II", rsp, 20)
