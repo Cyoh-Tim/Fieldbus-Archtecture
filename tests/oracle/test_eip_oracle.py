@@ -1254,3 +1254,73 @@ def test_forward_close_same_ip_new_session_allowed(eip_dut):
         b.close()
     assert rsp[0] == 0xCE and rsp[2] == 0x00, rsp.hex()
     assert rsp[4:12] == struct.pack("<HHI", serial, ORIG_VENDOR, ORIG_SERIAL), rsp.hex()
+
+
+# ================================================================ 감사 A20261018 (EtherNet/IP 스택)
+# 보고서: docs/reports/audits/20261018-eip-stack.md. 기대값 근거는 OpENer (d8820ef) 와
+# docs/protocols/ethernetip.md 의 사양 서술이다. 스택 코드를 참조하지 않는다.
+@known_defect("A20261018-1", "O→T 데이터 길이가 연결 크기와 달라도 앞부분을 출력에 쓴다 (짧으면 앞 바이트만, 길면 잘라서). "
+              "사양·OpENer 는 그 패킷의 데이터를 버린다")
+@pytest.mark.parametrize("data", [bytes([0x11, 0x22]), bytes([0x11] * 8)], ids=["short", "long"])
+def test_o2t_wrong_length_not_applied(sess, eip_dut, data):
+    u = io_socket()
+    try:
+        o2t_id, _, _ = open_class1(sess, mult=5)  # O→T 6 = 데이터 4 + 순번 2
+        good = bytes([0xAA, 0xBB, 0xCC, 0xDD])
+        u.sendto(o2t_packet(o2t_id, 1, good), ("127.0.0.1", eip_dut.udp_port))
+        assert wait_output(sess, good) == good, "정상 O→T 가 적용되지 않음 (전제)"
+        u.sendto(o2t_packet(o2t_id, 2, data), ("127.0.0.1", eip_dut.udp_port))
+        time.sleep(0.2)
+        got = get_output(sess)
+        assert got == good, f"길이 {len(data)}B O→T 가 출력에 적용됨: {got.hex()}"
+    finally:
+        u.close()
+
+
+@known_defect("A20261018-2", "Class 1 연결 크기가 Assembly 크기와 같아도(2바이트 순번 없음) 수락한다. 소비는 그래도 2바이트를 "
+              "순번으로 떼고, T→O 는 협상보다 2바이트 크게 보낸다. 사양·OpENer 는 0x01/0x0127(O→T)·0x0128(T→O)")
+@pytest.mark.parametrize("o2t_size,t2o_size,exts", [
+    (OUT_SIZE, IN_SIZE + 2, (0x0109, 0x0127)),
+    (OUT_SIZE + 2, IN_SIZE, (0x0109, 0x0128)),
+], ids=["o2t", "t2o"])
+def test_class1_size_without_sequence_count_rejected(sess, o2t_size, t2o_size, exts):
+    rsp = sess.cip(fo_ex(next(_serial), o2t_size=o2t_size, t2o_size=t2o_size))
+    assert rsp[0] == 0xD4 and rsp[2] == 0x01, rsp.hex()
+    assert ext_status(rsp) in exts, f"extended {ext_status(rsp)}"
+
+
+@known_defect("A20261018-3", "Forward Open 연결 경로의 위치(config·소비·생산 순서)·config 인스턴스·클래스를 보지 않고, "
+              "출력·입력 Assembly 번호가 어디든 있으면 Exclusive Owner 로 수락한다. 사양·OpENer 는 0x01 + 경로 오류")
+@pytest.mark.parametrize("path", [
+    bytes([0x20, 0x04, 0x24, CFG_ASM, 0x2C, IN_ASM, 0x2C, OUT_ASM]),
+    bytes([0x20, 0x04, 0x24, 0x63, 0x2C, OUT_ASM, 0x2C, IN_ASM]),
+    bytes([0x20, 0x01, 0x24, CFG_ASM, 0x2C, OUT_ASM, 0x2C, IN_ASM]),
+], ids=["swapped_points", "unknown_config_instance", "identity_class"])
+def test_forward_open_connection_path_positions_checked(sess, path):
+    rsp = sess.cip(fo_ex(next(_serial), path=path))
+    assert rsp[0] == 0xD4 and rsp[2] == 0x01, rsp.hex()
+    # OpENer: 0x012F(경로 조합), 0x0315(경로 세그먼트), 크기로 판정되면 0x0127. 사양의 0x0117/0x012A/0x012B 도 허용
+    assert ext_status(rsp) in (0x0117, 0x012A, 0x012B, 0x012F, 0x0315, 0x0109, 0x0127), rsp.hex()
+
+
+@known_defect("A20261018-4", "Assembly attr 3 Set 이 길이가 모자라면 앞부분만, 넘치면 잘라서 쓰고 성공한다. "
+              "사양·OpENer 는 0x13 Not enough data / 0x15 Too much data, 데이터 변경 없음")
+@pytest.mark.parametrize("data,status", [
+    (bytes([0x11, 0x22]), 0x13),
+    (bytes([0x11] * (OUT_SIZE + 2)), 0x15),
+], ids=["short", "long"])
+def test_assembly_set_wrong_length_rejected(sess, data, status):
+    before = get_output(sess)
+    rsp = sess.cip(mr(Services.set_attribute_single[0], 0x04, OUT_ASM, 3, data))
+    after = get_output(sess)
+    assert rsp[0] == 0x90 and rsp[2] == status, rsp.hex()
+    assert after == before, f"길이가 틀린 Set 이 출력 Assembly 를 바꿈: {before.hex()} → {after.hex()}"
+
+
+@known_defect("A20261018-5", "지원 객체(Assembly·Identity)에 정의되지 않은 서비스에 0x05 Path destination unknown 으로 답한다. "
+              "사양·OpENer 는 0x08 Service not supported")
+@pytest.mark.parametrize("req", [mr(0x01, 0x04, IN_ASM), mr(0x0D, 0x01, 1)],
+                         ids=["assembly_get_attributes_all", "identity_apply_attributes"])
+def test_unsupported_service_on_known_object(sess, req):
+    rsp = sess.cip(req)
+    assert rsp[0] == (req[0] | 0x80) and rsp[2] == 0x08, rsp.hex()
