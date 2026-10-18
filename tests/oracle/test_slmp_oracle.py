@@ -270,7 +270,6 @@ def test_adapter_word_point_roundtrip(slmp_app):
     assert app.cmd("RU32 q") == ["R", "0", str(0x0102)]
 
 
-@known_defect("T10-3", "A~F 로 시작하는 16진 디바이스 번호를 파싱하지 못해 포인트가 경고 없이 빠진다")
 @pytest.mark.parametrize(
     "slmp,write,device,mask",
     [

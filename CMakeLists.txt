@@ -348,6 +348,11 @@ if(ENABLE_SLMP_TESTS)
         target_include_directories(test_slmp_adapter PRIVATE
             stacks/slmp/include include core adapters/slmp)
         target_link_libraries(test_slmp_adapter PRIVATE adapter_slmp m)
+
+        add_executable(test_slmp_t10_3 tests/test_slmp_t10_3.c)
+        target_include_directories(test_slmp_t10_3 PRIVATE
+            stacks/slmp/include include core adapters/slmp)
+        target_link_libraries(test_slmp_t10_3 PRIVATE adapter_slmp m)
     endif()
 endif()
 
@@ -427,6 +432,7 @@ if(ENABLE_SLMP_TESTS)
     add_test(NAME test_slmp_stack COMMAND test_slmp_stack)
     if(BUILD_DAEMON)
         add_test(NAME test_slmp_adapter COMMAND test_slmp_adapter)
+        add_test(NAME test_slmp_t10_3 COMMAND test_slmp_t10_3)
     endif()
 endif()
 
