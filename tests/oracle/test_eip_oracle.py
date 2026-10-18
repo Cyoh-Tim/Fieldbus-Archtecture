@@ -778,6 +778,35 @@ def test_t2o_not_redirected_by_other_ip(sess, eip_dut):
         spoof.close()
 
 
+# P2P T→O 의 0x8001 Sockaddr 는 포트만 정한다. 주소는 Forward Open 을 보낸 Originator (TCP 피어).
+# 독립 구현 OpENer cipioconnection.c OpenProducingPointToPointConnection: sin_port 만 쓰고 주소는 GetPeerAddress().
+@known_defect("A20261017-2", "0x8001 의 sin_addr 이 0.0.0.0 이면 항목을 버려 요청 포트를 무시하고 Originator:2222 로 보낸다. "
+              "P2P 는 Originator 주소 + 항목의 포트")
+def test_t2o_sockaddr_zero_addr_uses_port(sess):
+    u = io_socket()
+    try:
+        _, t2o_id, _ = open_class1(sess, items=[(0x8001, sockaddr_item("0.0.0.0", u.getsockname()[1]))], mult=5)
+        assert recv_t2o(u, t2o_id, timeout=1.0) is not None, "sin_addr 0 + 포트로 T→O 가 오지 않음"
+    finally:
+        u.close()
+
+
+@known_defect("A20261017-2", "0x8001 의 sin_addr(다른 호스트 127.0.0.2)로 T→O 를 보낸다. P2P 는 sin_addr 을 보지 않고 "
+              "Originator(127.0.0.1) 의 그 포트로 보낸다")
+def test_t2o_sockaddr_other_addr_ignored(sess):
+    legit = io_socket("127.0.0.1")
+    other = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        port = legit.getsockname()[1]
+        other.bind(("127.0.0.2", port))
+        _, t2o_id, _ = open_class1(sess, items=[(0x8001, sockaddr_item("127.0.0.2", port))], mult=5)
+        assert recv_t2o(legit, t2o_id, timeout=1.0) is not None, "Originator(127.0.0.1) 의 그 포트로 T→O 가 오지 않음"
+        assert recv_t2o(other, t2o_id, timeout=0.3) is None, "T→O 가 sin_addr 의 다른 호스트로 감"
+    finally:
+        legit.close()
+        other.close()
+
+
 # ---------------------------------------------------------------- 최소 RPI (T5 EIP)
 def test_rpi_below_minimum_rejected_with_acceptable_rpi(sess):
     serial = next(_serial)
@@ -797,6 +826,43 @@ def test_accepted_rpi_api_is_actual_production_interval(sess):
     _, _, rsp = open_class1(sess, o2t_rpi=10000, t2o_rpi=10000)
     _o2t_api, t2o_api = struct.unpack_from("<II", rsp, 20)
     assert t2o_api == 16000, f"T→O API {t2o_api}"
+
+
+# ---------------------------------------------------------------- 어댑터 최소 RPI (A20261017-1)
+# 장치 최소 RPI = cycle_ms×1000 (인수인계 T5, EDS RPI Param min 과 같은 기준). rpi_us 를 더 크게 주면 그 값.
+def fbapi_fo(tmp_path, cycle_ms, rpi_us, req_us):
+    cfg = fbapi_cfg()
+    cfg["cycle_ms"] = cycle_ms
+    if rpi_us is None:
+        cfg["protocol_params"].pop("rpi_us")
+    else:
+        cfg["protocol_params"]["rpi_us"] = rpi_us
+    d = FbApiDut(cfg, tmp_path)
+    try:
+        s = Session(d.port)
+        try:
+            return s.cip(fo_ex(next(_serial), o2t_size=8 + 2, t2o_size=64 + 2, o2t_rpi=req_us, t2o_rpi=req_us))
+        finally:
+            s.close()
+    finally:
+        d.close()
+
+
+def min_rpi_reject(rsp: bytes):
+    assert rsp[0] == 0xD4 and rsp[2] == 0x01, f"수락 또는 다른 응답: {rsp.hex()}"
+    ext, o2t_type, t2o_type, o2t_rpi, t2o_rpi = struct.unpack_from("<HBBII", rsp, 4)
+    assert (ext, o2t_type, t2o_type) == (0x0112, 2, 2), rsp.hex()
+    return o2t_rpi, t2o_rpi
+
+
+def test_adapter_min_rpi_from_rpi_us_param(tmp_path):
+    assert min_rpi_reject(fbapi_fo(tmp_path, cycle_ms=8, rpi_us=16000, req_us=8000)) == (16000, 16000)
+
+
+@known_defect("A20261017-1", "어댑터가 최소 RPI 를 protocol_params.rpi_us(기본 8000)에서만 정한다. cycle_ms 16 에서 "
+              "8000µs Forward Open 을 수락한다. 사양은 최소 RPI = cycle_ms×1000")
+def test_adapter_min_rpi_follows_cycle_ms(tmp_path):
+    assert min_rpi_reject(fbapi_fo(tmp_path, cycle_ms=16, rpi_us=None, req_us=8000)) == (16000, 16000)
 
 
 # ---------------------------------------------------------------- Class 1 소비 규칙·FO 검사 (T11-8)
