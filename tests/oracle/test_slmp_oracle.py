@@ -295,6 +295,17 @@ def test_adapter_hex_device_number_starting_with_letter(slmp_app, slmp, write, d
     assert got & mask == expect, f"{device} = {got:#06x}"
 
 
+# 회귀 방지 (지금 통과): device_code 와 같은 디바이스 이름을 단 start ("B1") 는 접두사다. MELSEC 표기 B1 = B 1번
+# (pymcprotocol headdevice="B1" 도 B 0x1). B 는 이름이 16진 숫자라 start 전체를 번호로 읽으면 0xB1 이 된다 (#138 검증).
+@pytest.mark.parametrize("slmp", [{"device_code": "B", "start": "B1"}, {"start": "B1"}, {"device_code": "B", "start": "1"}],
+                         ids=["device_code=B,start=B1", "start=B1", "device_code=B,start=1"])
+def test_adapter_device_code_with_same_prefix_start(slmp_app, slmp):
+    app, plc = slmp_app([{"name": "p", "access": "readwrite", "data_type": "bool", "address": {"slmp": slmp}}])
+    assert app.cmd("WBOOL p 1") == ["W", "0"]
+    words = u16(plc.batchread_wordunits(headdevice="B0", readsize=16))
+    assert words[0] == 0x0002 and not any(words[1:]), [hex(w) for w in words]
+
+
 @known_defect("T10-4", "문자열 기본 배치가 앞 문자=상위 바이트다. MELSEC($MOV) 관례는 앞 문자=하위 바이트")
 def test_adapter_string_default_is_melsec_order(slmp_app):
     app, plc = slmp_app([{"name": "s", "access": "readwrite", "data_type": "string", "length": 4,
@@ -432,6 +443,19 @@ def test_client_stack_reads_high_device_numbers(args, expect):
         assert run_client_one(plc.port, *args) == expect
     finally:
         plc.close()
+
+
+# 3E 선두 디바이스 번호는 3바이트(0~0xFFFFFF)다. pymcprotocol 은 그보다 큰 번호를 인코딩하지 못한다 (OverflowError).
+# 큰 번호를 24비트로 잘라 보내면 다른 디바이스(0x1000005 → 5)를 조용히 읽는다. 판정: 요청이 실패로 끝나야 한다.
+@known_defect("A20261019-1", "클라이언트가 0xFFFFFF 를 넘는 선두 번호를 24비트로 잘라 보낸다 (D0x1000005 요청이 D5 를 읽고 rc 0). "
+              "사양 3바이트 범위 밖은 거절")
+def test_client_head_above_24bit_rejected():
+    plc = SpecPlc()
+    try:
+        line = run_client_one(plc.port, "--start", str(0x1000005))
+    finally:
+        plc.close()
+    assert line[2] != "0", f"3바이트 범위 밖 선두 번호를 잘라 보냄: {line}"
 
 
 @known_defect("A20261011-3", "클라이언트 batch_write 가 로컬 맵(워드 4096·비트 8192, 비트 디바이스 워드 단위 512) 밖 주소면 -ERANGE 로 PLC 에 보내지도 않는다")
