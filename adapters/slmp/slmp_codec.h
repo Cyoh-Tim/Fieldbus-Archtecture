@@ -32,6 +32,9 @@ typedef enum {
     SLMP_DT_BCD32,
 } slmp_data_type_t;
 
+/* Omitted byte_order, word_order, and endian select MELSEC CDAB (low word
+ * at D(n)). An explicit byte_order or word_order keeps the ABCD/BADC/CDAB/
+ * DCBA matrix (big + ab = ABCD). */
 slmp_endian_t slmp_parse_endian(const char *byte_order, const char *word_order,
                                 const char *endian);
 slmp_data_type_t slmp_parse_data_type(const char *s);
