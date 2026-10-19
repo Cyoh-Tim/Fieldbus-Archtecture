@@ -178,9 +178,35 @@ static int longest_device_prefix(const char *s, uint8_t *code, int *is_bit,
     return -ENOENT;
 }
 
+/* Case-insensitive name prefix. *len_out is the matched length. */
+static int prefix_eqi(const char *s, const char *prefix, size_t *len_out)
+{
+    if (!s || !prefix || !prefix[0]) {
+        return 0;
+    }
+    size_t n = 0;
+    while (prefix[n]) {
+        unsigned char a = (unsigned char)s[n];
+        unsigned char b = (unsigned char)prefix[n];
+        if (!a || tolower(a) != tolower(b)) {
+            return 0;
+        }
+        n++;
+    }
+    if (len_out) {
+        *len_out = n;
+    }
+    return 1;
+}
+
 /* Parse "D100", "X1A", "XA", "A" (with a hex device_hint), "100", "0x1A".
  * device_hint may be NULL; if present it is used when start has no device
- * prefix, including when the number itself begins with A-F. */
+ * prefix, including when the number itself begins with A-F.
+ *
+ * A start that repeats the same device name is a GX Works label. Strip that
+ * prefix only when the remainder is a valid number ("B"+"B1" → B 1,
+ * "B"+"BA0" → B 0xA0). Otherwise the whole start is the number
+ * ("X"+"BA0" → X 0xBA0). */
 static int parse_device_head(const char *device_hint, const char *start_str,
                              int start_num, int have_num, uint8_t *code_out,
                              uint32_t *head_out, int *is_bit_out)
@@ -200,8 +226,18 @@ static int parse_device_head(const char *device_hint, const char *start_str,
 
     if (start_str && start_str[0]) {
         int parsed = 0;
-        /* Explicit device: "A" / "FF" / "A0" are numbers, not a new name. */
-        if (have_device && parse_device_number(start_str, code, &head) == 0) {
+        /* Same-name prefix ("B"+"B1"). Raw codes ("0xA0") are not names. */
+        if (have_device && device_hint &&
+            isalpha((unsigned char)device_hint[0])) {
+            size_t nlen = 0;
+            if (prefix_eqi(start_str, device_hint, &nlen) && start_str[nlen] &&
+                parse_device_number(start_str + nlen, code, &head) == 0) {
+                parsed = 1;
+            }
+        }
+        /* Explicit device: "A" / "FF" / "A0" / "BA0" on X are numbers. */
+        if (!parsed && have_device &&
+            parse_device_number(start_str, code, &head) == 0) {
             parsed = 1;
         }
         if (!parsed) {

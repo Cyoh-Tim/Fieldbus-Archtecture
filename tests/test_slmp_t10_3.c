@@ -222,6 +222,82 @@ static void test_hex_letter_aliases(void)
     a->destroy(a);
 }
 
+/* A device_code that is repeated at the front of start is the GX Works
+ * label (B + "B1" is B 1), but only when the remainder is a valid number.
+ * B + "BA0" is B 0xA0. X + "BA0" does not start with X, so it stays X 0xBA0. */
+static void test_same_name_prefix(void)
+{
+    const char *points =
+        "["
+        "{\"name\":\"b1\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"device_code\":\"B\",\"start\":\"1\","
+        "\"unit\":\"bit\"}}},"
+        "{\"name\":\"b_b1\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"device_code\":\"B\",\"start\":\"B1\","
+        "\"unit\":\"bit\"}}},"
+        "{\"name\":\"b_b1_low\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"device_code\":\"b\",\"start\":\"b1\","
+        "\"unit\":\"bit\"}}},"
+        "{\"name\":\"b_label\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"start\":\"B1\",\"unit\":\"bit\"}}},"
+        "{\"name\":\"b_0xb1\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"device_code\":\"B\",\"start\":\"0xB1\","
+        "\"unit\":\"bit\"}}},"
+
+        "{\"name\":\"b_a0\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"device_code\":\"B\",\"start\":\"A0\","
+        "\"unit\":\"bit\"}}},"
+        "{\"name\":\"b_ba0\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"device_code\":\"B\",\"start\":\"BA0\","
+        "\"unit\":\"bit\"}}},"
+        "{\"name\":\"b_label_ba0\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"start\":\"BA0\",\"unit\":\"bit\"}}},"
+        "{\"name\":\"b_0xba0\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"device_code\":\"B\",\"start\":\"0xBA0\","
+        "\"unit\":\"bit\"}}},"
+
+        "{\"name\":\"x_ba0\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"device_code\":\"X\",\"start\":\"BA0\","
+        "\"unit\":\"bit\"}}},"
+        "{\"name\":\"x_0xba0\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"device_code\":\"X\",\"start\":\"0xBA0\","
+        "\"unit\":\"bit\"}}},"
+        "{\"name\":\"x_label\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"start\":\"XBA0\",\"unit\":\"bit\"}}},"
+        "{\"name\":\"x_a0\",\"access\":\"readwrite\",\"data_type\":\"bool\","
+        "\"address\":{\"slmp\":{\"device_code\":\"X\",\"start\":\"A0\","
+        "\"unit\":\"bit\"}}}"
+        "]";
+
+    int rc = 0;
+    protocol_adapter_t *a = open_adapter(points, &rc);
+    expect(a && rc == 0, "init same-name prefix points");
+    if (!a || rc != 0) {
+        if (a) {
+            a->destroy(a);
+        }
+        return;
+    }
+
+    write_u8(a, "b_b1", 1, "write device B start B1");
+    expect_u8(a, "b1", 1, "device B start B1 aliases B 1");
+    expect_u8(a, "b_b1_low", 1, "device b start b1 aliases B 1");
+    expect_u8(a, "b_label", 1, "device B start B1 aliases label B1");
+    expect_u8(a, "b_0xb1", 0, "device B start B1 is not B 0xB1");
+
+    write_u8(a, "b_ba0", 1, "write device B start BA0");
+    expect_u8(a, "b_a0", 1, "device B start BA0 aliases B A0");
+    expect_u8(a, "b_label_ba0", 1, "device B start BA0 aliases label BA0");
+    expect_u8(a, "b_0xba0", 0, "device B start BA0 is not B 0xBA0");
+
+    write_u8(a, "x_ba0", 1, "write device X start BA0");
+    expect_u8(a, "x_0xba0", 1, "device X start BA0 aliases X 0xBA0");
+    expect_u8(a, "x_label", 1, "device X start BA0 aliases label XBA0");
+    expect_u8(a, "x_a0", 0, "device X start BA0 is not X A0");
+
+    a->destroy(a);
+}
+
 /* A number that is not valid for the device fails init instead of
  * dropping the point. */
 static void test_bad_number_fails_init(void)
@@ -258,6 +334,7 @@ static void test_bad_number_fails_init(void)
 int main(void)
 {
     test_hex_letter_aliases();
+    test_same_name_prefix();
     test_bad_number_fails_init();
     if (g_fail) {
         fprintf(stderr, "test_slmp_t10_3: FAILED\n");
