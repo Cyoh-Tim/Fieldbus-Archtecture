@@ -1324,3 +1324,24 @@ def test_assembly_set_wrong_length_rejected(sess, data, status):
 def test_unsupported_service_on_known_object(sess, req):
     rsp = sess.cip(req)
     assert rsp[0] == (req[0] | 0x80) and rsp[2] == 0x08, rsp.hex()
+
+
+# Null Forward Open: O→T·T→O NCP 연결 형식이 둘 다 Null(0). 데이터 연결을 만들지 않는 요청이다 (구성 전용·재구성).
+# OpENer HandleNullNonMatching/MatchingForwardOpenRequest: 지원하지 않으면 0x01/0x0132. 어느 쪽이든 Exclusive Owner 를 차지하면 안 된다.
+def null_forward_open(serial: int) -> bytes:
+    body = struct.pack(
+        "<BBIIHHIB3sIHIHB",
+        0x0A, 0x0E, 0, 0x7E000000 | serial, serial, ORIG_VENDOR, ORIG_SERIAL, 5, b"\0\0\0",
+        20000, (0b10 << 10) | (OUT_SIZE + 2), 20000, (0b10 << 10) | (IN_SIZE + 2), 0x01,
+    ) + bytes([len(DEFAULT_FO_PATH) // 2]) + DEFAULT_FO_PATH
+    return bytes([0x54, 0x02, 0x20, 0x06, 0x24, 0x01]) + body
+
+
+@known_defect("A20261018-6", "Null Forward Open(NCP 형식 둘 다 Null)을 실제 Exclusive Owner 연결로 수락해, 뒤이은 정상 FO 가 "
+              "0x0106 으로 막힌다. 사양·OpENer 는 0x01/0x0132 (또는 데이터 연결 없이 구성만)")
+def test_null_forward_open_does_not_take_exclusive_owner(sess):
+    rsp = sess.cip(null_forward_open(next(_serial)))
+    if rsp[2] != 0x00:
+        assert rsp[0] == 0xD4 and rsp[2] == 0x01 and ext_status(rsp) == 0x0132, rsp.hex()
+    real = sess.cip(fo_ex(next(_serial), mult=5))
+    assert real[0] == 0xD4 and real[2] == 0x00, f"Null FO 뒤 정상 FO 실패: {real.hex()}"
