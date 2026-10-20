@@ -111,6 +111,7 @@
 | 87 | A20261018-4 | EIP Assembly attr 3 Set 이 길이가 틀려도 부분 쓰기·잘라 쓰기 후 성공. `0x13`/`0x15`, 데이터 불변 | `stacks/ethernetip/`, `tests/` | A20261018-4 ×2 | 같은 보고서. 근거 OpENer `DecodeCipAssemblyAttribute3` |
 | 88 | A20261018-5 | EIP 존재하는 객체(Assembly·Identity)에 정의되지 않은 서비스를 `0x05` 로 답함. `0x08` Service not supported (없는 클래스·인스턴스만 `0x05`) | `stacks/ethernetip/`, `tests/` | A20261018-5 ×2 | 같은 보고서. 근거 OpENer `cipcommon.c` `NotifyClass`. T11-10 (큐 45) 과 같은 분기 — 그 PR 에서 함께 해도 된다 (표시 같이 삭제 허용) |
 | 89 | A20261018-6 | EIP Null Forward Open(NCP 형식 둘 다 Null)을 실제 Exclusive Owner 연결로 수락해 정상 FO 를 `0x0106` 으로 막음. `0x01/0x0132`, FO 를 보내는 CTT·단위 테스트·하네스는 Point-to-point 형식으로 | `stacks/ethernetip/`, `tests/`, `tools/ctt/proto/ethernetip/`, `examples/sw_master.py` | A20261018-6 | 담당자 결정 (2026-10-19, CTT 같이 고침). 보고서 [audits/20261018-eip-stack.md](audits/20261018-eip-stack.md). 근거 OpENer `HandleNull*ForwardOpenRequest`. 큐 85 와 같은 CTT 인코더·하네스를 바꾼다 |
+| 90 | A20261019-1 | SLMP 클라이언트가 0xFFFFFF 를 넘는 선두 디바이스 번호를 24비트로 잘라 보냄 (D0x1000005 요청이 D5 를 읽고 성공), 어댑터 숫자 `start` 상한 없음. `-ERANGE` / init 실패 | `stacks/slmp/`, `adapters/slmp/`, `tests/` | A20261019-1 | 출처 #138 제안 1, 보고서 [audits/20261019-slmp-head-range.md](audits/20261019-slmp-head-range.md). 근거 pymcprotocol `_make_devicedata` (3바이트, OverflowError). 큐 27 (T10-3) 이후 |
 
 ## 이슈 본문 템플릿
 
