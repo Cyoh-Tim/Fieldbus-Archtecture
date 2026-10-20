@@ -155,8 +155,86 @@ static int read_layout(const cJSON *obj, int *legacy, int *present)
     return -1;
 }
 
-/* Parse "D100", "X1A", "100", "0x1A" into device + head.
- * device_hint may be NULL; if present used when start has no prefix. */
+/* Number in the device's base. Hex devices (X/Y/B/W/SB/SW/DX/DY) use
+ * base 16, so a head may start with A-F. The whole string must be consumed
+ * and the value must fit in the 3-byte SLMP head (0xFFFFFF). */
+static int parse_device_number(const char *num, uint8_t code, uint32_t *head_out)
+{
+    if (!num || !num[0]) {
+        return -EINVAL;
+    }
+    int base = 10;
+    if (slmp_device_is_hex_addr(code) ||
+        (num[0] == '0' && (num[1] == 'x' || num[1] == 'X'))) {
+        base = 0; /* auto if 0x; hex devices use 16 otherwise */
+        if (!(num[0] == '0' && (num[1] == 'x' || num[1] == 'X')) &&
+            slmp_device_is_hex_addr(code)) {
+            base = 16;
+        }
+    }
+    errno = 0;
+    char *end = NULL;
+    unsigned long v = strtoul(num, &end, base);
+    if (end == num || !end || *end || errno != 0 || v > 0xFFFFFFu) {
+        return -EINVAL;
+    }
+    *head_out = (uint32_t)v;
+    return 0;
+}
+
+/* Longest leading device-name prefix ("SW" before "S", "DX" before "D").
+ * Hex digits that are not a known name stay part of the number ("XA" → X + A). */
+static int longest_device_prefix(const char *s, uint8_t *code, int *is_bit,
+                                 size_t *len_out)
+{
+    size_t alpha = 0;
+    while (s[alpha] && isalpha((unsigned char)s[alpha])) {
+        alpha++;
+    }
+    if (alpha > 7) {
+        alpha = 7;
+    }
+    for (size_t len = alpha; len > 0; len--) {
+        char dname[8];
+        memcpy(dname, s, len);
+        dname[len] = '\0';
+        if (slmp_device_code_from_name(dname, code, is_bit) == 0) {
+            *len_out = len;
+            return 0;
+        }
+    }
+    return -ENOENT;
+}
+
+/* Case-insensitive name prefix. *len_out is the matched length. */
+static int prefix_eqi(const char *s, const char *prefix, size_t *len_out)
+{
+    if (!s || !prefix || !prefix[0]) {
+        return 0;
+    }
+    size_t n = 0;
+    while (prefix[n]) {
+        unsigned char a = (unsigned char)s[n];
+        unsigned char b = (unsigned char)prefix[n];
+        if (!a || tolower(a) != tolower(b)) {
+            return 0;
+        }
+        n++;
+    }
+    if (len_out) {
+        *len_out = n;
+    }
+    return 1;
+}
+
+/* Parse "D100", "X1A", "XA", "A" (with a hex device_hint), "100", "0x1A".
+ * device_hint may be NULL; if present it is used when start has no device
+ * prefix, including when the number itself begins with A-F.
+ *
+ * A start that repeats the same device name is a GX Works label. Strip that
+ * prefix only when the remainder is a valid number ("B"+"B1" → B 1,
+ * "B"+"BA0" → B 0xA0). Otherwise the whole start is the number
+ * ("X"+"BA0" → X 0xBA0). */
 static int parse_device_head(const char *device_hint, const char *start_str,
                              int start_num, int have_num, uint8_t *code_out,
                              uint32_t *head_out, int *is_bit_out)
@@ -164,50 +242,50 @@ static int parse_device_head(const char *device_hint, const char *start_str,
     uint8_t code = SLMP_DEV_D;
     int is_bit = 0;
     uint32_t head = 0;
+    int have_device = 0;
 
     if (device_hint && device_hint[0]) {
         if (slmp_device_code_from_name(device_hint, &code, &is_bit) != 0) {
             LOG_WARN("slmp", "unknown device_code '%s'", device_hint);
             return -EINVAL;
         }
+        have_device = 1;
     }
 
     if (start_str && start_str[0]) {
-        /* Optional leading device letters then number */
-        size_t i = 0;
-        while (start_str[i] && isalpha((unsigned char)start_str[i])) {
-            i++;
-        }
-        if (i > 0) {
-            char dname[8];
-            if (i >= sizeof(dname)) {
-                return -EINVAL;
-            }
-            memcpy(dname, start_str, i);
-            dname[i] = 0;
-            if (slmp_device_code_from_name(dname, &code, &is_bit) != 0) {
-                return -EINVAL;
+        int parsed = 0;
+        /* Same-name prefix ("B"+"B1"). Raw codes ("0xA0") are not names. */
+        if (have_device && device_hint &&
+            isalpha((unsigned char)device_hint[0])) {
+            size_t nlen = 0;
+            if (prefix_eqi(start_str, device_hint, &nlen) && start_str[nlen] &&
+                parse_device_number(start_str + nlen, code, &head) == 0) {
+                parsed = 1;
             }
         }
-        const char *num = start_str + i;
-        if (!num[0]) {
+        /* Explicit device: "A" / "FF" / "A0" / "BA0" on X are numbers. */
+        if (!parsed && have_device &&
+            parse_device_number(start_str, code, &head) == 0) {
+            parsed = 1;
+        }
+        if (!parsed) {
+            uint8_t pcode = 0;
+            int pbit = 0;
+            size_t plen = 0;
+            if (longest_device_prefix(start_str, &pcode, &pbit, &plen) == 0 &&
+                start_str[plen] &&
+                parse_device_number(start_str + plen, pcode, &head) == 0) {
+                code = pcode;
+                is_bit = pbit;
+                parsed = 1;
+            }
+        }
+        if (!parsed && parse_device_number(start_str, code, &head) == 0) {
+            parsed = 1;
+        }
+        if (!parsed) {
             return -EINVAL;
         }
-        int base = 10;
-        if (slmp_device_is_hex_addr(code) ||
-            (num[0] == '0' && (num[1] == 'x' || num[1] == 'X'))) {
-            base = 0; /* auto hex if 0x, else if hex device use 16 */
-            if (!(num[0] == '0' && (num[1] == 'x' || num[1] == 'X')) &&
-                slmp_device_is_hex_addr(code)) {
-                base = 16;
-            }
-        }
-        char *end = NULL;
-        unsigned long v = strtoul(num, &end, base);
-        if (end == num) {
-            return -EINVAL;
-        }
-        head = (uint32_t)v;
     } else if (have_num) {
         head = (uint32_t)start_num;
     }
@@ -417,8 +495,9 @@ static int parse_points(slmp_ctx_t *ctx, const char *points_json)
         if (parse_device_head(dev, start_str, start_num, have_num,
                               &pt->device_code, &pt->start,
                               &pt->is_bit_device) != 0) {
-            LOG_WARN("slmp", "point %s 주소 파싱 실패 - 건너뜀", pt->name);
-            continue;
+            LOG_ERROR("slmp", "point %s 주소 파싱 실패", pt->name);
+            cJSON_Delete(arr);
+            return -EINVAL;
         }
 
         int off = json_get_int(sa, "offset", "reg_offset", NULL, 0, &found);
