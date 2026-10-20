@@ -15,7 +15,7 @@ import time
 import pymcprotocol
 import pytest
 
-from conftest import dut_path, free_port, known_defect, wait_tcp
+from conftest import REPO, dut_path, free_port, known_defect, wait_tcp
 
 
 @pytest.fixture
@@ -722,3 +722,35 @@ def test_client_waits_past_monitoring_timer_for_abnormal_response():
     finally:
         plc.close()
     assert [rc for _, rc, _ in reads] == [-5, 0] and plc.accepts == 1, (reads, plc.accepts, plc.timers)
+
+
+# ---------------------------------------------------------------- 예제 config: 포인트 주소 겹침
+# 한 워드 디바이스(D 등)에서 두 포인트의 워드 범위가 겹치면 한쪽 쓰기가 다른 쪽 값을 덮는다.
+# 워드 수: 문자열은 MELSEC 관례 워드당 2문자, 32비트 2워드, 64비트 4워드, 그 밖 1워드 (quantity 가 있으면 그 값).
+# 저장소 어댑터 코드를 쓰지 않고 config JSON 만 읽는다.
+SLMP_EXAMPLE_CONFIGS = sorted(p for p in (REPO / "config").glob("example*.slmp.json"))
+_WORDS = {"uint32": 2, "int32": 2, "float": 2, "float32": 2, "uint64": 4, "int64": 4, "double": 4, "float64": 4}
+
+
+def _slmp_word_ranges(cfg: dict):
+    for p in cfg.get("points", []):
+        a = p.get("address", {}).get("slmp", {})
+        dev = str(a.get("device_code", a.get("device", "D"))).upper()
+        if a.get("unit") == "bit" or dev not in ("D", "W", "R", "ZR"):
+            continue
+        start = a.get("start", a.get("address"))
+        base = 16 if dev == "W" else 10
+        head = start if isinstance(start, int) else int(str(start).lstrip(dev), base)
+        dt = p.get("data_type", "uint16")
+        n = a.get("quantity") or ((int(p.get("length", 2)) + 1) // 2 if dt == "string" else _WORDS.get(dt, 1))
+        yield p["name"], dev, head, head + n - 1
+
+
+@known_defect("A20261020-1", "예제 SLMP config 의 barcode_value (문자열 32자 = D100~D115) 가 temperature (D110) 와 겹친다. "
+              "바코드 쓰기가 온도를 0 으로 덮어 sw-master-soak 가 가끔 0°C 를 읽는다 (#140)")
+@pytest.mark.parametrize("path", SLMP_EXAMPLE_CONFIGS, ids=[p.name for p in SLMP_EXAMPLE_CONFIGS])
+def test_example_slmp_config_points_do_not_overlap(path):
+    ranges = list(_slmp_word_ranges(json.loads(path.read_text())))
+    clashes = [(a[0], b[0]) for i, a in enumerate(ranges) for b in ranges[i + 1:]
+               if a[1] == b[1] and a[2] <= b[3] and b[2] <= a[3]]
+    assert not clashes, f"{path.name}: 겹치는 포인트 {clashes} — 범위 {ranges}"
