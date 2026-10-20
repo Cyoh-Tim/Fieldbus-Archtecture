@@ -45,7 +45,7 @@ steps:
     quantity: 0
     expect:
       exception: true
-      exception_code: 0x02
+      exception_code: 0x03
   - action: request
     fc: 0x2B
     address: 0
