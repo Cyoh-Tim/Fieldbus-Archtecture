@@ -305,7 +305,6 @@ def test_adapter_device_code_with_same_prefix_start(slmp_app, slmp):
     assert words[0] == 0x0002 and not any(words[1:]), [hex(w) for w in words]
 
 
-@known_defect("T10-4", "문자열 기본 배치가 앞 문자=상위 바이트다. MELSEC($MOV) 관례는 앞 문자=하위 바이트")
 def test_adapter_string_default_is_melsec_order(slmp_app):
     app, plc = slmp_app([{"name": "s", "access": "readwrite", "data_type": "string", "length": 4,
                           "address": {"slmp": {"device_code": "D", "start": 300}}}])
@@ -315,7 +314,6 @@ def test_adapter_string_default_is_melsec_order(slmp_app):
     assert b"".join(struct.pack("<H", w) for w in words) == b"ABCD", [hex(w) for w in words]
 
 
-@known_defect("T10-4", "32비트 기본 워드 순서가 ABCD(상위 워드 먼저)다. MELSEC(DMOV/DINT)은 하위 워드가 D(n)")
 @pytest.mark.parametrize(
     "data_type,write,expect",
     [("int32", "WI32 v 0x12345678", [0x5678, 0x1234]), ("float32", "WF32 v 1.5", [0x0000, 0x3FC0])],

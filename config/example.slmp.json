@@ -24,6 +24,7 @@
       "length": 32,
       "chars_per_word": 2,
       "trim_null": true,
+      "string_swap": true,
       "address": {
         "slmp": { "device_code": "D", "start": 100 }
       }

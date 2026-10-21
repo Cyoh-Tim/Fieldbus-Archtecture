@@ -19,7 +19,7 @@
     "cycle_ms": { "type": "integer", "minimum": 1, "default": 8 },
     "protocol_params": {
       "type": "object",
-      "description": "프로토콜별 연결 파라미터. 코어는 해석하지 않고 선택된 어댑터에 그대로 전달한다. docs/design.md 3.3 절 참고."
+      "description": "프로토콜별 연결 파라미터. 코어는 해석하지 않고 선택된 어댑터에 그대로 전달한다. docs/design.md 3.3 절 참고. SLMP 어댑터는 layout(\"melsec\"|\"legacy\")을 읽는다. 생략 또는 melsec 는 32/64비트 CDAB 와 문자열 앞 문자=하위 바이트이고, legacy 한 키는 예전 기본(ABCD, 앞 문자=상위 바이트)을 endian/string_swap 을 생략한 포인트에 되돌린다."
     },
     "points": {
       "type": "array",
@@ -52,11 +52,19 @@
           "endian": {
             "type": "string",
             "enum": ["ABCD", "BADC", "CDAB", "DCBA", "big", "little", "BE", "LE"],
-            "description": "32/64비트 센서 엔디안. byte_order+word_order 대신 사용 가능"
+            "description": "32/64비트 워드 순서. byte_order+word_order 대신 사용 가능. SLMP 에서 생략하면 CDAB (MELSEC, 하위 워드가 D(n))."
           },
           "chars_per_register": { "type": "integer", "enum": [1, 2] },
           "chars_per_word": { "type": "integer", "enum": [1, 2] },
-          "string_swap": { "type": "boolean" },
+          "string_swap": {
+            "type": "boolean",
+            "description": "문자열 워드 안 바이트 교환. SLMP 에서 생략하면 true (MELSEC $MOV, 앞 문자=하위 바이트). false 는 앞 문자=상위 바이트. 포인트에 boolean 이 있으면 layout 보다 우선한다."
+          },
+          "layout": {
+            "type": "string",
+            "enum": ["melsec", "legacy"],
+            "description": "SLMP 값 배치. 생략 또는 melsec: 32/64비트 CDAB, 문자열 앞 문자=하위 바이트. legacy: 예전 기본(ABCD, 앞 문자=상위 바이트). protocol_params.layout 이 설정 전체에 적용되고, 포인트 layout 은 그 포인트만 덮어쓴다. endian/byte_order/word_order 와 string_swap 이 있으면 그 필드가 우선한다."
+          },
           "trim_null": { "type": "boolean", "default": true },
           "address": {
             "type": "object",
