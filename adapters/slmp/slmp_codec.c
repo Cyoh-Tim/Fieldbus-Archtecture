@@ -36,6 +36,12 @@ slmp_endian_t slmp_parse_endian(const char *byte_order, const char *word_order,
             return SLMP_END_DCBA;
         }
     }
+    /* Omitted order is MELSEC: low word at D(n) (CDAB). Explicit
+     * byte_order/word_order still use the matrix below, so big+ab stays
+     * ABCD. layout=legacy in the adapter passes endian "ABCD". */
+    if ((!byte_order || !byte_order[0]) && (!word_order || !word_order[0])) {
+        return SLMP_END_CDAB;
+    }
     int le = byte_order && eqi(byte_order, "little");
     int ba = word_order && (eqi(word_order, "ba") || eqi(word_order, "cdab"));
     if (!le && !ba) {

@@ -45,6 +45,7 @@ typedef struct {
     slmp_role_t role;
     slmp_point_t points[MAX_POINTS];
     int point_count;
+    int layout_legacy; /* protocol_params.layout = legacy */
     char last_error[128];
 } slmp_ctx_t;
 
@@ -125,6 +126,33 @@ static const char *json_get_str(const cJSON *obj, const char *k1,
         }
     }
     return NULL;
+}
+
+/* layout: "melsec" (0) or "legacy" (1). 0 = ok, -1 = present but invalid.
+ * *present is 1 when the key exists. */
+static int read_layout(const cJSON *obj, int *legacy, int *present)
+{
+    *present = 0;
+    if (!obj) {
+        return 0;
+    }
+    const cJSON *it = cJSON_GetObjectItemCaseSensitive(obj, "layout");
+    if (!it) {
+        return 0;
+    }
+    *present = 1;
+    if (!cJSON_IsString(it)) {
+        return -1;
+    }
+    if (eqi(it->valuestring, "melsec")) {
+        *legacy = 0;
+        return 0;
+    }
+    if (eqi(it->valuestring, "legacy")) {
+        *legacy = 1;
+        return 0;
+    }
+    return -1;
 }
 
 /* Number in the device's base. Hex devices (X/Y/B/W/SB/SW/DX/DY) use
@@ -390,6 +418,30 @@ static int parse_points(slmp_ctx_t *ctx, const char *points_json)
         if (!wo) {
             wo = json_get_str(sa, "word_order", "wordOrder");
         }
+
+        int legacy = ctx->layout_legacy;
+        int layout_present = 0;
+        int point_legacy = 0;
+        if (read_layout(p, &point_legacy, &layout_present) != 0) {
+            LOG_ERROR("slmp", "point %s layout 은 melsec 또는 legacy", pt->name);
+            cJSON_Delete(arr);
+            return -EINVAL;
+        }
+        if (!layout_present &&
+            read_layout(sa, &point_legacy, &layout_present) != 0) {
+            LOG_ERROR("slmp", "point %s layout 은 melsec 또는 legacy", pt->name);
+            cJSON_Delete(arr);
+            return -EINVAL;
+        }
+        if (layout_present) {
+            legacy = point_legacy;
+        }
+
+        /* Explicit endian / byte_order / word_order wins over layout. */
+        int numeric_set = (en && en[0]) || (bo && bo[0]) || (wo && wo[0]);
+        if (!numeric_set && legacy) {
+            en = "ABCD";
+        }
         pt->endian = slmp_parse_endian(bo, wo, en);
 
         int found = 0;
@@ -405,7 +457,12 @@ static int parse_points(slmp_ctx_t *ctx, const char *points_json)
         if (!ss) {
             ss = cJSON_GetObjectItemCaseSensitive(sa, "string_swap");
         }
-        pt->string_swap = cJSON_IsTrue(ss) ? 1 : 0;
+        if (ss) {
+            pt->string_swap = cJSON_IsTrue(ss) ? 1 : 0;
+        } else {
+            /* MELSEC $MOV: first character is the low byte. legacy opts out. */
+            pt->string_swap = legacy ? 0 : 1;
+        }
         const cJSON *tn = cJSON_GetObjectItemCaseSensitive(p, "trim_null");
         if (cJSON_IsBool(tn)) {
             pt->trim_null = cJSON_IsTrue(tn) ? 1 : 0;
@@ -563,6 +620,18 @@ static int slmp_init(protocol_adapter_t *self, const char *protocol_params_json,
                                                "word_map_size", NULL, 0, &f);
         cfg.map_bits = (uint32_t)json_get_int(params, "map_bits",
                                               "bit_map_size", NULL, 0, &f);
+
+        int layout_present = 0;
+        int layout_legacy = 0;
+        if (read_layout(params, &layout_legacy, &layout_present) != 0) {
+            LOG_ERROR("slmp", "protocol_params.layout 은 melsec 또는 legacy");
+            cJSON_Delete(params);
+            free(ctx);
+            return -EINVAL;
+        }
+        if (layout_present) {
+            ctx->layout_legacy = layout_legacy;
+        }
 
         const char *frame = json_get_str(params, "frame", "frame_type");
         if (frame) {
