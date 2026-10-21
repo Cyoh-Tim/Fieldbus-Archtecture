@@ -8,6 +8,10 @@
  *
  * The response echoes the request Unit ID and returns the seeded register
  * (holding[0] = 0xA000), matching the oracle PDU.
+ *
+ * mb_cfg_t.unit_id_reject_ff = 1 turns that special case off. 0xFF is then
+ * ignored unless it equals unit_id or unit_id_any is set. Unit 0 stays
+ * answered either way.
  */
 #include "mb_stack.h"
 
@@ -35,13 +39,14 @@ static uint16_t rd_be16(const uint8_t *p)
     return (uint16_t)((p[0] << 8) | p[1]);
 }
 
-static mb_stack_t *make_server(int unit_id, int unit_id_any)
+static mb_stack_t *make_server(int unit_id, int unit_id_any, int reject_ff)
 {
     mb_cfg_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.role = MB_ROLE_SERVER;
     cfg.unit_id = unit_id;
     cfg.unit_id_any = unit_id_any;
+    cfg.unit_id_reject_ff = reject_ff;
     cfg.n_holding = 16;
     cfg.n_input = 8;
     cfg.n_coil = 8;
@@ -119,7 +124,7 @@ static void expect_ignored(mb_stack_t *s, uint8_t unit, const char *what)
 
 static void test_default_accepts_unit_ff(void)
 {
-    mb_stack_t *s = make_server(1, 0);
+    mb_stack_t *s = make_server(1, 0, 0);
     expect(s != NULL, "create default server");
     if (!s) {
         return;
@@ -131,9 +136,52 @@ static void test_default_accepts_unit_ff(void)
     mb_stack_destroy(s);
 }
 
+static void test_reject_ff_restores_ignore(void)
+{
+    mb_stack_t *s = make_server(1, 0, 1);
+    expect(s != NULL, "create reject_ff server");
+    if (!s) {
+        return;
+    }
+    expect_ignored(s, 0xFF, "reject_ff unit 0xFF");
+    expect_answered(s, 1, "reject_ff unit 1");
+    expect_answered(s, 0, "reject_ff unit 0");
+    expect_ignored(s, 9, "reject_ff unit 9");
+    mb_stack_destroy(s);
+}
+
+/* Configured unit_id 255 still matches when the special case is off. */
+static void test_configured_ff_accepted_when_rejected_special_case(void)
+{
+    mb_stack_t *s = make_server(0xFF, 0, 1);
+    expect(s != NULL, "create unit_id 255 server");
+    if (!s) {
+        return;
+    }
+    expect_answered(s, 0xFF, "unit_id 255 with reject_ff");
+    expect_ignored(s, 1, "unit_id 255 ignores unit 1");
+    mb_stack_destroy(s);
+}
+
+/* unit_id_any still accepts 0xFF and other ids when reject_ff is set. */
+static void test_unit_id_any_overrides_reject_ff(void)
+{
+    mb_stack_t *s = make_server(1, 1, 1);
+    expect(s != NULL, "create unit_id_any server");
+    if (!s) {
+        return;
+    }
+    expect_answered(s, 0xFF, "unit_id_any unit 0xFF");
+    expect_answered(s, 9, "unit_id_any unit 9");
+    mb_stack_destroy(s);
+}
+
 int main(void)
 {
     test_default_accepts_unit_ff();
+    test_reject_ff_restores_ignore();
+    test_configured_ff_accepted_when_rejected_special_case();
+    test_unit_id_any_overrides_reject_ff();
     if (g_fail) {
         fprintf(stderr, "test_mb_t9_6: FAILED\n");
         return 1;
