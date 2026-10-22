@@ -398,7 +398,7 @@ static void fill_init_uuid(uint8_t *dst)
 }
 
 /* session, optional CMInitiatorObjectUUID, optional input FrameID,
- * optional garbage Security Class 1 block. */
+ * optional garbage vendor integrity extension block. */
 static size_t build_connect_ex(uint8_t *pdu, uint16_t session, int with_init,
                                uint16_t in_fid, int bad_sec)
 {
@@ -454,7 +454,7 @@ static void test_connect_reject_keeps_ar(void)
     s->ar.prm_end = 1;
     uint16_t fid = s->ar.in_frame_id;
 
-    s->cfg.security_class = PN_SECURITY_CLASS_1;
+    s->cfg.security_class = PN_VENDOR_INTEGRITY;
     plen = build_connect_ex(pdu, 99, 1, 0x80AA, 0);
     rlen = 0;
     expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==

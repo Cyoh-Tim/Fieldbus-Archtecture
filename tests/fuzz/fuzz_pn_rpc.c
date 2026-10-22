@@ -3,7 +3,7 @@
  *
  * The original harness dumped raw UDP payloads into pn_stack_handle_rpc()
  * with no AR. Connect rarely parsed, so Write/PrmEnd/AppReady/Release and
- * Security Class 1 HMAC never ran. pn_rt.c stayed dark (no IOCR / no ETH).
+ * Vendor integrity extension HMAC never ran. pn_rt.c stayed dark (no IOCR / no ETH).
  *
  * Byte 0 selects a mode. A live AR is kept via a valid Connect (AR + IOCR
  * input/output + AlarmCR + ExpectedSubmodule). A second stack runs
@@ -401,14 +401,14 @@ static pn_stack_t *make_stack(int sec, int enforce)
     cfg.output_len = FUZZ_OUT;
     cfg.cycle_us = 8000;
     if (sec) {
-        cfg.security_class = PN_SECURITY_CLASS_1;
+        cfg.security_class = PN_VENDOR_INTEGRITY;
         memcpy(cfg.psk, k_psk, PN_PSK_LEN);
         cfg.psk_set = 1;
     }
     cfg.enforce_security_class = enforce ? 1 : 0;
     if (enforce && !sec) {
         /* create() refuses class 0 + enforce; class 1 + PSK is the valid pair. */
-        cfg.security_class = PN_SECURITY_CLASS_1;
+        cfg.security_class = PN_VENDOR_INTEGRITY;
         memcpy(cfg.psk, k_psk, PN_PSK_LEN);
         cfg.psk_set = 1;
     }

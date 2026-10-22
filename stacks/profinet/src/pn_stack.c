@@ -55,10 +55,11 @@ pn_stack_t *pn_stack_create(const pn_cfg_t *cfg)
     s->cfg.enforce_security_class = 1;
 #endif
     if (s->cfg.enforce_security_class) {
-        if (s->cfg.security_class < PN_SECURITY_CLASS_1 || !s->cfg.psk_set) {
+        if (s->cfg.security_class < PN_VENDOR_INTEGRITY || !s->cfg.psk_set) {
             LOG_ERROR("pn_stack",
-                      "production/enforce_security_class: security_class>=1 와 "
-                      "psk_hex 가 필요 (lab 기본은 enforce=0, class 0 허용)");
+                      "production/enforce_security_class: security_class>=1 "
+                      "(vendor integrity extension) 와 psk_hex 가 필요 "
+                      "(lab 기본은 enforce=0, security_class 0 허용)");
             free(s);
             return NULL;
         }

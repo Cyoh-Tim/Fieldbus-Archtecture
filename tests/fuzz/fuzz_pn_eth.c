@@ -318,13 +318,13 @@ static pn_stack_t *make_stack(int sec, int enforce)
     cfg.output_len = FUZZ_OUT;
     cfg.cycle_us = 8000;
     if (sec) {
-        cfg.security_class = PN_SECURITY_CLASS_1;
+        cfg.security_class = PN_VENDOR_INTEGRITY;
         memcpy(cfg.psk, k_psk, PN_PSK_LEN);
         cfg.psk_set = 1;
     }
     cfg.enforce_security_class = enforce ? 1 : 0;
     if (enforce && !sec) {
-        cfg.security_class = PN_SECURITY_CLASS_1;
+        cfg.security_class = PN_VENDOR_INTEGRITY;
         memcpy(cfg.psk, k_psk, PN_PSK_LEN);
         cfg.psk_set = 1;
     }

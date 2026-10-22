@@ -9,7 +9,7 @@
 > 아니다. 공식 PI Test Bundle 실행·DoC 는 멤버십+공인 랩 제품 프로세스다.
 
 범위: PROFINET **CC-B Device + RT Class 1** (CC-A 기능 중 CC-B 가 쓰는 것
-포함: DCP, CM, RTC1, Alarm, Record, LLDP/SNMP, Security Class 1 lab profile).
+포함: DCP, CM, RTC1, Alarm, Record, LLDP/SNMP, vendor integrity extension lab profile).
 **CC-C / IRT / RT Class 3 / PTCP 는 영구 비목표** — TC 를 만들지 않는다.
 
 도구는 하나다. `tools/ctt` 플러그인 + `tests/scenarios/profinet/*.yaml`.
@@ -70,8 +70,8 @@ protocol: profinet
 | PN-B-DCP-003 | `dcp_hello.yaml` | catalog | pass + golden | DCP Hello TX | ID only |
 | PN-B-DCP-004 | `dcp_signal.yaml` | catalog | pass + golden | DCP Signal | ID only |
 | PN-B-DCP-005 | `dcp_set_ip.yaml` | catalog | pass + golden | DCP Set IP + Hello | ID only |
-| PN-B-SEC-001 | `dcp_set_sec_class1.yaml` | NEG/SEC | pass + golden | DCP Set + Sec1 | ID only |
-| PN-B-CM-001 | `rpc_connect_sec1_integrity.yaml` | CM | pass | CM Connect + Sec1 | ID only |
+| PN-B-SEC-001 | `dcp_set_sec_class1.yaml` | NEG/SEC | pass + golden | DCP Set + vendor integrity | ID only |
+| PN-B-CM-001 | `rpc_connect_sec1_integrity.yaml` | CM | pass | CM Connect + vendor integrity | ID only |
 | PN-B-CM-002 | `rpc_release.yaml` | CM | pass | CM Release | ID only (IO 없는 단축) |
 | PN-B-CM-003 | `rpc_ar_lifetime.yaml` | **lifetime** | pass | CM lifetime | wave 1 Connect→IO→Release→reconnect |
 | PN-B-CM-004 | `rpc_write_prmend_appready.yaml` | CM | pass | Write / PrmEnd / AppReady | ID only |
@@ -106,7 +106,7 @@ Wave 1 이 메운 갭:
 
 - Cyclic 이 smoke(16 프레임, `period_max_ms`) 만 있었음 → **cycle_us 대비 late/missed/jitter** + 48 사이클 기본 CI
 - Release 시나리오에 IO 가 없음 → **AR lifetime + 재연결**
-- Sec1 reject 는 integrity **부재** 만 → **HMAC 불량**
+- vendor integrity reject 는 integrity **부재** 만 → **HMAC 불량**
 - malformed CM / AR 없이 cyclic / unknown record 없음 → **fail-closed TCs**
 
 Wave 2 (이 PR) 가 메운 갭:

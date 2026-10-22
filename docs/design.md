@@ -135,7 +135,7 @@ interface ProtocolAdapter {
 | SLMP | 자체 스택 `stacks/slmp/` | 클라이언트(기본)/서버(시뮬) | Binary 3E batch only. ASCII/4E 제품 목표 아님. 상세 `docs/slmp_stack.md` |
 | CC-Link | 스텁 → 추후 구현 | TBD | 인터페이스 자리만 확보, `NotImplementedAdapter` |
 | EtherNet/IP | 자체 스택 `stacks/ethernetip/` | Adapter Class 1 + Originator explicit | Sec Class 1/2. 공식 ODVA DoC는 멤버십+랩. 상세 `docs/ethernetip_stack.md` |
-| PROFINET | 자체 Device 스택 `stacks/profinet/` | 디바이스(슬레이브) | CC-B + RT Class 1 + Security Class 1(HMAC). IRT 없음. PI 인증 아님. 상세는 `docs/profinet_stack.md` |
+| PROFINET | 자체 Device 스택 `stacks/profinet/` | 디바이스(슬레이브) | CC-B + RT Class 1. vendor integrity extension(HMAC)은 기본 끔. IRT 없음. PI 인증 아님. 상세는 `docs/profinet_stack.md` |
 | EtherCAT(추후) | 미정 | TBD | 인터페이스만 남겨둠 |
 
 ## 5. 비기능 요구사항

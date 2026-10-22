@@ -1016,8 +1016,6 @@ APP_BASE_PARAMS = {"iface": "mock", "device_name": "oracle-dut", "vendor_id": 0x
                    "cycle_us": 8000}
 
 
-@known_defect("T12-9", "어댑터 기본값이 자체 HMAC 프로파일(security_class 1)이라 보안 키 없는 기본 config 가 열리지 않는다. "
-              "PI Security Class 1 은 프레임에 HMAC 을 넣지 않는다 — 기본 설정으로 표준 Connect 가 돼야 한다")
 def test_adapter_default_config_accepts_standard_connect(pn_app):
     app = pn_app(dict(APP_BASE_PARAMS))  # security_class / psk_hex 없음
     assert app.opened(), f"기본 config 로 fb_open 실패: {app.startup}"

@@ -1,10 +1,11 @@
-# PROFINET IO Device 완전 입문 — Conformance Class B · RT Class 1 · (이 저장소의) Security Class 1
+# PROFINET IO Device 완전 입문 — Conformance Class B · RT Class 1 · (선택) vendor integrity extension
 
 > 이 문서는 산업용 통신을 처음 보는 사람이 **PROFINET IO Device 스택을 직접 만들 수 있고**,
 > 동시에 이 저장소의 자체 스택(`stacks/profinet/`)을 **이해·유지보수**할 수 있도록 쓴 기술 입문서다.
 >
-> - 범위: IO **Device**(IO 장치) 쪽, Conformance Class **B**, **RT Class 1**, 이 저장소가 "Security Class 1"
->   이라고 부르는 HMAC 프로파일. **IRT / RT Class 3 / Conformance Class C 는 영구 비목표**다
+> - 범위: IO **Device**(IO 장치) 쪽, Conformance Class **B**, **RT Class 1**. 선택 기능으로
+>   **vendor integrity extension**(HMAC-SHA256, config 키 `security_class`)이 있다. 기본은 꺼져 있고
+>   PI Security Class 가 아니다. **IRT / RT Class 3 / Conformance Class C 는 영구 비목표**다
 >   ([CLAUDE.md](../../CLAUDE.md), [docs/ctt_pn_bundle.md](../ctt_pn_bundle.md) 4장).
 > - 기준 코드: 이 문서를 쓴 시점의 `stacks/profinet/`, `adapters/profinet/`. 인용은 `경로:줄` 형식이다.
 > - 이 문서는 **PI 인증 문서가 아니다.** 사양 원문(IEC 61158-5-10 / 61158-6-10 등)은 유료이고 이 저장소에
@@ -22,7 +23,7 @@
 - [5. 프레임 포맷](#5-프레임-포맷)
 - [6. 동작과 상태](#6-동작과-상태)
 - [7. SNMP / I&M / 진단](#7-snmp--im--진단)
-- [8. Security Class 1](#8-security-class-1)
+- [8. PI Security Class 와 vendor integrity extension](#8-pi-security-class-와-vendor-integrity-extension)
 - [9. 에러 처리와 제한값](#9-에러-처리와-제한값)
 - [10. 직접 구현하기](#10-직접-구현하기)
 - [11. 이 저장소의 구현 지도](#11-이-저장소의-구현-지도)
@@ -285,7 +286,7 @@ Conformance Class 는 "이 장치가 어느 기능 묶음을 반드시 지원하
 
 이 저장소의 주장: "Conformance Class B functions: DCP (Identify/Get/Set/Hello/Signal), cyclic RTC1,
 record (I&M0–4), alarm TX (High/Low), LLDP, minimal SNMP" ([pn_stack.h:12-16](../../stacks/profinet/include/pn_stack.h)).
-상수로 `PN_CONFORMANCE_CLASS_B 2`, `PN_RT_CLASS_1 1`, `PN_SECURITY_CLASS_1 1` 이 있다
+상수로 `PN_CONFORMANCE_CLASS_B 2`, `PN_RT_CLASS_1 1`, `PN_VENDOR_INTEGRITY 1` 이 있다
 ([pn_types.h:87-89](../../stacks/profinet/include/pn_types.h)). 실제로 "CC-B 수준으로 동작하는가"는 11.5 의
 차이 목록과 함께 봐야 한다 — 이 저장소 문서도 스스로를 "internal bundle-grade gate ≠ PI 인증"이라 적는다
 ([docs/ctt_pn_bundle.md:7-10](../ctt_pn_bundle.md)).
@@ -347,7 +348,8 @@ record (I&M0–4), alarm TX (High/Low), LLDP, minimal SNMP" ([pn_stack.h:12-16](
 | **CMInitiator** | CM 개시자 | Connect 를 보낸 쪽(=컨트롤러). ObjectUUID·MAC·ActivityTimeoutFactor 를 알림 | `initiator_mac/uuid` |
 | **CMI Activity Timeout** | — | Connect 후 컨트롤러가 조용하면 AR 을 버리는 시간. 사양은 `CMInitiatorActivityTimeoutFactor × 100ms` [사양 확인 필요] | **2초 고정** ([pn_internal.h:48](../../stacks/profinet/include/pn_internal.h)) |
 | **EPM** | Endpoint Mapper | "이 인터페이스 UUID 는 어느 포트?" 를 알려주는 DCE/RPC 표준 서비스 | 없음 |
-| **Security Class 1/2/3** | PI 보안 등급 | 8장 참고. 이 저장소의 "Class 1" 은 **자체 HMAC 프로파일** | [pn_sec.c](../../stacks/profinet/src/pn_sec.c) |
+| **Security Class 1/2/3** | PI 보안 등급 | 8장. 암호 없는 하드닝(Class 1)부터. 이 저장소 HMAC 은 여기 해당하지 않음 | — |
+| **vendor integrity extension** | 이 저장소 HMAC | DCP Set·Connect 에 HMAC-SHA256. 기본 끔. config 키는 `security_class` | [pn_sec.c](../../stacks/profinet/src/pn_sec.c) |
 | **PSK** | Pre-Shared Key | 미리 나눠 가진 비밀 키. 이 저장소는 32바이트 | `cfg.psk` |
 
 ---
@@ -1707,7 +1709,7 @@ RT DataStatus 의 StationProblemIndicator 로 "뭔가 있음"을 알린다.
 
 ---
 
-## 8. Security Class 1
+## 8. PI Security Class 와 vendor integrity extension
 
 ### 8.1 PI 의 PROFINET Security Class 1 / 2 / 3
 
@@ -1720,11 +1722,12 @@ PI 는 PROFINET 보안을 단계로 정의한다 (IEC 62443 방법론 기반). �
 | **Class 2** | **무결성 + 진위성(integrity & authenticity)** | 인증서 기반 인증, 주기/비주기/알람 통신 무결성 보호 |
 | **Class 3** | + **기밀성(confidentiality)** | 암호화 |
 
-### 8.2 이 저장소의 "Security Class 1" — 자체 HMAC 프로파일
+### 8.2 vendor integrity extension — 자체 HMAC 프로파일
 
-이 저장소는 "Security Class 1" 이라는 이름으로 **HMAC-SHA256 PSK 무결성**을 DCP Set 과 CM Connect 에 요구한다.
-문서 스스로 "PI 옵션 코드를 사칭하지 않는다. 이 저장소 프로파일이다" 라고 밝힌다
-([docs/profinet_stack.md:16-30](../profinet_stack.md), [docs/ctt_pi_matrix.md](../ctt_pi_matrix.md) "Security lab profile").
+이 저장소의 **vendor integrity extension** 은 **HMAC-SHA256 PSK 무결성**을 DCP Set 과 CM Connect 에 요구한다.
+PI Security Class 가 아니다. PI 옵션 코드를 사칭하지 않는다
+([docs/profinet_stack.md](../profinet_stack.md), [docs/ctt_pi_matrix.md](../ctt_pi_matrix.md) "Security lab profile").
+config 키 이름은 그대로 `security_class` · `psk_hex` 다.
 
 | 항목 | 값 | 근거 |
 |------|----|------|
@@ -1734,10 +1737,10 @@ PI 는 PROFINET 보안을 단계로 정의한다 (IEC 62443 방법론 기반). �
 | DCP Set | Option `0xF0` / Suboption `0x01`, 길이 32 블록 필수 | [pn_types.h:32-34](../../stacks/profinet/include/pn_types.h), [pn_dcp.c:164-249](../../stacks/profinet/src/pn_dcp.c) |
 | CM Connect | BlockType `0x0E01`, 본문 = AlgID(2) + HMAC(32) | [pn_types.h:61](../../stacks/profinet/include/pn_types.h), [pn_rpc.c:280-326](../../stacks/profinet/src/pn_rpc.c) |
 | 서명 안 함 | DCP Identify/Get, Hello, Read/Write/Control/Release RPC, RT, Alarm, LLDP, SNMP | 코드상 검증 경로 없음 |
-| 켜는 법 | `security_class: 1` + `psk_hex` (어댑터 기본값이 1!), 또는 `enforce_security_class: true`, 또는 CMake `-DPN_ENFORCE_SECURITY_CLASS=ON` | [profinet_adapter.c:124, 161-171, 199-204](../../adapters/profinet/profinet_adapter.c), [pn_stack.c:54-65](../../stacks/profinet/src/pn_stack.c), [CMakeLists.txt:14-15, 60-61](../../CMakeLists.txt) |
+| 켜는 법 | `security_class: 1` + `psk_hex` (어댑터 기본값은 **0**, 끔), 또는 `enforce_security_class: true`, 또는 CMake `-DPN_ENFORCE_SECURITY_CLASS=ON` | [profinet_adapter.c](../../adapters/profinet/profinet_adapter.c) `pn_init`, [pn_stack.c](../../stacks/profinet/src/pn_stack.c) |
 
-주의: 어댑터는 `security_class` 를 명시하지 않으면 **1** 로 두고, 그때 `psk_hex` 가 없으면 init 이 `-EINVAL` 로
-실패한다 ([profinet_adapter.c:124, 199-204](../../adapters/profinet/profinet_adapter.c)).
+`security_class` 를 생략하면 **0** 이다. 표준 Connect 와 서명 없는 DCP Set(이름 설정)이 된다.
+`security_class` ≥ 1 인데 `psk_hex` 가 없으면 init 이 `-EINVAL` 로 실패한다.
 
 #### 8.2.1 DCP Set 서명 범위 (정확히)
 
@@ -1782,7 +1785,7 @@ ServiceType 5 + BlockError 3 으로 거부된다(5.b.8).
  f4 00 71 ab 29 f5 32 10 f9 ec 47 bf 74 f7 06 85 56 cc 95 1e     HMAC-SHA256
 ```
 
-서명 없는 Connect 는 `"Security Class 1: Connect 에 integrity block 없음"` 로그 후 에러 응답(9.4), AR 미수립.
+`security_class` ≥ 1 에서 서명 없는 Connect 는 `"vendor integrity extension: Connect 에 integrity block 없음"` 로그 후 에러 응답(9.4), AR 미수립. 기본값(0)에서는 그 검사를 하지 않는다.
 
 ### 8.3 위협 관점의 한계 (이 저장소 프로파일)
 
@@ -1799,7 +1802,7 @@ ServiceType 5 + BlockError 3 으로 거부된다(5.b.8).
 
 ### 8.4 PI 정의와의 관계
 
-| 관점 | PI Security Class 1 | 이 저장소 "Security Class 1" |
+| 관점 | PI Security Class 1 | vendor integrity extension |
 |------|---------------------|------------------------------|
 | 성격 | 견고성(암호 없음) 기능 모음 | **암호학적 무결성**(성격상 Class 2 쪽) 의 축소판 |
 | DCP | Set 쓰기 보호 모드 | Set 에 HMAC 요구 |
@@ -1808,7 +1811,7 @@ ServiceType 5 + BlockError 3 으로 거부된다(5.b.8).
 | 상호운용 | 표준 | 비표준(자체 옵션/블록) |
 | 인증 | PI 시험 대상 | 해당 없음 |
 
-즉 **이름은 같지만 다른 것**이다. 제품 문서에서 "PROFINET Security Class 1 준수"라고 쓰면 안 된다.
+둘은 다른 기능이다. 제품 문서에서 vendor integrity extension 을 "PROFINET Security Class 1 준수"라고 쓰면 안 된다.
 CRA/CE 등 규제 대응도 "제품 프로세스이지 컴파일 플래그가 아니다" ([pn_stack.h:18-19](../../stacks/profinet/include/pn_stack.h)).
 
 ---
@@ -2131,7 +2134,7 @@ static size_t ndr_res(uint8_t *out, const uint8_t status[4],
 
 - 코어는 `protocol_adapter_t` 함수 포인터만 부른다 ([include/protocol_adapter.h:26-53](../../include/protocol_adapter.h)).
   `protocol_params`/`points` JSON 은 문자열 그대로 넘기고 해석하지 않는다([CLAUDE.md](../../CLAUDE.md) 코딩 컨벤션).
-- `pn_init` 이 JSON 을 파싱해 `pn_cfg_t` 를 채운다. 기본값: `security_class=1`, `cycle_us=8000`, `input_len=32`,
+- `pn_init` 이 JSON 을 파싱해 `pn_cfg_t` 를 채운다. 기본값: `security_class=0` (vendor integrity extension 끔), `cycle_us=8000`, `input_len=32`,
   `output_len=8`, `iface="mock"` ([profinet_adapter.c:122-128](../../adapters/profinet/profinet_adapter.c)).
 - `pn_connect` → `pn_stack_start`, `pn_poll_cycle` → `pn_stack_poll`, `pn_health` → `pn_stack_ar_up`.
 
@@ -2143,7 +2146,7 @@ config 키 (`protocol_params`) — [config/example.profinet.json](../../config/e
 | `device_name` | string | `station_name` | 초기 NameOfStation |
 | `vendor_id` / `device_id` | number | 동일 | GSDML 과 일치해야 함 (예제 43981 = 0xABCD) |
 | `ip` / `netmask` / `gateway` | "a.b.c.d" | 동일 | DCP 응답에 보고될 값. OS IP 는 따로 설정해야 함 |
-| `security_class` | 0/1 | 동일 | 기본 1 |
+| `security_class` | 0/1 | 동일 | 기본 0. 1 이면 vendor integrity extension (HMAC). PI Security Class 아님 |
 | `enforce_security_class` | bool/number | 동일 | |
 | `psk_hex` | 64 hex | `psk`, `psk_set` | class≥1 이면 필수 |
 | `input_len` / `output_len` | number | 동일 | 최대 256 |
@@ -2543,7 +2546,7 @@ mock (`iface: "mock"`)은 아무 권한도 필요 없다 — raw 소켓·UDP 를
 | `0x0400` | MultipleBlockHeader | | 없음 |
 | `0x0600`/`0x0601` | FSHello / FSParameter | FSU | 없음 |
 | `0x8001` / `0x8002` | AlarmAck High / Low | Alarm | 없음 |
-| `0x0E01` | **(이 저장소 전용)** Security Class 1 integrity | Connect | 필수(class≥1) |
+| `0x0E01` | **(이 저장소 전용)** vendor integrity extension | Connect | `security_class`≥1 일 때만 필수 |
 
 ## 부록 D. PNIO 에러 코드 표
 
