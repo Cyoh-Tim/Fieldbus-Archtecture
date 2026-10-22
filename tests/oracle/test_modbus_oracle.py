@@ -108,7 +108,6 @@ def test_illegal_function_is_exception_01(mb_dut):
     assert rsp == bytes([0xC1, 0x01])
 
 
-@known_defect("T9-4", "수량 위반(0 또는 >125)에 예외 02 를 낸다. 사양은 03 (ILLEGAL DATA VALUE)")
 @pytest.mark.parametrize("qty", [0, 126])
 def test_fc03_bad_quantity_is_exception_03(mb_dut, qty):
     rsp = raw_request(mb_dut.port, struct.pack(">BHH", 0x03, 0, qty))
