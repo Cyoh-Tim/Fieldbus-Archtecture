@@ -190,7 +190,12 @@ static size_t handle_pdu(mb_stack_t *s, uint16_t tid, uint8_t unit,
         uint16_t qty = rd_be16(pdu + 3);
         mb_reg_type_t t =
             (fc == MB_FC_READ_COILS) ? MB_REG_COIL : MB_REG_DISCRETE;
-        if (qty < 1 || qty > 2000 || !map_ok_bits(s, t, addr, qty)) {
+        /* Quantity (0 or >2000) is ILLEGAL DATA VALUE. Address is checked
+         * after, so a request that breaks both still returns 03. */
+        if (qty < 1 || qty > 2000) {
+            return build_exception(resp, tid, unit, fc, MB_EX_ILLEGAL_VALUE);
+        }
+        if (!map_ok_bits(s, t, addr, qty)) {
             return build_exception(resp, tid, unit, fc, MB_EX_ILLEGAL_ADDRESS);
         }
         uint8_t nbytes = (uint8_t)((qty + 7) / 8);
@@ -216,7 +221,12 @@ static size_t handle_pdu(mb_stack_t *s, uint16_t tid, uint8_t unit,
         uint16_t qty = rd_be16(pdu + 3);
         mb_reg_type_t t =
             (fc == MB_FC_READ_HOLDING) ? MB_REG_HOLDING : MB_REG_INPUT;
-        if (qty < 1 || qty > 125 || !map_ok_regs(s, t, addr, qty)) {
+        /* Quantity (0 or >125) is ILLEGAL DATA VALUE. Address is checked
+         * after, so a request that breaks both still returns 03. */
+        if (qty < 1 || qty > 125) {
+            return build_exception(resp, tid, unit, fc, MB_EX_ILLEGAL_VALUE);
+        }
+        if (!map_ok_regs(s, t, addr, qty)) {
             return build_exception(resp, tid, unit, fc, MB_EX_ILLEGAL_ADDRESS);
         }
         const uint16_t *map =
