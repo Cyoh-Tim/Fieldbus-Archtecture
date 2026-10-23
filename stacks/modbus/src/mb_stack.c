@@ -147,6 +147,23 @@ static size_t build_exception(uint8_t *resp, uint16_t tid, uint8_t unit,
     return 9;
 }
 
+/*
+ * Unit 0 is answered: this TCP server does not treat it as a serial
+ * broadcast. Unit 0xFF is answered unless unit_id_reject_ff is set, because
+ * the TCP implementation guide recommends 0xFF for a device connected
+ * directly. Any other id needs a unit_id match or unit_id_any.
+ */
+static int unit_accepted(const mb_stack_t *s, uint8_t unit)
+{
+    if (s->cfg.unit_id_any || unit == (uint8_t)s->cfg.unit_id || unit == 0) {
+        return 1;
+    }
+    if (unit == 0xFFu && !s->cfg.unit_id_reject_ff) {
+        return 1;
+    }
+    return 0;
+}
+
 static size_t handle_pdu(mb_stack_t *s, uint16_t tid, uint8_t unit,
                          const uint8_t *pdu, size_t pdu_len, uint8_t *resp,
                          size_t resp_cap)
@@ -154,7 +171,7 @@ static size_t handle_pdu(mb_stack_t *s, uint16_t tid, uint8_t unit,
     if (pdu_len < 1 || resp_cap < 9) {
         return 0;
     }
-    if (!s->cfg.unit_id_any && unit != (uint8_t)s->cfg.unit_id && unit != 0) {
+    if (!unit_accepted(s, unit)) {
         /* Wrong unit — ignore (no response) for TCP multi-drop style. */
         return 0;
     }

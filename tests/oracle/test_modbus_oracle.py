@@ -114,7 +114,6 @@ def test_fc03_bad_quantity_is_exception_03(mb_dut, qty):
     assert rsp == bytes([0x83, 0x03])
 
 
-@known_defect("T9-6", "Unit ID 0xFF 요청을 무시한다. TCP 구현 가이드는 직접 연결 장치에 0xFF 를 권고")
 def test_unit_id_ff_is_answered(mb_dut):
     rsp = raw_request(mb_dut.port, struct.pack(">BHH", 0x03, 0, 1), unit=0xFF)
     assert rsp == bytes([0x03, 0x02, 0xA0, 0x00])

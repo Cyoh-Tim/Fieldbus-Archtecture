@@ -20,6 +20,10 @@ typedef struct {
     int port;
     int unit_id;
     int unit_id_any;       /* 1: respond to any unit id */
+    int unit_id_reject_ff; /* 1: do not special-case Unit ID 0xFF.
+                            * 0 (default, including a zeroed mb_cfg_t): always
+                            * accept 0xFF and echo it. Matching unit_id or
+                            * unit_id_any still accepts 0xFF when this is 1. */
     int client_timeout_ms; /* client response wait and connect poll (default 200) */
     int max_clients;       /* server concurrent masters (1..8, default 4) */
     int idle_timeout_ms;   /* drop idle TCP masters; 0 = 60000 */
