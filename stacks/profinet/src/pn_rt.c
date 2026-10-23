@@ -5,6 +5,26 @@
 #include "logger.h"
 #include "pn_endian.h"
 
+/* ERR-RTA-PDU ErrorCode2 for RTA_ERR_CLS_PROTOCOL (0xFD).
+ * p-net: CONSUMER_DHT_EXPIRED 0x05, CMI_TIMEOUT 0x06,
+ * ALARM_SEND_CNF_NEG 0x08, ABORT_REQ 0x0d. */
+static uint8_t abort_rta_code2(const char *why)
+{
+    if (!why) {
+        return 0x0d;
+    }
+    if (strstr(why, "data-hold") != NULL) {
+        return 0x05;
+    }
+    if (strstr(why, "CMI") != NULL) {
+        return 0x06;
+    }
+    if (strstr(why, "alarm ACK") != NULL) {
+        return 0x08;
+    }
+    return 0x0d;
+}
+
 void pn_ar_abort(pn_stack_t *s, const char *why)
 {
     if (!s || !s->ar.established) {
@@ -14,6 +34,13 @@ void pn_ar_abort(pn_stack_t *s, const char *why)
         }
         return;
     }
+    /* Substitute value. No per-submodule substitute is configured, so
+     * the output image the application reads becomes zero. Do this
+     * before the AR is dropped. */
+    pthread_mutex_lock(&s->io_lock);
+    memset(s->output_image, 0, s->cfg.output_len);
+    pthread_mutex_unlock(&s->io_lock);
+    pn_alarm_send_err(s, abort_rta_code2(why));
     LOG_WARN("pn_rt", "AR aborted: %s", why ? why : "timeout");
     memset(&s->ar, 0, sizeof(s->ar));
     s->last_rt_ns = 0;
@@ -191,6 +218,10 @@ void pn_rt_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen)
         return;
     }
     uint16_t fid = pn_rd_be16(payload);
+    if (fid == PN_FRAMEID_ALARM_HIGH || fid == PN_FRAMEID_ALARM_LOW) {
+        pn_alarm_on_frame(s, payload, plen);
+        return;
+    }
     if (fid != s->ar.out_frame_id) {
         return;
     }

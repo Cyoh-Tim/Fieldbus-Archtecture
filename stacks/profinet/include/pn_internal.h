@@ -26,6 +26,18 @@ typedef struct {
 /* One submodule from ExpectedSubmoduleBlockReq. Lengths are the
  * DataDescription SubmoduleDataLength for that direction (0 if absent). */
 #define PN_EXP_SUB_MAX 16
+/* Saved RTA frame for one retransmission. A notification is ~60 octets. */
+#define PN_ALARM_FRAME_MAX 128
+typedef struct {
+    uint16_t send_seq;
+    uint16_t ack_seq;
+    uint16_t retries_left;
+    int wait_ack;
+    uint64_t ack_due_ns;
+    uint8_t frame[PN_ALARM_FRAME_MAX];
+    size_t frame_len;
+} pn_alarm_ch_t;
+
 typedef struct {
     uint32_t api;
     uint16_t slot;
@@ -79,6 +91,17 @@ typedef struct {
     uint16_t data_hold_factor; /* 0 = PN_AR_DATA_HOLD_CYCLES */
     uint64_t last_rt_rx_ns;
     uint64_t last_cmi_ns;
+    /* Alarm CR. dst_ref is the controller LocalAlarmReference
+     * (AlarmDstEndpoint). src_ref is the device reference announced in
+     * AlarmCRBlockRes. timeout factor is ×100 ms; 0 does not arm the
+     * ACK timer. Two channels: [0] low, [1] high, each with its own
+     * sequence (first DATA is 0xFFFF / ack 0xFFFE). */
+    uint16_t alarm_dst_ref;
+    uint16_t alarm_src_ref;
+    uint16_t rta_timeout_factor;
+    uint16_t rta_retries;
+    int have_alarm_cr;
+    pn_alarm_ch_t alarm_ch[2];
 } pn_ar_t;
 
 /* CMI activity (2 s) stays armed until the controller shows liveness
@@ -207,6 +230,14 @@ int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                     uint16_t index, const uint8_t *data, size_t len);
 
 int pn_alarm_send_dummy(pn_stack_t *s, uint16_t frame_id);
+/* After Connect parse: default endpoint/timer when AlarmCRBlockReq was
+ * absent, and reset both RTA sequence counters. */
+void pn_alarm_arm(pn_ar_t *ar);
+void pn_alarm_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen);
+void pn_alarm_poll(pn_stack_t *s);
+/* ERR-RTA-PDU on the low alarm channel. code2 is RTA protocol ErrorCode2.
+ * Called from pn_ar_abort while the AR fields are still intact. */
+void pn_alarm_send_err(pn_stack_t *s, uint8_t code2);
 
 int pn_sec_hmac(const pn_stack_t *s, const uint8_t *data, size_t len,
                 uint8_t mac[PN_HMAC_LEN]);
