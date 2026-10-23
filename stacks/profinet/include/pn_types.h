@@ -34,7 +34,7 @@
 #define PN_DCP_OPT_DHCP       0x03u
 #define PN_DCP_OPT_CTRL       0x05u
 #define PN_DCP_OPT_ALL        0xFFu
-/* Stack Security Class 1 profile (not a PI-assigned option). */
+/* Vendor integrity extension (not a PI-assigned option, not PI Security Class). */
 #define PN_DCP_OPT_SEC        0xF0u
 #define PN_DCP_SUB_SEC_HMAC   0x01u
 
@@ -77,7 +77,7 @@
 #define PN_BLOCK_ALARMCR_RES   0x8103u
 #define PN_BLOCK_MOD_DIFF      0x8104u
 #define PN_BLOCK_AR_SERVER     0x8106u
-#define PN_BLOCK_SEC_INT       0x0E01u /* stack Security Class 1 integrity block */
+#define PN_BLOCK_SEC_INT       0x0E01u /* vendor integrity extension block (not PI) */
 
 #define PN_CONTROL_PRM_END    0x0001u
 #define PN_CONTROL_APP_READY  0x0002u
@@ -107,6 +107,8 @@
 
 #define PN_CONFORMANCE_CLASS_B  2
 #define PN_RT_CLASS_1           1
-#define PN_SECURITY_CLASS_1     1
+/* 1 = vendor integrity extension on (HMAC on DCP Set and CM Connect).
+ * Not PI Security Class. The config key is still "security_class". */
+#define PN_VENDOR_INTEGRITY     1
 
 #endif /* PN_TYPES_H */

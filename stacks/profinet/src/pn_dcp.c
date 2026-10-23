@@ -233,7 +233,7 @@ static int dcp_require_integrity(const pn_stack_t *s)
 #ifdef PN_ENFORCE_SECURITY_CLASS
     return 1;
 #else
-    return s->cfg.security_class >= PN_SECURITY_CLASS_1 ||
+    return s->cfg.security_class >= PN_VENDOR_INTEGRITY ||
            s->cfg.enforce_security_class;
 #endif
 }
@@ -538,7 +538,8 @@ void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
 
     if (sid == PN_DCP_SET) {
         if (pn_dcp_verify_set(s, payload, plen) != 0) {
-            LOG_WARN("pn_dcp", "Security Class 1: unsigned/invalid DCP Set 거부");
+            LOG_WARN("pn_dcp",
+                     "vendor integrity extension: unsigned/invalid DCP Set 거부");
             send_set_not_possible(s, src, xid, PN_DCP_OPT_SEC,
                                   PN_DCP_SUB_SEC_HMAC);
             return;

@@ -71,7 +71,7 @@
 
 ## Security lab profile
 
-Security Class 1 HMAC 은 이 저장소 프로파일이다 (`docs/profinet_stack.md`).
+vendor integrity extension(HMAC)은 이 저장소 프로파일이다 (`docs/profinet_stack.md`). PI Security Class 가 아니다.
 PI 할당 option/block 코드를 사칭하지 않는다. 매트릭스의 “security lab
 profile” 은 DCP Set `0xF0/0x01` 과 Connect block `0x0E01` 회귀를 뜻한다.
 

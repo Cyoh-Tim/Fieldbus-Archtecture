@@ -562,7 +562,7 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
 
 static int verify_connect_sec(pn_stack_t *s, const uint8_t *blocks, size_t n)
 {
-    if (s->cfg.security_class < PN_SECURITY_CLASS_1) {
+    if (s->cfg.security_class < PN_VENDOR_INTEGRITY) {
         return 0;
     }
     uint8_t mac[PN_HMAC_LEN];
@@ -598,11 +598,13 @@ static int verify_connect_sec(pn_stack_t *s, const uint8_t *blocks, size_t n)
         off += total;
     }
     if (!have) {
-        LOG_WARN("pn_rpc", "Security Class 1: Connect 에 integrity block 없음");
+        LOG_WARN("pn_rpc",
+                 "vendor integrity extension: Connect 에 integrity block 없음");
         return -EPERM;
     }
     if (!pn_sec_ok(s, rebuilt, rn, mac)) {
-        LOG_WARN("pn_rpc", "Security Class 1: Connect HMAC 불일치");
+        LOG_WARN("pn_rpc",
+                 "vendor integrity extension: Connect HMAC 불일치");
         return -EPERM;
     }
     return 0;

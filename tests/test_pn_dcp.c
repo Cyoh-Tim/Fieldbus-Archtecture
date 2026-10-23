@@ -381,7 +381,7 @@ static void test_set_name_and_enforce(void)
     cfg.security_class = 0;
     expect(pn_stack_create(&cfg) == NULL, "enforce + class0 fails");
 
-    cfg.security_class = PN_SECURITY_CLASS_1;
+    cfg.security_class = PN_VENDOR_INTEGRITY;
     cfg.psk_set = 1;
     memset(cfg.psk, 0x33, PN_PSK_LEN);
     s = pn_stack_create(&cfg);

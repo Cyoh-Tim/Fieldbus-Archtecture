@@ -419,7 +419,11 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
 
     pn_cfg_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    cfg.security_class = PN_SECURITY_CLASS_1;
+    /* Vendor integrity extension stays off. PI Security Class 1 does not
+     * put HMAC on frames; a standard controller must be able to Connect
+     * and set the station name. protocol_params.security_class still
+     * turns the extension on. */
+    cfg.security_class = 0;
     cfg.cycle_us = 8000;
     cfg.input_len = 32;
     cfg.output_len = 8;
@@ -494,9 +498,10 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
         cJSON_Delete(params);
     }
 
-    if (cfg.security_class >= PN_SECURITY_CLASS_1 && !cfg.psk_set) {
+    if (cfg.security_class >= PN_VENDOR_INTEGRITY && !cfg.psk_set) {
         LOG_ERROR("profinet",
-                  "security_class>=1 이면 protocol_params.psk_hex 가 필요함");
+                  "security_class>=1 (vendor integrity extension) 이면 "
+                  "protocol_params.psk_hex 가 필요함");
         free(ctx);
         return -EINVAL;
     }
@@ -508,8 +513,9 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
         return -ENOMEM;
     }
     self->ctx = ctx;
-    LOG_INFO("profinet", "init CC-B/RT1/SecClass1 device=%s points=%d (IRT 없음)",
-             cfg.station_name, ctx->point_count);
+    LOG_INFO("profinet",
+             "init CC-B/RT1 device=%s points=%d vendor_integrity=%d (IRT 없음)",
+             cfg.station_name, ctx->point_count, cfg.security_class);
     return 0;
 }
 

@@ -212,7 +212,7 @@ Class 1 이 실제로 붙었는지는 **IDE 가 있는 랩에서만** 확인한�
 | NameOfStation | `sensor-line1` |
 | VendorID / DeviceID | `0xABCD` / `0x0001` |
 | Cycle | 8 ms, **RT Class 1 only** |
-| `security_class` | SoftPLC 는 보통 PN Security Class 1 HMAC 을 안 보냄 → 랩 JSON **0** |
+| `security_class` | SoftPLC 는 vendor integrity extension(HMAC)을 안 보냄 → 랩 JSON **0** (어댑터 기본값도 0) |
 | mock JSON | AF_PACKET 없음. 프로세스 이미지만 |
 | 라이브 | 실 NIC + 종종 `CAP_NET_RAW`. **이 헬퍼는 cap 을 요구·설정하지 않음** |
 

@@ -6,7 +6,7 @@
 **결정: 도구는 하나, 프로토콜은 플러그인.**
 프로토콜마다 별도 툴을 두지 않고, PN+EIP 프레임 로직을 하나의 stub에 섞지도 않는다.
 
-Phase 1 DUT: `stacks/profinet/` — **CC-B + RT Class 1** + Security Class 1 HMAC.
+Phase 1 DUT: `stacks/profinet/` — **CC-B + RT Class 1**. vendor integrity extension(HMAC)은 `security_class: 1` 일 때만.
 **CC-C (IRT / RT Class 3) 는 이 제품·CTT에서 영구 제외**다. 후속 페이즈로 올리지 않는다.
 PN 플러그인 역할: **Controller stub + DCP station** (RT Class 1). Device 스택을 대체하지 않는다.
 
@@ -263,7 +263,7 @@ steps:
       name_of_station: sensor-line1
 ```
 
-### 3.3 Security Class 1 DCP Set — `test_dcp_set_sec` 대응
+### 3.3 vendor integrity extension DCP Set — `test_dcp_set_sec` 대응
 
 ```yaml
 name: dcp_set_sec_class1
@@ -312,7 +312,7 @@ steps:
 ### 3.5 Phase 1 신규: RTC1 IO cycle smoke
 
 기존 단위 테스트에 없는 경로. Connect 수락 후 Device가 cyclic input을 내는지 확인한다.
-`security_class: 0` 으로 서명 없이 AR을 올려 스모크만 본다 (Sec1 Connect + integrity는 Phase 2).
+`security_class: 0` 으로 서명 없이 AR을 올려 스모크만 본다 (vendor integrity Connect + integrity는 Phase 2).
 
 ```yaml
 name: rtc1_io_cycle_smoke
@@ -354,7 +354,7 @@ main에 있는 DUT는 `stacks/profinet/` 뿐이다. 구현 후속 PR에서:
 
 - 공통 runner (YAML, report, mock-transport, ctest/CI 엔트리)
 - `tools/ctt/proto/profinet/` — 양방향 mock eth + 최소 Controller stub (DCP Identify/Set, Connect accept/reject)
-- `test_pn_stack.c` 의 DCP Identify / Sec1 DCP Set / Connect without integrity 를 `tests/scenarios/profinet/` 로 이전
+- `test_pn_stack.c` 의 DCP Identify / vendor integrity DCP Set / Connect without integrity 를 `tests/scenarios/profinet/` 로 이전
 - HMAC RFC4231 단위 테스트는 `tests/test_*.c` 에 유지
 - RTC1 IO cycle smoke 시나리오 1개
 - `ctest` + GitHub Actions (ubuntu). CTT PR job 은 `BUILD_DAEMON=OFF`.
@@ -427,7 +427,7 @@ PROFINET (Phase 1 플러그인 위, **CC-B / RTC1만**). 구현 상태 (이 트�
 | Alarm Low | `alarm_low.yaml` | FrameID `0xFE01` |
 | LLDP | `lldp.yaml` | `pn_stack_send_lldp`, ethertype `0x88CC` |
 | SNMP GET sysName | `snmp_get_sysname.yaml` | mock `handle_snmp`; lab UDP 161 when `device.ip` |
-| Sec1 Connect success | `rpc_connect_sec1_integrity.yaml` | integrity block `0x0E01`, AR up + short IO |
+| vendor integrity Connect success | `rpc_connect_sec1_integrity.yaml` | integrity block `0x0E01`, AR up + short IO |
 | Soak (short) | `soak_short.yaml` | iterations; default `ctest` |
 | Soak (30s) | `soak_ci.yaml` | `ctest -L soak_ci`; PR 기본 게이트에서 제외 (PN only) |
 | Soak (1–2h) | `*/nightly/soak_nightly.yaml` | ctest 미등록. `tests/run_mock_soak.sh --seconds N` (MB/SLMP/EIP/PN). `--seconds` / `CTT_SOAK_DURATION_S` 가 YAML `duration_s` 를 덮어씀 |
@@ -525,14 +525,14 @@ Modbus DUT는 `stacks/modbus/`. SLMP DUT는 `stacks/slmp/`.
 Phase 1:
 
 - 매 PR에서 `ctest` (또는 `./build/ctt --scenario tests/scenarios/profinet/…`) 가 CI에서 green
-- 기존 네 행동 중 HMAC·Identify.Res FrameID·Sec1 DCP Set·Connect without integrity 가 빠지지 않음
+- 기존 네 행동 중 HMAC·Identify.Res FrameID·vendor integrity DCP Set·Connect without integrity 가 빠지지 않음
 - RTC1 smoke 시나리오가 새로 통과 (CC-B cyclic. IRT/CC-C 시나리오 없음)
 - mock 경로에 AF_PACKET / sudo 가 없음
 - runner는 `protocol:` 으로 플러그인을 고른다. Phase 1에서 구현된 플러그인은 profinet 하나
 
 Phase 2 (PROFINET, 이 트리):
 
-- Release, Alarm TX, I&M0 record, LLDP, SNMP sysName, Sec1 Connect **success** (`integrity: true`) 시나리오가 mock에서 green
+- Release, Alarm TX, I&M0 record, LLDP, SNMP sysName, vendor integrity Connect **success** (`integrity: true`) 시나리오가 mock에서 green
 - `soak_short` 가 기본 `ctest`에 포함. `soak_ci` (30s) 는 `-LE soak_ci` 로 PR 게이트에서 제외
 - 메트릭(unexpected / AR drop / period histogram)을 `LOG_INFO` 로 남김
 - 이 페이즈의 PN 범위만. CC-C / IRT 시나리오 없음. (통합 트리에서는 EIP/Modbus/SLMP 플러그인이 같은 runner 에 있음)
@@ -540,7 +540,7 @@ Phase 2 (PROFINET, 이 트리):
 Phase 3 (하네스, 이 트리):
 
 - 같은 YAML 이 `--transport=mock` (기본 `ctest`) 과 `--transport=af_packet` 에서 돈다
-- mock golden replay (`dcp_identify_res.pcap`, Sec1 Set accept) 가 기본 CI 에 포함
+- mock golden replay (`dcp_identify_res.pcap`, vendor integrity Set accept) 가 기본 CI 에 포함
 - `tests/run_ctt_lab.sh` + `docs/ctt_lab.md` + `docs/ctt_pi_matrix.md`
 - default CI 에 sudo/AF_PACKET 없음. lab 은 workflow_dispatch
 - CC-C 시나리오/매핑 없음. 공식 PI Bundle / ODVA CT 실행 없음
@@ -609,7 +609,7 @@ CMake `ENABLE_PN_TESTS=ON` (기본) 일 때 `./build/test_pn_stack`. `ctest` 등
 - CTT timing assert 는 mock에서 **ms 스케일 soft bound** 다. 하드 리얼타임(µs IRT)을 mock이나 A-core 랩 soak로 주장하지 않는다
 - 8ms 사이클 에이징(코어 스케줄러, PREEMPT_RT 없이 최대 편차 0.1ms)은 데몬 스케줄러 수치다. mock eth jitter·IRT 동기 정밀도와 혼동하지 말 것
 - CTT green ≠ PI / ODVA / Modbus.org / Mitsubishi 인증. 내부 신뢰도일 뿐 인증 증거로 제출하지 않는다. 장래에 PI 랩을 가더라도 대상은 CC-B(및 해당 CC-A)이지 CC-C가 아니다. CRA/CE 도 제품 프로세스다
-- Security Class 1 의 DCP option `0xF0` / Connect block `0x0E01` 은 이 저장소 프로파일이다. PI 할당 코드를 사칭하지 않는다 (`docs/profinet_stack.md`)
+- vendor integrity extension 의 DCP option `0xF0` / Connect block `0x0E01` 은 이 저장소 프로파일이다. PI Security Class 가 아니고 PI 할당 코드를 사칭하지 않는다 (`docs/profinet_stack.md`)
 - mock은 큐 깊이·단일 스레드 가정이다. 실제 스위치/멀티캐스트/VLAN 태깅 이상은 Phase 3
 - 플러그인 stub이 너무 두꺼워지면 DUT 버그를 stub이 가린다. stub은 프레임 조립/파싱만, 상태 머신은 시나리오 step에 둔다
 - 공통 runner가 `if (protocol == profinet)` 로 프레임을 다루기 시작하면 플러그인 경계 위반이다. 그건 `proto/<name>/` 으로 옮긴다
