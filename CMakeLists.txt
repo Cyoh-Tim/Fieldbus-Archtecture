@@ -279,6 +279,22 @@ if(ENABLE_PN_TESTS)
     add_executable(test_pn_t5 tests/test_pn_t5.c)
     target_include_directories(test_pn_t5 PRIVATE stacks/profinet/include include core)
     target_link_libraries(test_pn_t5 PRIVATE pn_stack)
+    add_executable(test_pn_t12_11 tests/test_pn_t12_11.c)
+    target_include_directories(test_pn_t12_11 PRIVATE stacks/profinet/include include core)
+    target_link_libraries(test_pn_t12_11 PRIVATE pn_stack)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_FOUND)
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import scapy.contrib.lldp"
+            RESULT_VARIABLE _pn_t12_11_scapy
+            OUTPUT_QUIET ERROR_QUIET)
+        if(_pn_t12_11_scapy EQUAL 0)
+            add_test(NAME test_pn_t12_11_scapy
+                COMMAND ${Python3_EXECUTABLE}
+                        ${CMAKE_SOURCE_DIR}/tests/test_pn_t12_11_scapy.py
+                        $<TARGET_FILE:test_pn_t12_11>)
+        endif()
+    endif()
 endif()
 
 if(ENABLE_EIP_TESTS)
@@ -421,6 +437,7 @@ if(ENABLE_PN_TESTS)
     add_test(NAME test_pn_dcp COMMAND test_pn_dcp)
     add_test(NAME test_pn_t12_8 COMMAND test_pn_t12_8)
     add_test(NAME test_pn_t5 COMMAND test_pn_t5)
+    add_test(NAME test_pn_t12_11 COMMAND test_pn_t12_11)
 endif()
 
 if(ENABLE_EIP_TESTS)
