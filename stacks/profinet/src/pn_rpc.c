@@ -556,6 +556,14 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         }
     } else if (type == PN_BLOCK_EXPSUB_REQ) {
         parse_expected_submodules(body, blen, ar);
+    } else if (type == PN_BLOCK_ALARMCR_REQ && blen >= 14) {
+        /* AlarmCRType(2) LT(2) Properties(4) RTATimeoutFactor(2)
+         * RTARetries(2) LocalAlarmReference(2). The reference is the
+         * controller endpoint our alarms must address. */
+        ar->rta_timeout_factor = pn_rd_be16(body + 8);
+        ar->rta_retries = pn_rd_be16(body + 10);
+        ar->alarm_dst_ref = pn_rd_be16(body + 12);
+        ar->have_alarm_cr = 1;
     }
     return 0;
 }
@@ -854,7 +862,7 @@ static size_t build_connect_res_blocks(pn_stack_t *s, uint8_t *out, size_t cap)
     uint8_t alarm[8];
     memset(alarm, 0, sizeof(alarm));
     pn_wr_be16(alarm, 0x0001);
-    pn_wr_be16(alarm + 2, 1);
+    pn_wr_be16(alarm + 2, s->ar.alarm_src_ref ? s->ar.alarm_src_ref : 1);
     pn_wr_be16(alarm + 4, 200);
     pn_wr_be16(alarm + 6, 0x00A0);
     if (append_block(out, cap, &n, PN_BLOCK_ALARMCR_RES, alarm, sizeof(alarm)) !=
@@ -1252,6 +1260,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         parsed.established = 1;
         parsed.owner_ip = src_ip;
         parsed.last_cmi_ns = pn_now_ns();
+        pn_alarm_arm(&parsed);
         if (s->ar.established) {
             LOG_INFO("pn_rpc", "same-controller Connect replaces established AR");
         }

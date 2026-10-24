@@ -185,9 +185,10 @@ static void tx_reset(void)
 /* RTC1 for input_len 32: C_SDU 33 padded to 36.
  * Tagged Ethernet is 18+2+36+4 = 60. */
 static const size_t k_rtc1_tagged = 60;
-/* Alarm dummy payload is 32 bytes. Tagged Ethernet is 18+32 = 50.
+/* Alarm RTA notification payload is 40 bytes (FrameID + 12-byte RTA
+ * header + 26-byte AlarmNotification). Tagged Ethernet is 18+40 = 58.
  * Not RTC1, so the C_SDU 36 pad does not apply. */
-static const size_t k_alarm_tagged = 50;
+static const size_t k_alarm_tagged = 58;
 
 static void expect_tagged(const char *what, uint16_t want_tci, uint16_t want_fid,
                           size_t want_len)
