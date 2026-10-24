@@ -215,7 +215,6 @@ def test_dcp_identify_device_role(pn_dut):
 
 
 # ---------------------------------------------------------------- LLDP
-@known_defect("T12-11", "PROFINET 조직 TLV 의 OUI 가 00-0C-CF 다. PNO OUI 는 00-0E-CF")
 def test_lldp_pno_oui(pn_dut):
     frames = [f for f in tx_frames(pn_dut.startup) if f.type == 0x88CC]
     assert frames, "시작 시 LLDP 송신 없음"
