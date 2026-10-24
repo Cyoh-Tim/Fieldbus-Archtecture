@@ -11,6 +11,11 @@
  *   PDUType high nibble = version 1, low nibble = type (DATA 1, ACK 3, ERR 4)
  *   AddFlags low nibble = WindowSize 1, bit 4 = TACK (set on DATA)
  *   first DATA SendSeqNum 0xFFFF, AckSeqNum 0xFFFE
+ *   after that DATA is TACKed, the next DATA SendSeqNum is 0x0000
+ *   a controller DATA-RTA with TACK=1 and SendSeqNum equal to the
+ *   expected sequence is answered with one ACK-RTA (PDUType 0x13,
+ *   AddFlags 0x01). Its AckSeqNum is the sequence just accepted, and
+ *   the next device DATA uses that same value.
  *   ERR PNIOStatus CF 81 FD plus RTA protocol ErrorCode2
  *     data-hold 0x05, CMI 0x06, alarm send give-up 0x08
  */
@@ -345,6 +350,13 @@ static void test_ack_advances_seq_and_stops_retry(void)
         return;
     }
     seq = pn_rd_be16(rta + 6);
+    uint16_t first_ack = pn_rd_be16(rta + 8);
+    if (seq != 0xFFFF || first_ack != 0xFFFE) {
+        fprintf(stderr,
+                "FAIL: first DATA seq FFFF/FFFE got SendSeq=0x%04x AckSeq=0x%04x\n",
+                seq, first_ack);
+        g_fail = 1;
+    }
     uint8_t ack[128];
     size_t alen = build_ack(ack, PN_FRAMEID_ALARM_LOW, seq);
     expect(alen > 0, "ack frame built");
@@ -360,10 +372,15 @@ static void test_ack_advances_seq_and_stops_retry(void)
     if (g_ntx >= 1 &&
         alarm_rta(g_tx[0], g_txlen[0], PN_FRAMEID_ALARM_LOW, &rta, &rl)) {
         uint16_t next = pn_rd_be16(rta + 6);
-        uint16_t want = (uint16_t)((seq + 1) & 0x7FFF);
-        if (next != want) {
-            fprintf(stderr, "FAIL: next SendSeq=0x%04x want 0x%04x (prev 0x%04x)\n",
-                    next, want, seq);
+        uint16_t next_ack = pn_rd_be16(rta + 8);
+        /* Option A: TACK of the first DATA (0xFFFF) advances with
+         * (send_seq + 1) & 0x7FFF, which is 0x0000. No controller DATA
+         * has been accepted, so AckSeqNum stays 0xFFFE. */
+        if (next != 0x0000 || next_ack != 0xFFFE) {
+            fprintf(stderr,
+                    "FAIL: DATA after ACK SendSeq=0x%04x AckSeq=0x%04x "
+                    "want 0x0000/0xFFFE (first SendSeq=0x%04x)\n",
+                    next, next_ack, seq);
             g_fail = 1;
         }
     } else {
@@ -482,6 +499,197 @@ static void test_data_hold_abort_notifies_and_clears(void)
     pn_stack_destroy(s);
 }
 
+static int count_pdu(uint16_t fid, uint8_t pdu)
+{
+    int n = 0;
+    for (int i = 0; i < g_ntx; i++) {
+        const uint8_t *rta;
+        size_t rl;
+        if (alarm_rta(g_tx[i], g_txlen[i], fid, &rta, &rl) && rta[4] == pdu) {
+            n++;
+        }
+    }
+    return n;
+}
+
+/* Controller AlarmAck as DATA-RTA, TACK=1. BlockType 0x8002 (low) or
+ * 0x8001 (high). SendSeqNum is the sequence the device is expected to
+ * accept; AckSeqNum acknowledges a device DATA when it matches. */
+static size_t build_alarm_ack_data(uint8_t *frame, uint16_t fid,
+                                   uint16_t send_seq, uint16_t ack_seq)
+{
+    uint8_t body[24];
+    memset(body, 0, sizeof(body));
+    pn_wr_be16(body, 0x0001); /* AlarmType diagnosis; PNIOStatus OK */
+    uint16_t block = fid == PN_FRAMEID_ALARM_LOW ? 0x8002u : 0x8001u;
+    uint8_t blk[40];
+    size_t blen = wr_block(blk, block, body, sizeof(body));
+    uint8_t pay[80];
+    memset(pay, 0, sizeof(pay));
+    pn_wr_be16(pay, fid);
+    pn_wr_be16(pay + 2, 1);
+    pn_wr_be16(pay + 4, 0x0007);
+    pay[6] = 0x11; /* DATA, version 1 */
+    pay[7] = 0x11; /* TACK, WindowSize 1 */
+    pn_wr_be16(pay + 8, send_seq);
+    pn_wr_be16(pay + 10, ack_seq);
+    pn_wr_be16(pay + 12, (uint16_t)blen);
+    memcpy(pay + 14, blk, blen);
+    static const uint8_t dst[6] = {0x02, 0xFB, 0x00, 0x00, 0x00, 0x01};
+    static const uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint16_t tci = fid == PN_FRAMEID_ALARM_LOW ? PN_VLAN_TCI_ALARM_LOW
+                                              : PN_VLAN_TCI_ALARM_HIGH;
+    return pn_eth_build_vlan(frame, 160, dst, src, tci, PN_ETHTYPE_PN, pay,
+                             14u + blen);
+}
+
+static void expect_one_ack_rta(const char *what, uint16_t fid,
+                               uint16_t want_send, uint16_t want_ack)
+{
+    int nack = count_pdu(fid, 0x13);
+    if (g_ntx != 1 || nack != 1) {
+        fprintf(stderr, "FAIL: %s ACK-RTA frames %d (tx=%d, want 1)\n", what,
+                nack, g_ntx);
+        g_fail = 1;
+        return;
+    }
+    const uint8_t *rta = NULL;
+    size_t rl = 0;
+    if (!alarm_rta(g_tx[0], g_txlen[0], fid, &rta, &rl) || rl < 12) {
+        fprintf(stderr, "FAIL: %s ACK-RTA is not a tagged alarm\n", what);
+        g_fail = 1;
+        return;
+    }
+    uint16_t dst_ep = pn_rd_be16(rta);
+    uint16_t src_ep = pn_rd_be16(rta + 2);
+    uint16_t seq = pn_rd_be16(rta + 6);
+    uint16_t ack = pn_rd_be16(rta + 8);
+    uint16_t var_len = pn_rd_be16(rta + 10);
+    if (rta[4] != 0x13 || rta[5] != 0x01 || dst_ep != 0x0007 || src_ep != 1 ||
+        seq != want_send || ack != want_ack || var_len != 0) {
+        fprintf(stderr,
+                "FAIL: %s ACK-RTA dst=0x%04x src=0x%04x pdu=0x%02x flags=0x%02x "
+                "SendSeq=0x%04x AckSeq=0x%04x var=%u "
+                "(want dst=0x0007 src=1 pdu=0x13 flags=0x01 "
+                "SendSeq=0x%04x AckSeq=0x%04x var=0)\n",
+                what, dst_ep, src_ep, rta[4], rta[5], seq, ack, var_len,
+                want_send, want_ack);
+        g_fail = 1;
+    }
+}
+
+/* H1: device Notification, controller ACK-RTA, controller AlarmAck DATA.
+ * The device must answer that DATA with one ACK-RTA. The next device
+ * DATA uses SendSeqNum 0x0000 and AckSeqNum equal to the controller
+ * SendSeqNum that was accepted. */
+static void test_alarm_ack_data_gets_ack_rta(uint16_t fid, const char *what)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, what);
+    if (!s) {
+        return;
+    }
+    if (!connect_ok(s, 0x0007, 1, 3, what)) {
+        pn_stack_destroy(s);
+        return;
+    }
+    tx_reset();
+    expect(pn_stack_send_alarm_ex(s, fid) == 0, what);
+    const uint8_t *rta = NULL;
+    size_t rl = 0;
+    if (g_ntx < 1 || !alarm_rta(g_tx[0], g_txlen[0], fid, &rta, &rl)) {
+        expect(0, what);
+        pn_stack_destroy(s);
+        return;
+    }
+    uint16_t dev_seq = pn_rd_be16(rta + 6);
+    uint16_t dev_ack = pn_rd_be16(rta + 8);
+    if (dev_seq != 0xFFFF || dev_ack != 0xFFFE) {
+        fprintf(stderr,
+                "FAIL: %s first DATA SendSeq=0x%04x AckSeq=0x%04x want FFFF/FFFE\n",
+                what, dev_seq, dev_ack);
+        g_fail = 1;
+    }
+    uint8_t ack[128];
+    size_t alen = build_ack(ack, fid, dev_seq);
+    expect(pn_stack_handle_eth(s, ack, alen) == 0, what);
+    tx_reset();
+    const uint16_t ctrl_seq = 0xFFFF; /* first expected controller sequence */
+    uint8_t data[160];
+    size_t dlen = build_alarm_ack_data(data, fid, ctrl_seq, dev_seq);
+    expect(dlen > 0, what);
+    expect(pn_stack_handle_eth(s, data, dlen) == 0, what);
+    /* ACK-RTA SendSeqNum is send_seq_count_o (the DATA the controller
+     * just TACKed, 0xFFFF). AckSeqNum is the accepted controller seq. */
+    expect_one_ack_rta(what, fid, 0xFFFF, ctrl_seq);
+    tx_reset();
+    expect(pn_stack_send_alarm_ex(s, fid) == 0, what);
+    if (g_ntx >= 1 && alarm_rta(g_tx[0], g_txlen[0], fid, &rta, &rl)) {
+        uint16_t next = pn_rd_be16(rta + 6);
+        uint16_t next_ack = pn_rd_be16(rta + 8);
+        if (next != 0x0000 || next_ack != ctrl_seq) {
+            fprintf(stderr,
+                    "FAIL: %s DATA after ACK-RTA SendSeq=0x%04x AckSeq=0x%04x "
+                    "want 0x0000/0x%04x\n",
+                    what, next, next_ack, ctrl_seq);
+            g_fail = 1;
+        }
+    } else {
+        expect(0, what);
+    }
+    pn_stack_destroy(s);
+}
+
+/* H2: the controller DATA carries the TACK (AckSeq = device SendSeq).
+ * The device DATA is not retransmitted, and one ACK-RTA is sent. */
+static void test_data_piggyback_tack(uint16_t fid, const char *what)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, what);
+    if (!s) {
+        return;
+    }
+    if (pn_stack_start(s) != 0) {
+        expect(0, what);
+        pn_stack_destroy(s);
+        return;
+    }
+    tx_reset();
+    if (!connect_ok(s, 0x0007, 1, 3, what)) {
+        pn_stack_destroy(s);
+        return;
+    }
+    tx_reset();
+    expect(pn_stack_send_alarm_ex(s, fid) == 0, what);
+    const uint8_t *rta = NULL;
+    size_t rl = 0;
+    if (g_ntx < 1 || !alarm_rta(g_tx[0], g_txlen[0], fid, &rta, &rl)) {
+        expect(0, what);
+        pn_stack_destroy(s);
+        return;
+    }
+    uint16_t dev_seq = pn_rd_be16(rta + 6);
+    expect(dev_seq == 0xFFFF, what);
+    tx_reset();
+    uint8_t data[160];
+    size_t dlen = build_alarm_ack_data(data, fid, 0xFFFF, dev_seq);
+    expect(dlen > 0, what);
+    expect(pn_stack_handle_eth(s, data, dlen) == 0, what);
+    expect_one_ack_rta(what, fid, dev_seq, 0xFFFF);
+    int ack_frames = count_pdu(fid, 0x13);
+    sleep_ms(250);
+    pn_stack_poll(s);
+    int data_frames = count_pdu(fid, 0x11);
+    if (data_frames != 0 || count_pdu(fid, 0x13) != ack_frames) {
+        fprintf(stderr,
+                "FAIL: %s retransmit DATA=%d ACK-RTA=%d (want DATA 0, ACK-RTA 1)\n",
+                what, data_frames, count_pdu(fid, 0x13));
+        g_fail = 1;
+    }
+    expect(pn_stack_ar_up(s) == 1, what);
+    pn_stack_destroy(s);
+}
+
 static void test_cmi_abort_notifies(void)
 {
     pn_stack_t *s = make_stack();
@@ -513,6 +721,10 @@ int main(void)
 {
     test_low_format_and_dst();
     test_ack_advances_seq_and_stops_retry();
+    test_alarm_ack_data_gets_ack_rta(PN_FRAMEID_ALARM_LOW, "H1 low AlarmAck");
+    test_alarm_ack_data_gets_ack_rta(PN_FRAMEID_ALARM_HIGH, "H1 high AlarmAck");
+    test_data_piggyback_tack(PN_FRAMEID_ALARM_LOW, "H2 low piggyback");
+    test_data_piggyback_tack(PN_FRAMEID_ALARM_HIGH, "H2 high piggyback");
     test_retransmit_then_err_and_safe_output();
     test_data_hold_abort_notifies_and_clears();
     test_cmi_abort_notifies();

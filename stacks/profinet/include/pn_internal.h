@@ -29,8 +29,14 @@ typedef struct {
 /* Saved RTA frame for one retransmission. A notification is ~60 octets. */
 #define PN_ALARM_FRAME_MAX 128
 typedef struct {
+    /* p-net pf_alarm_apmx_activate. DATA SendSeqNum is send_seq.
+     * ACK-RTA SendSeqNum is send_seq_o. Both DATA and ACK use ack_seq
+     * (exp_seq_count_o) as AckSeqNum. exp_seq is the controller
+     * SendSeqNum the device will accept next. */
     uint16_t send_seq;
+    uint16_t send_seq_o;
     uint16_t ack_seq;
+    uint16_t exp_seq;
     uint16_t retries_left;
     int wait_ack;
     uint64_t ack_due_ns;
@@ -95,7 +101,9 @@ typedef struct {
      * (AlarmDstEndpoint). src_ref is the device reference announced in
      * AlarmCRBlockRes. timeout factor is ×100 ms; 0 does not arm the
      * ACK timer. Two channels: [0] low, [1] high, each with its own
-     * sequence (first DATA is 0xFFFF / ack 0xFFFE). */
+     * sequence. At activation send_seq and exp_seq are 0xFFFF, and
+     * send_seq_o and ack_seq are 0xFFFE. The first DATA is therefore
+     * SendSeqNum 0xFFFF / AckSeqNum 0xFFFE. */
     uint16_t alarm_dst_ref;
     uint16_t alarm_src_ref;
     uint16_t rta_timeout_factor;

@@ -50,11 +50,26 @@ void pn_alarm_arm(pn_ar_t *ar)
     }
     for (int i = 0; i < 2; i++) {
         ar->alarm_ch[i].send_seq = RTA_SEQ_INIT;
+        ar->alarm_ch[i].send_seq_o = RTA_ACK_NONE;
         ar->alarm_ch[i].ack_seq = RTA_ACK_NONE;
+        ar->alarm_ch[i].exp_seq = RTA_SEQ_INIT;
         ar->alarm_ch[i].retries_left = 0;
         ar->alarm_ch[i].wait_ack = 0;
         ar->alarm_ch[i].ack_due_ns = 0;
         ar->alarm_ch[i].frame_len = 0;
+    }
+}
+
+/* 0/0/0/0 means Connect never armed the counters. A later 0 is a real
+ * sequence (0xFFFF + 1 wraps to 0), so that case is left alone. */
+static void alarm_seq_ensure(pn_alarm_ch_t *ch)
+{
+    if (ch->send_seq == 0 && ch->send_seq_o == 0 && ch->ack_seq == 0 &&
+        ch->exp_seq == 0) {
+        ch->send_seq = RTA_SEQ_INIT;
+        ch->send_seq_o = RTA_ACK_NONE;
+        ch->ack_seq = RTA_ACK_NONE;
+        ch->exp_seq = RTA_SEQ_INIT;
     }
 }
 
@@ -161,11 +176,7 @@ int pn_alarm_send_dummy(pn_stack_t *s, uint16_t frame_id)
         LOG_WARN("pn_alarm", "RTA channel %d waiting for ACK", chi);
         return -EBUSY;
     }
-    if (ch->send_seq == 0 && ch->ack_seq == 0) {
-        /* Connect did not arm the counters (should not happen). */
-        ch->send_seq = RTA_SEQ_INIT;
-        ch->ack_seq = RTA_ACK_NONE;
-    }
+    alarm_seq_ensure(ch);
     uint8_t pay[64];
     size_t plen = put_notification(pay, sizeof(pay), frame_id, alarm_dst(&s->ar),
                                    alarm_src(&s->ar), ch->send_seq, ch->ack_seq,
@@ -197,14 +208,9 @@ void pn_alarm_send_err(pn_stack_t *s, uint8_t code2)
         return;
     }
     pn_alarm_ch_t *ch = &s->ar.alarm_ch[0];
-    /* 0/0 means the counters were never armed. SendSeq 0 after 0xFFFF
-     * is a real sequence and is kept. */
+    alarm_seq_ensure(ch);
     uint16_t send_seq = ch->send_seq;
     uint16_t ack_seq = ch->ack_seq;
-    if (send_seq == 0 && ack_seq == 0) {
-        send_seq = RTA_SEQ_INIT;
-        ack_seq = RTA_ACK_NONE;
-    }
     uint8_t pay[20];
     size_t n = 0;
     pn_wr_be16(pay + n, PN_FRAMEID_ALARM_LOW);
@@ -233,6 +239,55 @@ void pn_alarm_send_err(pn_stack_t *s, uint8_t code2)
     }
 }
 
+/* APMS: a TACK whose AckSeqNum matches the outstanding DATA frees it
+ * and advances send_seq. send_seq_o keeps the sequence just TACKed;
+ * an ACK-RTA we send uses that value. Mirrors pf_alarm_apms_a_data_ind. */
+static void apms_on_tack(pn_alarm_ch_t *ch, uint16_t ack_seq, uint16_t frame_id)
+{
+    if (!ch->wait_ack || ack_seq != ch->send_seq) {
+        return;
+    }
+    ch->wait_ack = 0;
+    ch->frame_len = 0;
+    ch->ack_due_ns = 0;
+    ch->retries_left = 0;
+    ch->send_seq_o = ch->send_seq;
+    ch->send_seq = (uint16_t)((ch->send_seq + 1u) & 0x7FFFu);
+    LOG_INFO("pn_alarm", "RTA ACK FrameID=0x%04x next_seq=0x%04x", frame_id,
+             ch->send_seq);
+}
+
+/* APMR ACK. PDUType ACK v1, WindowSize 1, TACK 0. SendSeqNum is
+ * send_seq_count_o and AckSeqNum is exp_seq_count_o. Not saved for
+ * retransmission. Mirrors pf_alarm_apmr_send_ack. */
+static void send_ack_rta(pn_stack_t *s, uint16_t frame_id, const pn_alarm_ch_t *ch)
+{
+    uint8_t pay[16];
+    size_t n = 0;
+    pn_wr_be16(pay + n, frame_id);
+    n += 2;
+    pn_wr_be16(pay + n, alarm_dst(&s->ar));
+    n += 2;
+    pn_wr_be16(pay + n, alarm_src(&s->ar));
+    n += 2;
+    pay[n++] = (uint8_t)((RTA_VERSION << 4) | RTA_TYPE_ACK);
+    pay[n++] = RTA_ADD_WINDOW;
+    pn_wr_be16(pay + n, ch->send_seq_o);
+    n += 2;
+    pn_wr_be16(pay + n, ch->ack_seq);
+    n += 2;
+    pn_wr_be16(pay + n, 0);
+    n += 2;
+    int rc = send_tagged_alarm(s, frame_id, pay, n, NULL, 0, NULL);
+    if (rc != 0) {
+        LOG_WARN("pn_alarm", "ACK-RTA send failed (%d)", rc);
+    } else {
+        LOG_INFO("pn_alarm",
+                 "TX ACK-RTA FrameID=0x%04x SendSeq=0x%04x AckSeq=0x%04x",
+                 frame_id, ch->send_seq_o, ch->ack_seq);
+    }
+}
+
 void pn_alarm_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen)
 {
     if (!s || !s->ar.established || !payload || plen < 2u + 12u) {
@@ -255,20 +310,24 @@ void pn_alarm_on_frame(pn_stack_t *s, const uint8_t *payload, size_t plen)
         return;
     }
     pn_alarm_ch_t *ch = &s->ar.alarm_ch[alarm_channel(fid)];
-    if (!ch->wait_ack) {
+    uint16_t recv_seq = pn_rd_be16(rta + 6);
+    uint16_t recv_ack = pn_rd_be16(rta + 8);
+    if (typ == RTA_TYPE_ACK) {
+        apms_on_tack(ch, recv_ack, fid);
         return;
     }
-    uint16_t ack = pn_rd_be16(rta + 8);
-    if (ack != ch->send_seq) {
+    /* APMR OPEN: DATA with TACK and SendSeqNum == exp_seq_count.
+     * The AckSeqNum is handed to APMS first, then the expected
+     * sequence advances and one ACK-RTA goes out. A DATA whose
+     * SendSeqNum is not the expected value is left for a later pass
+     * (p-net resends the ACK for exp_seq_count_o and NACKs the rest). */
+    if ((rta[5] & RTA_ADD_TACK) == 0 || recv_seq != ch->exp_seq) {
         return;
     }
-    ch->wait_ack = 0;
-    ch->frame_len = 0;
-    ch->ack_due_ns = 0;
-    ch->retries_left = 0;
-    ch->send_seq = (uint16_t)((ch->send_seq + 1u) & 0x7FFFu);
-    LOG_INFO("pn_alarm", "RTA ACK FrameID=0x%04x next_seq=0x%04x", fid,
-             ch->send_seq);
+    apms_on_tack(ch, recv_ack, fid);
+    ch->ack_seq = ch->exp_seq;
+    ch->exp_seq = (uint16_t)((ch->exp_seq + 1u) & 0x7FFFu);
+    send_ack_rta(s, fid, ch);
 }
 
 void pn_alarm_poll(pn_stack_t *s)
