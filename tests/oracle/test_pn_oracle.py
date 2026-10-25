@@ -605,8 +605,6 @@ def alarm_rta(pn, frame_id=ALARM_LOW_FID):
     return raw(frames[0][ProfinetIO])[2:]
 
 
-@known_defect("T12-10", "알람 RTA-PDU 가 PDUType 0x01(버전 0)·AddFlags 0 이고 AlarmNotification 블록 헤더가 깨져 있다. "
-              "사양: PDUType 0x11 (DATA-RTA, 버전 1), AddFlags WindowSize=1, VarPartLen = BlockHeader 포함 블록 길이")
 def test_alarm_rta_pdu_format(pn_dut):
     pn_dut.rpc(raw(connect_pdu()))
     rta = alarm_rta(pn_dut)
@@ -623,8 +621,6 @@ def test_alarm_rta_pdu_format(pn_dut):
     assert block.block_length == var_len - 4, f"BlockLength {block.block_length}, VarPartLen {var_len}"
 
 
-@known_defect("T12-10", "AlarmCRBlockReq 를 파싱하지 않아 AlarmDstEndpoint 가 1 고정이다. "
-              "사양: 컨트롤러 LocalAlarmReference")
 def test_alarm_dst_endpoint_from_alarm_cr_req(pn_dut):
     pn_dut.rpc(raw(connect_pdu(alarm_ref=0x0007)))
     rta = alarm_rta(pn_dut)
