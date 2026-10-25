@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 from scapy.all import Dot1Q, Ether, raw
-from scapy.contrib.lldp import LLDPDU, LLDPDUGenericOrganisationSpecific
+from scapy.contrib.lldp import LLDPDU, LLDPDUGenericOrganisationSpecific, LLDPDUManagementAddress, LLDPDUPortID
 from scapy.contrib.pnio import ProfinetIO
 from scapy.contrib.pnio_dcp import DCPNameOfStationBlock, DCPDeviceRoleBlock, ProfinetDCP
 from scapy.contrib.pnio_rpc import (
@@ -94,7 +94,7 @@ DEFAULT_LAYOUT = (IN_LAYOUT_DATA, IN_LAYOUT_IOCS, OUT_LAYOUT_DATA, OUT_LAYOUT_IO
 
 def connect_pdu(station=b"controller", scf=32, rr=16, slot1_module=0x00000010,
                 alarm_ref=1, layout=DEFAULT_LAYOUT, startup_mode=0,
-                iocr_prio=6, alarm_tag_low=0xA000, alarm_tag_high=0xC000):
+                iocr_prio=6, alarm_tag_low=0xA000, alarm_tag_high=0xC000, rta_tf=1, rta_retries=3):
     """사양 형태의 Connect.req (ARBlockReq + 입력/출력 IOCR + AlarmCR + ExpectedSubmodule).
 
     기본 주기는 SCF=32 × RR=16 × 31.25µs = 16ms (GSDML 이 허용해야 하는 값, 장치 최소 8ms 이상).
@@ -123,7 +123,7 @@ def connect_pdu(station=b"controller", scf=32, rr=16, slot1_module=0x00000010,
                     ARProperties_StartupMode=startup_mode,
                     CMInitiatorActivityTimeoutFactor=600, CMInitiatorUDPRTPort=0x8892,
                     CMInitiatorStationName=station)
-    alarm = AlarmCRBlockReq(AlarmCRType=1, LT=0x8892, RTATimeoutFactor=1, RTARetries=3,
+    alarm = AlarmCRBlockReq(AlarmCRType=1, LT=0x8892, RTATimeoutFactor=rta_tf, RTARetries=rta_retries,
                             LocalAlarmReference=alarm_ref, MaxAlarmDataLength=200,
                             AlarmCRTagHeaderHigh=alarm_tag_high, AlarmCRTagHeaderLow=alarm_tag_low)
     # NO_IO(Type 0) 서브모듈에도 Input DataDescription 1개(길이 0, IOCS 1, IOPS 1)가 따라온다:
@@ -222,6 +222,36 @@ def test_lldp_pno_oui(pn_dut):
     ouis = {t.org_code for t in frames[0].getlayer(LLDPDU).iterpayloads()
             if isinstance(t, LLDPDUGenericOrganisationSpecific)}
     assert 0x000ECF in ouis
+
+
+# LLDPDU 내용 (T12-11). 독립 구현 p-net src/common/pf_lldp.c: Port ID subtype 7 (locally assigned) 값은 "port-001"
+# (legacy) 또는 "port-001.<NameOfStation>" (PROFINET 2.4 standard), 송신 TLV 는 Chassis ID·Port ID·TTL 다음
+# PNO Port Status (OUI 00-0E-CF subtype 2), PNO Chassis MAC (subtype 5), IEEE 802.3 MAC/PHY (OUI 00-12-0F subtype 1),
+# Management Address (IPv4) 순서 (pf_lldp.c `pf_lldp_build`). 판정은 scapy contrib.lldp 디섹트.
+def _lldp_tlvs(pn_dut):
+    frames = [f for f in tx_frames(pn_dut.startup) if f.type == 0x88CC]
+    assert frames, "시작 시 LLDP 송신 없음"
+    return list(frames[0].getlayer(LLDPDU).iterpayloads())
+
+
+@known_defect("T12-11", "Port ID 가 MAC (subtype 3) 다. PROFINET 은 subtype 7 locally assigned \"port-001\"")
+def test_lldp_port_id_is_port_name(pn_dut):
+    ports = [t for t in _lldp_tlvs(pn_dut) if isinstance(t, LLDPDUPortID)]
+    assert len(ports) == 1 and ports[0].subtype == 7, ports
+    pid = bytes(ports[0].id)
+    assert pid == b"port-001" or pid.startswith(b"port-001."), pid
+
+
+@known_defect("T12-11", "PNO Port Status·Chassis MAC, IEEE 802.3 MAC/PHY, Management Address TLV 가 없다 (토폴로지 검출 불가)")
+def test_lldp_profinet_required_tlvs(pn_dut):
+    tlvs = _lldp_tlvs(pn_dut)
+    org = {(t.org_code, t.subtype) for t in tlvs if isinstance(t, LLDPDUGenericOrganisationSpecific)}
+    missing = {name for name, key in {"PNO Port Status": (0x000ECF, 2), "PNO Chassis MAC": (0x000ECF, 5),
+                                      "IEEE 802.3 MAC/PHY": (0x00120F, 1)}.items() if key not in org}
+    mgmt = [t for t in tlvs if isinstance(t, LLDPDUManagementAddress)]
+    if not mgmt:
+        missing.add("Management Address")
+    assert not missing, f"없는 TLV: {sorted(missing)} (org TLV {sorted(org)})"
 
 
 # ---------------------------------------------------------------- RPC
@@ -373,6 +403,22 @@ def test_connect_rejects_cycle_below_device_minimum(pn_dut):
     (dict(alarm_tag_high=0xA000), 0xDB81040B), # AlarmCRTagHeaderHigh 우선순위 5 → ErrorCode2 11 (0x0B)
 ], ids=["iocr-prio5", "alarm-low-prio6", "alarm-high-prio5"])
 def test_connect_rejects_nonstandard_tag_header(pn_dut, kw, expected):
+    rsp = rpc_response(pn_dut.rpc(raw(connect_pdu(**kw))))
+    assert rsp is not None, "Connect 응답 없음"
+    status, _ = ndr_response(rsp)
+    assert status == expected, f"PNIOStatus {status:08x} (기대 {expected:08x})"
+
+
+# AlarmCRBlockReq 범위: RTATimeoutFactor 1..100 (×100 ms), RTARetries 3..15. 밖이면 Connect 거부.
+# p-net src/device/pf_cmdev.c (AlarmCR 검사): rta_timeout_factor < 1 || > 0x64 → CONNECT / PNIO / FAULTY_ALARM_BLOCK_REQ(0x04) / 7,
+# rta_retries < 3 || > 15 → … / 8. TF 0 이면 장치의 알람 ACK 타이머가 꺼진다 (T12-10 재전송이 동작하지 않음).
+@known_defect("A20261025-6", "AlarmCRBlockReq 의 RTATimeoutFactor·RTARetries 범위를 보지 않고 Connect 를 받아들인다. "
+              "사양: TF 1..100 밖 DB 81 04 07, Retries 3..15 밖 DB 81 04 08")
+@pytest.mark.parametrize("kw,expected", [
+    (dict(rta_tf=0), 0xDB810407), (dict(rta_tf=101), 0xDB810407),
+    (dict(rta_retries=2), 0xDB810408), (dict(rta_retries=16), 0xDB810408),
+], ids=["tf0", "tf101", "retries2", "retries16"])
+def test_connect_rejects_alarm_cr_out_of_range(pn_dut, kw, expected):
     rsp = rpc_response(pn_dut.rpc(raw(connect_pdu(**kw))))
     assert rsp is not None, "Connect 응답 없음"
     status, _ = ndr_response(rsp)
