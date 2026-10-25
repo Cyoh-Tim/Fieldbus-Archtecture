@@ -679,7 +679,9 @@ static void test_cmi_ignores_own_tx(void)
 /* T12-1: response NDR is PNIOStatus, ArgsLength, MaxCount, Offset,
  * ActualCount, then blocks. A successful Connect.rsp starts with status 0,
  * not the block length. This Connect has no ARProperties, so StartupMode
- * is Legacy and ARServerBlock is not appended (blocks stay 0x48). */
+ * is Legacy and ARServerBlock is not appended.
+ * Blocks: ARBlockRes 34 + IOCRBlockRes 12 + IOCRBlockRes 12
+ * + AlarmCRBlockRes 12 (T12-12 body is 6, BlockLength 8) = 0x46. */
 static void test_connect_response_ndr_pniostatus(void)
 {
     pn_stack_t *s = make_stack();
@@ -699,11 +701,11 @@ static void test_connect_response_ndr_pniostatus(void)
     uint32_t offset = pn_rd_le32(stub + 12);
     uint32_t actual = pn_rd_le32(stub + 16);
     expect_u32(status, 0, "Connect.rsp PNIOStatus");
-    expect_u32(args_len, 0x48, "Connect.rsp ArgsLength");
-    expect_u32(max_count, 0x48, "Connect.rsp MaxCount");
+    expect_u32(args_len, 0x46, "Connect.rsp ArgsLength");
+    expect_u32(max_count, 0x46, "Connect.rsp MaxCount");
     expect_u32(offset, 0, "Connect.rsp Offset");
-    expect_u32(actual, 0x48, "Connect.rsp ActualCount");
-    expect(rlen == 80 + 20 + 0x48, "Connect.rsp length is header + NDR + blocks");
+    expect_u32(actual, 0x46, "Connect.rsp ActualCount");
+    expect(rlen == 80 + 20 + 0x46, "Connect.rsp length is header + NDR + blocks");
     expect(pn_rd_be16(stub + 20) == PN_BLOCK_AR_RES, "blocks follow the NDR header");
     pn_stack_destroy(s);
 }
