@@ -1345,3 +1345,232 @@ def test_null_forward_open_does_not_take_exclusive_owner(sess):
         assert rsp[0] == 0xD4 and rsp[2] == 0x01 and ext_status(rsp) == 0x0132, rsp.hex()
     real = sess.cip(fo_ex(next(_serial), mult=5))
     assert real[0] == 0xD4 and real[2] == 0x00, f"Null FO 뒤 정상 FO 실패: {real.hex()}"
+
+
+# ---------------------------------------------------------------- 감사 2026-10-25 (어댑터·Originator)
+# 아래는 tests/oracle/test_eip_oracle.py 끝에 붙인다. 위 파일의 헬퍼(encap, Session, FakeLogix,
+# FbApiDut, fbapi_cfg, scanner_read_input, scanner_write_output, IN_ASM, OUT_ASM)를 그대로 쓴다.
+import signal as _signal
+
+
+def _wait_line(d: "FbApiDut", line: str, timeout: float):
+    """FbApiDut.cmd 는 2 s 만 기다린다. Originator 요청은 2 s 타임아웃이 있어 더 기다린다."""
+    try:
+        d.proc.stdin.write(line + "\n")
+        d.proc.stdin.flush()
+    except OSError:  # DUT 가 이미 죽었다
+        return None
+    return d._next(timeout)
+
+
+def _dut_exit(d: "FbApiDut") -> str:
+    rc = d.proc.poll()
+    if rc is None:
+        return "살아 있음"
+    if rc < 0:
+        return f"시그널 {_signal.Signals(-rc).name} 로 종료"
+    return f"종료 코드 {rc}"
+
+
+class IdentityTarget(FakeLogix):
+    """Identity(1/1) attr 1 = 0x1111, attr 2 = 0x2222 를 Get_Attribute_Single 로 돌려주는 대상.
+
+    delay_first: 첫 요청의 응답을 이만큼 늦게 보낸다 (늦은 응답).
+    drop_after_first: 첫 TCP 연결에서 첫 응답을 보낸 뒤 연결을 닫는다 (대상 재시작·유휴 타임아웃 흉내).
+    이후 연결은 정상 처리한다.
+    """
+
+    ATTRS = {1: 0x1111, 2: 0x2222}
+
+    def __init__(self, delay_first=0.0, drop_after_first=False):
+        self.delay_first = delay_first
+        self.drop_after_first = drop_after_first
+        self.n_requests = 0
+        self.n_conns = 0
+        super().__init__()
+
+    def _cip(self, req: bytes) -> bytes:
+        service, words = req[0], req[1]
+        path = req[2:2 + 2 * words]
+        self.requests.append((service, path, req[2 + 2 * words:]))
+        self.n_requests += 1
+        if self.n_requests == 1 and self.delay_first:
+            time.sleep(self.delay_first)
+        if service == 0x0E and len(path) == 6 and path[:4] == bytes([0x20, 0x01, 0x24, 0x01]) \
+                and path[4] == 0x30 and path[5] in self.ATTRS:
+            return bytes([0x8E, 0, 0, 0]) + struct.pack("<H", self.ATTRS[path[5]])
+        return bytes([service | 0x80, 0, 0x08, 0])
+
+    def _serve(self, conn):
+        self.n_conns += 1
+        first_conn = self.n_conns == 1
+        if not (self.drop_after_first and first_conn):
+            return super()._serve(conn)
+        with conn:  # RegisterSession + 첫 SendRRData 하나만 답하고 닫는다
+            for _ in range(2):
+                pkt = recv_encap(conn)
+                cmd, _ln, sess, _st, ctx = struct.unpack_from("<HHII8s", pkt, 0)
+                if cmd == 0x0065:
+                    out, sess = pkt[24:], 0x1234ABCD
+                else:
+                    rsp = self._cip(unconnected_item(pkt))
+                    out = (struct.pack("<IHH", 0, 0, 2) + struct.pack("<HH", 0, 0)
+                           + struct.pack("<HH", 0x00B2, len(rsp)) + rsp)
+                conn.sendall(struct.pack("<HHII8sI", cmd, len(out), sess, 0, ctx, 0) + out)
+
+
+def originator_cfg(port: int) -> dict:
+    def ident(name, attr):
+        return dict(name=name, access="read", data_type="uint16", length=2,
+                    address={"ethernetip": {"class_id": 1, "instance": 1, "attribute": attr}})
+
+    return {
+        "protocol": "ethernetip",
+        "device": {"name": "eip_oracle_originator", "role": "client"},
+        "cycle_ms": 8,
+        "protocol_params": {
+            "role": "client", "ip": "127.0.0.1", "port": port, "udp_io_port": free_port(),
+            "security_class": 0, "lldp_enable": False, "acd_enable": False, "mock": False,
+        },
+        "points": [ident("vendor", 1), ident("device_type", 2)],
+    }
+
+
+@known_defect("A20261025-1", "응답을 TCP 로 보낼 때 MSG_NOSIGNAL 이 없어, 요청을 몰아 보내고 닫은 피어에 세 번째 응답을 "
+              "쓰는 순간 SIGPIPE 로 프로세스(데몬)가 죽는다. OpENer 는 MSG_NOSIGNAL, EIPScanner 는 SO_NOSIGPIPE")
+def test_peer_close_does_not_kill_adapter(eip_dut):
+    for _ in range(5):
+        c = socket.create_connection(("127.0.0.1", eip_dut.port), timeout=2)
+        c.sendall(encap(0x0063, b"") * 8)  # ListIdentity 8개 (세션 불필요), 응답을 읽지 않고 닫는다
+        c.close()
+        time.sleep(0.2)
+        if eip_dut.proc.poll() is not None:
+            break
+    rc = eip_dut.proc.poll()
+    assert rc is None, f"어댑터 DUT 가 {'시그널 ' + _signal.Signals(-rc).name if rc < 0 else rc} 로 종료"
+    s = Session(eip_dut.port)  # 다음 스캐너도 접속된다
+    s.close()
+
+
+@known_defect("A20261025-2", "응답 대기 2 s 가 지나 늦게 온 이전 요청의 응답을 다음 요청의 응답으로 받는다 "
+              "(Sender Context·서비스 코드 미대조). device_type 읽기가 vendor 값 0x1111 을 rc 0 으로 돌려준다")
+def test_originator_late_reply_not_taken_for_next_request(tmp_path):
+    plc = IdentityTarget(delay_first=2.6)
+    d = FbApiDut(originator_cfg(plc.port), tmp_path)
+    try:
+        first = _wait_line(d, "R vendor u32", 6.0)            # 2 s 타임아웃 → 실패가 맞다
+        second = _wait_line(d, "R device_type u32", 6.0)
+    finally:
+        d.close()
+        plc.close()
+    assert first is not None and second is not None, (first, second)
+    _, rc2, v2 = second.split()
+    # 기대: device_type 의 값(0x2222 = 8738) 이거나 실패. vendor 의 값(0x1111 = 4369)이면 응답 짝이 틀렸다.
+    assert not (int(rc2) == 0 and int(v2) != 0x2222), f"첫 읽기 {first!r}, 둘째 읽기 {second!r}"
+
+
+@known_defect("A20261025-3", "대상이 TCP 연결을 닫으면(재시작·유휴 타임아웃) 끊김을 감지하지도 다시 연결하지도 않는다. "
+              "읽기는 계속 실패하고 health 는 connected 로 남으며, 세 번째 send 에서 SIGPIPE 로 앱이 죽는다")
+def test_originator_reconnects_after_target_closes(tmp_path):
+    plc = IdentityTarget(drop_after_first=True)
+    d = FbApiDut(originator_cfg(plc.port), tmp_path)
+    log = []
+    try:
+        log.append(_wait_line(d, "R vendor u32", 6.0))       # 정상 (그 뒤 대상이 닫는다)
+        assert log[0] == "VAL 0 4369", log
+        time.sleep(0.3)
+        ok = False
+        for _ in range(6):
+            line = _wait_line(d, "R vendor u32", 6.0)
+            log.append(line)
+            if line == "VAL 0 4369":
+                ok = True
+                break
+            if line is None:
+                break
+            time.sleep(0.5)
+        state = _dut_exit(d)
+    finally:
+        d.close()
+        plc.close()
+    assert ok, f"재연결 후 읽기 성공 없음: {log} (DUT {state}, 대상 연결 수 {plc.n_conns})"
+
+
+def _len_omitted_cfg():
+    cfg = fbapi_cfg()
+    cfg["points"] += [
+        # length 생략: 숫자 포인트의 크기는 data_type 이 정한다 (CIP UINT 2 B, DINT 4 B)
+        dict(name="u16_nolen", access="read", data_type="uint16",
+             address={"ethernetip": {"assembly": IN_ASM, "byte_offset": 48}}),
+        dict(name="i32_nolen", access="read", data_type="int32",
+             address={"ethernetip": {"assembly": IN_ASM, "byte_offset": 52}}),
+        # data_type 생략: 코어·Modbus 어댑터 기본은 uint16
+        dict(name="nodt", access="read", length=2,
+             address={"ethernetip": {"assembly": IN_ASM, "byte_offset": 56, "length": 2}}),
+        dict(name="cmd_nolen", access="write", data_type="uint16",
+             address={"ethernetip": {"assembly": OUT_ASM, "byte_offset": 4}}),
+    ]
+    return cfg
+
+
+@known_defect("A20261025-4", "length 를 생략한 숫자 포인트를 1바이트로 다루고(앞 BE 바이트만 씀), data_type 을 생략한 포인트는 "
+              "코어가 uint16 BE 로 넘겨도 LE 로 바꾸지 않는다. CIP UINT/DINT 는 2/4 바이트 LE")
+@pytest.mark.parametrize("name,typ,value,off,wire", [
+    ("u16_nolen", "u32", 300, 48, struct.pack("<H", 300)),
+    ("i32_nolen", "i32", -2, 52, struct.pack("<i", -2)),
+    ("nodt", "u32", 300, 56, struct.pack("<H", 300)),
+], ids=["uint16_no_length", "int32_no_length", "no_data_type"])
+def test_numeric_point_defaults_on_wire(tmp_path, name, typ, value, off, wire):
+    d = FbApiDut(_len_omitted_cfg(), tmp_path)
+    try:
+        d.write(name, typ, value)
+        raw = scanner_read_input(d.port)
+    finally:
+        d.close()
+    assert raw[off:off + len(wire)] == wire, raw[off:off + len(wire)].hex(" ")
+
+
+@known_defect("A20261025-4", "length 를 생략한 uint16 출력 포인트를 1바이트만 읽는다 (스캐너가 쓴 300 → 앱 44)")
+def test_numeric_point_without_length_read_from_scanner(tmp_path):
+    d = FbApiDut(_len_omitted_cfg(), tmp_path)
+    try:
+        scanner_write_output(d.port, d.udp_port, bytes(4) + struct.pack("<H", 300) + bytes(2))
+        got = d.read("cmd_nolen", "u32")
+    finally:
+        d.close()
+    assert got == (0, 300), got
+
+
+@known_defect("A20261025-5", "Originator 의 TCP connect 에 타임아웃이 없어, SYN 에 답하지 않는 대상(전원 꺼짐·필터)이면 "
+              "fb_open 이 커널 SYN 재시도(~127 s) 동안 막힌다. EIPScanner 는 non-blocking connect + 타임아웃, pycomm3 는 5 s")
+def test_originator_connect_has_timeout(tmp_path):
+    # accept 하지 않는 listen(0) 소켓에 연결 하나를 채우면 다음 SYN 은 버려진다 (응답 없는 대상).
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(0)
+    port = srv.getsockname()[1]
+    fillers = []
+    for _ in range(2):
+        f = socket.socket()
+        f.setblocking(False)
+        f.connect_ex(("127.0.0.1", port))
+        fillers.append(f)
+    time.sleep(0.2)
+    path = tmp_path / "eip_orig_blackhole.json"
+    path.write_text(json.dumps(originator_cfg(port)))
+    t0 = time.monotonic()
+    p = subprocess.Popen([str(dut_path("eip_oracle_fbapi")), str(path)], stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    try:
+        out, _ = p.communicate("Q\n", timeout=12)
+        elapsed = time.monotonic() - t0
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        out, elapsed = None, time.monotonic() - t0
+    finally:
+        for f in fillers:
+            f.close()
+        srv.close()
+    assert out is not None and elapsed < 10, f"fb_open 이 {elapsed:.1f} s 동안 반환하지 않음 (출력 {out!r})"
+    assert out.startswith("OPEN "), out  # 연결 실패를 에러로 돌려준다
