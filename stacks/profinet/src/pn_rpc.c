@@ -499,7 +499,11 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
             uint32_t props = pn_rd_be32(body + 42);
             ar->startup_advanced = (props & (1u << 30)) != 0;
         }
-        /* ARProperties(4) + ActivityTimeoutFactor(2) + UDPRTPort(2) */
+        /* ARProperties(4) + ActivityTimeoutFactor(2) + UDPRTPort(2).
+         * Factor × 100 ms is the CMI activity window (0 keeps 2 s). */
+        if (blen >= 48) {
+            ar->cmi_activity_factor = pn_rd_be16(body + 46);
+        }
         if (blen >= 50) {
             ar->initiator_udp_rt_port = pn_rd_be16(body + 48);
         }
@@ -897,31 +901,300 @@ static size_t build_connect_res_blocks(pn_stack_t *s, uint8_t *out, size_t cap)
     }
 
     (void)strip_sec_cb;
-    (void)k_pnio_if;
     return n;
 }
 
+/* drep high nibble: 1 = little-endian integers, 0 = big-endian. */
+static int rpc_drep_be(uint8_t drep0)
+{
+    return (drep0 >> 4) != 1;
+}
+
+static uint16_t rd16e(const uint8_t *p, int be)
+{
+    return be ? pn_rd_be16(p) : pn_rd_le16(p);
+}
+
+static uint32_t rd32e(const uint8_t *p, int be)
+{
+    return be ? pn_rd_be32(p) : pn_rd_le32(p);
+}
+
+static void wr16e(uint8_t *p, uint16_t v, int be)
+{
+    if (be) {
+        pn_wr_be16(p, v);
+    } else {
+        pn_wr_le16(p, v);
+    }
+}
+
+static void wr32e(uint8_t *p, uint32_t v, int be)
+{
+    if (be) {
+        pn_wr_be32(p, v);
+    } else {
+        pn_wr_le32(p, v);
+    }
+}
+
+/* Wire UUID time fields follow drep. Canonical form is big-endian time. */
+static void uuid_wire_to_canon(uint8_t out[PN_UUID_LEN], const uint8_t *in,
+                               int be)
+{
+    if (be) {
+        memcpy(out, in, PN_UUID_LEN);
+        return;
+    }
+    out[0] = in[3];
+    out[1] = in[2];
+    out[2] = in[1];
+    out[3] = in[0];
+    out[4] = in[5];
+    out[5] = in[4];
+    out[6] = in[7];
+    out[7] = in[6];
+    memcpy(out + 8, in + 8, 8);
+}
+
+static void uuid_canon_to_wire(uint8_t out[PN_UUID_LEN], const uint8_t *in,
+                               int be)
+{
+    uuid_wire_to_canon(out, in, be);
+}
+
+/* DEA00001-6C97-11D1-8271-00A02442DF7D */
+static const uint8_t k_if_device_canon[16] = {
+    0xDE, 0xA0, 0x00, 0x01, 0x6C, 0x97, 0x11, 0xD1,
+    0x82, 0x71, 0x00, 0xA0, 0x24, 0x42, 0xDF, 0x7D};
+/* E1AF8308-5D1F-11C9-91A4-08002B14A0FA (EPM v3) */
+static const uint8_t k_if_epm_canon[16] = {
+    0xE1, 0xAF, 0x83, 0x08, 0x5D, 0x1F, 0x11, 0xC9,
+    0x91, 0xA4, 0x08, 0x00, 0x2B, 0x14, 0xA0, 0xFA};
+/* DEA00000-6C97-11D1-8271 */
+static const uint8_t k_obj_prefix[10] = {
+    0xDE, 0xA0, 0x00, 0x00, 0x6C, 0x97, 0x11, 0xD1, 0x82, 0x71};
+
+/* NDR transfer syntax 8A885D04-1CEB-11C9-9FE8-08002B104860, LE wire. */
+static const uint8_t k_ndr_uuid_le[16] = {
+    0x04, 0x5D, 0x88, 0x8A, 0xEB, 0x1C, 0xC9, 0x11,
+    0x9F, 0xE8, 0x08, 0x00, 0x2B, 0x10, 0x48, 0x60};
+
+#define RPC_PFC_LAST 0x02
+#define RPC_PFC_FRAG 0x04
+#define RPC_OP_EPM_LOOKUP 2
+
+typedef struct {
+    uint8_t vers;
+    uint8_t ptype;
+    uint8_t flags1;
+    int be;
+    uint16_t op;
+    uint16_t frag_num;
+    uint16_t body_len;
+    uint32_t seq;
+    uint8_t object[PN_UUID_LEN];
+    uint8_t iface[PN_UUID_LEN];
+} rpc_hdr_t;
+
+static void parse_rpc_hdr(const uint8_t *pdu, size_t len, rpc_hdr_t *h)
+{
+    memset(h, 0, sizeof(*h));
+    h->vers = pdu[0];
+    h->ptype = pdu[1];
+    h->flags1 = pdu[2];
+    h->be = rpc_drep_be(pdu[4]);
+    uuid_wire_to_canon(h->object, pdu + 8, h->be);
+    uuid_wire_to_canon(h->iface, pdu + 24, h->be);
+    h->seq = rd32e(pdu + 64, h->be);
+    h->op = rd16e(pdu + 68, h->be);
+    uint16_t declared = rd16e(pdu + 74, h->be);
+    h->frag_num = rd16e(pdu + 76, h->be);
+    size_t avail = len - RPC_HDR;
+    if ((size_t)declared < avail) {
+        h->body_len = declared;
+    } else if (avail > 0xFFFFu) {
+        h->body_len = 0xFFFF;
+    } else {
+        h->body_len = (uint16_t)avail;
+    }
+}
+
+/* Instance 1, then either DeviceID|VendorID (p-net / IEC) or
+ * VendorID|DeviceID (the oracle Connect object tail). */
+static int object_is_device(const pn_stack_t *s, const uint8_t canon[16])
+{
+    if (memcmp(canon, k_obj_prefix, sizeof(k_obj_prefix)) != 0) {
+        return 0;
+    }
+    uint8_t spec[6];
+    uint8_t swapped[6];
+    pn_wr_be16(spec, 1);
+    pn_wr_be16(spec + 2, s->cfg.device_id);
+    pn_wr_be16(spec + 4, s->cfg.vendor_id);
+    pn_wr_be16(swapped, 1);
+    pn_wr_be16(swapped + 2, s->cfg.vendor_id);
+    pn_wr_be16(swapped + 4, s->cfg.device_id);
+    return memcmp(canon + 10, spec, 6) == 0 ||
+           memcmp(canon + 10, swapped, 6) == 0;
+}
+
+static void device_object_canon(const pn_stack_t *s, uint8_t out[16])
+{
+    memcpy(out, k_obj_prefix, sizeof(k_obj_prefix));
+    pn_wr_be16(out + 10, 1);
+    pn_wr_be16(out + 12, s->cfg.device_id);
+    pn_wr_be16(out + 14, s->cfg.vendor_id);
+}
+
+/* 1 = stub is complete, 0 = waiting for the last fragment, -1 = drop. */
+static int rpc_assemble(pn_stack_t *s, const uint8_t *pdu, const rpc_hdr_t *h,
+                        const uint8_t **stub, size_t *slen)
+{
+    if ((h->flags1 & RPC_PFC_FRAG) == 0) {
+        s->rpc_asm_on = 0;
+        *stub = pdu + RPC_HDR;
+        *slen = h->body_len;
+        return 1;
+    }
+    if (h->frag_num == 0) {
+        if ((size_t)h->body_len > PN_RPC_ASM_MAX) {
+            s->rpc_asm_on = 0;
+            return -1;
+        }
+        memcpy(s->rpc_asm, pdu + RPC_HDR, h->body_len);
+        s->rpc_asm_len = h->body_len;
+        memcpy(s->rpc_asm_act, pdu + 40, PN_UUID_LEN);
+        s->rpc_asm_seq = h->seq;
+        s->rpc_asm_be = h->be;
+        s->rpc_asm_next = 1;
+        s->rpc_asm_on = 1;
+    } else if (!s->rpc_asm_on || s->rpc_asm_be != h->be ||
+               s->rpc_asm_seq != h->seq || h->frag_num != s->rpc_asm_next ||
+               memcmp(s->rpc_asm_act, pdu + 40, PN_UUID_LEN) != 0) {
+        LOG_WARN("pn_rpc", "RPC fragment %u dropped (activity/sequence)",
+                 h->frag_num);
+        s->rpc_asm_on = 0;
+        return -1;
+    } else if (s->rpc_asm_len + h->body_len > PN_RPC_ASM_MAX) {
+        LOG_WARN("pn_rpc", "RPC reassembly exceeds %u bytes", PN_RPC_ASM_MAX);
+        s->rpc_asm_on = 0;
+        return -1;
+    } else {
+        memcpy(s->rpc_asm + s->rpc_asm_len, pdu + RPC_HDR, h->body_len);
+        s->rpc_asm_len += h->body_len;
+        s->rpc_asm_next++;
+    }
+    if ((h->flags1 & RPC_PFC_LAST) == 0) {
+        return 0;
+    }
+    *stub = s->rpc_asm;
+    *slen = s->rpc_asm_len;
+    s->rpc_asm_on = 0;
+    return 1;
+}
+
+static size_t epm_floor_uuid(uint8_t *p, const uint8_t uuid_le[16],
+                             uint16_t major, uint16_t minor)
+{
+    pn_wr_be16(p, 19);
+    p[2] = 0x0d;
+    memcpy(p + 3, uuid_le, 16);
+    pn_wr_be16(p + 19, major);
+    pn_wr_be16(p + 21, 2);
+    pn_wr_be16(p + 23, minor);
+    return 25;
+}
+
+static size_t epm_floor_rhs(uint8_t *p, uint8_t proto, const uint8_t *rhs,
+                            uint16_t rhslen)
+{
+    pn_wr_be16(p, 1);
+    p[2] = proto;
+    pn_wr_be16(p + 3, rhslen);
+    if (rhslen > 0 && rhs) {
+        memcpy(p + 5, rhs, rhslen);
+    }
+    return 5u + rhslen;
+}
+
+/* ept_lookup response: entry_handle(20) num_ents(4) one tower for the
+ * PNIO Device interface on UDP 34964, status 0. */
+static size_t epm_lookup_stub(const pn_stack_t *s, uint8_t *out, int be)
+{
+    uint8_t tower[160];
+    size_t tn = 2;
+    pn_wr_be16(tower, 5);
+    tn += epm_floor_uuid(tower + tn, k_pnio_if, 1, 0);
+    tn += epm_floor_uuid(tower + tn, k_ndr_uuid_le, 2, 0);
+    uint8_t minor0[2] = {0, 0};
+    tn += epm_floor_rhs(tower + tn, 0x0a, minor0, 2);
+    uint8_t port[2];
+    pn_wr_be16(port, PN_RPC_PORT);
+    tn += epm_floor_rhs(tower + tn, 0x08, port, 2);
+    uint8_t ip[4];
+    pn_wr_be32(ip, s->cfg.ip);
+    tn += epm_floor_rhs(tower + tn, 0x09, ip, 4);
+
+    memset(out, 0, 20);
+    wr32e(out + 20, 1, be);
+    wr32e(out + 24, 1, be);
+    wr32e(out + 28, 0, be);
+    wr32e(out + 32, 1, be);
+    uint8_t obj[16];
+    device_object_canon(s, obj);
+    uuid_canon_to_wire(out + 36, obj, be);
+    wr32e(out + 52, 0x00020000u, be);
+    wr32e(out + 56, 0x00020004u, be);
+    size_t pos = 60;
+    wr32e(out + pos, (uint32_t)tn, be);
+    pos += 4;
+    wr32e(out + pos, (uint32_t)tn, be);
+    pos += 4;
+    memcpy(out + pos, tower, tn);
+    pos += tn;
+    while (pos & 3u) {
+        out[pos++] = 0;
+    }
+    wr32e(out + pos, 1, be);
+    pos += 4;
+    wr32e(out + pos, 0, be);
+    pos += 4;
+    wr32e(out + pos, 1, be);
+    pos += 4;
+    out[pos++] = 0;
+    while (pos & 3u) {
+        out[pos++] = 0;
+    }
+    wr32e(out + pos, 0, be);
+    pos += 4;
+    return pos;
+}
+
 static size_t wrap_rpc_resp(const uint8_t *req, uint8_t *resp, size_t cap,
-                            const uint8_t *stub, size_t stub_len)
+                            const uint8_t *stub, size_t stub_len, int be)
 {
     if (cap < RPC_HDR + stub_len) {
         return 0;
     }
     memcpy(resp, req, RPC_HDR);
     resp[1] = RPC_PT_RESPONSE;
-    pn_wr_le16(resp + 74, (uint16_t)stub_len);
+    resp[2] = (uint8_t)((resp[2] & (uint8_t)~RPC_PFC_FRAG) | RPC_PFC_LAST);
+    wr16e(resp + 74, (uint16_t)stub_len, be);
+    wr16e(resp + 76, 0, be);
     memcpy(resp + RPC_HDR, stub, stub_len);
     return RPC_HDR + stub_len;
 }
 
-static const uint8_t *ndr_blocks(const uint8_t *stub, size_t len, size_t *blen)
+static const uint8_t *ndr_blocks(const uint8_t *stub, size_t len, size_t *blen,
+                                 int be)
 {
-    /* argsMax, argsLen, max, offset, actual  — 5 x uint32 LE */
+    /* argsMax, argsLen, max, offset, actual — 5 x uint32 in drep order */
     if (len < 20) {
         return NULL;
     }
-    uint32_t args_len = pn_rd_le32(stub + 4);
-    uint32_t actual = pn_rd_le32(stub + 16);
+    uint32_t args_len = rd32e(stub + 4, be);
+    uint32_t actual = rd32e(stub + 16, be);
     uint32_t n = args_len < actual ? args_len : actual;
     /* Do not use `20 + n > len`: n==UINT32_MAX wraps and accepts a 4 GiB
      * window, then walk_blocks reads off the stub (fuzz SEGV). */
@@ -946,20 +1219,20 @@ static size_t ndr_wrap(uint8_t *out, const uint8_t *blocks, size_t n)
 }
 
 /* Response NDR: PNIOStatus, ArgsLength, MaxCount, Offset, ActualCount, blocks.
- * status is ErrorCode, ErrorDecode, ErrorCode1, ErrorCode2 (NULL = OK).
- * Length words are little-endian and count the block bytes that follow. */
+ * status bytes are already in drep order (NULL = OK). Length words follow
+ * drep and count the block bytes that follow. PNIO blocks stay big-endian. */
 static size_t ndr_res(uint8_t *out, const uint8_t status[4],
-                      const uint8_t *blocks, size_t n)
+                      const uint8_t *blocks, size_t n, int be)
 {
     if (status) {
         memcpy(out, status, 4);
     } else {
         memset(out, 0, 4);
     }
-    pn_wr_le32(out + 4, (uint32_t)n);
-    pn_wr_le32(out + 8, (uint32_t)n);
-    pn_wr_le32(out + 12, 0);
-    pn_wr_le32(out + 16, (uint32_t)n);
+    wr32e(out + 4, (uint32_t)n, be);
+    wr32e(out + 8, (uint32_t)n, be);
+    wr32e(out + 12, 0, be);
+    wr32e(out + 16, (uint32_t)n, be);
     if (n > 0 && blocks) {
         memcpy(out + 20, blocks, n);
     }
@@ -1034,8 +1307,7 @@ static void queue_app_ready(pn_stack_t *s)
 }
 
 /* PNIOStatus as ErrorCode<<24 | ErrorDecode<<16 | ErrorCode1<<8 | ErrorCode2.
- * Written in little-endian drep order (this stack always emits LE NDR;
- * a big-endian request is T12-14). Logical DB 81 02 0B is bytes 0B 02 81 DB.
+ * Written as a drep integer. Little-endian DB 81 02 0B is bytes 0B 02 81 DB.
  *
  * Cycle rejects use the IOCR codes below. Other rejects still pass
  * PN_PNIO_ERR_LEGACY (0x81000000). Queue 59 owns the other-controller
@@ -1048,14 +1320,14 @@ static void queue_app_ready(pn_stack_t *s)
 
 static int reply_pnio_err(const uint8_t *pdu, uint8_t *resp, size_t cap,
                           size_t *out_len, uint8_t *stub_out,
-                          uint32_t pnio_status)
+                          uint32_t pnio_status, int be)
 {
     /* Connect.rsp stub: PNIOStatus, ArgsLength=0, MaxCount=0, Offset=0,
      * ActualCount=0. No blocks. */
     uint8_t status[4];
-    pn_wr_le32(status, pnio_status);
-    size_t so = ndr_res(stub_out, status, NULL, 0);
-    *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so);
+    wr32e(status, pnio_status, be);
+    size_t so = ndr_res(stub_out, status, NULL, 0, be);
+    *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so, be);
     return 0;
 }
 
@@ -1125,13 +1397,14 @@ static int check_input_iocr_min(uint16_t type, const uint8_t *body,
     return 0;
 }
 
-static int consume_app_ready_res(pn_stack_t *s, const uint8_t *stub, size_t slen)
+static int consume_app_ready_res(pn_stack_t *s, const uint8_t *stub, size_t slen,
+                                 int be)
 {
     if (s->pending_rpc_tx_len == 0) {
         return -EINVAL;
     }
     size_t blen = 0;
-    const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
+    const uint8_t *blocks = ndr_blocks(stub, slen, &blen, be);
     if (!blocks || blen < 2) {
         return -EINVAL;
     }
@@ -1186,26 +1459,62 @@ static void flush_pending_rpc(pn_stack_t *s)
 int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
                   size_t cap, size_t *out_len, uint32_t src_ip)
 {
-    if (len < RPC_HDR) {
+    if (out_len) {
+        *out_len = 0;
+    }
+    if (!s || !pdu || !resp || !out_len || len < RPC_HDR) {
         return -EINVAL;
     }
-    uint8_t ptype = pdu[1];
-    uint16_t op = pn_rd_le16(pdu + 68);
+    rpc_hdr_t h;
+    parse_rpc_hdr(pdu, len, &h);
+    if (h.vers != 4) {
+        LOG_WARN("pn_rpc", "DCE/RPC rpc_vers %u rejected (connectionless is 4)",
+                 h.vers);
+        return -EPROTONOSUPPORT;
+    }
     const uint8_t *stub = pdu + RPC_HDR;
-    size_t slen = len - RPC_HDR;
-    uint16_t declared = pn_rd_le16(pdu + 74);
-    if (declared < slen) {
-        slen = declared;
+    size_t slen = h.body_len;
+    uint8_t ptype = h.ptype;
+    uint16_t op = h.op;
+    int be = h.be;
+    if (ptype == RPC_PT_REQUEST) {
+        int ready = rpc_assemble(s, pdu, &h, &stub, &slen);
+        if (ready < 0) {
+            return -EINVAL;
+        }
+        if (ready == 0) {
+            return 0;
+        }
     }
     if (ptype == RPC_PT_RESPONSE) {
-        *out_len = 0;
         if (op != OP_CONTROL) {
             return -EINVAL;
         }
-        return consume_app_ready_res(s, stub, slen);
+        return consume_app_ready_res(s, stub, slen, be);
     }
     if (ptype != RPC_PT_REQUEST) {
         return -EINVAL;
+    }
+    if (memcmp(h.iface, k_if_epm_canon, PN_UUID_LEN) == 0) {
+        if (op != RPC_OP_EPM_LOOKUP) {
+            LOG_WARN("pn_rpc", "EPM opnum %u not served", op);
+            return -ENOSYS;
+        }
+        uint8_t estub[512];
+        size_t en = epm_lookup_stub(s, estub, be);
+        *out_len = wrap_rpc_resp(pdu, resp, cap, estub, en, be);
+        if (*out_len == 0) {
+            return -ENOBUFS;
+        }
+        return 0;
+    }
+    if (memcmp(h.iface, k_if_device_canon, PN_UUID_LEN) != 0) {
+        LOG_WARN("pn_rpc", "unknown interface UUID — not served");
+        return -EPROTONOSUPPORT;
+    }
+    if (!object_is_device(s, h.object)) {
+        LOG_WARN("pn_rpc", "object UUID is not this device — not served");
+        return -EPROTONOSUPPORT;
     }
 
     uint8_t stub_out[2048];
@@ -1213,7 +1522,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
 
     if (op == OP_CONNECT) {
         size_t blen = 0;
-        const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
+        const uint8_t *blocks = ndr_blocks(stub, slen, &blen, be);
         if (!blocks) {
             return -EINVAL;
         }
@@ -1221,20 +1530,20 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
          * temporary AR. A rejected Connect does not touch s->ar. */
         if (verify_connect_sec(s, blocks, blen) != 0) {
             return reply_pnio_err(pdu, resp, cap, out_len, stub_out,
-                                  PN_PNIO_ERR_LEGACY);
+                                  PN_PNIO_ERR_LEGACY, be);
         }
         pn_ar_t parsed;
         memset(&parsed, 0, sizeof(parsed));
         if (walk_blocks(blocks, blen, parse_ar_iocr, &parsed) != 0) {
             return reply_pnio_err(pdu, resp, cap, out_len, stub_out,
-                                  PN_PNIO_ERR_LEGACY);
+                                  PN_PNIO_ERR_LEGACY, be);
         }
         iocr_min_t min_ck;
         memset(&min_ck, 0, sizeof(min_ck));
         min_ck.min_us = s->cfg.cycle_us;
         (void)walk_blocks(blocks, blen, check_input_iocr_min, &min_ck);
         if (min_ck.err != 0) {
-            return reply_pnio_err(pdu, resp, cap, out_len, stub_out, min_ck.err);
+            return reply_pnio_err(pdu, resp, cap, out_len, stub_out, min_ck.err, be);
         }
         connect_ident_t ident;
         memset(&ident, 0, sizeof(ident));
@@ -1245,7 +1554,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         if (s->ar.established && !ar_same_controller(s, src_ip, &ident)) {
             LOG_WARN("pn_rpc", "Connect rejected: AR already established");
             return reply_pnio_err(pdu, resp, cap, out_len, stub_out,
-                                  PN_PNIO_ERR_LEGACY);
+                                  PN_PNIO_ERR_LEGACY, be);
         }
         if (parsed.in_frame_id == 0) {
             parsed.in_frame_id = 0x8001;
@@ -1273,7 +1582,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         clear_pending_rpc(s);
         uint8_t blocks_res[1280];
         size_t bn = build_connect_res_blocks(s, blocks_res, sizeof(blocks_res));
-        so = ndr_res(stub_out, NULL, blocks_res, bn);
+        so = ndr_res(stub_out, NULL, blocks_res, bn, be);
         LOG_INFO("pn_rpc",
                  "AR established in_fid=0x%04x out_fid=0x%04x in=%u out=%u",
                  s->ar.in_frame_id, s->ar.out_frame_id,
@@ -1288,7 +1597,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
             uuid_walk_t uw;
             memset(&uw, 0, sizeof(uw));
             size_t blen = 0;
-            const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
+            const uint8_t *blocks = ndr_blocks(stub, slen, &blen, be);
             if (blocks) {
                 walk_blocks(blocks, blen, parse_uuid_any, &uw);
             }
@@ -1306,7 +1615,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         memset(&s->ar, 0, sizeof(s->ar));
         clear_pending_rpc(s);
         uint8_t z[4] = {0};
-        so = ndr_res(stub_out, NULL, z, 4);
+        so = ndr_res(stub_out, NULL, z, 4, be);
         LOG_INFO("pn_rpc", "AR released");
     } else if (op == OP_CONTROL) {
         if (!s->ar.established) {
@@ -1321,7 +1630,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         memset(&cw, 0, sizeof(cw));
         cw.command = PN_CONTROL_PRM_END;
         size_t blen = 0;
-        const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
+        const uint8_t *blocks = ndr_blocks(stub, slen, &blen, be);
         if (blocks) {
             walk_blocks(blocks, blen, parse_ctrl_req, &cw);
         }
@@ -1340,7 +1649,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         uint8_t blocks_res[64];
         size_t bn = wr_block(blocks_res, PN_BLOCK_CONTROL_RES, cres,
                              sizeof(cres));
-        so = ndr_res(stub_out, NULL, blocks_res, bn);
+        so = ndr_res(stub_out, NULL, blocks_res, bn, be);
         s->ar.established = 1;
         ar_touch_cmi(s);
         if (cw.command == PN_CONTROL_PRM_END) {
@@ -1360,7 +1669,7 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         rw.subslot = 1;
         rw.index = PN_INDEX_IM0;
         size_t blen = 0;
-        const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
+        const uint8_t *blocks = ndr_blocks(stub, slen, &blen, be);
         if (blocks) {
             walk_blocks(blocks, blen, parse_read_req, &rw);
         }
@@ -1382,14 +1691,14 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
                                PN_BLOCK_IOD_READ_RES, rw.seq, rw.aruuid, rw.api,
                                rw.slot, rw.subslot, rw.index, (uint32_t)rlen,
                                rec, rlen);
-        so = ndr_res(stub_out, NULL, blocks_res, bn);
+        so = ndr_res(stub_out, NULL, blocks_res, bn, be);
     } else if (op == OP_WRITE) {
         write_walk_t ww;
         memset(&ww, 0, sizeof(ww));
         ww.slot = 0;
         ww.subslot = 1;
         size_t blen = 0;
-        const uint8_t *blocks = ndr_blocks(stub, slen, &blen);
+        const uint8_t *blocks = ndr_blocks(stub, slen, &blen, be);
         if (blocks) {
             walk_blocks(blocks, blen, parse_write_req, &ww);
             attach_write_payload(blocks, blen, &ww);
@@ -1416,12 +1725,12 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         size_t bn = iod_rw_res(blocks_res, sizeof(blocks_res),
                                PN_BLOCK_IOD_WRITE_RES, ww.seq, ww.aruuid, ww.api,
                                ww.slot, ww.subslot, ww.index, ww.dlen, NULL, 0);
-        so = ndr_res(stub_out, NULL, blocks_res, bn);
+        so = ndr_res(stub_out, NULL, blocks_res, bn, be);
     } else {
         return -ENOSYS;
     }
 
-    *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so);
+    *out_len = wrap_rpc_resp(pdu, resp, cap, stub_out, so, be);
     return 0;
 }
 

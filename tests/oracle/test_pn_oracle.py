@@ -693,8 +693,6 @@ def raw_rsp(lines):
     return None
 
 
-@known_defect("T12-14", "drep 을 무시하고 LE 로 고정한다. 빅 엔디안 drep 요청의 응답 헤더 fragment length·NDR 이 "
-              "응답 drep 과 맞지 않는다")
 def test_rpc_big_endian_drep_connect(pn_dut):
     req = connect_pdu()
     req.endian = 0  # drep: 빅 엔디안 정수. scapy 가 RPC 헤더·NDR 을 BE 로 만든다.
@@ -710,8 +708,6 @@ def test_rpc_big_endian_drep_connect(pn_dut):
     assert types[:1] == [0x8101], f"블록 타입 {[hex(t) for t in types]}"
 
 
-@known_defect("T12-14", "인터페이스 UUID 를 검사하지 않아 모르는 인터페이스의 opnum 2 를 PNIO Read 로 처리하고 응답한다. "
-              "사양: reject (nca_unk_if) 또는 무응답")
 def test_rpc_unknown_interface_not_served(pn_dut):
     rd = IODReadReq(seqNum=1, ARUUID=AR_UUID, API=0, slotNumber=0, subslotNumber=1,
                     index=IM0_INDEX, recordDataLength=4096)
@@ -721,8 +717,6 @@ def test_rpc_unknown_interface_not_served(pn_dut):
     assert rsp is None or rsp[1] in (3, 6), f"ptype {rsp[1]} (fault 3 / reject 6 또는 무응답이어야 한다)"
 
 
-@known_defect("T12-14", "EPM(ept_lookup) 이 없다. 인터페이스를 보지 않아 EPM opnum 2 를 PNIO Read 로 처리하고 I&M0 를 "
-              "돌려준다. 사양: 0x8894 의 EPM 이 PNIO Device 인터페이스 tower 를 돌려준다")
 def test_rpc_epm_lookup_lists_pnio_interface(pn_dut):
     # ept_lookup (EPM v3, opnum 2) 요청 스텁은 scapy msrpce (NDR 32비트) 로 만든다.
     stub = raw(ept_lookup_Request(inquiry_type=0, object=None, Ifid=None, vers_option=1,
@@ -741,8 +735,6 @@ def test_rpc_epm_lookup_lists_pnio_interface(pn_dut):
     assert struct.unpack(fmt + "I", body[-4:])[0] == 0, "ept_lookup status"
 
 
-@known_defect("T12-14", "단편화를 지원하지 않는다. 첫 단편만으로 Connect 를 처리해 응답한다. "
-              "사양: 마지막 단편까지 모아서 한 번 처리")
 def test_rpc_fragmented_connect(pn_dut):
     whole = connect_pdu()
     stub = raw(whole.payload)

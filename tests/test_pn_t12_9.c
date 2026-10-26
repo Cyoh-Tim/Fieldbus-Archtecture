@@ -161,8 +161,17 @@ static size_t build_plain_connect(uint8_t *pdu)
     uint8_t stub[128];
     size_t sn = ndr_wrap(stub, blocks, bn);
     memset(pdu, 0, 80);
-    pdu[0] = 4; /* rpc_vers. 스택은 버전을 검사하지 않지만 사양 형태를 쓴다. */
+    pdu[0] = 4; /* CL RPC. 버전·drep·UUID 를 검사한다. */
     pdu[1] = 0;
+    pdu[4] = 0x10;
+    static const uint8_t obj[16] = {
+        0x00, 0x00, 0xa0, 0xde, 0x97, 0x6c, 0xd1, 0x11,
+        0x82, 0x71, 0x00, 0x01, 0x00, 0x01, 0xab, 0xcd};
+    static const uint8_t iface[16] = {
+        0x01, 0x00, 0xa0, 0xde, 0x97, 0x6c, 0xd1, 0x11,
+        0x82, 0x71, 0x00, 0xa0, 0x24, 0x42, 0xdf, 0x7d};
+    memcpy(pdu + 8, obj, 16);
+    memcpy(pdu + 24, iface, 16);
     pn_wr_le16(pdu + 68, 0); /* Connect */
     pn_wr_le16(pdu + 74, (uint16_t)sn);
     memcpy(pdu + 80, stub, sn);
