@@ -233,7 +233,6 @@ def _lldp_tlvs(pn_dut):
     return list(frames[0].getlayer(LLDPDU).iterpayloads())
 
 
-@known_defect("T12-11", "Port ID 가 MAC (subtype 3) 다. PROFINET 은 subtype 7 locally assigned \"port-001\"")
 def test_lldp_port_id_is_port_name(pn_dut):
     ports = [t for t in _lldp_tlvs(pn_dut) if isinstance(t, LLDPDUPortID)]
     assert len(ports) == 1 and ports[0].subtype == 7, ports
@@ -241,7 +240,6 @@ def test_lldp_port_id_is_port_name(pn_dut):
     assert pid == b"port-001" or pid.startswith(b"port-001."), pid
 
 
-@known_defect("T12-11", "PNO Port Status·Chassis MAC, IEEE 802.3 MAC/PHY, Management Address TLV 가 없다 (토폴로지 검출 불가)")
 def test_lldp_profinet_required_tlvs(pn_dut):
     tlvs = _lldp_tlvs(pn_dut)
     org = {(t.org_code, t.subtype) for t in tlvs if isinstance(t, LLDPDUGenericOrganisationSpecific)}
