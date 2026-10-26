@@ -836,7 +836,10 @@ static size_t build_connect_res_blocks(pn_stack_t *s, uint8_t *out, size_t cap)
     memcpy(ar + 2, s->ar.uuid, 16);
     pn_wr_be16(ar + 18, s->ar.session_key);
     memcpy(ar + 20, s->cfg.mac, 6);
-    pn_wr_be16(ar + 26, PN_RPC_PORT);
+    /* RT_CLASS_1 CMResponderUDPRTPort is the L2 RT marker 0x8892, the
+     * same role as CMInitiatorUDPRTPort. PN_RPC_PORT (0x8894) is the
+     * CM RPC socket, not this field. */
+    pn_wr_be16(ar + 26, PN_ETHTYPE_PN);
     if (append_block(out, cap, &n, PN_BLOCK_AR_RES, ar, sizeof(ar)) != 0) {
         return 0;
     }
@@ -859,12 +862,13 @@ static size_t build_connect_res_blocks(pn_stack_t *s, uint8_t *out, size_t cap)
         return 0;
     }
 
-    uint8_t alarm[8];
+    /* AlarmCRType, LocalAlarmReference (this device), MaxAlarmDataLength.
+     * BlockLength is 8. The response has no tag header. */
+    uint8_t alarm[6];
     memset(alarm, 0, sizeof(alarm));
     pn_wr_be16(alarm, 0x0001);
     pn_wr_be16(alarm + 2, s->ar.alarm_src_ref ? s->ar.alarm_src_ref : 1);
     pn_wr_be16(alarm + 4, 200);
-    pn_wr_be16(alarm + 6, 0x00A0);
     if (append_block(out, cap, &n, PN_BLOCK_ALARMCR_RES, alarm, sizeof(alarm)) !=
         0) {
         return 0;

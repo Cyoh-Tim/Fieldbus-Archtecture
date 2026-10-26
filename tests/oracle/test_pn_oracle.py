@@ -619,8 +619,6 @@ def connect_res_blocks(pn, **connect_kw):
     return split_blocks(blocks)
 
 
-@known_defect("T12-12", "AlarmCRBlockRes 본문이 8바이트다 (BlockLength 10). 사양: AlarmCRType·LocalAlarmReference·"
-              "MaxAlarmDataLength 6바이트 (BlockLength 8)")
 def test_connect_alarm_cr_block_res_length(pn_dut):
     blocks = [b for t, b in connect_res_blocks(pn_dut) if t == 0x8103]
     assert len(blocks) == 1, "AlarmCRBlockRes(0x8103) 없음"
@@ -629,7 +627,6 @@ def test_connect_alarm_cr_block_res_length(pn_dut):
     assert res.AlarmCRType == 1
 
 
-@known_defect("T12-12", "ARBlockRes 의 CMResponderUDPRTPort 가 0x8894(RPC 포트)다. RT_CLASS_1 (UDP 아님) 은 0x8892")
 def test_connect_ar_block_res_udp_rt_port(pn_dut):
     blocks = [b for t, b in connect_res_blocks(pn_dut) if t == 0x8101]
     assert len(blocks) == 1, "ARBlockRes(0x8101) 없음"
