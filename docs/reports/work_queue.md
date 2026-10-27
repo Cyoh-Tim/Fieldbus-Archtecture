@@ -56,7 +56,7 @@
 | 32 | T12-10 | PN 알람 RTA-PDU 형식·AlarmCRBlockReq 파싱 | `stacks/profinet/`, `tests/` | T12-10 ×2 | |
 | 33 | T12-11 | PN LLDP OUI·PortID·필수 TLV | `stacks/profinet/`, `tests/` | T12-11 |. 2026-10-25 #155 검증: scapy LLDP 확인을 오라클로 옮김 — `test_lldp_port_id_is_port_name`, `test_lldp_profinet_required_tlvs` 의 T12-11 표시도 이 항목 PR 에서 함께 지운다 (통과할 때만) |
 | 34 | T12-12 | PN AlarmCRBlockRes 길이, ARBlockRes 포트 | `stacks/profinet/`, `tests/` | T12-12 ×2 | |
-| 35 | T12-14 | PN DCE/RPC 헤더 처리 (drep, UUID, 단편화, EPM) | `stacks/profinet/`, `tests/` | T12-14 ×4 | |
+| 35 | T12-14 | PN DCE/RPC 헤더 처리 (drep, UUID, 단편화, EPM) | `stacks/profinet/`, `tests/` | T12-14 ×4 |. 2026-10-27 (#151 반론): 오라클 `pnio_request` 의 장치 object UUID 를 Instance+DeviceID+VendorID (`…-00010001abcd`) 로 정정. object UUID 검사는 이 순서만 받는다. EPM 은 UDP 34964 에서만 (UDP 135 안 엶) |
 | 36 | T12-16 | PN DCP Set 처리 규칙 | `stacks/profinet/`, `tests/` | T12-16 ×3 | |
 | 37 | T12-17 | PN 표준 Release(0x0114) | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-17 | |
 | 38 | T12-18 | PN 미지원 레코드 index 에러 | `stacks/profinet/`, `tests/` | T12-18 ×2 | T12-1 이후 |
