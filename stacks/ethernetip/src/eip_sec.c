@@ -9,9 +9,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -111,6 +113,197 @@ size_t eip_sec_append_mac_item(eip_stack_t *s, uint32_t session,
     return 4 + EIP_HMAC_LEN;
 }
 
+/* ---- TLS socket BIO: send(MSG_NOSIGNAL) so a closed peer returns EPIPE ---- */
+
+typedef struct {
+    int fd;
+    int shutdown;
+} eip_nosig_bio_t;
+
+static BIO_METHOD *g_nosig_method;
+static int g_nosig_users;
+
+static int nosig_write(BIO *b, const char *in, int inl)
+{
+    eip_nosig_bio_t *d = BIO_get_data(b);
+    ssize_t n;
+    int ret;
+
+    errno = 0;
+    if (!d || !BIO_get_init(b) || !in || inl <= 0) {
+        return 0;
+    }
+    n = send(d->fd, in, (size_t)inl, MSG_NOSIGNAL);
+    ret = (int)n;
+    BIO_clear_retry_flags(b);
+    if (ret <= 0 && BIO_sock_should_retry(ret)) {
+        BIO_set_retry_write(b);
+    }
+    return ret;
+}
+
+static int nosig_read(BIO *b, char *out, int outl)
+{
+    eip_nosig_bio_t *d = BIO_get_data(b);
+    ssize_t n;
+    int ret;
+
+    errno = 0;
+    if (!d || !BIO_get_init(b) || !out || outl <= 0) {
+        return 0;
+    }
+    n = recv(d->fd, out, (size_t)outl, 0);
+    ret = (int)n;
+    BIO_clear_retry_flags(b);
+    if (ret <= 0) {
+        if (BIO_sock_should_retry(ret)) {
+            BIO_set_retry_read(b);
+        } else if (ret == 0) {
+            BIO_set_flags(b, BIO_FLAGS_IN_EOF);
+        }
+    }
+    return ret;
+}
+
+static int nosig_puts(BIO *b, const char *str)
+{
+    if (!str) {
+        return 0;
+    }
+    return nosig_write(b, str, (int)strlen(str));
+}
+
+static int nosig_create(BIO *b)
+{
+    eip_nosig_bio_t *d = calloc(1, sizeof(*d));
+    if (!d) {
+        return 0;
+    }
+    d->fd = -1;
+    BIO_set_data(b, d);
+    BIO_set_init(b, 0);
+    BIO_set_shutdown(b, 0);
+    return 1;
+}
+
+static int nosig_destroy(BIO *b)
+{
+    eip_nosig_bio_t *d;
+    if (!b) {
+        return 0;
+    }
+    d = BIO_get_data(b);
+    if (d) {
+        if (d->shutdown && d->fd >= 0) {
+            close(d->fd);
+        }
+        free(d);
+        BIO_set_data(b, NULL);
+    }
+    BIO_set_init(b, 0);
+    return 1;
+}
+
+static long nosig_ctrl(BIO *b, int cmd, long num, void *ptr)
+{
+    eip_nosig_bio_t *d = b ? BIO_get_data(b) : NULL;
+
+    switch (cmd) {
+    case BIO_C_SET_FD:
+        if (!d || !ptr) {
+            return 0;
+        }
+        if (d->shutdown && d->fd >= 0) {
+            close(d->fd);
+        }
+        d->fd = *(int *)ptr;
+        d->shutdown = (int)num;
+        BIO_set_shutdown(b, d->shutdown);
+        BIO_set_init(b, 1);
+        BIO_clear_flags(b, BIO_FLAGS_IN_EOF);
+        return 1;
+    case BIO_C_GET_FD:
+        if (!d || !BIO_get_init(b)) {
+            return -1;
+        }
+        if (ptr) {
+            *(int *)ptr = d->fd;
+        }
+        return d->fd;
+    case BIO_CTRL_GET_CLOSE:
+        return d ? d->shutdown : 0;
+    case BIO_CTRL_SET_CLOSE:
+        if (d) {
+            d->shutdown = (int)num;
+            BIO_set_shutdown(b, d->shutdown);
+        }
+        return 1;
+    case BIO_CTRL_DUP:
+    case BIO_CTRL_FLUSH:
+        return 1;
+    case BIO_CTRL_EOF:
+        return (BIO_test_flags(b, BIO_FLAGS_IN_EOF) != 0) ? 1 : 0;
+    default:
+        return 0;
+    }
+}
+
+static int nosig_method_acquire(void)
+{
+    BIO_METHOD *m;
+    int idx;
+    if (g_nosig_method) {
+        g_nosig_users++;
+        return 0;
+    }
+    idx = BIO_get_new_index();
+    if (idx < 0) {
+        return -1;
+    }
+    m = BIO_meth_new(idx, "eip-tcp-nosignal");
+    if (!m) {
+        return -1;
+    }
+    if (BIO_meth_set_write(m, nosig_write) != 1 ||
+        BIO_meth_set_read(m, nosig_read) != 1 ||
+        BIO_meth_set_puts(m, nosig_puts) != 1 ||
+        BIO_meth_set_ctrl(m, nosig_ctrl) != 1 ||
+        BIO_meth_set_create(m, nosig_create) != 1 ||
+        BIO_meth_set_destroy(m, nosig_destroy) != 1) {
+        BIO_meth_free(m);
+        return -1;
+    }
+    g_nosig_method = m;
+    g_nosig_users = 1;
+    return 0;
+}
+
+static void nosig_method_release(void)
+{
+    if (g_nosig_users > 0) {
+        g_nosig_users--;
+    }
+    if (g_nosig_users == 0 && g_nosig_method) {
+        BIO_meth_free(g_nosig_method);
+        g_nosig_method = NULL;
+    }
+}
+
+static int tls_attach_nosig(SSL *ssl, int fd)
+{
+    BIO *bio;
+    if (!g_nosig_method) {
+        return -1;
+    }
+    bio = BIO_new(g_nosig_method);
+    if (!bio || BIO_set_fd(bio, fd, BIO_NOCLOSE) != 1) {
+        BIO_free(bio);
+        return -1;
+    }
+    SSL_set_bio(ssl, bio, bio);
+    return 0;
+}
+
 /* ---- TLS confidentiality listener (port 2221) ---- */
 
 static unsigned int psk_server_cb(SSL *ssl, const char *identity,
@@ -176,6 +369,13 @@ int eip_sec_tls_start(eip_stack_t *s)
     if (flags >= 0) {
         fcntl(fd, F_SETFL, flags | O_NONBLOCK);
     }
+    if (nosig_method_acquire() != 0) {
+        close(fd);
+        SSL_CTX_free(s->tls_ctx);
+        s->tls_ctx = NULL;
+        LOG_ERROR("ethernetip", "MSG_NOSIGNAL TLS BIO setup failed");
+        return -ENOMEM;
+    }
     s->tls_listen_fd = fd;
     LOG_INFO("ethernetip",
              "CIP Security confidentiality: TLS PSK listen port %d",
@@ -185,9 +385,12 @@ int eip_sec_tls_start(eip_stack_t *s)
 
 void eip_sec_tls_stop(eip_stack_t *s)
 {
+    int release_nosig;
     if (!s) {
         return;
     }
+    /* Acquire runs only on the successful path that installs the listener. */
+    release_nosig = s->tls_listen_fd >= 0;
     for (int i = 0; i < EIP_TLS_CLIENTS_MAX; i++) {
         if (s->tls_clients[i].ssl) {
             SSL_shutdown(s->tls_clients[i].ssl);
@@ -210,6 +413,9 @@ void eip_sec_tls_stop(eip_stack_t *s)
     if (s->tls_ctx) {
         SSL_CTX_free(s->tls_ctx);
         s->tls_ctx = NULL;
+    }
+    if (release_nosig) {
+        nosig_method_release();
     }
 }
 
@@ -303,7 +509,12 @@ static void tls_accept(eip_stack_t *s, int budget)
             close(fd);
             continue;
         }
-        SSL_set_fd(ssl, fd);
+        if (tls_attach_nosig(ssl, fd) != 0) {
+            LOG_ERROR("ethernetip", "TLS socket BIO attach failed");
+            SSL_free(ssl);
+            close(fd);
+            continue;
+        }
         SSL_set_ex_data(ssl, 0, s);
         SSL_set_accept_state(ssl);
         SSL_set_mode(ssl, SSL_MODE_ENABLE_PARTIAL_WRITE |

@@ -79,8 +79,13 @@ static int originator_sendrr(eip_stack_t *s, const uint8_t *cip, size_t cip_len,
     eip_wr_le16(req + 2, (uint16_t)(off - EIP_ENCAP_HDR_SIZE));
     eip_wr_le32(req + 4, s->clients[0].session);
 
-    if (send(s->originator_fd, req, off, 0) < 0) {
-        return -errno;
+    if (send(s->originator_fd, req, off, MSG_NOSIGNAL) < 0) {
+        int e = errno;
+        if ((e == EPIPE || e == ECONNRESET) &&
+            s->clients[0].fd == s->originator_fd) {
+            eip_tcp_client_drop(s, &s->clients[0]);
+        }
+        return -e;
     }
 
     uint8_t resp[EIP_TCP_BUF_MAX];
