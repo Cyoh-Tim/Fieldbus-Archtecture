@@ -169,6 +169,14 @@ struct pn_stack {
 
     pthread_mutex_t io_lock;
 
+    /* Create-time NameOfStation and IP suite. DCP ResetToFactory
+     * (Control 5/5 and 5/6) copies these back. I&M1–4 factory state is
+     * the blank fill from pn_stack_create. */
+    char factory_station_name[PN_STATION_NAME_MAX + 1];
+    uint32_t factory_ip;
+    uint32_t factory_netmask;
+    uint32_t factory_gateway;
+
     /* Delayed DCP Identify.Res (ResponseDelay, 10 ms units). */
     int dcp_ident_pending;
     uint8_t dcp_ident_dst[6];

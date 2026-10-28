@@ -810,7 +810,6 @@ NAME_BLOCK = (0x02, 0x02, b"oracle-set")
 IP_BLOCK = (0x01, 0x02, bytes([192, 168, 0, 60, 255, 255, 255, 0, 192, 168, 0, 1]))
 
 
-@known_defect("T12-16", "Set.req 블록이 여러 개여도 Control/Response 블록을 하나만 돌려준다. 사양: 블록마다 하나")
 def test_dcp_set_answers_every_block(pn_dut):
     p = dcp_set(pn_dut, [NAME_BLOCK, IP_BLOCK], xid=0x5101)
     assert p is not None, "Set.res 없음"
@@ -819,8 +818,6 @@ def test_dcp_set_answers_every_block(pn_dut):
     assert res == {(0x02, 0x02): 0x00, (0x01, 0x02): 0x00}, f"응답 블록 {res}"
 
 
-@known_defect("T12-16", "설정할 수 없는 블록(DeviceVendor 2/1, 읽기 전용)에도 성공을 답한다. "
-              "사양: 그 블록의 BlockError 가 0 이 아니어야 한다")
 def test_dcp_set_read_only_block_reports_error(pn_dut):
     p = dcp_set(pn_dut, [(0x02, 0x01, b"OtherVendor")], xid=0x5102)
     assert p is not None, "Set.res 없음"
@@ -829,8 +826,6 @@ def test_dcp_set_read_only_block_reports_error(pn_dut):
     assert res[(0x02, 0x01)] != 0x00
 
 
-@known_defect("T12-16", "AR 이 있는 동안에도 NameOfStation Set 을 받아들인다. "
-              "사양: BlockError 0x06 (In operation, SET not possible)")
 def test_dcp_set_name_rejected_during_ar(pn_dut):
     pn_dut.rpc(raw(connect_pdu()))
     p = dcp_set(pn_dut, [NAME_BLOCK], xid=0x5103)

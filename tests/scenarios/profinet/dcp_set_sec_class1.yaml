@@ -14,8 +14,9 @@ steps:
     name_of_station: new-name
     xid: 0xAABBCCDD
     expect:
-      result: reject
-      station_name: old-name    # DUT cfg 불변
+      # T12-16: 서명 실패도 ServiceType 1 + BlockError. result:reject 는
+      # 하네스가 ServiceType 5 로 본다. 이름은 바뀌지 않아야 한다.
+      station_name: old-name
   - action: dcp_set
     signed: true                # HMAC over unsigned DCP body, option 0xF0/0x01
     name_of_station: new-name

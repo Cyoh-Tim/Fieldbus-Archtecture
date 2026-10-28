@@ -25,26 +25,24 @@ steps:
     name_fill: b
     xid: 0xB0000002
     expect:
-      result: reject
+      # T12-16: 거부 Set.res 는 ServiceType 1 + BlockError. 하네스의
+      # result:reject 는 ServiceType 5 를 정답으로 본다.
       station_name_len: 240
   - action: dcp_set
     name_len: 64
     name_fill: c
     xid: 0xB0000004
     expect:
-      result: reject
       station_name_len: 240
   - action: dcp_set
     name_of_station: 192.168.0.1
     xid: 0xB0000005
     expect:
-      result: reject
       station_name_len: 240
   - action: dcp_set
     name_of_station: port-abc
     xid: 0xB0000006
     expect:
-      result: reject
       station_name_len: 240
   - action: dcp_set
     name_of_station: sensor-line1

@@ -529,12 +529,337 @@ static void test_response_blockinfo(void)
     pn_stack_destroy(s);
 }
 
+/* One Set.res Control/Response entry: the request block it answers. */
+typedef struct {
+    uint8_t opt;
+    uint8_t sub;
+    uint8_t err;
+} set_res_t;
+
+static size_t append_set_block(uint8_t *blocks, size_t bn, uint8_t opt,
+                               uint8_t sub, const void *val, size_t vlen)
+{
+    uint16_t blen = (uint16_t)(2u + vlen);
+    blocks[bn++] = opt;
+    blocks[bn++] = sub;
+    pn_wr_be16(blocks + bn, blen);
+    bn += 2;
+    pn_wr_be16(blocks + bn, 1); /* BlockQualifier: permanent */
+    bn += 2;
+    if (vlen && val) {
+        memcpy(blocks + bn, val, vlen);
+        bn += vlen;
+    }
+    if (blen & 1u) {
+        blocks[bn++] = 0;
+    }
+    return bn;
+}
+
+static size_t dcp_set_blocks_frame(uint8_t *out, const uint8_t *dst,
+                                   const uint8_t *src, uint32_t xid,
+                                   const uint8_t *blocks, size_t bn)
+{
+    uint8_t pay[PN_FRAME_MAX];
+    pn_wr_be16(pay, PN_FRAMEID_DCP_GETSET);
+    pay[2] = PN_DCP_SET;
+    pay[3] = PN_DCP_REQ;
+    pn_wr_be32(pay + 4, xid);
+    pn_wr_be16(pay + 8, 0);
+    pn_wr_be16(pay + 10, (uint16_t)bn);
+    memcpy(pay + 12, blocks, bn);
+    return pn_eth_build(out, PN_FRAME_MAX, dst, src, PN_ETHTYPE_PN, pay,
+                        12 + bn);
+}
+
+/* Set.res Control/Response blocks. Returns the count, or -1 if the frame
+ * is not a Set response. */
+static int parse_set_responses(const uint8_t *frame, size_t len, uint8_t *stype,
+                               set_res_t *out, int cap)
+{
+    if (!frame || len < 26 || pn_rd_be16(frame + 14) != PN_FRAMEID_DCP_GETSET ||
+        frame[16] != PN_DCP_SET) {
+        return -1;
+    }
+    *stype = frame[17];
+    uint16_t dlen = pn_rd_be16(frame + 24);
+    if (26u + dlen > len) {
+        return -1;
+    }
+    const uint8_t *blocks = frame + 26;
+    int n = 0;
+    size_t off = 0;
+    while (off + 4 <= dlen) {
+        uint16_t bl = pn_rd_be16(blocks + off + 2);
+        size_t total = 4u + bl + (bl & 1u);
+        if (off + total > dlen) {
+            return -1;
+        }
+        if (blocks[off] == PN_DCP_OPT_CTRL &&
+            blocks[off + 1] == PN_DCP_SUB_CTRL_RESPONSE && bl >= 3 && n < cap) {
+            out[n].opt = blocks[off + 4];
+            out[n].sub = blocks[off + 5];
+            out[n].err = blocks[off + 6];
+            n++;
+        }
+        off += total;
+    }
+    return n;
+}
+
+static int set_res_err(const set_res_t *r, int n, uint8_t opt, uint8_t sub,
+                       uint8_t *err)
+{
+    for (int i = 0; i < n; i++) {
+        if (r[i].opt == opt && r[i].sub == sub) {
+            *err = r[i].err;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* T12-16: one Control/Response per Set block, ServiceType success on errors,
+ * read-only and in-AR name/IP rejected, ResetToFactory restores factory state. */
+static void test_t12_16_set_rules(void)
+{
+    pn_stack_t *s = make_dcp_stack();
+    expect(s != NULL, "t12-16 stack");
+    if (!s) {
+        return;
+    }
+    uint8_t dst[6];
+    memcpy(dst, s->cfg.mac, 6);
+    uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t frame[PN_FRAME_MAX];
+    uint8_t blocks[256];
+    uint8_t ipb[12];
+    pn_wr_be32(ipb, 0xC0A80014u);
+    pn_wr_be32(ipb + 4, 0xFFFFFF00u);
+    pn_wr_be32(ipb + 8, 0xC0A80001u);
+
+    /* Name + IP: a response block for each, ServiceType success, both OK. */
+    size_t bn = 0;
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME,
+                          "press-7", 7);
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ipb,
+                          sizeof(ipb));
+    tx_reset();
+    size_t flen = dcp_set_blocks_frame(frame, dst, src, 0x5101, blocks, bn);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "set name+ip");
+    size_t rlen = 0;
+    const uint8_t *rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    uint8_t stype = 0xFF;
+    set_res_t res[8];
+    int nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(nres == 2, "name+ip yields two Control/Response blocks");
+    expect(stype == PN_DCP_RESP_SUCCESS, "name+ip ServiceType success");
+    uint8_t err = 0xFF;
+    expect(set_res_err(res, nres, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, &err) &&
+               err == 0x00,
+           "NameOfStation BlockError 0");
+    expect(set_res_err(res, nres, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, &err) &&
+               err == 0x00,
+           "IP parameter BlockError 0");
+    expect(strcmp(s->cfg.station_name, "press-7") == 0, "name applied");
+    expect(s->cfg.ip == 0xC0A80014u, "ip applied");
+
+    /* Read-only TypeOfStation (2/1): BlockError is not OK. Name stays. */
+    bn = 0;
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_TYPE,
+                          "OtherVendor", 11);
+    tx_reset();
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5102, blocks, bn);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "set type of station");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(stype == PN_DCP_RESP_SUCCESS, "read-only ServiceType success");
+    expect(set_res_err(res, nres, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_TYPE, &err) &&
+               err != 0x00,
+           "TypeOfStation BlockError is not OK");
+    expect(strcmp(s->cfg.station_name, "press-7") == 0,
+           "read-only set leaves name");
+
+    /* Bad NameOfStation: ServiceType stays success; the block is not OK. */
+    tx_reset();
+    flen = dcp_set_name_frame(frame, dst, src, "port-abc");
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "set reserved port name");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(stype == PN_DCP_RESP_SUCCESS && stype != PN_DCP_RESP_UNSUP,
+           "invalid name ServiceType is success, not unsupported");
+    expect(set_res_err(res, nres, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, &err) &&
+               err != 0x00,
+           "invalid name BlockError is not OK");
+    expect(strcmp(s->cfg.station_name, "press-7") == 0, "invalid name not applied");
+
+    /* AR up: Name and IP are BlockError 0x06 and are not applied. */
+    s->ar.established = 1;
+    tx_reset();
+    flen = dcp_set_name_frame(frame, dst, src, "during-ar");
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "set name during ar");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(stype == PN_DCP_RESP_SUCCESS, "in-ar name ServiceType success");
+    expect(set_res_err(res, nres, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, &err) &&
+               err == 0x06,
+           "in-ar name BlockError 0x06");
+    expect(strcmp(s->cfg.station_name, "press-7") == 0, "in-ar name not applied");
+
+    uint32_t ip_before = s->cfg.ip;
+    pn_wr_be32(ipb, 0x0A000001u);
+    bn = 0;
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ipb,
+                          sizeof(ipb));
+    tx_reset();
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5104, blocks, bn);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "set ip during ar");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(set_res_err(res, nres, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, &err) &&
+               err == 0x06,
+           "in-ar ip BlockError 0x06");
+    expect(s->cfg.ip == ip_before, "in-ar ip not applied");
+    s->ar.established = 0;
+
+    /* ResetToFactory (5/6) and Reset Factory Settings (5/5) restore the
+     * create-time name, IP suite, and I&M1–4. */
+    uint8_t im[PN_IM1_FUNC_LEN + PN_IM1_LOC_LEN];
+    memset(im, 'X', sizeof(im));
+    expect(pn_record_write(s, 0, 1, PN_INDEX_IM1, im, sizeof(im)) == 0,
+           "write im1");
+    uint8_t im2[PN_IM2_DATE_LEN];
+    memset(im2, 'Y', sizeof(im2));
+    expect(pn_record_write(s, 0, 1, PN_INDEX_IM2, im2, sizeof(im2)) == 0,
+           "write im2");
+    uint8_t im4[PN_IM4_SIG_LEN];
+    memset(im4, 0x5A, sizeof(im4));
+    expect(pn_record_write(s, 0, 1, PN_INDEX_IM4, im4, sizeof(im4)) == 0,
+           "write im4");
+    bn = 0;
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_CTRL, 0x06, NULL, 0);
+    tx_reset();
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5105, blocks, bn);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "reset to factory");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(stype == PN_DCP_RESP_SUCCESS, "reset ServiceType success");
+    expect(set_res_err(res, nres, PN_DCP_OPT_CTRL, 0x06, &err) && err == 0x00,
+           "ResetToFactory BlockError 0");
+    expect(strcmp(s->cfg.station_name, "sensor-line1") == 0,
+           "reset restores station name");
+    expect(s->cfg.ip == 0 && s->cfg.netmask == 0 && s->cfg.gateway == 0,
+           "reset restores ip suite");
+    uint8_t got[128];
+    size_t got_n = 0;
+    expect(pn_record_read(s, 0, 1, PN_INDEX_IM1, got, sizeof(got), &got_n) == 0,
+           "read im1");
+    int im_blank = got_n >= 6 + sizeof(im);
+    for (size_t i = 0; im_blank && i < sizeof(im); i++) {
+        if (got[6 + i] != ' ') {
+            im_blank = 0;
+        }
+    }
+    expect(im_blank, "reset clears I&M1 to spaces");
+    got_n = 0;
+    expect(pn_record_read(s, 0, 1, PN_INDEX_IM4, got, sizeof(got), &got_n) == 0,
+           "read im4");
+    int im4_zero = got_n >= 6 + PN_IM4_SIG_LEN;
+    for (size_t i = 0; im4_zero && i < PN_IM4_SIG_LEN; i++) {
+        if (got[6 + i] != 0) {
+            im4_zero = 0;
+        }
+    }
+    expect(im4_zero, "reset clears I&M4");
+
+    bn = 0;
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME,
+                          "again-1", 7);
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5106, blocks, bn);
+    pn_stack_handle_eth(s, frame, flen);
+    expect(pn_record_write(s, 0, 1, PN_INDEX_IM3, im2, sizeof(im2)) == 0,
+           "write im3");
+    bn = 0;
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_CTRL, 0x05, NULL, 0);
+    tx_reset();
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5107, blocks, bn);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "reset factory settings");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(set_res_err(res, nres, PN_DCP_OPT_CTRL, 0x05, &err) && err == 0x00,
+           "Reset Factory Settings BlockError 0");
+    expect(strcmp(s->cfg.station_name, "sensor-line1") == 0,
+           "factory settings restores name");
+    got_n = 0;
+    expect(pn_record_read(s, 0, 1, PN_INDEX_IM3, got, sizeof(got), &got_n) == 0,
+           "read im3");
+    im_blank = got_n >= 6 + PN_IM3_DESC_LEN;
+    for (size_t i = 0; im_blank && i < PN_IM3_DESC_LEN; i++) {
+        if (got[6 + i] != ' ') {
+            im_blank = 0;
+        }
+    }
+    expect(im_blank, "factory settings clears I&M3");
+
+    /* In operation, factory reset is refused and the name stays. */
+    bn = 0;
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME,
+                          "keep-me", 7);
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5108, blocks, bn);
+    pn_stack_handle_eth(s, frame, flen);
+    s->ar.established = 1;
+    bn = 0;
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_CTRL, 0x06, NULL, 0);
+    tx_reset();
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5109, blocks, bn);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "reset during ar");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(set_res_err(res, nres, PN_DCP_OPT_CTRL, 0x06, &err) && err == 0x06,
+           "in-ar ResetToFactory BlockError 0x06");
+    expect(strcmp(s->cfg.station_name, "keep-me") == 0,
+           "in-ar reset leaves name");
+
+    pn_stack_destroy(s);
+
+    /* Unsigned Set while the vendor integrity extension is required:
+     * ServiceType success + a non-zero BlockError, name unchanged. */
+    pn_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    snprintf(cfg.iface, sizeof(cfg.iface), "mock");
+    snprintf(cfg.station_name, sizeof(cfg.station_name), "lab");
+    cfg.security_class = PN_VENDOR_INTEGRITY;
+    cfg.enforce_security_class = 1;
+    cfg.psk_set = 1;
+    memset(cfg.psk, 0x33, PN_PSK_LEN);
+    s = pn_stack_create(&cfg);
+    expect(s != NULL, "enforce stack for service type");
+    if (!s) {
+        return;
+    }
+    pn_eth_ops_t ops = {.send = capture_send, .recv = NULL, .ctx = NULL};
+    pn_stack_set_eth_ops(s, ops);
+    pn_stack_start(s);
+    memcpy(dst, s->cfg.mac, 6);
+    tx_reset();
+    flen = dcp_set_name_frame(frame, dst, src, "prod-name");
+    pn_stack_handle_eth(s, frame, flen);
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(stype == PN_DCP_RESP_SUCCESS && stype != PN_DCP_RESP_UNSUP,
+           "integrity failure ServiceType is success, not unsupported");
+    expect(nres >= 1 && res[0].err != 0x00, "integrity failure BlockError");
+    expect(strcmp(s->cfg.station_name, "lab") == 0, "unsigned name not applied");
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
     test_name_ok();
     test_ident_filter_and_delay();
     test_set_name_and_enforce();
     test_response_blockinfo();
+    test_t12_16_set_rules();
     if (g_fail) {
         fprintf(stderr, "test_pn_dcp: FAILED\n");
         return 1;
