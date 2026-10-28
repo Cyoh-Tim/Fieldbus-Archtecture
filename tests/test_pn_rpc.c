@@ -1167,6 +1167,7 @@ static void test_t12_6_rtc1_datastatus_run(void)
 static const uint8_t k_t1214_obj_le[16] = {
     0x00, 0x00, 0xA0, 0xDE, 0x97, 0x6C, 0xD1, 0x11,
     0x82, 0x71, 0x00, 0x01, 0x00, 0x01, 0xAB, 0xCD};
+/* Reverse node: Instance + VendorID + DeviceID (…-0001abcd0001). */
 static const uint8_t k_t1214_obj_swapped_le[16] = {
     0x00, 0x00, 0xA0, 0xDE, 0x97, 0x6C, 0xD1, 0x11,
     0x82, 0x71, 0x00, 0x01, 0xAB, 0xCD, 0x00, 0x01};
@@ -1328,7 +1329,11 @@ static void test_t12_14_rpc_vers_and_uuids(void)
                      0, 4);
     rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
     expect(rc == 0 && rlen > 80 && pn_stack_ar_up(s) == 1,
-           "t12-14 device object UUID (instance, device, vendor) accepted");
+           "t12-14 p-net object UUID (instance, device, vendor) accepted");
+    if (rlen >= 24) {
+        expect(memcmp(resp + 8, k_t1214_obj_le, 16) == 0,
+               "t12-14 response object UUID is dea00000-…-00010001abcd");
+    }
     pn_stack_destroy(s);
 
     s = make_stack();
@@ -1336,8 +1341,8 @@ static void test_t12_14_rpc_vers_and_uuids(void)
     plen = t1214_req(pdu, 4, 0, 0, k_t1214_obj_swapped_le, k_t1214_if_le, stub,
                      sn, 0x20, 0, 5);
     rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
-    expect(rc == 0 && pn_stack_ar_up(s) == 1,
-           "t12-14 oracle object tail (instance, vendor, device) accepted");
+    expect(rc != 0 && rlen == 0 && pn_stack_ar_up(s) == 0,
+           "t12-14 reverse object tail (instance, vendor, device) rejected");
     pn_stack_destroy(s);
 }
 

@@ -1020,23 +1020,18 @@ static void parse_rpc_hdr(const uint8_t *pdu, size_t len, rpc_hdr_t *h)
     }
 }
 
-/* Instance 1, then either DeviceID|VendorID (p-net / IEC) or
- * VendorID|DeviceID (the oracle Connect object tail). */
+/* Instance(2) + DeviceID(2) + VendorID(2). The reverse node
+ * (Instance + VendorID + DeviceID) is not this device's object. */
 static int object_is_device(const pn_stack_t *s, const uint8_t canon[16])
 {
     if (memcmp(canon, k_obj_prefix, sizeof(k_obj_prefix)) != 0) {
         return 0;
     }
     uint8_t spec[6];
-    uint8_t swapped[6];
     pn_wr_be16(spec, 1);
     pn_wr_be16(spec + 2, s->cfg.device_id);
     pn_wr_be16(spec + 4, s->cfg.vendor_id);
-    pn_wr_be16(swapped, 1);
-    pn_wr_be16(swapped + 2, s->cfg.vendor_id);
-    pn_wr_be16(swapped + 4, s->cfg.device_id);
-    return memcmp(canon + 10, spec, 6) == 0 ||
-           memcmp(canon + 10, swapped, 6) == 0;
+    return memcmp(canon + 10, spec, 6) == 0;
 }
 
 static void device_object_canon(const pn_stack_t *s, uint8_t out[16])
