@@ -151,8 +151,12 @@ def connect_pdu(station=b"controller", scf=32, rr=16, slot1_module=0x00000010,
 
 def pnio_request(opnum, blocks, seqnum):
     """PNIO Device 인터페이스로 가는 DCE/RPC 요청 (opnum 0 Connect, 2 Read, 3 Write, 4 Control)."""
+    # 장치 object UUID 노드 = Instance(2) DeviceID(2) VendorID(2) — DUT 는 instance 1, device 0x0001, vendor 0xABCD.
+    # p-net src/device/pf_cmrpc_epm.c (EPM 응답 object 노드: 0x0001, device_id, vendor_id), p-net test/test_cmrpc.cpp 의
+    # 캡처 (…0001 BEEF FEED, device 0xBEEF / vendor 0xFEED), docs/protocols/profinet.md:194·:1011.
+    # (2026-10-27 정정: Vendor·Device 순서를 바꿔 0001abcd0001 로 적었었다 — #151 반론, fable 2차 의견 동의.)
     rpc = DceRpc4(ptype="request", flags1=0x20, opnum=opnum, if_id=PNIO_DEVICE_IF,
-                  object="dea00000-6c97-11d1-8271-0001abcd0001",
+                  object="dea00000-6c97-11d1-8271-00010001abcd",
                   act_id=str(uuid.UUID(int=1)), seqnum=seqnum)
     return rpc / PNIOServiceReqPDU(args_max=16384, blocks=blocks)
 
