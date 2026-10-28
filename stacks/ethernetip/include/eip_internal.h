@@ -158,6 +158,8 @@ uint8_t eip_identity_state(const eip_stack_t *s);
 /* Host-order IPv4 of a connected or bound socket. 0 if unknown. */
 uint32_t eip_ipv4_local(int fd);
 void eip_encap_drop_owner(eip_stack_t *s, uint32_t owner_id);
+/* Close one accepted TCP client. Also clears originator_fd when it is this fd. */
+void eip_tcp_client_drop(eip_stack_t *s, eip_tcp_client_t *c);
 
 #define EIP_ENCAP_OWNER_MOCK 0x80000001u
 #define EIP_ENCAP_OWNER_TCP  0x10000000u

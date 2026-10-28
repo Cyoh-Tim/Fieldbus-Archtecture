@@ -151,8 +151,12 @@ def connect_pdu(station=b"controller", scf=32, rr=16, slot1_module=0x00000010,
 
 def pnio_request(opnum, blocks, seqnum):
     """PNIO Device 인터페이스로 가는 DCE/RPC 요청 (opnum 0 Connect, 2 Read, 3 Write, 4 Control)."""
+    # 장치 object UUID 노드 = Instance(2) DeviceID(2) VendorID(2) — DUT 는 instance 1, device 0x0001, vendor 0xABCD.
+    # p-net src/device/pf_cmrpc_epm.c (EPM 응답 object 노드: 0x0001, device_id, vendor_id), p-net test/test_cmrpc.cpp 의
+    # 캡처 (…0001 BEEF FEED, device 0xBEEF / vendor 0xFEED), docs/protocols/profinet.md:194·:1011.
+    # (2026-10-27 정정: Vendor·Device 순서를 바꿔 0001abcd0001 로 적었었다 — #151 반론, fable 2차 의견 동의.)
     rpc = DceRpc4(ptype="request", flags1=0x20, opnum=opnum, if_id=PNIO_DEVICE_IF,
-                  object="dea00000-6c97-11d1-8271-0001abcd0001",
+                  object="dea00000-6c97-11d1-8271-00010001abcd",
                   act_id=str(uuid.UUID(int=1)), seqnum=seqnum)
     return rpc / PNIOServiceReqPDU(args_max=16384, blocks=blocks)
 
@@ -215,7 +219,6 @@ def test_dcp_identify_device_role(pn_dut):
 
 
 # ---------------------------------------------------------------- LLDP
-@known_defect("T12-11", "PROFINET 조직 TLV 의 OUI 가 00-0C-CF 다. PNO OUI 는 00-0E-CF")
 def test_lldp_pno_oui(pn_dut):
     frames = [f for f in tx_frames(pn_dut.startup) if f.type == 0x88CC]
     assert frames, "시작 시 LLDP 송신 없음"
@@ -234,7 +237,6 @@ def _lldp_tlvs(pn_dut):
     return list(frames[0].getlayer(LLDPDU).iterpayloads())
 
 
-@known_defect("T12-11", "Port ID 가 MAC (subtype 3) 다. PROFINET 은 subtype 7 locally assigned \"port-001\"")
 def test_lldp_port_id_is_port_name(pn_dut):
     ports = [t for t in _lldp_tlvs(pn_dut) if isinstance(t, LLDPDUPortID)]
     assert len(ports) == 1 and ports[0].subtype == 7, ports
@@ -242,7 +244,6 @@ def test_lldp_port_id_is_port_name(pn_dut):
     assert pid == b"port-001" or pid.startswith(b"port-001."), pid
 
 
-@known_defect("T12-11", "PNO Port Status·Chassis MAC, IEEE 802.3 MAC/PHY, Management Address TLV 가 없다 (토폴로지 검출 불가)")
 def test_lldp_profinet_required_tlvs(pn_dut):
     tlvs = _lldp_tlvs(pn_dut)
     org = {(t.org_code, t.subtype) for t in tlvs if isinstance(t, LLDPDUGenericOrganisationSpecific)}

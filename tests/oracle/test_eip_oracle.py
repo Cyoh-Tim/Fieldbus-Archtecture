@@ -1436,8 +1436,6 @@ def originator_cfg(port: int) -> dict:
     }
 
 
-@known_defect("A20261025-1", "응답을 TCP 로 보낼 때 MSG_NOSIGNAL 이 없어, 요청을 몰아 보내고 닫은 피어에 세 번째 응답을 "
-              "쓰는 순간 SIGPIPE 로 프로세스(데몬)가 죽는다. OpENer 는 MSG_NOSIGNAL, EIPScanner 는 SO_NOSIGPIPE")
 def test_peer_close_does_not_kill_adapter(eip_dut):
     for _ in range(5):
         c = socket.create_connection(("127.0.0.1", eip_dut.port), timeout=2)
