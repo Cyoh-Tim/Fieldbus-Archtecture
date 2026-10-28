@@ -320,7 +320,7 @@ static int connect_originator(eip_stack_t *s)
     eip_wr_le16(req + 2, 4);
     eip_wr_le16(req + 24, 1);
     eip_wr_le16(req + 26, 0);
-    if (send(fd, req, sizeof(req), 0) < 0) {
+    if (send(fd, req, sizeof(req), MSG_NOSIGNAL) < 0) {
         int e = errno;
         close(fd);
         s->originator_fd = -1;
@@ -529,13 +529,16 @@ static uint32_t tcp_client_owner(eip_stack_t *s, eip_tcp_client_t *c)
     return eip_tcp_owner_id((int)slot);
 }
 
-static void tcp_client_drop(eip_stack_t *s, eip_tcp_client_t *c)
+void eip_tcp_client_drop(eip_stack_t *s, eip_tcp_client_t *c)
 {
     uint32_t owner = tcp_client_owner(s, c);
     pthread_mutex_lock(&s->lock);
     eip_encap_drop_owner(s, owner);
     pthread_mutex_unlock(&s->lock);
     if (c->fd >= 0) {
+        if (s->originator_fd == c->fd) {
+            s->originator_fd = -1;
+        }
         close(c->fd);
         c->fd = -1;
     }
@@ -554,12 +557,12 @@ static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
         ssize_t n = recv(c->fd, tmp, sizeof(tmp), 0);
         if (n <= 0) {
             if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) {
-                tcp_client_drop(s, c);
+                eip_tcp_client_drop(s, c);
             }
             break;
         }
         if (c->rx_len + (size_t)n > sizeof(c->rx)) {
-            tcp_client_drop(s, c);
+            eip_tcp_client_drop(s, c);
             break;
         }
         memcpy(c->rx + c->rx_len, tmp, (size_t)n);
@@ -593,7 +596,11 @@ static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
                 if (s->tops_set && s->tops.tcp_send) {
                     s->tops.tcp_send(s->tops.ctx, resp, resp_len);
                 } else {
-                    (void)send(c->fd, resp, resp_len, 0);
+                    ssize_t w = send(c->fd, resp, resp_len, MSG_NOSIGNAL);
+                    if (w < 0 && (errno == EPIPE || errno == ECONNRESET)) {
+                        eip_tcp_client_drop(s, c);
+                        return;
+                    }
                 }
             }
             memmove(c->rx, c->rx + need, c->rx_len - need);
@@ -756,7 +763,7 @@ void eip_stack_poll(eip_stack_t *s)
             if (s->clients[i].active && idle_ns > 0 && last != 0 && now > last &&
                 now - last > idle_ns) {
                 LOG_INFO("ethernetip", "idle timeout TCP slot %d", i);
-                tcp_client_drop(s, &s->clients[i]);
+                eip_tcp_client_drop(s, &s->clients[i]);
             }
         }
         service_udp(s, EIP_POLL_UDP_BUDGET);
