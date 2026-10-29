@@ -120,6 +120,7 @@
 | 96 | A20261025-3 | EIP Originator 가 대상의 TCP 종료를 감지·재연결하지 않고 health 는 connected 로 남음 | `stacks/ethernetip/`, `tests/` | A20261025-3 | 같은 보고서. 큐 95 와 같은 PR 허용, 큐 94 (SIGPIPE) 이후가 좋다 |
 | 97 | A20261025-4 | EIP 어댑터가 `length` 생략 숫자 포인트를 1바이트로, `data_type` 생략 포인트를 무변환으로 다룸 (uint16 300 → `01 00`) | `adapters/ethernetip/`, `tests/` | A20261025-4 ×4 | 같은 보고서. 기본 = data_type 크기·LE (CIP UINT/DINT, T0 A안). PN 어댑터 같은 패턴은 범위 밖 |
 | 98 | A20261025-5 | EIP Originator TCP connect 가 블로킹·타임아웃 없음 — 응답 없는 대상이면 `fb_open` 이 ~130 s 막힘 | `stacks/ethernetip/`, `tests/` | A20261025-5 | 같은 보고서. 근거 EIPScanner `TCPSocket.cpp` (non-blocking + 타임아웃), pycomm3 5 s. Modbus T9-5 와 같은 방식 |
+| 99 | A20261028-1 | EIP TCP·TLS 응답의 짧은 `send`·`EAGAIN`·`SSL_ERROR_WANT_WRITE` 를 성공으로 보고 나머지를 버림 — 스캐너가 잠시 안 읽으면 응답이 빠지고 잘린 프레임으로 스트림 경계가 깨짐 (연결 유지) | `stacks/ethernetip/`, `tests/` | A20261028-1 | 출처 #164 "발견한 다른 문제", 보고서 [audits/20261028-eip-partial-send.md](audits/20261028-eip-partial-send.md). 근거 OpENer (accept 소켓 blocking). Modbus T9-8 (큐 52) 과 같은 기준 |
 
 ## 이슈 본문 템플릿
 
