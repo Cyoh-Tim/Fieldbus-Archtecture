@@ -227,6 +227,7 @@ static int parse_uuid_any(uint16_t type, const uint8_t *body, uint16_t blen,
     }
     if ((type == PN_BLOCK_AR_REQ && blen >= 18) ||
         (type == PN_BLOCK_CONTROL_REQ && blen >= 18) ||
+        (type == PN_BLOCK_RELEASE_REQ && blen >= 18) ||
         (type == PN_BLOCK_IOD_READ_REQ && blen >= 18) ||
         (type == PN_BLOCK_IOD_WRITE_REQ && blen >= 18)) {
         copy_uuid(w->aruuid, body + 2);
@@ -1302,11 +1303,20 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
                 return -EPERM;
             }
         }
+        /* ReleaseBlockRes 0x8114: same body as IODControlRes, command Done.
+         * Copy the AR identity before it is cleared. */
+        uint8_t cres[26];
+        memset(cres, 0, sizeof(cres));
+        memcpy(cres + 2, s->ar.uuid, 16);
+        pn_wr_be16(cres + 18, s->ar.session_key);
+        pn_wr_be16(cres + 22, PN_CONTROL_DONE);
+        uint8_t blocks_res[64];
+        size_t bn = wr_block(blocks_res, PN_BLOCK_RELEASE_RES, cres,
+                             sizeof(cres));
         s->ar.established = 0;
         memset(&s->ar, 0, sizeof(s->ar));
         clear_pending_rpc(s);
-        uint8_t z[4] = {0};
-        so = ndr_res(stub_out, NULL, z, 4);
+        so = ndr_res(stub_out, NULL, blocks_res, bn);
         LOG_INFO("pn_rpc", "AR released");
     } else if (op == OP_CONTROL) {
         if (!s->ar.established) {

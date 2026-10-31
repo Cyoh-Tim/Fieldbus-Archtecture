@@ -1094,6 +1094,88 @@ static void test_t12_5_app_ready_dest_rpc_port(void)
     }
 }
 
+/* ReleaseBlockReq (0x0114): same body as IODControlReq.
+ * pad(2) ARUUID(16) SessionKey(2) AlarmSequenceNumber(2)
+ * ControlCommand(2) = Release 0x0004, ControlBlockProperties(2). */
+static size_t build_release_0114(uint8_t *pdu, const uint8_t uuid[16])
+{
+    uint8_t body[26];
+    memset(body, 0, sizeof(body));
+    memcpy(body + 2, uuid, 16);
+    pn_wr_be16(body + 18, 1);
+    pn_wr_be16(body + 22, PN_CONTROL_RELEASE);
+    uint8_t blocks[64];
+    size_t bn = wr_block(blocks, PN_BLOCK_RELEASE_REQ, body, sizeof(body));
+    uint8_t stub[128];
+    size_t sn = ndr_wrap(stub, blocks, bn);
+    return wrap_rpc(pdu, 1, stub, sn);
+}
+
+/* T12-17: a standard Release (opnum 1, block 0x0114) must answer
+ * ReleaseBlockRes 0x8114 with ControlCommand Done and drop the AR so
+ * RTC1 stops. The 0x0101 form is not what a controller sends. */
+static void test_t12_17_standard_release(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "t12-17 create");
+    if (!s) {
+        return;
+    }
+    pn_eth_ops_t ops = {.send = capture_send, .recv = NULL, .ctx = NULL};
+    pn_stack_set_eth_ops(s, ops);
+
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = build_connect(pdu);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "t12-17 connect");
+    expect(pn_stack_ar_up(s) == 1, "t12-17 ar up");
+
+    g_ntx = 0;
+    pn_rt_send_if_due(s);
+    expect(g_ntx >= 1, "t12-17 RTC1 while AR is up");
+
+    uint8_t bad_uuid[16];
+    memset(bad_uuid, 0x11, sizeof(bad_uuid));
+    plen = build_release_0114(pdu, bad_uuid);
+    rlen = 0;
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               -EPERM,
+           "t12-17 release wrong ARUUID rejected");
+    expect(pn_stack_ar_up(s) == 1, "t12-17 AR kept after wrong UUID");
+
+    uint8_t want_uuid[16];
+    fill_aruuid(want_uuid);
+    plen = build_release_0114(pdu, want_uuid);
+    rlen = 0;
+    int rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect(rc == 0, "t12-17 standard Release accepted");
+    expect(pn_stack_ar_up(s) == 0, "t12-17 AR down after Release");
+    expect(rlen >= 80 + 20 + 32, "t12-17 Release response present");
+    if (rlen >= 80 + 20 + 32) {
+        const uint8_t *rstub = resp + 80;
+        expect_u32(pn_rd_le32(rstub), 0, "t12-17 Release PNIOStatus");
+        uint32_t blen = pn_rd_le32(rstub + 4);
+        expect(blen >= 32, "t12-17 ArgsLength covers ReleaseBlockRes");
+        const uint8_t *blk = rstub + 20;
+        expect(pn_rd_be16(blk) == PN_BLOCK_RELEASE_RES,
+               "t12-17 res block type 0x8114");
+        expect(pn_rd_be16(blk + 2) == 28, "t12-17 res block_length 28");
+        expect(memcmp(blk + 8, want_uuid, 16) == 0, "t12-17 res ARUUID");
+        expect(pn_rd_be16(blk + 24) == 1, "t12-17 res SessionKey");
+        expect(pn_rd_be16(blk + 28) == PN_CONTROL_DONE,
+               "t12-17 res ControlCommand Done");
+    }
+
+    int ntx_before = g_ntx;
+    s->last_rt_ns = 0; /* due immediately; a live AR would emit another RTC1 */
+    pn_rt_send_if_due(s);
+    expect(g_ntx == ntx_before, "t12-17 no RTC1 after Release");
+    pn_stack_destroy(s);
+}
+
 /* T12-6: RTC1 APDUStatus DataStatus must be 0x35
  * (Primary 0x01 | DataValid 0x04 | ProviderState Run 0x10 |
  * StationProblemIndicator no-problem 0x20). PN_DATASTATUS_RUN 0x20 was
@@ -1147,6 +1229,7 @@ static void test_t12_6_rtc1_datastatus_run(void)
 
 int main(void)
 {
+    test_t12_17_standard_release();
     test_t12_5_prm_end_and_app_ready();
     test_t12_5_app_ready_dest_rpc_port();
     test_t12_6_rtc1_datastatus_run();

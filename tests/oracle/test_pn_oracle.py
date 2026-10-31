@@ -1028,8 +1028,6 @@ def test_dcp_get_unsupported_option_reports_block_error(pn_dut):
 
 
 # ---------------------------------------------------------------- Release (T12-17)
-@known_defect("T12-17", "표준 Release(블록 0x0114) 의 ARUUID 를 찾지 못해 거부한다. 응답이 없고 AR·RTC1 이 유지된다. "
-              "사양: 0x8114 ControlCommand Done 응답 후 AR 해제")
 def test_release_standard_block(pn_dut):
     assert rtc1_frames(pn_dut, poll_ms=40), "AR 수립 후 RTC1 프레임 없음"
     rel = IODControlReq(ARUUID=AR_UUID, SessionKey=SESSION_KEY, ControlCommand_Release=1)
