@@ -56,8 +56,8 @@
 | 32 | T12-10 | PN 알람 RTA-PDU 형식·AlarmCRBlockReq 파싱 | `stacks/profinet/`, `tests/` | T12-10 ×2 | |
 | 33 | T12-11 | PN LLDP OUI·PortID·필수 TLV | `stacks/profinet/`, `tests/` | T12-11 |. 2026-10-25 #155 검증: scapy LLDP 확인을 오라클로 옮김 — `test_lldp_port_id_is_port_name`, `test_lldp_profinet_required_tlvs` 의 T12-11 표시도 이 항목 PR 에서 함께 지운다 (통과할 때만) |
 | 34 | T12-12 | PN AlarmCRBlockRes 길이, ARBlockRes 포트 | `stacks/profinet/`, `tests/` | T12-12 ×2 | |
-| 35 | T12-14 | PN DCE/RPC 헤더 처리 (drep, UUID, 단편화, EPM) | `stacks/profinet/`, `tests/` | T12-14 ×4 |. 2026-10-27 (#151 반론): 오라클 `pnio_request` 의 장치 object UUID 를 Instance+DeviceID+VendorID (`…-00010001abcd`) 로 정정. object UUID 검사는 이 순서만 받는다. EPM 은 UDP 34964 에서만 (UDP 135 안 엶) |
-| 36 | T12-16 | PN DCP Set 처리 규칙 | `stacks/profinet/`, `tests/` | T12-16 ×3 | |
+| 35 | T12-14 | PN DCE/RPC 헤더 처리 (drep, UUID, 단편화, EPM) | `stacks/profinet/`, `tests/` | T12-14 ×4 |. 2026-10-27 (#151 반론): 오라클 `pnio_request` 의 장치 object UUID 를 Instance+DeviceID+VendorID (`…-00010001abcd`) 로 정정. object UUID 검사는 이 순서만 받는다. EPM 은 UDP 34964 에서만 (UDP 135 안 엶). 2026-10-29: EPM 오라클을 scapy `ept_lookup_Response`·`protocol_tower_t` 디코드로 강화 (ept_entry_t 배치, tower floor 개수·길이 LE) — 보고서 [audits/20261029-pn-dcp-ar-epm.md](audits/20261029-pn-dcp-ar-epm.md) |
+| 36 | T12-16 | PN DCP Set 처리 규칙 | `stacks/profinet/`, `tests/`, `tools/ctt/proto/profinet/` (DCP Set `result: reject` 판정만) | T12-16 ×7 | 2026-10-29 오라클 정정 (#167 답): AR 중 이름 Set 은 기본 수락 + AR abort, ARProperties bit 27 RejectDCPsetRequests=1 일 때만 거부. AR 중 IP Set 거부. ResetToFactory 는 BlockQualifier 모드별, 공장값 = 빈 이름·0.0.0.0, AR 중 수락 + abort. 근거 p-net CMINA 상태표 구현·Wireshark — 보고서 [audits/20261029-pn-dcp-ar-epm.md](audits/20261029-pn-dcp-ar-epm.md). CTT 하네스 `reject` = ServiceType 1 + BlockError ≠ 0 |
 | 37 | T12-17 | PN 표준 Release(0x0114) | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-17 | |
 | 38 | T12-18 | PN 미지원 레코드 index 에러 | `stacks/profinet/`, `tests/` | T12-18 ×2 | T12-1 이후 |
 | 39 | T12-19 | PN SNMP 요청 파싱 | `stacks/profinet/`, `tests/` | T12-19 ×2 | |
@@ -120,6 +120,7 @@
 | 96 | A20261025-3 | EIP Originator 가 대상의 TCP 종료를 감지·재연결하지 않고 health 는 connected 로 남음 | `stacks/ethernetip/`, `tests/` | A20261025-3 | 같은 보고서. 큐 95 와 같은 PR 허용, 큐 94 (SIGPIPE) 이후가 좋다 |
 | 97 | A20261025-4 | EIP 어댑터가 `length` 생략 숫자 포인트를 1바이트로, `data_type` 생략 포인트를 무변환으로 다룸 (uint16 300 → `01 00`) | `adapters/ethernetip/`, `tests/` | A20261025-4 ×4 | 같은 보고서. 기본 = data_type 크기·LE (CIP UINT/DINT, T0 A안). PN 어댑터 같은 패턴은 범위 밖 |
 | 98 | A20261025-5 | EIP Originator TCP connect 가 블로킹·타임아웃 없음 — 응답 없는 대상이면 `fb_open` 이 ~130 s 막힘 | `stacks/ethernetip/`, `tests/` | A20261025-5 | 같은 보고서. 근거 EIPScanner `TCPSocket.cpp` (non-blocking + 타임아웃), pycomm3 5 s. Modbus T9-5 와 같은 방식 |
+| 99 | A20261028-1 | EIP TCP·TLS 응답의 짧은 `send`·`EAGAIN`·`SSL_ERROR_WANT_WRITE` 를 성공으로 보고 나머지를 버림 — 스캐너가 잠시 안 읽으면 응답이 빠지고 잘린 프레임으로 스트림 경계가 깨짐 (연결 유지) | `stacks/ethernetip/`, `tests/` | A20261028-1 | 출처 #164 "발견한 다른 문제", 보고서 [audits/20261028-eip-partial-send.md](audits/20261028-eip-partial-send.md). 근거 OpENer (accept 소켓 blocking). Modbus T9-8 (큐 52) 과 같은 기준 |
 
 ## 이슈 본문 템플릿
 

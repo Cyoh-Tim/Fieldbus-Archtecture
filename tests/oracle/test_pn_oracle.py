@@ -15,7 +15,7 @@ import pytest
 from scapy.all import Dot1Q, Ether, raw
 from scapy.contrib.lldp import LLDPDU, LLDPDUGenericOrganisationSpecific, LLDPDUManagementAddress, LLDPDUPortID
 from scapy.contrib.pnio import ProfinetIO
-from scapy.contrib.pnio_dcp import DCPNameOfStationBlock, DCPDeviceRoleBlock, ProfinetDCP
+from scapy.contrib.pnio_dcp import DCPIPBlock, DCPNameOfStationBlock, DCPDeviceRoleBlock, ProfinetDCP
 from scapy.contrib.pnio_rpc import (
     AlarmCRBlockReq,
     AlarmCRBlockRes,
@@ -41,7 +41,8 @@ from scapy.contrib.pnio_rpc import (
     PNIOServiceResPDU,
 )
 from scapy.layers.dcerpc import DceRpc4, NDRContextHandle
-from scapy.layers.msrpce.raw.ept import ept_lookup_Request
+from scapy.layers.msrpce.ept import protocol_tower_t
+from scapy.layers.msrpce.raw.ept import ept_lookup_Request, ept_lookup_Response
 from scapy.layers.snmp import SNMP, SNMPget, SNMPresponse, SNMPvarbind
 
 from conftest import REPO, PnPipe, dut_path, known_defect
@@ -675,6 +676,7 @@ def test_alarm_dst_endpoint_from_alarm_cr_req(pn_dut):
 
 # ---------------------------------------------------------------- DCE/RPC 헤더 (T12-14)
 EPM_IF = "e1af8308-5d1f-11c9-91a4-08002b14a0fa"
+NDR_TRANSFER_SYNTAX = "8a885d04-1ceb-11c9-9fe8-08002b104860"
 
 
 def cl_header(pdu):
@@ -734,12 +736,30 @@ def test_rpc_epm_lookup_lists_pnio_interface(pn_dut):
     assert rsp is not None, "EPM lookup 응답 없음"
     ptype, fmt, _, body = cl_header(rsp)
     assert ptype == 2
-    # 응답: entry_handle(20) num_ents(4) entries[] status(4). tower floor 1 에 인터페이스 UUID (LE 인코딩)가 있다.
-    assert len(body) >= 28, f"응답 스텁 {len(body)}바이트"
-    num_ents = struct.unpack(fmt + "I", body[20:24])[0]
-    assert num_ents >= 1, f"num_ents {num_ents}"
-    assert uuid.UUID(PNIO_DEVICE_IF).bytes_le in body, "PNIO Device 인터페이스 tower 없음"
-    assert struct.unpack(fmt + "I", body[-4:])[0] == 0, "ept_lookup status"
+    # 응답 스텁을 scapy msrpce 로 NDR 디코드한다: entry_handle(20) num_ents entries[ept_entry_t] status.
+    # ept_entry_t = object(16) tower(포인터) annotation(varying char[64]) — tower 는 뒤에 deferred 로 온다
+    # (p-net pf_block_writer.c pf_put_tower_entry: referent, annotation offset·length·64바이트, tower 길이 ×2, floor).
+    assert fmt == "<", "LE 요청에 LE 응답"
+    r = ept_lookup_Response(body, ndr64=False)
+    assert r.status == 0, f"ept_lookup status {r.status} (스텁 {body.hex()})"
+    assert r.num_ents >= 1, f"num_ents {r.num_ents}"
+    towers = []
+    for e in r.valueof("entries"):
+        octs = bytes(e.valueof("tower").valueof("tower_octet_string"))
+        try:
+            t = protocol_tower_t(octs)
+        except Exception as ex:  # noqa: BLE001 — 깨진 tower 는 판정 실패로 보고한다
+            raise AssertionError(f"tower 디코드 실패 {ex}: {octs.hex()}")
+        towers.append([(f.protocol_identifier, str(getattr(f, "uuid", "")), getattr(f, "version", None), f.rhs)
+                       for f in t.floors])
+    # tower floor: 개수·lhs/rhs 길이·버전은 little-endian, 포트·IP 는 big-endian
+    # (scapy protocol_tower_t, Wireshark packet-dcerpc-epm.c tvb_get_letohs, p-net LE drep 의 pf_put_rpc_floor_*).
+    pnio = [t for t in towers if t and t[0][1] == PNIO_DEVICE_IF]
+    assert pnio, f"PNIO Device 인터페이스 tower 없음 {towers}"
+    fl = pnio[0]
+    assert [f[0] for f in fl] == [0x0D, 0x0D, 0x0A, 0x08, 0x09], f"floor (UUID, NDR, ncadg, UDP, IP) {fl}"
+    assert fl[0][2] == 1 and fl[1][1] == NDR_TRANSFER_SYNTAX and fl[1][2] == 2, f"floor 1·2 {fl[:2]}"
+    assert fl[3][3] == 34964, f"UDP 포트 {fl[3][3]}"
 
 
 @known_defect("T12-14", "단편화를 지원하지 않는다. 첫 단편만으로 Connect 를 처리해 응답한다. "
@@ -773,12 +793,13 @@ def dcp_set(pn, blocks, xid):
     """DCP Set.req (FrameID 0xFEFD). scapy ProfinetDCP 요청은 블록 1개만 만들 수 있어 사양대로 직접 인코딩한다.
 
     DCP 헤더: ServiceID(1)=4 ServiceType(1)=0 Xid(4) Reserved(2) DCPDataLength(2)
-    Set 블록: Option(1) Suboption(1) DCPBlockLength(2) BlockQualifier(2)=1 값, 홀수면 패딩 1 (DCPDataLength 에만 포함)
+    Set 블록: Option(1) Suboption(1) DCPBlockLength(2) BlockQualifier(2)=1 값, 홀수면 패딩 1 (DCPDataLength 에만 포함).
+    블록 튜플의 4번째 값을 주면 BlockQualifier 로 쓴다 (ResetToFactory 모드 등).
     반환: 같은 Xid 의 Set.res DCP PDU (FrameID 뒤), 없으면 None.
     """
     body = b""
-    for opt, sub, value in blocks:
-        blk = struct.pack(">BBHH", opt, sub, 2 + len(value), 0x0001) + value
+    for opt, sub, value, *qual in blocks:
+        blk = struct.pack(">BBHH", opt, sub, 2 + len(value), qual[0] if qual else 0x0001) + value
         body += blk + (b"\x00" if len(blk) % 2 else b"")
     dcp = struct.pack(">BBIHH", 0x04, 0x00, xid, 0, len(body)) + body
     frame = (Ether(dst=DEVICE_MAC, src=CONTROLLER_MAC, type=0x8892)
@@ -826,12 +847,88 @@ def test_dcp_set_read_only_block_reports_error(pn_dut):
     assert res[(0x02, 0x01)] != 0x00
 
 
-def test_dcp_set_name_rejected_during_ar(pn_dut):
-    pn_dut.rpc(raw(connect_pdu()))
+def test_dcp_set_name_during_ar_accepted_and_aborts_ar(pn_dut):
+    """AR(ARProperties.RejectDCPsetRequests=0, 기본) 중 다른 이름 Set → 수락, 이름 적용, AR abort.
+
+    근거: p-net pf_cmina.c pf_cmina_dcp_set_ind 의 W_CONNECT 분기 "Case 27, 28 in Profinet 2.4 Table 1096
+    CMINA state table — Change name or reset IP — Abort active ARs" (abort 코드
+    PNET_ERROR_CODE_2_ABORT_DCP_STATION_NAME_CHANGED 0x1F, pnet_api.h). 거부(0x06)는 AR 이
+    RejectDCPsetRequests=1 일 때만이다 (Wireshark packet-dcerpc-pn-io-all.c ARProperties bit 27
+    "Accepted"/"Rejected"). AR abort 는 RTC1 이 멈추는 것으로 본다.
+    """
+    assert rtc1_frames(pn_dut, poll_ms=40), "AR 수립 후 RTC1 프레임 없음"
     p = dcp_set(pn_dut, [NAME_BLOCK], xid=0x5103)
     assert p is not None, "Set.res 없음"
-    _, res = dcp_set_results(p)
-    assert res.get((0x02, 0x02)) == 0x06, f"응답 블록 {res}"
+    stype, res = dcp_set_results(p)
+    assert stype == 0x01 and res.get((0x02, 0x02)) == 0x00, f"ServiceType {stype}, 응답 블록 {res}"
+    assert dcp_name(pn_dut, 0x5104) == NAME_BLOCK[2], "이름이 바뀌지 않음"
+    out = pn_dut.cmd("POLL 60")
+    assert not [f for f in tx_frames(out) if is_rtc1(f)], "이름 변경 뒤에도 AR 의 RTC1 이 계속 나간다 (abort 안 됨)"
+
+
+def test_dcp_set_name_rejected_when_ar_rejects_dcp_set(pn_dut):
+    req = connect_pdu()
+    # ARProperties bit 27 RejectDCPsetRequests. scapy 는 이 비트를 reserved_3 (bit 24..29) 에 둔다.
+    req[ARBlockReq].ARProperties_reserved_3 = 0x08
+    ar = raw(req[ARBlockReq])
+    props = struct.unpack(">I", ar[6 + 2 + 16 + 2 + 6 + 16:6 + 2 + 16 + 2 + 6 + 16 + 4])[0]
+    assert props & (1 << 27), f"ARProperties {props:08x}"
+    pn_dut.rpc(raw(req))
+    p = dcp_set(pn_dut, [NAME_BLOCK], xid=0x5105)
+    assert p is not None, "Set.res 없음"
+    stype, res = dcp_set_results(p)
+    assert stype == 0x01, f"ServiceType {stype}"
+    assert res.get((0x02, 0x02)) not in (None, 0x00), f"응답 블록 {res}"
+    assert dcp_name(pn_dut, 0x5106) == b"oracle-dut", "거부했는데 이름이 바뀜"
+    out = pn_dut.cmd("POLL 60")
+    assert [f for f in tx_frames(out) if is_rtc1(f)], "거부한 Set 뒤 AR 의 RTC1 이 멈췄다"
+
+
+def test_dcp_set_ip_rejected_during_ar(pn_dut):
+    """근거: p-net pf_cmina.c "Case 26 in Profinet 2.4 Table 1096 — Change IP, active connection" → 오류.
+
+    BlockError 값은 1차 출처가 없어 0 이 아닌 것만 본다 (의미상 0x06 In operation, SET not possible).
+    """
+    before = dcp_ip(pn_dut, 0x5107)
+    assert rtc1_frames(pn_dut, poll_ms=40), "AR 수립 후 RTC1 프레임 없음"
+    p = dcp_set(pn_dut, [IP_BLOCK], xid=0x5108)
+    assert p is not None, "Set.res 없음"
+    stype, res = dcp_set_results(p)
+    assert stype == 0x01, f"ServiceType {stype}"
+    assert res.get((0x01, 0x02)) not in (None, 0x00), f"응답 블록 {res}"
+    assert dcp_ip(pn_dut, 0x5109) == before, "거부했는데 IP 가 바뀜"
+    out = pn_dut.cmd("POLL 60")
+    assert [f for f in tx_frames(out) if is_rtc1(f)], "거부한 Set 뒤 AR 의 RTC1 이 멈췄다"
+
+
+RESET_COMM = (0x05, 0x06, b"", 2 << 1)  # ResetToFactory, BlockQualifier 모드 2 (Reset communication parameter)
+
+
+def test_dcp_reset_to_factory_communication_parameters(pn_dut):
+    """BlockQualifier 의 bit 1..15 가 모드 (Wireshark packet-pn-dcp.c pn_dcp_BlockQualifier: 1 application data,
+    2 communication parameter, 3 engineering, 4 all except security, 8 all, 9 reset and restore).
+
+    공장값은 빈 이름·0.0.0.0 이다 (기동 config 값이 아님): p-net pf_cmina_set_default_cfg 의
+    "Reset communication parameters" — ip_addr/mask/gateway = 0, station_name memset 0.
+    """
+    p = dcp_set(pn_dut, [RESET_COMM], xid=0x5111)
+    assert p is not None, "Set.res 없음"
+    stype, res = dcp_set_results(p)
+    assert stype == 0x01 and res.get((0x05, 0x06)) == 0x00, f"ServiceType {stype}, 응답 블록 {res}"
+    assert dcp_name(pn_dut, 0x5112) == b"", "이름이 비워지지 않음"
+    assert dcp_ip(pn_dut, 0x5113)[0] == "0.0.0.0", "IP 가 0.0.0.0 이 아님"
+
+
+def test_dcp_reset_to_factory_during_ar_aborts_ar(pn_dut):
+    """근거: p-net pf_cmina.c "Case 27, 30 — Reset name or reset to factory — Abort active ARs"
+    (PNET_ERROR_CODE_2_ABORT_DCP_RESET_TO_FACTORY 0x20)."""
+    assert rtc1_frames(pn_dut, poll_ms=40), "AR 수립 후 RTC1 프레임 없음"
+    p = dcp_set(pn_dut, [RESET_COMM], xid=0x5114)
+    assert p is not None, "Set.res 없음"
+    stype, res = dcp_set_results(p)
+    assert stype == 0x01 and res.get((0x05, 0x06)) == 0x00, f"ServiceType {stype}, 응답 블록 {res}"
+    out = pn_dut.cmd("POLL 60")
+    assert not [f for f in tx_frames(out) if is_rtc1(f)], "ResetToFactory 뒤에도 AR 의 RTC1 이 계속 나간다"
 
 
 # ---------------------------------------------------------------- DCP Get (A20261003-2)
@@ -858,6 +955,26 @@ def dcp_get(pn, selectors, xid):
 
 def dcp_block_ids(d):
     return [(b.option, b.sub_option) for b in d.dcp_blocks]
+
+
+def dcp_name(pn, xid):
+    """DCP Get NameOfStation → bytes. 이름 블록이 없거나 길이 0 이면 b""."""
+    d = dcp_get(pn, [(0x02, 0x02)], xid)
+    assert d is not None, "Get.res 없음"
+    for b in d.dcp_blocks:
+        if isinstance(b, DCPNameOfStationBlock):
+            return bytes(b.name_of_station)
+    return b""
+
+
+def dcp_ip(pn, xid):
+    """DCP Get IP Parameter → (ip, netmask, gateway) 문자열."""
+    d = dcp_get(pn, [(0x01, 0x02)], xid)
+    assert d is not None, "Get.res 없음"
+    for b in d.dcp_blocks:
+        if isinstance(b, DCPIPBlock):
+            return (b.ip, b.netmask, b.gateway)
+    raise AssertionError(f"IP 블록 없음 {dcp_block_ids(d)}")
 
 
 @known_defect("A20261003-2", "Get.req 가 무엇을 요청하든 Identify 와 같은 블록 7개 전체를 돌려준다. "

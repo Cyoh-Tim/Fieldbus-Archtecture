@@ -52,3 +52,5 @@
 | 2026-10-20 | SLMP 예제·랩 하네스 (11단계 제안 선별) | [20261020-slmp-example-overlap.md](20261020-slmp-example-overlap.md) | 91 (A20261020-1) | #140: 예제 config 바코드 문자열이 온도 D110 과 겹침 (config 정적 오라클) |
 | 2026-10-25 | EtherNet/IP 어댑터·Originator (12단계 일요일 감사, opus) | [20261025-eip-adapter-originator.md](20261025-eip-adapter-originator.md) | 94–98 (A20261025-1 ~ -5) | SIGPIPE 원격 DoS, Originator 늦은 응답·재연결·connect 타임아웃, 포인트 기본 크기. 확인 필요 7건 |
 | 2026-10-25 | PROFINET 알람·LLDP (11단계, #153·#155 검증) | [20261025-pn-alarm-followups.md](20261025-pn-alarm-followups.md) | 93 (A20261025-6) | AlarmCR 범위 미검사 (p-net 대조). LLDP Port ID·필수 TLV 오라클 보강 (T12-11). 확인 필요 4건 |
+| 2026-10-28 | EtherNet/IP 스택 (11단계 제안 선별, #164 검증) | [20261028-eip-partial-send.md](20261028-eip-partial-send.md) | 99 (A20261028-1) | #164 제안: nonblocking TCP·TLS 응답의 짧은 send·EAGAIN 을 버림 → 응답 유실·잘린 프레임 (오라클 재현). OpENer 대조 |
+| 2026-10-29 | PROFINET DCP·CL-RPC (0-1단계 #167 답, #161 검증) | [20261029-pn-dcp-ar-epm.md](20261029-pn-dcp-ar-epm.md) | 없음 (큐 35·36 기준 변경) | 오라클 정정: AR 중 이름 Set 은 기본 수락+AR abort (bit 27 일 때만 거부), ResetToFactory 공장값·AR 중 abort. EPM 응답 오라클을 scapy 디코드로 강화. p-net·Wireshark 대조, opus 2차 의견 |

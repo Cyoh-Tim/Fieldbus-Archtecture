@@ -1450,6 +1450,56 @@ def test_peer_close_does_not_kill_adapter(eip_dut):
     s.close()
 
 
+@known_defect("A20261028-1", "nonblocking TCP 소켓의 짧은 send·EAGAIN 을 성공으로 보고 남은 바이트를 버린다. "
+              "송신 버퍼가 차면 응답이 빠지고 잘린 프레임이 스트림에 들어가 스캐너가 프레임 경계를 잃는다")
+def test_slow_reader_gets_every_reply_intact(eip_dut):
+    """스캐너가 잠시 읽지 않아 어댑터 송신 버퍼가 차도, 응답을 하나도 빼거나 자르지 않고 순서대로 보낸다.
+
+    ListIdentity(세션 불필요) 200000개를 파이프라인하고 2 s 뒤에 읽기 시작한다. OpENer 는 accept 한 TCP 소켓이
+    blocking 이라 send 가 프레임을 다 쓰거나 실패한다. 연결을 끊는 것도 허용한다 (잘린 프레임만 아니면).
+    """
+    n = 200000
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    s.connect(("127.0.0.1", eip_dut.port))
+    errors = []
+
+    def sender():
+        try:
+            s.sendall(encap(0x0063, b"") * n)
+        except OSError as e:
+            errors.append(e)
+
+    threading.Thread(target=sender, daemon=True).start()
+    time.sleep(2.0)
+    s.settimeout(5.0)
+    got, buf, bad, closed = 0, b"", None, False
+    deadline = time.time() + 60
+    try:
+        while got < n and bad is None and time.time() < deadline:
+            chunk = s.recv(1 << 16)
+            if not chunk:
+                closed = True
+                break
+            buf += chunk
+            while len(buf) >= 24:
+                cmd, length = struct.unpack_from("<HH", buf, 0)
+                if cmd != 0x0063:
+                    bad = (got, buf[:32].hex())
+                    break
+                if len(buf) < 24 + length:
+                    break
+                buf = buf[24 + length:]
+                got += 1
+    except OSError as e:
+        errors.append(e)
+    finally:
+        s.close()
+    assert bad is None, f"응답 {got} 개 뒤 잘린 프레임: {bad[1]}"
+    assert got == n or closed, f"응답 {got}/{n} (연결 유지, 나머지 유실), 오류 {errors}"
+    assert eip_dut.proc.poll() is None
+
+
 @known_defect("A20261025-2", "응답 대기 2 s 가 지나 늦게 온 이전 요청의 응답을 다음 요청의 응답으로 받는다 "
               "(Sender Context·서비스 코드 미대조). device_type 읽기가 vendor 값 0x1111 을 rc 0 으로 돌려준다")
 def test_originator_late_reply_not_taken_for_next_request(tmp_path):
