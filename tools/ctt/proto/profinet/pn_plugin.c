@@ -1413,11 +1413,16 @@ static int step_rpc_release(ctt_run_t *run, pn_priv_t *priv,
     memset(pdu, 0, sizeof(pdu));
     pdu[0] = 1;
     pn_wr_le16(pdu + 68, RPC_OP_RELEASE);
-    uint8_t rel[18];
+    /* ReleaseBlockReq 0x0114. Same body as Control: pad, ARUUID,
+     * SessionKey (Connect uses 1), AlarmSequenceNumber,
+     * ControlCommand Release. */
+    uint8_t rel[26];
     memset(rel, 0, sizeof(rel));
     fill_connect_aruuid(rel + 2);
-    uint8_t blocks[32];
-    size_t bn = wr_pn_block(blocks, PN_BLOCK_AR_REQ, rel, sizeof(rel));
+    pn_wr_be16(rel + 18, 1);
+    pn_wr_be16(rel + 22, PN_CONTROL_RELEASE);
+    uint8_t blocks[64];
+    size_t bn = wr_pn_block(blocks, PN_BLOCK_RELEASE_REQ, rel, sizeof(rel));
     size_t stub = ndr_wrap(pdu + 80, blocks, bn);
     pn_wr_le16(pdu + 74, (uint16_t)stub);
 

@@ -227,6 +227,7 @@ static int parse_uuid_any(uint16_t type, const uint8_t *body, uint16_t blen,
     }
     if ((type == PN_BLOCK_AR_REQ && blen >= 18) ||
         (type == PN_BLOCK_CONTROL_REQ && blen >= 18) ||
+        (type == PN_BLOCK_RELEASE_REQ && blen >= 18) ||
         (type == PN_BLOCK_IOD_READ_REQ && blen >= 18) ||
         (type == PN_BLOCK_IOD_WRITE_REQ && blen >= 18)) {
         copy_uuid(w->aruuid, body + 2);
@@ -1280,7 +1281,13 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
                  s->ar.have_in_layout ? s->ar.in_csdu_len : s->ar.in_data_len,
                  s->ar.have_out_layout ? s->ar.out_csdu_len : s->ar.out_data_len);
     } else if (op == OP_RELEASE) {
-        if (s->ar.established) {
+        int had_ar = s->ar.established;
+        uint8_t rel_uuid[PN_UUID_LEN];
+        uint16_t rel_session = 0;
+        memset(rel_uuid, 0, sizeof(rel_uuid));
+        if (had_ar) {
+            memcpy(rel_uuid, s->ar.uuid, PN_UUID_LEN);
+            rel_session = s->ar.session_key;
             if (!ar_owner_ok(s, src_ip)) {
                 LOG_WARN("pn_rpc", "Release rejected: sender IP mismatch");
                 return -EPERM;
@@ -1305,8 +1312,23 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
         s->ar.established = 0;
         memset(&s->ar, 0, sizeof(s->ar));
         clear_pending_rpc(s);
-        uint8_t z[4] = {0};
-        so = ndr_res(stub_out, NULL, z, 4);
+        if (had_ar) {
+            /* ReleaseBlockRes 0x8114. Same body as IODControlRes:
+             * pad, ARUUID, SessionKey, AlarmSequenceNumber,
+             * ControlCommand Done. */
+            uint8_t cres[26];
+            memset(cres, 0, sizeof(cres));
+            memcpy(cres + 2, rel_uuid, PN_UUID_LEN);
+            pn_wr_be16(cres + 18, rel_session);
+            pn_wr_be16(cres + 22, PN_CONTROL_DONE);
+            uint8_t blocks_res[64];
+            size_t bn = wr_block(blocks_res, PN_BLOCK_RELEASE_RES, cres,
+                                 sizeof(cres));
+            so = ndr_res(stub_out, NULL, blocks_res, bn);
+        } else {
+            uint8_t z[4] = {0};
+            so = ndr_res(stub_out, NULL, z, 4);
+        }
         LOG_INFO("pn_rpc", "AR released");
     } else if (op == OP_CONTROL) {
         if (!s->ar.established) {

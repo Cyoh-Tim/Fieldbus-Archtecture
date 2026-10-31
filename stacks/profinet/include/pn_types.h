@@ -70,8 +70,10 @@
 #define PN_BLOCK_EXPSUB_REQ    0x0104u
 #define PN_BLOCK_CONTROL_REQ   0x0110u /* IODControlReq PrmEnd (Connect) */
 #define PN_BLOCK_APP_READY_REQ 0x0112u /* IOXControlReq ApplicationReady */
+#define PN_BLOCK_RELEASE_REQ   0x0114u /* ReleaseBlockReq */
 #define PN_BLOCK_CONTROL_RES   0x8110u /* IODControlRes PrmEnd Done */
 #define PN_BLOCK_APP_READY_RES 0x8112u /* IOXControlRes ApplicationReady Done */
+#define PN_BLOCK_RELEASE_RES   0x8114u /* ReleaseBlockRes Done */
 #define PN_BLOCK_AR_RES        0x8101u
 #define PN_BLOCK_IOCR_RES      0x8102u
 #define PN_BLOCK_ALARMCR_RES   0x8103u
@@ -81,6 +83,7 @@
 
 #define PN_CONTROL_PRM_END    0x0001u
 #define PN_CONTROL_APP_READY  0x0002u
+#define PN_CONTROL_RELEASE    0x0004u
 #define PN_CONTROL_DONE       0x0008u
 
 #define PN_INDEX_IM0 0xAFF0u
