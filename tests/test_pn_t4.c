@@ -73,8 +73,17 @@ static size_t ndr_wrap(uint8_t *out, const uint8_t *blocks, size_t n)
 static size_t wrap_rpc(uint8_t *out, const uint8_t *stub, size_t slen)
 {
     memset(out, 0, 80);
-    out[0] = 1;
+    out[0] = 4;
     out[1] = 0;
+    out[4] = 0x10;
+    static const uint8_t obj[16] = {
+        0x00, 0x00, 0xa0, 0xde, 0x97, 0x6c, 0xd1, 0x11,
+        0x82, 0x71, 0x00, 0x01, 0x00, 0x01, 0xab, 0xcd};
+    static const uint8_t iface[16] = {
+        0x01, 0x00, 0xa0, 0xde, 0x97, 0x6c, 0xd1, 0x11,
+        0x82, 0x71, 0x00, 0xa0, 0x24, 0x42, 0xdf, 0x7d};
+    memcpy(out + 8, obj, 16);
+    memcpy(out + 24, iface, 16);
     pn_wr_le16(out + 68, 0);
     pn_wr_le16(out + 74, (uint16_t)slen);
     memcpy(out + 80, stub, slen);

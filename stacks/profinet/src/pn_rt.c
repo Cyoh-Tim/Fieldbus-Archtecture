@@ -52,6 +52,16 @@ static int ar_controller_live(const pn_ar_t *ar)
     return ar->saw_rt || ar->prm_end || ar->app_ready;
 }
 
+/* PNIO: CMInitiatorActivityTimeout = factor × 100 ms. A Connect that
+ * omitted the field (or sent 0) keeps the previous 2 s window. */
+static uint64_t cmi_window_ns(const pn_ar_t *ar)
+{
+    if (ar->cmi_activity_factor == 0) {
+        return PN_CMI_ACTIVITY_TIMEOUT_NS;
+    }
+    return (uint64_t)ar->cmi_activity_factor * 100000000ull;
+}
+
 void pn_ar_watchdog(pn_stack_t *s)
 {
     if (!s || !s->ar.established) {
@@ -60,7 +70,7 @@ void pn_ar_watchdog(pn_stack_t *s)
     uint64_t now = pn_now_ns();
     if (!ar_controller_live(&s->ar)) {
         if (s->ar.last_cmi_ns != 0 && now > s->ar.last_cmi_ns &&
-            (now - s->ar.last_cmi_ns) > PN_CMI_ACTIVITY_TIMEOUT_NS) {
+            (now - s->ar.last_cmi_ns) > cmi_window_ns(&s->ar)) {
             pn_ar_abort(s, "CMI activity timeout");
         }
         return;
@@ -75,7 +85,7 @@ void pn_ar_watchdog(pn_stack_t *s)
             base = s->ar.last_rt_rx_ns;
         }
         if (base != 0 && now > base &&
-            (now - base) > PN_CMI_ACTIVITY_TIMEOUT_NS) {
+            (now - base) > cmi_window_ns(&s->ar)) {
             pn_ar_abort(s, "CMI activity timeout");
         }
         return;

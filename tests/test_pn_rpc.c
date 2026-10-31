@@ -92,12 +92,27 @@ static size_t ndr_wrap(uint8_t *out, const uint8_t *blocks, size_t n)
     return 20 + n;
 }
 
+/* CL RPC v4, LE integers, this device's object and the PNIO interface. */
+static void stamp_cl_req(uint8_t *out)
+{
+    static const uint8_t obj[16] = {
+        0x00, 0x00, 0xa0, 0xde, 0x97, 0x6c, 0xd1, 0x11,
+        0x82, 0x71, 0x00, 0x01, 0x00, 0x01, 0xab, 0xcd};
+    static const uint8_t iface[16] = {
+        0x01, 0x00, 0xa0, 0xde, 0x97, 0x6c, 0xd1, 0x11,
+        0x82, 0x71, 0x00, 0xa0, 0x24, 0x42, 0xdf, 0x7d};
+    out[0] = 4;
+    out[4] = 0x10;
+    memcpy(out + 8, obj, 16);
+    memcpy(out + 24, iface, 16);
+}
+
 static size_t wrap_rpc(uint8_t *out, uint16_t op, const uint8_t *stub,
                        size_t slen)
 {
     memset(out, 0, 80);
-    out[0] = 1;
     out[1] = 0;
+    stamp_cl_req(out);
     pn_wr_le16(out + 68, op);
     pn_wr_le16(out + 74, (uint16_t)slen);
     memcpy(out + 80, stub, slen);
@@ -333,8 +348,8 @@ static void test_ndr_huge_args_len(void)
     expect(pn_stack_ar_up(s) == 1, "ndr ar up");
 
     memset(pdu, 0, sizeof(pdu));
-    pdu[0] = 1;
     pdu[1] = 0;
+    stamp_cl_req(pdu);
     pn_wr_le16(pdu + 68, 1); /* Release */
     pn_wr_le16(pdu + 74, 24);
     memset(pdu + 80, 0xff, 24); /* argsMax/Len/max/offset/actual = UINT32_MAX */
@@ -577,7 +592,7 @@ static void test_ar_block_mac_bounds(void)
     size_t pdu_n = 80 + stub_n;
     uint8_t *pdu = calloc(1, pdu_n);
     expect(pdu != NULL, "mac bounds alloc");
-    pdu[0] = 1;
+    stamp_cl_req(pdu);
     pn_wr_le16(pdu + 68, 0);
     pn_wr_le16(pdu + 74, (uint16_t)stub_n);
     pn_wr_le32(pdu + 80, (uint32_t)blocks_n);
@@ -968,6 +983,7 @@ static void test_t12_5_prm_end_and_app_ready(void)
     memset(ack, 0, 80);
     ack[0] = 4;
     ack[1] = 2; /* RPC response */
+    ack[4] = 0x10; /* LE drep: opnum and NDR follow the request byte order */
     pn_wr_le16(ack + 68, 4);
     pn_wr_le16(ack + 74, (uint16_t)sn);
     memcpy(ack + 80, stub, sn);
@@ -1145,8 +1161,417 @@ static void test_t12_6_rtc1_datastatus_run(void)
     pn_stack_destroy(s);
 }
 
+/* T12-14. Headers below are what a controller sends. The stack before
+ * the fix ignores drep (always LE), rpc_vers, interface UUID, and object
+ * UUID, answers the first fragment, has no EPM, and times CMI out at 2 s. */
+static const uint8_t k_t1214_obj_le[16] = {
+    0x00, 0x00, 0xA0, 0xDE, 0x97, 0x6C, 0xD1, 0x11,
+    0x82, 0x71, 0x00, 0x01, 0x00, 0x01, 0xAB, 0xCD};
+/* Reverse node: Instance + VendorID + DeviceID (…-0001abcd0001). */
+static const uint8_t k_t1214_obj_swapped_le[16] = {
+    0x00, 0x00, 0xA0, 0xDE, 0x97, 0x6C, 0xD1, 0x11,
+    0x82, 0x71, 0x00, 0x01, 0xAB, 0xCD, 0x00, 0x01};
+static const uint8_t k_t1214_if_le[16] = {
+    0x01, 0x00, 0xA0, 0xDE, 0x97, 0x6C, 0xD1, 0x11,
+    0x82, 0x71, 0x00, 0xA0, 0x24, 0x42, 0xDF, 0x7D};
+static const uint8_t k_t1214_obj_be[16] = {
+    0xDE, 0xA0, 0x00, 0x00, 0x6C, 0x97, 0x11, 0xD1,
+    0x82, 0x71, 0x00, 0x01, 0x00, 0x01, 0xAB, 0xCD};
+static const uint8_t k_t1214_if_be[16] = {
+    0xDE, 0xA0, 0x00, 0x01, 0x6C, 0x97, 0x11, 0xD1,
+    0x82, 0x71, 0x00, 0xA0, 0x24, 0x42, 0xDF, 0x7D};
+static const uint8_t k_t1214_epm_le[16] = {
+    0x08, 0x83, 0xAF, 0xE1, 0x1F, 0x5D, 0xC9, 0x11,
+    0x91, 0xA4, 0x08, 0x00, 0x2B, 0x14, 0xA0, 0xFA};
+/* NDR transfer syntax 8A885D04-1CEB-11C9-9FE8-08002B104860, little-endian wire. */
+static const uint8_t k_t1214_ndr_le[16] = {
+    0x04, 0x5D, 0x88, 0x8A, 0xEB, 0x1C, 0xC9, 0x11,
+    0x9F, 0xE8, 0x08, 0x00, 0x2B, 0x10, 0x48, 0x60};
+
+static void t1214_w32(uint8_t *p, uint32_t v, int be)
+{
+    if (be) {
+        pn_wr_be32(p, v);
+    } else {
+        pn_wr_le32(p, v);
+    }
+}
+
+static void t1214_w16(uint8_t *p, uint16_t v, int be)
+{
+    if (be) {
+        pn_wr_be16(p, v);
+    } else {
+        pn_wr_le16(p, v);
+    }
+}
+
+static uint32_t t1214_r32(const uint8_t *p, int be)
+{
+    return be ? pn_rd_be32(p) : pn_rd_le32(p);
+}
+
+static uint16_t t1214_r16(const uint8_t *p, int be)
+{
+    return be ? pn_rd_be16(p) : pn_rd_le16(p);
+}
+
+static size_t t1214_connect_stub(uint8_t *stub, int be, uint16_t factor)
+{
+    uint8_t ar[50];
+    memset(ar, 0, sizeof(ar));
+    pn_wr_be16(ar, 0x0001);
+    fill_aruuid(ar + 2);
+    pn_wr_be16(ar + 18, 1);
+    uint16_t body = 26;
+    if (factor != 0) {
+        pn_wr_be16(ar + 46, factor);
+        pn_wr_be16(ar + 48, 0x8892);
+        body = 50;
+    }
+    uint8_t blocks[96];
+    size_t bn = wr_block(blocks, PN_BLOCK_AR_REQ, ar, body);
+    t1214_w32(stub, (uint32_t)bn, be);
+    t1214_w32(stub + 4, (uint32_t)bn, be);
+    t1214_w32(stub + 8, (uint32_t)bn, be);
+    t1214_w32(stub + 12, 0, be);
+    t1214_w32(stub + 16, (uint32_t)bn, be);
+    memcpy(stub + 20, blocks, bn);
+    return 20u + bn;
+}
+
+static size_t t1214_req(uint8_t *out, int vers, int be, uint16_t op,
+                        const uint8_t *obj, const uint8_t *iface,
+                        const uint8_t *stub, size_t slen, uint8_t flags1,
+                        uint16_t fragnum, uint32_t seq)
+{
+    memset(out, 0, 80);
+    out[0] = (uint8_t)vers;
+    out[2] = flags1;
+    out[4] = be ? 0x00 : 0x10;
+    if (obj) {
+        memcpy(out + 8, obj, 16);
+    }
+    if (iface) {
+        memcpy(out + 24, iface, 16);
+    }
+    out[40] = 0xA1;
+    out[55] = 0x5A;
+    t1214_w32(out + 64, seq, be);
+    t1214_w16(out + 68, op, be);
+    t1214_w16(out + 74, (uint16_t)slen, be);
+    t1214_w16(out + 76, fragnum, be);
+    memcpy(out + 80, stub, slen);
+    return 80u + slen;
+}
+
+static void test_t12_14_be_drep(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "t12-14 be create");
+    uint8_t stub[160];
+    size_t sn = t1214_connect_stub(stub, 1, 0);
+    uint8_t pdu[320];
+    size_t plen = t1214_req(pdu, 4, 1, 0, k_t1214_obj_be, k_t1214_if_be, stub,
+                            sn, 0x20, 0, 1);
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    int rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect(rc == 0 && rlen >= 100 && pn_stack_ar_up(s) == 1, "t12-14 BE Connect");
+    if (rlen >= 100) {
+        int be = (resp[4] >> 4) != 1;
+        uint16_t frag = t1214_r16(resp + 74, be);
+        expect(resp[1] == 2, "t12-14 BE ptype response");
+        expect(frag == (uint16_t)(rlen - 80), "t12-14 BE fragment length matches drep");
+        uint32_t args = t1214_r32(resp + 84, be);
+        uint32_t off = t1214_r32(resp + 92, be);
+        uint32_t actual = t1214_r32(resp + 96, be);
+        expect(off == 0 && args == actual && 100u + args <= rlen,
+               "t12-14 BE NDR lengths match drep");
+        if (100u + args <= rlen) {
+            expect(pn_rd_be16(resp + 100) == 0x8101, "t12-14 BE ARBlockRes");
+        }
+    }
+    pn_stack_destroy(s);
+}
+
+static void test_t12_14_rpc_vers_and_uuids(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "t12-14 vers create");
+    uint8_t stub[160];
+    size_t sn = t1214_connect_stub(stub, 0, 0);
+    uint8_t pdu[320];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+
+    size_t plen = t1214_req(pdu, 1, 0, 0, k_t1214_obj_le, k_t1214_if_le, stub,
+                            sn, 0x20, 0, 1);
+    int rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect(rc != 0 && rlen == 0 && pn_stack_ar_up(s) == 0,
+           "t12-14 rpc_vers 1 rejected");
+
+    uint8_t bad_if[16];
+    memset(bad_if, 0x5A, sizeof(bad_if));
+    rlen = 0;
+    plen = t1214_req(pdu, 4, 0, 0, k_t1214_obj_le, bad_if, stub, sn, 0x20, 0, 2);
+    rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect((rc != 0 || rlen == 0 || (rlen > 1 && (resp[1] == 3 || resp[1] == 6))) &&
+               pn_stack_ar_up(s) == 0,
+           "t12-14 unknown interface not served");
+
+    uint8_t bad_obj[16];
+    memset(bad_obj, 0x11, sizeof(bad_obj));
+    rlen = 0;
+    plen = t1214_req(pdu, 4, 0, 0, bad_obj, k_t1214_if_le, stub, sn, 0x20, 0, 3);
+    rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect(rc != 0 && rlen == 0 && pn_stack_ar_up(s) == 0,
+           "t12-14 wrong object UUID rejected");
+
+    rlen = 0;
+    plen = t1214_req(pdu, 4, 0, 0, k_t1214_obj_le, k_t1214_if_le, stub, sn, 0x20,
+                     0, 4);
+    rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect(rc == 0 && rlen > 80 && pn_stack_ar_up(s) == 1,
+           "t12-14 p-net object UUID (instance, device, vendor) accepted");
+    if (rlen >= 24) {
+        expect(memcmp(resp + 8, k_t1214_obj_le, 16) == 0,
+               "t12-14 response object UUID is dea00000-…-00010001abcd");
+    }
+    pn_stack_destroy(s);
+
+    s = make_stack();
+    rlen = 0;
+    plen = t1214_req(pdu, 4, 0, 0, k_t1214_obj_swapped_le, k_t1214_if_le, stub,
+                     sn, 0x20, 0, 5);
+    rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect(rc != 0 && rlen == 0 && pn_stack_ar_up(s) == 0,
+           "t12-14 reverse object tail (instance, vendor, device) rejected");
+    pn_stack_destroy(s);
+}
+
+static void test_t12_14_fragment_and_epm(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "t12-14 frag create");
+    uint8_t stub[160];
+    size_t sn = t1214_connect_stub(stub, 0, 0);
+    size_t cut = (sn / 2u) & ~7u;
+    if (cut == 0 || cut >= sn) {
+        cut = 8;
+    }
+    uint8_t pdu[320];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = t1214_req(pdu, 4, 0, 0, k_t1214_obj_le, k_t1214_if_le, stub,
+                            cut, 0x2C, 0, 7);
+    int rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect((rc != 0 || rlen == 0 || (rlen > 1 && resp[1] == 9)) &&
+               pn_stack_ar_up(s) == 0,
+           "t12-14 first fragment does not Connect");
+    rlen = 0;
+    plen = t1214_req(pdu, 4, 0, 0, k_t1214_obj_le, k_t1214_if_le, stub + cut,
+                     sn - cut, 0x2E, 1, 7);
+    rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect(rc == 0 && rlen >= 100 && resp[1] == 2 && pn_stack_ar_up(s) == 1,
+           "t12-14 last fragment completes Connect");
+    pn_stack_destroy(s);
+
+    s = make_stack();
+    uint8_t estub[8];
+    memset(estub, 0, sizeof(estub));
+    rlen = 0;
+    plen = t1214_req(pdu, 4, 0, 2, NULL, k_t1214_epm_le, estub, sizeof(estub),
+                     0x20, 0, 1);
+    rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect(rc == 0 && rlen >= 80 + 28 && resp[1] == 2, "t12-14 EPM lookup response");
+    if (rlen >= 80 + 28) {
+        const uint8_t *body = resp + 80;
+        size_t blen = rlen - 80;
+        int be = (resp[4] >> 4) != 1;
+        uint32_t nent = t1214_r32(body + 20, be);
+        expect(nent >= 1, "t12-14 EPM num_ents");
+        int found = 0;
+        for (size_t i = 0; i + 16 <= blen; i++) {
+            if (memcmp(body + i, k_t1214_if_le, 16) == 0) {
+                found = 1;
+                break;
+            }
+        }
+        expect(found, "t12-14 EPM tower has PNIO Device interface");
+        expect(t1214_r32(body + blen - 4, be) == 0, "t12-14 EPM status 0");
+    }
+    pn_stack_destroy(s);
+}
+
+static void test_t12_14_activity_timeout(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "t12-14 cmi create");
+    uint8_t stub[160];
+    size_t sn = t1214_connect_stub(stub, 0, 600);
+    uint8_t pdu[320];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = t1214_req(pdu, 4, 0, 0, k_t1214_obj_le, k_t1214_if_le, stub,
+                            sn, 0x20, 0, 1);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "t12-14 factor 600 connect");
+    expect(s->ar.cmi_activity_factor == 600, "t12-14 stored ActivityTimeoutFactor 600");
+    s->ar.last_cmi_ns = pn_now_ns() - (3ull * 1000000000ull);
+    pn_ar_watchdog(s);
+    expect(pn_stack_ar_up(s) == 1, "t12-14 60 s window survives 3 s of silence");
+    pn_stack_destroy(s);
+
+    s = make_stack();
+    sn = t1214_connect_stub(stub, 0, 1);
+    rlen = 0;
+    plen = t1214_req(pdu, 4, 0, 0, k_t1214_obj_le, k_t1214_if_le, stub, sn, 0x20,
+                     0, 1);
+    expect(pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001) ==
+               0,
+           "t12-14 factor 1 connect");
+    expect(s->ar.cmi_activity_factor == 1, "t12-14 stored ActivityTimeoutFactor 1");
+    s->ar.last_cmi_ns = pn_now_ns() - 50000000ull; /* 50 ms */
+    pn_ar_watchdog(s);
+    expect(pn_stack_ar_up(s) == 1, "t12-14 100 ms window keeps 50 ms silence");
+    s->ar.last_cmi_ns = pn_now_ns() - 150000000ull; /* 150 ms */
+    pn_ar_watchdog(s);
+    expect(pn_stack_ar_up(s) == 0, "t12-14 100 ms window aborts after 150 ms");
+    pn_stack_destroy(s);
+}
+
+/* One tower floor. Lengths and versions are little-endian. rhs bytes are
+ * returned as stored (port and IP stay big-endian). */
+static int t1214_next_floor(const uint8_t **pp, const uint8_t *end,
+                            uint8_t *proto, const uint8_t **uuid,
+                            uint16_t *ver, const uint8_t **rhs,
+                            uint16_t *rhslen)
+{
+    const uint8_t *p = *pp;
+    if (p + 3 > end) {
+        return 0;
+    }
+    uint16_t lhs = pn_rd_le16(p);
+    p += 2;
+    if (lhs < 1 || p + lhs > end) {
+        return 0;
+    }
+    *proto = p[0];
+    *uuid = NULL;
+    *ver = 0;
+    if (*proto == 0x0d) {
+        if (lhs != 19 || p + 19 > end) {
+            return 0;
+        }
+        *uuid = p + 1;
+        *ver = pn_rd_le16(p + 17);
+    }
+    p += lhs;
+    if (p + 2 > end) {
+        return 0;
+    }
+    uint16_t rl = pn_rd_le16(p);
+    p += 2;
+    if (p + rl > end) {
+        return 0;
+    }
+    *rhs = p;
+    *rhslen = rl;
+    p += rl;
+    *pp = p;
+    return 1;
+}
+
+/* ept_lookup stub must be NDR: object, one tower referent, annotation
+ * (offset, actual_count, 64 chars), then deferred tower_length, max_count,
+ * little-endian floors. Port and IP are the only big-endian floor fields. */
+static void test_t12_14_epm_ndr_tower(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "t12-14 epm ndr create");
+    s->cfg.ip = 0x0a000001;
+    uint8_t estub[8];
+    memset(estub, 0, sizeof(estub));
+    uint8_t pdu[320];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = t1214_req(pdu, 4, 0, 2, NULL, k_t1214_epm_le, estub,
+                            sizeof(estub), 0x20, 0, 1);
+    int rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect(rc == 0 && rlen > 80 && resp[1] == 2 && (resp[4] >> 4) == 1,
+           "t12-14 EPM LE response");
+    if (!(rc == 0 && rlen > 80 && (resp[4] >> 4) == 1)) {
+        pn_stack_destroy(s);
+        return;
+    }
+    const uint8_t *body = resp + 80;
+    size_t blen = rlen - 80;
+    expect(blen >= 216 && t1214_r32(body + 20, 0) == 1, "t12-14 EPM num_ents 1");
+    expect(t1214_r32(body + 24, 0) == 1 && t1214_r32(body + 28, 0) == 0 &&
+               t1214_r32(body + 32, 0) == 1,
+           "t12-14 EPM entries max/offset/actual");
+    expect(blen >= 52 && memcmp(body + 36, k_t1214_obj_le, 16) == 0,
+           "t12-14 EPM entry object is device UUID");
+    expect(blen >= 64 && t1214_r32(body + 52, 0) != 0,
+           "t12-14 EPM tower referent");
+    /* The second word is annotation offset, not another referent (0x00020004). */
+    expect(blen >= 128 && t1214_r32(body + 56, 0) == 0 &&
+               t1214_r32(body + 60, 0) == 64,
+           "t12-14 EPM annotation offset 0 count 64");
+    uint32_t tlen = blen >= 136 ? t1214_r32(body + 128, 0) : 0;
+    uint32_t tmax = blen >= 136 ? t1214_r32(body + 132, 0) : 0;
+    expect(tlen == 75 && tmax == 75 && 136u + tlen <= blen,
+           "t12-14 EPM deferred tower length 75");
+    int floors_ok = 0;
+    if (tlen == 75 && 136u + tlen <= blen) {
+        const uint8_t *tw = body + 136;
+        const uint8_t *end = tw + tlen;
+        expect(pn_rd_le16(tw) == 5 && tw[0] == 5 && tw[1] == 0,
+               "t12-14 EPM floor count is little-endian 5");
+        const uint8_t *p = tw + 2;
+        uint8_t proto = 0;
+        const uint8_t *uuid = NULL;
+        const uint8_t *rhs = NULL;
+        uint16_t ver = 0;
+        uint16_t rhslen = 0;
+        int ok = t1214_next_floor(&p, end, &proto, &uuid, &ver, &rhs, &rhslen);
+        expect(ok && proto == 0x0d && ver == 1 && uuid &&
+                   memcmp(uuid, k_t1214_if_le, 16) == 0,
+               "t12-14 EPM floor UUID PNIO Device v1");
+        ok = ok && t1214_next_floor(&p, end, &proto, &uuid, &ver, &rhs, &rhslen);
+        expect(ok && proto == 0x0d && ver == 2 && uuid &&
+                   memcmp(uuid, k_t1214_ndr_le, 16) == 0,
+               "t12-14 EPM floor UUID NDR v2");
+        ok = ok && t1214_next_floor(&p, end, &proto, &uuid, &ver, &rhs, &rhslen);
+        expect(ok && proto == 0x0a, "t12-14 EPM floor ncadg 0x0A");
+        ok = ok && t1214_next_floor(&p, end, &proto, &uuid, &ver, &rhs, &rhslen);
+        expect(ok && proto == 0x08 && rhslen == 2 && rhs &&
+                   pn_rd_be16(rhs) == 34964,
+               "t12-14 EPM floor UDP 34964 big-endian");
+        ok = ok && t1214_next_floor(&p, end, &proto, &uuid, &ver, &rhs, &rhslen);
+        expect(ok && proto == 0x09 && rhslen == 4 && rhs &&
+                   memcmp(rhs, "\x0a\x00\x00\x01", 4) == 0 && p == end,
+               "t12-14 EPM floor IP big-endian");
+        floors_ok = ok && p == end;
+    }
+    size_t st = 136u + (tlen == 75 ? tlen : 0);
+    while (st & 3u) {
+        st++;
+    }
+    expect(floors_ok && st + 4 == blen && t1214_r32(body + st, 0) == 0,
+           "t12-14 EPM status 0 after tower");
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
+    test_t12_14_be_drep();
+    test_t12_14_rpc_vers_and_uuids();
+    test_t12_14_fragment_and_epm();
+    test_t12_14_epm_ndr_tower();
+    test_t12_14_activity_timeout();
     test_t12_5_prm_end_and_app_ready();
     test_t12_5_app_ready_dest_rpc_port();
     test_t12_6_rtc1_datastatus_run();
