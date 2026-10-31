@@ -82,11 +82,6 @@ pn_stack_t *pn_stack_create(const pn_cfg_t *cfg)
     memset(s->im2_date, ' ', sizeof(s->im2_date));
     memset(s->im3_desc, ' ', sizeof(s->im3_desc));
     memset(s->im4_sig, 0, sizeof(s->im4_sig));
-    memcpy(s->factory_station_name, s->cfg.station_name,
-           sizeof(s->factory_station_name));
-    s->factory_ip = s->cfg.ip;
-    s->factory_netmask = s->cfg.netmask;
-    s->factory_gateway = s->cfg.gateway;
     s->start_ns = pn_now_ns();
     return s;
 }
