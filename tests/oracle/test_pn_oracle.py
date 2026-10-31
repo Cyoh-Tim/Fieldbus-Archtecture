@@ -831,7 +831,6 @@ NAME_BLOCK = (0x02, 0x02, b"oracle-set")
 IP_BLOCK = (0x01, 0x02, bytes([192, 168, 0, 60, 255, 255, 255, 0, 192, 168, 0, 1]))
 
 
-@known_defect("T12-16", "Set.req 블록이 여러 개여도 Control/Response 블록을 하나만 돌려준다. 사양: 블록마다 하나")
 def test_dcp_set_answers_every_block(pn_dut):
     p = dcp_set(pn_dut, [NAME_BLOCK, IP_BLOCK], xid=0x5101)
     assert p is not None, "Set.res 없음"
@@ -840,8 +839,6 @@ def test_dcp_set_answers_every_block(pn_dut):
     assert res == {(0x02, 0x02): 0x00, (0x01, 0x02): 0x00}, f"응답 블록 {res}"
 
 
-@known_defect("T12-16", "설정할 수 없는 블록(DeviceVendor 2/1, 읽기 전용)에도 성공을 답한다. "
-              "사양: 그 블록의 BlockError 가 0 이 아니어야 한다")
 def test_dcp_set_read_only_block_reports_error(pn_dut):
     p = dcp_set(pn_dut, [(0x02, 0x01, b"OtherVendor")], xid=0x5102)
     assert p is not None, "Set.res 없음"
@@ -850,8 +847,6 @@ def test_dcp_set_read_only_block_reports_error(pn_dut):
     assert res[(0x02, 0x01)] != 0x00
 
 
-@known_defect("T12-16", "AR 이 있는 동안 NameOfStation Set 을 받아들이지만 AR 을 끊지 않는다. "
-              "사양: RejectDCPsetRequests=0 인 AR 이면 이름을 바꾸고 AR 을 abort (ErrorCode2 0x1F)")
 def test_dcp_set_name_during_ar_accepted_and_aborts_ar(pn_dut):
     """AR(ARProperties.RejectDCPsetRequests=0, 기본) 중 다른 이름 Set → 수락, 이름 적용, AR abort.
 
@@ -871,8 +866,6 @@ def test_dcp_set_name_during_ar_accepted_and_aborts_ar(pn_dut):
     assert not [f for f in tx_frames(out) if is_rtc1(f)], "이름 변경 뒤에도 AR 의 RTC1 이 계속 나간다 (abort 안 됨)"
 
 
-@known_defect("T12-16", "ARProperties.RejectDCPsetRequests 를 보지 않는다. 사양: 그 AR 이 있는 동안 이름 Set 을 "
-              "거부 (BlockError ≠ 0, 의미상 0x06 In operation) 하고 이름·AR 유지")
 def test_dcp_set_name_rejected_when_ar_rejects_dcp_set(pn_dut):
     req = connect_pdu()
     # ARProperties bit 27 RejectDCPsetRequests. scapy 는 이 비트를 reserved_3 (bit 24..29) 에 둔다.
@@ -891,7 +884,6 @@ def test_dcp_set_name_rejected_when_ar_rejects_dcp_set(pn_dut):
     assert [f for f in tx_frames(out) if is_rtc1(f)], "거부한 Set 뒤 AR 의 RTC1 이 멈췄다"
 
 
-@known_defect("T12-16", "AR 이 있는 동안 IP Set 을 받아들인다. 사양: 거부 (BlockError ≠ 0), IP·AR 유지")
 def test_dcp_set_ip_rejected_during_ar(pn_dut):
     """근거: p-net pf_cmina.c "Case 26 in Profinet 2.4 Table 1096 — Change IP, active connection" → 오류.
 
@@ -912,7 +904,6 @@ def test_dcp_set_ip_rejected_during_ar(pn_dut):
 RESET_COMM = (0x05, 0x06, b"", 2 << 1)  # ResetToFactory, BlockQualifier 모드 2 (Reset communication parameter)
 
 
-@known_defect("T12-16", "ResetToFactory(5/6) 를 처리하지 않는다. 사양: 모드 2 는 NameOfStation 을 비우고 IP 를 0.0.0.0 으로")
 def test_dcp_reset_to_factory_communication_parameters(pn_dut):
     """BlockQualifier 의 bit 1..15 가 모드 (Wireshark packet-pn-dcp.c pn_dcp_BlockQualifier: 1 application data,
     2 communication parameter, 3 engineering, 4 all except security, 8 all, 9 reset and restore).
@@ -928,7 +919,6 @@ def test_dcp_reset_to_factory_communication_parameters(pn_dut):
     assert dcp_ip(pn_dut, 0x5113)[0] == "0.0.0.0", "IP 가 0.0.0.0 이 아님"
 
 
-@known_defect("T12-16", "ResetToFactory(5/6) 를 처리하지 않는다. 사양: AR 중에도 수락하고 AR 을 abort (ErrorCode2 0x20)")
 def test_dcp_reset_to_factory_during_ar_aborts_ar(pn_dut):
     """근거: p-net pf_cmina.c "Case 27, 30 — Reset name or reset to factory — Abort active ARs"
     (PNET_ERROR_CODE_2_ABORT_DCP_RESET_TO_FACTORY 0x20)."""

@@ -88,6 +88,7 @@ typedef struct {
     uint8_t initiator_uuid[PN_UUID_LEN]; /* CMInitiatorObjectUUID */
     int have_initiator_uuid;
     int startup_advanced; /* ARProperties bit 30; ARServerBlock only then */
+    int reject_dcp_set;   /* ARProperties bit 27 RejectDCPsetRequests */
     uint16_t initiator_udp_rt_port; /* CMInitiatorUDPRTPort; RT marker, not RPC dest */
     uint32_t owner_ip; /* host-order IPv4 of Connect sender; 0 = unset */
     int established;

@@ -22,6 +22,13 @@ static uint8_t abort_rta_code2(const char *why)
     if (strstr(why, "alarm ACK") != NULL) {
         return 0x08;
     }
+    /* p-net PNET_ERROR_CODE_2_ABORT_DCP_STATION_NAME_CHANGED / RESET_TO_FACTORY. */
+    if (strstr(why, "DCP station name") != NULL) {
+        return 0x1F;
+    }
+    if (strstr(why, "DCP reset to factory") != NULL) {
+        return 0x20;
+    }
     return 0x0d;
 }
 

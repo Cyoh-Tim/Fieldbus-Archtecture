@@ -252,89 +252,189 @@ int pn_dcp_verify_set(const pn_stack_t *s, const uint8_t *payload, size_t plen)
     return pn_sec_ok(s, body, body_len, mac) ? 0 : -EPERM;
 }
 
-static void apply_blocks(pn_stack_t *s, const uint8_t *blocks, uint16_t dlen)
+static int ar_in_operation(const pn_stack_t *s)
 {
-    size_t off = 0;
-    while (off + 4 <= dlen) {
-        uint8_t opt = blocks[off];
-        uint8_t sub = blocks[off + 1];
-        uint16_t bl = pn_rd_be16(blocks + off + 2);
-        size_t total = 4u + bl + (bl & 1u);
-        if (off + total > dlen) {
-            break;
-        }
-        const uint8_t *data = blocks + off + 4;
-        /* Set blocks include 2-byte BlockQualifier */
-        const uint8_t *val = (bl >= 2) ? data + 2 : data;
-        size_t vlen = (bl >= 2) ? (size_t)bl - 2 : 0;
+    return s->ar.established != 0;
+}
 
-        if (opt == PN_DCP_OPT_DEV && sub == PN_DCP_SUB_DEV_NAME && vlen > 0) {
-            if (!pn_dcp_name_ok(val, vlen)) {
-                LOG_WARN("pn_dcp", "NameOfStation rejected (DNS/PN rules)");
-            } else {
-                size_t n =
-                    vlen < PN_STATION_NAME_MAX ? vlen : PN_STATION_NAME_MAX;
-                memcpy(s->cfg.station_name, val, n);
-                s->cfg.station_name[n] = '\0';
-                LOG_INFO("pn_dcp", "NameOfStation=%s", s->cfg.station_name);
+static void note_abort(int *abort_code2, int code)
+{
+    if (abort_code2 && *abort_code2 == 0) {
+        *abort_code2 = code;
+    }
+}
+
+/* Factory communication parameters are an empty NameOfStation and
+ * 0.0.0.0, not the values from pn_stack_create. */
+static void clear_comm_factory(pn_stack_t *s, int *ip_changed)
+{
+    uint32_t old_ip = s->cfg.ip;
+    s->cfg.station_name[0] = '\0';
+    s->cfg.ip = 0;
+    s->cfg.netmask = 0;
+    s->cfg.gateway = 0;
+    if (old_ip != 0) {
+        *ip_changed = 1;
+    }
+    LOG_INFO("pn_dcp", "Reset communication parameters: empty name, ip 0.0.0.0");
+}
+
+static void clear_im_factory(pn_stack_t *s)
+{
+    memset(s->im1_function, ' ', sizeof(s->im1_function));
+    memset(s->im1_location, ' ', sizeof(s->im1_location));
+    memset(s->im2_date, ' ', sizeof(s->im2_date));
+    memset(s->im3_desc, ' ', sizeof(s->im3_desc));
+    memset(s->im4_sig, 0, sizeof(s->im4_sig));
+}
+
+static int ip_suite_same(const pn_stack_t *s, const uint8_t *val, size_t vlen)
+{
+    if (!val || vlen < 12) {
+        return 0;
+    }
+    return pn_rd_be32(val) == s->cfg.ip && pn_rd_be32(val + 4) == s->cfg.netmask &&
+           pn_rd_be32(val + 8) == s->cfg.gateway;
+}
+
+/* ResetToFactory mode is BlockQualifier >> 1.
+ * 1 = I&M1–4, 2 = name+IP, 3/4/8/9 = all of those.
+ * 0, 5–7, and >=10 are reserved: change nothing, BlockError 0x03.
+ * Reset Factory Settings (5/5) is all supported, ignoring the mode.
+ * An accepted reset aborts an AR (ErrorCode2 0x20). BlockQualifier is
+ * not stored (nonvolatile save is T12-20). */
+static uint8_t apply_reset(pn_stack_t *s, int factory_settings, uint16_t qual,
+                           int *ip_changed, int *abort_code2)
+{
+    int comm = 0;
+    int im = 0;
+    if (factory_settings) {
+        comm = 1;
+        im = 1;
+    } else {
+        unsigned mode = (unsigned)qual >> 1;
+        if (mode == 1) {
+            im = 1;
+        } else if (mode == 2) {
+            comm = 1;
+        } else if (mode == 3 || mode == 4 || mode == 8 || mode == 9) {
+            comm = 1;
+            im = 1;
+        } else {
+            return PN_DCP_BLOCK_ERR_SUB_NOT_SET;
+        }
+    }
+    if (comm) {
+        clear_comm_factory(s, ip_changed);
+    }
+    if (im) {
+        clear_im_factory(s);
+    }
+    if (ar_in_operation(s)) {
+        note_abort(abort_code2, 0x20);
+    }
+    return PN_DCP_BLOCK_ERR_OK;
+}
+
+/* Set.req value is BlockQualifier(2) + payload. Returns BlockError.
+ * *ip_changed is set when cfg.ip actually changes (Hello follows).
+ * *abort_code2 is 0x1F (name) or 0x20 (reset) when an active AR must be
+ * released after the Set.res is sent. The first reason wins. */
+static uint8_t apply_set_block(pn_stack_t *s, uint8_t opt, uint8_t sub,
+                               uint16_t qual, const uint8_t *val, size_t vlen,
+                               int *ip_changed, int *abort_code2)
+{
+    if (opt == PN_DCP_OPT_IP) {
+        if (sub == PN_DCP_SUB_IP_MAC) {
+            return PN_DCP_BLOCK_ERR_SUB_NOT_SET;
+        }
+        if (sub != PN_DCP_SUB_IP_PARAM) {
+            return PN_DCP_BLOCK_ERR_SUB_UNSUP;
+        }
+        /* Same suite is not a change (CMINA case 24). A different value
+         * during an AR is rejected and the AR stays (case 26). */
+        if (ip_suite_same(s, val, vlen)) {
+            return PN_DCP_BLOCK_ERR_OK;
+        }
+        if (ar_in_operation(s)) {
+            return PN_DCP_BLOCK_ERR_IN_OPERATION;
+        }
+        if (vlen < 12) {
+            return PN_DCP_BLOCK_ERR_SUB_NOT_SET;
+        }
+        uint32_t ip = pn_rd_be32(val);
+        if (ip != s->cfg.ip) {
+            *ip_changed = 1;
+        }
+        s->cfg.ip = ip;
+        s->cfg.netmask = pn_rd_be32(val + 4);
+        s->cfg.gateway = pn_rd_be32(val + 8);
+        LOG_INFO("pn_dcp", "IP set %u.%u.%u.%u", (s->cfg.ip >> 24) & 0xff,
+                 (s->cfg.ip >> 16) & 0xff, (s->cfg.ip >> 8) & 0xff,
+                 s->cfg.ip & 0xff);
+        return PN_DCP_BLOCK_ERR_OK;
+    }
+    if (opt == PN_DCP_OPT_DEV) {
+        if (sub == PN_DCP_SUB_DEV_NAME) {
+            if (!val || vlen == 0 || !pn_dcp_name_ok(val, vlen)) {
+                LOG_WARN("pn_dcp", "DCP Set NameOfStation invalid — 거부");
+                return PN_DCP_BLOCK_ERR_SUB_NOT_SET;
             }
-        } else if (opt == PN_DCP_OPT_IP && sub == PN_DCP_SUB_IP_PARAM &&
-                   vlen >= 12) {
-            s->cfg.ip = pn_rd_be32(val);
-            s->cfg.netmask = pn_rd_be32(val + 4);
-            s->cfg.gateway = pn_rd_be32(val + 8);
-            LOG_INFO("pn_dcp", "IP set %u.%u.%u.%u",
-                     (s->cfg.ip >> 24) & 0xff, (s->cfg.ip >> 16) & 0xff,
-                     (s->cfg.ip >> 8) & 0xff, s->cfg.ip & 0xff);
-        } else if (opt == PN_DCP_OPT_CTRL && sub == PN_DCP_SUB_CTRL_SIGNAL) {
+            size_t cur = strlen(s->cfg.station_name);
+            if (vlen == cur && memcmp(val, s->cfg.station_name, cur) == 0) {
+                return PN_DCP_BLOCK_ERR_OK;
+            }
+            /* Reject only when this AR asked for it. Otherwise accept
+             * and abort (CMINA case 27/28, ErrorCode2 0x1F). */
+            if (ar_in_operation(s) && s->ar.reject_dcp_set) {
+                return PN_DCP_BLOCK_ERR_IN_OPERATION;
+            }
+            size_t n = vlen < PN_STATION_NAME_MAX ? vlen : PN_STATION_NAME_MAX;
+            memcpy(s->cfg.station_name, val, n);
+            s->cfg.station_name[n] = '\0';
+            LOG_INFO("pn_dcp", "NameOfStation=%s", s->cfg.station_name);
+            if (ar_in_operation(s)) {
+                note_abort(abort_code2, 0x1F);
+            }
+            return PN_DCP_BLOCK_ERR_OK;
+        }
+        if (sub == PN_DCP_SUB_DEV_TYPE || sub == PN_DCP_SUB_DEV_ID ||
+            sub == PN_DCP_SUB_DEV_ROLE || sub == PN_DCP_SUB_DEV_OPTS) {
+            return PN_DCP_BLOCK_ERR_SUB_NOT_SET;
+        }
+        return PN_DCP_BLOCK_ERR_SUB_UNSUP;
+    }
+    if (opt == PN_DCP_OPT_CTRL) {
+        /* Start/Stop bracket a transaction. Blocks are applied as they
+         * are read, so the markers themselves have no extra effect. */
+        if (sub == PN_DCP_SUB_CTRL_START || sub == PN_DCP_SUB_CTRL_STOP) {
+            return PN_DCP_BLOCK_ERR_OK;
+        }
+        if (sub == PN_DCP_SUB_CTRL_SIGNAL) {
             LOG_INFO("pn_dcp", "DCP Signal accepted (LED flash stub)");
+            return PN_DCP_BLOCK_ERR_OK;
         }
-        off += total;
+        if (sub == PN_DCP_SUB_CTRL_FACTORY || sub == PN_DCP_SUB_CTRL_RESET) {
+            return apply_reset(s, sub == PN_DCP_SUB_CTRL_FACTORY, qual, ip_changed,
+                               abort_code2);
+        }
+        if (sub == PN_DCP_SUB_CTRL_RESPONSE) {
+            return PN_DCP_BLOCK_ERR_SUB_NOT_SET;
+        }
+        return PN_DCP_BLOCK_ERR_SUB_UNSUP;
     }
+    return PN_DCP_BLOCK_ERR_OPT_UNSUP;
 }
 
-static int blocks_have(const uint8_t *blocks, uint16_t dlen, uint8_t opt,
-                       uint8_t sub)
+static void wr_set_response(wr_t *w, uint8_t opt, uint8_t sub, uint8_t err)
 {
-    size_t off = 0;
-    while (off + 4 <= dlen) {
-        uint8_t o = blocks[off];
-        uint8_t su = blocks[off + 1];
-        uint16_t bl = pn_rd_be16(blocks + off + 2);
-        size_t total = 4u + bl + (bl & 1u);
-        if (off + total > dlen) {
-            break;
-        }
-        if (o == opt && su == sub) {
-            return 1;
-        }
-        off += total;
-    }
-    return 0;
-}
-
-static int set_has_invalid_name(const uint8_t *blocks, uint16_t dlen)
-{
-    size_t off = 0;
-    while (off + 4 <= dlen) {
-        uint8_t o = blocks[off];
-        uint8_t su = blocks[off + 1];
-        uint16_t bl = pn_rd_be16(blocks + off + 2);
-        size_t total = 4u + bl + (bl & 1u);
-        if (off + total > dlen) {
-            break;
-        }
-        if (o == PN_DCP_OPT_DEV && su == PN_DCP_SUB_DEV_NAME) {
-            const uint8_t *data = blocks + off + 4;
-            const uint8_t *val = (bl >= 2) ? data + 2 : data;
-            size_t vlen = (bl >= 2) ? (size_t)bl - 2 : 0;
-            if (vlen == 0 || !pn_dcp_name_ok(val, vlen)) {
-                return 1;
-            }
-        }
-        off += total;
-    }
-    return 0;
+    wr_u8(w, PN_DCP_OPT_CTRL);
+    wr_u8(w, PN_DCP_SUB_CTRL_RESPONSE);
+    wr_be16(w, 3);
+    wr_u8(w, opt);
+    wr_u8(w, sub);
+    wr_u8(w, err);
+    wr_u8(w, 0); /* odd DCPBlockLength pad; included in DCPDataLength */
 }
 
 static int ident_filters_match(const pn_stack_t *s, const uint8_t *blocks,
@@ -488,20 +588,39 @@ void pn_dcp_poll(pn_stack_t *s)
     s->dcp_ident_pending = 0;
 }
 
-static void send_set_not_possible(pn_stack_t *s, const uint8_t src[6],
-                                  uint32_t xid, uint8_t opt, uint8_t sub)
+/* Signature failure: ServiceType success, BlockError 0x03 on each Set
+ * block (not ServiceType 5). The HMAC block is not a Set target. */
+static void send_set_rejected(pn_stack_t *s, const uint8_t src[6], uint32_t xid,
+                              const uint8_t *blocks, uint16_t dlen)
 {
-    uint8_t err[8];
-    wr_t w = {err, sizeof(err), 0};
-    wr_u8(&w, PN_DCP_OPT_CTRL);
-    wr_u8(&w, PN_DCP_SUB_CTRL_RESPONSE);
-    wr_be16(&w, 3);
-    wr_u8(&w, opt);
-    wr_u8(&w, sub);
-    wr_u8(&w, 0x03); /* set not possible */
-    wr_u8(&w, 0);
-    send_dcp(s, src, PN_FRAMEID_DCP_GETSET, PN_DCP_SET, PN_DCP_RESP_UNSUP, xid,
-             0, err, w.n);
+    uint8_t resp[512];
+    wr_t w = {resp, sizeof(resp), 0};
+    size_t off = 0;
+    int answered = 0;
+    while (off + 4 <= dlen) {
+        uint8_t opt = blocks[off];
+        uint8_t sub = blocks[off + 1];
+        uint16_t bl = pn_rd_be16(blocks + off + 2);
+        size_t total = 4u + bl + (bl & 1u);
+        if (off + total > dlen) {
+            break;
+        }
+        if (!(opt == PN_DCP_OPT_SEC && sub == PN_DCP_SUB_SEC_HMAC)) {
+            wr_set_response(&w, opt, sub, PN_DCP_BLOCK_ERR_SUB_NOT_SET);
+            answered = 1;
+        }
+        off += total;
+    }
+    if (!answered) {
+        wr_set_response(&w, PN_DCP_OPT_SEC, PN_DCP_SUB_SEC_HMAC,
+                        PN_DCP_BLOCK_ERR_SUB_NOT_SET);
+    }
+    if (w.n > sizeof(resp)) {
+        LOG_ERROR("pn_dcp", "Set.res blocks exceed buffer");
+        return;
+    }
+    send_dcp(s, src, PN_FRAMEID_DCP_GETSET, PN_DCP_SET, PN_DCP_RESP_SUCCESS, xid,
+             0, resp, w.n);
 }
 
 void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
@@ -540,41 +659,47 @@ void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
         if (pn_dcp_verify_set(s, payload, plen) != 0) {
             LOG_WARN("pn_dcp",
                      "vendor integrity extension: unsigned/invalid DCP Set 거부");
-            send_set_not_possible(s, src, xid, PN_DCP_OPT_SEC,
-                                  PN_DCP_SUB_SEC_HMAC);
+            send_set_rejected(s, src, xid, blocks, dlen);
             return;
         }
-        if (set_has_invalid_name(blocks, dlen)) {
-            LOG_WARN("pn_dcp", "DCP Set NameOfStation invalid — 거부");
-            send_set_not_possible(s, src, xid, PN_DCP_OPT_DEV,
-                                  PN_DCP_SUB_DEV_NAME);
+        uint8_t resp[512];
+        wr_t w = {resp, sizeof(resp), 0};
+        int ip_changed = 0;
+        int abort_code2 = 0;
+        size_t off = 0;
+        while (off + 4 <= dlen) {
+            uint8_t opt = blocks[off];
+            uint8_t sub = blocks[off + 1];
+            uint16_t bl = pn_rd_be16(blocks + off + 2);
+            size_t total = 4u + bl + (bl & 1u);
+            if (off + total > dlen) {
+                break;
+            }
+            /* HMAC is not a Set target and has no BlockQualifier. */
+            if (!(opt == PN_DCP_OPT_SEC && sub == PN_DCP_SUB_SEC_HMAC)) {
+                const uint8_t *data = blocks + off + 4;
+                uint16_t qual = (bl >= 2) ? pn_rd_be16(data) : 0;
+                const uint8_t *val = (bl >= 2) ? data + 2 : data;
+                size_t vlen = (bl >= 2) ? (size_t)bl - 2 : 0;
+                uint8_t berr = apply_set_block(s, opt, sub, qual, val, vlen,
+                                               &ip_changed, &abort_code2);
+                wr_set_response(&w, opt, sub, berr);
+            }
+            off += total;
+        }
+        if (w.n > sizeof(resp)) {
+            LOG_ERROR("pn_dcp", "Set.res blocks exceed buffer");
             return;
         }
-        int set_ip = blocks_have(blocks, dlen, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM);
-        int set_sig = blocks_have(blocks, dlen, PN_DCP_OPT_CTRL,
-                                  PN_DCP_SUB_CTRL_SIGNAL);
-        apply_blocks(s, blocks, dlen);
-        uint8_t ok[8];
-        wr_t w = {ok, sizeof(ok), 0};
-        wr_u8(&w, PN_DCP_OPT_CTRL);
-        wr_u8(&w, PN_DCP_SUB_CTRL_RESPONSE);
-        wr_be16(&w, 3);
-        if (set_sig) {
-            wr_u8(&w, PN_DCP_OPT_CTRL);
-            wr_u8(&w, PN_DCP_SUB_CTRL_SIGNAL);
-        } else if (set_ip) {
-            wr_u8(&w, PN_DCP_OPT_IP);
-            wr_u8(&w, PN_DCP_SUB_IP_PARAM);
-        } else {
-            wr_u8(&w, PN_DCP_OPT_DEV);
-            wr_u8(&w, PN_DCP_SUB_DEV_NAME);
+        send_dcp(s, src, PN_FRAMEID_DCP_GETSET, PN_DCP_SET, PN_DCP_RESP_SUCCESS,
+                 xid, 0, resp, w.n);
+        if (abort_code2 == 0x1F) {
+            pn_ar_abort(s, "DCP station name changed");
+        } else if (abort_code2 == 0x20) {
+            pn_ar_abort(s, "DCP reset to factory");
         }
-        wr_u8(&w, 0x00); /* OK */
-        wr_u8(&w, 0);
-        send_dcp(s, src, PN_FRAMEID_DCP_GETSET, PN_DCP_SET,
-                 PN_DCP_RESP_SUCCESS, xid, 0, ok, w.n);
-        if (set_ip) {
-            /* Device announces new IP (DCP Hello.Req, FrameID 0xFEFC). */
+        if (ip_changed) {
+            /* Device announces the new IP (DCP Hello.Req, FrameID 0xFEFC). */
             pn_dcp_send_hello(s);
         }
         return;
