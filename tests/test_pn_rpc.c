@@ -1183,6 +1183,10 @@ static const uint8_t k_t1214_if_be[16] = {
 static const uint8_t k_t1214_epm_le[16] = {
     0x08, 0x83, 0xAF, 0xE1, 0x1F, 0x5D, 0xC9, 0x11,
     0x91, 0xA4, 0x08, 0x00, 0x2B, 0x14, 0xA0, 0xFA};
+/* NDR transfer syntax 8A885D04-1CEB-11C9-9FE8-08002B104860, little-endian wire. */
+static const uint8_t k_t1214_ndr_le[16] = {
+    0x04, 0x5D, 0x88, 0x8A, 0xEB, 0x1C, 0xC9, 0x11,
+    0x9F, 0xE8, 0x08, 0x00, 0x2B, 0x10, 0x48, 0x60};
 
 static void t1214_w32(uint8_t *p, uint32_t v, int be)
 {
@@ -1438,11 +1442,135 @@ static void test_t12_14_activity_timeout(void)
     pn_stack_destroy(s);
 }
 
+/* One tower floor. Lengths and versions are little-endian. rhs bytes are
+ * returned as stored (port and IP stay big-endian). */
+static int t1214_next_floor(const uint8_t **pp, const uint8_t *end,
+                            uint8_t *proto, const uint8_t **uuid,
+                            uint16_t *ver, const uint8_t **rhs,
+                            uint16_t *rhslen)
+{
+    const uint8_t *p = *pp;
+    if (p + 3 > end) {
+        return 0;
+    }
+    uint16_t lhs = pn_rd_le16(p);
+    p += 2;
+    if (lhs < 1 || p + lhs > end) {
+        return 0;
+    }
+    *proto = p[0];
+    *uuid = NULL;
+    *ver = 0;
+    if (*proto == 0x0d) {
+        if (lhs != 19 || p + 19 > end) {
+            return 0;
+        }
+        *uuid = p + 1;
+        *ver = pn_rd_le16(p + 17);
+    }
+    p += lhs;
+    if (p + 2 > end) {
+        return 0;
+    }
+    uint16_t rl = pn_rd_le16(p);
+    p += 2;
+    if (p + rl > end) {
+        return 0;
+    }
+    *rhs = p;
+    *rhslen = rl;
+    p += rl;
+    *pp = p;
+    return 1;
+}
+
+/* ept_lookup stub must be NDR: object, one tower referent, annotation
+ * (offset, actual_count, 64 chars), then deferred tower_length, max_count,
+ * little-endian floors. Port and IP are the only big-endian floor fields. */
+static void test_t12_14_epm_ndr_tower(void)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, "t12-14 epm ndr create");
+    s->cfg.ip = 0x0a000001;
+    uint8_t estub[8];
+    memset(estub, 0, sizeof(estub));
+    uint8_t pdu[320];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = t1214_req(pdu, 4, 0, 2, NULL, k_t1214_epm_le, estub,
+                            sizeof(estub), 0x20, 0, 1);
+    int rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect(rc == 0 && rlen > 80 && resp[1] == 2 && (resp[4] >> 4) == 1,
+           "t12-14 EPM LE response");
+    if (!(rc == 0 && rlen > 80 && (resp[4] >> 4) == 1)) {
+        pn_stack_destroy(s);
+        return;
+    }
+    const uint8_t *body = resp + 80;
+    size_t blen = rlen - 80;
+    expect(blen >= 216 && t1214_r32(body + 20, 0) == 1, "t12-14 EPM num_ents 1");
+    expect(t1214_r32(body + 24, 0) == 1 && t1214_r32(body + 28, 0) == 0 &&
+               t1214_r32(body + 32, 0) == 1,
+           "t12-14 EPM entries max/offset/actual");
+    expect(blen >= 52 && memcmp(body + 36, k_t1214_obj_le, 16) == 0,
+           "t12-14 EPM entry object is device UUID");
+    expect(blen >= 64 && t1214_r32(body + 52, 0) != 0,
+           "t12-14 EPM tower referent");
+    /* The second word is annotation offset, not another referent (0x00020004). */
+    expect(blen >= 128 && t1214_r32(body + 56, 0) == 0 &&
+               t1214_r32(body + 60, 0) == 64,
+           "t12-14 EPM annotation offset 0 count 64");
+    uint32_t tlen = blen >= 136 ? t1214_r32(body + 128, 0) : 0;
+    uint32_t tmax = blen >= 136 ? t1214_r32(body + 132, 0) : 0;
+    expect(tlen == 75 && tmax == 75 && 136u + tlen <= blen,
+           "t12-14 EPM deferred tower length 75");
+    int floors_ok = 0;
+    if (tlen == 75 && 136u + tlen <= blen) {
+        const uint8_t *tw = body + 136;
+        const uint8_t *end = tw + tlen;
+        expect(pn_rd_le16(tw) == 5 && tw[0] == 5 && tw[1] == 0,
+               "t12-14 EPM floor count is little-endian 5");
+        const uint8_t *p = tw + 2;
+        uint8_t proto = 0;
+        const uint8_t *uuid = NULL;
+        const uint8_t *rhs = NULL;
+        uint16_t ver = 0;
+        uint16_t rhslen = 0;
+        int ok = t1214_next_floor(&p, end, &proto, &uuid, &ver, &rhs, &rhslen);
+        expect(ok && proto == 0x0d && ver == 1 && uuid &&
+                   memcmp(uuid, k_t1214_if_le, 16) == 0,
+               "t12-14 EPM floor UUID PNIO Device v1");
+        ok = ok && t1214_next_floor(&p, end, &proto, &uuid, &ver, &rhs, &rhslen);
+        expect(ok && proto == 0x0d && ver == 2 && uuid &&
+                   memcmp(uuid, k_t1214_ndr_le, 16) == 0,
+               "t12-14 EPM floor UUID NDR v2");
+        ok = ok && t1214_next_floor(&p, end, &proto, &uuid, &ver, &rhs, &rhslen);
+        expect(ok && proto == 0x0a, "t12-14 EPM floor ncadg 0x0A");
+        ok = ok && t1214_next_floor(&p, end, &proto, &uuid, &ver, &rhs, &rhslen);
+        expect(ok && proto == 0x08 && rhslen == 2 && rhs &&
+                   pn_rd_be16(rhs) == 34964,
+               "t12-14 EPM floor UDP 34964 big-endian");
+        ok = ok && t1214_next_floor(&p, end, &proto, &uuid, &ver, &rhs, &rhslen);
+        expect(ok && proto == 0x09 && rhslen == 4 && rhs &&
+                   memcmp(rhs, "\x0a\x00\x00\x01", 4) == 0 && p == end,
+               "t12-14 EPM floor IP big-endian");
+        floors_ok = ok && p == end;
+    }
+    size_t st = 136u + (tlen == 75 ? tlen : 0);
+    while (st & 3u) {
+        st++;
+    }
+    expect(floors_ok && st + 4 == blen && t1214_r32(body + st, 0) == 0,
+           "t12-14 EPM status 0 after tower");
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
     test_t12_14_be_drep();
     test_t12_14_rpc_vers_and_uuids();
     test_t12_14_fragment_and_epm();
+    test_t12_14_epm_ndr_tower();
     test_t12_14_activity_timeout();
     test_t12_5_prm_end_and_app_ready();
     test_t12_5_app_ready_dest_rpc_port();
