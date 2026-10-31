@@ -498,6 +498,7 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         if (blen >= 46) {
             uint32_t props = pn_rd_be32(body + 42);
             ar->startup_advanced = (props & (1u << 30)) != 0;
+            ar->reject_dcp_set = (props & (1u << 27)) != 0;
         }
         /* ARProperties(4) + ActivityTimeoutFactor(2) + UDPRTPort(2) */
         if (blen >= 50) {

@@ -22,6 +22,14 @@ static uint8_t abort_rta_code2(const char *why)
     if (strstr(why, "alarm ACK") != NULL) {
         return 0x08;
     }
+    /* PNIO RTA status CF 81 FD xx. 0x1F station name changed, 0x20 reset
+     * to factory (p-net PNET_ERROR_CODE_2_ABORT_DCP_*). */
+    if (strstr(why, "NameOfStation") != NULL) {
+        return 0x1F;
+    }
+    if (strstr(why, "ResetToFactory") != NULL) {
+        return 0x20;
+    }
     return 0x0d;
 }
 

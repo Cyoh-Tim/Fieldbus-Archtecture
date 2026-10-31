@@ -536,15 +536,16 @@ typedef struct {
     uint8_t err;
 } set_res_t;
 
-static size_t append_set_block(uint8_t *blocks, size_t bn, uint8_t opt,
-                               uint8_t sub, const void *val, size_t vlen)
+static size_t append_set_block_qual(uint8_t *blocks, size_t bn, uint8_t opt,
+                                    uint8_t sub, uint16_t qual, const void *val,
+                                    size_t vlen)
 {
     uint16_t blen = (uint16_t)(2u + vlen);
     blocks[bn++] = opt;
     blocks[bn++] = sub;
     pn_wr_be16(blocks + bn, blen);
     bn += 2;
-    pn_wr_be16(blocks + bn, 1); /* BlockQualifier: permanent */
+    pn_wr_be16(blocks + bn, qual);
     bn += 2;
     if (vlen && val) {
         memcpy(blocks + bn, val, vlen);
@@ -554,6 +555,89 @@ static size_t append_set_block(uint8_t *blocks, size_t bn, uint8_t opt,
         blocks[bn++] = 0;
     }
     return bn;
+}
+
+static size_t append_set_block(uint8_t *blocks, size_t bn, uint8_t opt,
+                               uint8_t sub, const void *val, size_t vlen)
+{
+    return append_set_block_qual(blocks, bn, opt, sub, 1, val, vlen);
+}
+
+static int tx_contains(const uint8_t *pat, size_t n)
+{
+    for (int i = 0; i < g_ntx; i++) {
+        if (g_txlen[i] < n) {
+            continue;
+        }
+        for (size_t off = 0; off + n <= g_txlen[i]; off++) {
+            if (memcmp(g_tx[i] + off, pat, n) == 0) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/* Next RTC1 is due immediately. Returns 1 when a frame is queued. */
+static int rtc1_sends(pn_stack_t *s)
+{
+    s->last_rt_ns = 0;
+    int before = g_ntx;
+    pn_rt_send_if_due(s);
+    return g_ntx > before;
+}
+
+static int im_is(pn_stack_t *s, uint16_t index, size_t n, uint8_t want)
+{
+    uint8_t got[128];
+    size_t got_n = 0;
+    if (6u + n > sizeof(got)) {
+        return 0;
+    }
+    if (pn_record_read(s, 0, 1, index, got, sizeof(got), &got_n) != 0 ||
+        got_n < 6u + n) {
+        return 0;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (got[6 + i] != want) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void fill_im(pn_stack_t *s)
+{
+    uint8_t im1[PN_IM1_FUNC_LEN + PN_IM1_LOC_LEN];
+    memset(im1, 'X', sizeof(im1));
+    expect(pn_record_write(s, 0, 1, PN_INDEX_IM1, im1, sizeof(im1)) == 0,
+           "write im1");
+    uint8_t im2[PN_IM2_DATE_LEN];
+    memset(im2, 'Y', sizeof(im2));
+    expect(pn_record_write(s, 0, 1, PN_INDEX_IM2, im2, sizeof(im2)) == 0,
+           "write im2");
+    uint8_t im3[PN_IM3_DESC_LEN];
+    memset(im3, 'Z', sizeof(im3));
+    expect(pn_record_write(s, 0, 1, PN_INDEX_IM3, im3, sizeof(im3)) == 0,
+           "write im3");
+    uint8_t im4[PN_IM4_SIG_LEN];
+    memset(im4, 0x5A, sizeof(im4));
+    expect(pn_record_write(s, 0, 1, PN_INDEX_IM4, im4, sizeof(im4)) == 0,
+           "write im4");
+}
+
+static int im_custom(pn_stack_t *s)
+{
+    return im_is(s, PN_INDEX_IM1, PN_IM1_FUNC_LEN + PN_IM1_LOC_LEN, 'X') &&
+           im_is(s, PN_INDEX_IM4, PN_IM4_SIG_LEN, 0x5A);
+}
+
+static int im_blank(pn_stack_t *s)
+{
+    return im_is(s, PN_INDEX_IM1, PN_IM1_FUNC_LEN + PN_IM1_LOC_LEN, ' ') &&
+           im_is(s, PN_INDEX_IM2, PN_IM2_DATE_LEN, ' ') &&
+           im_is(s, PN_INDEX_IM3, PN_IM3_DESC_LEN, ' ') &&
+           im_is(s, PN_INDEX_IM4, PN_IM4_SIG_LEN, 0);
 }
 
 static size_t dcp_set_blocks_frame(uint8_t *out, const uint8_t *dst,
@@ -619,8 +703,14 @@ static int set_res_err(const set_res_t *r, int n, uint8_t opt, uint8_t sub,
     return 0;
 }
 
-/* T12-16: one Control/Response per Set block, ServiceType success on errors,
- * read-only and in-AR name/IP rejected, ResetToFactory restores factory state. */
+/* T12-16: one Control/Response per Set block. Name-rule and signature
+ * failures stay BlockError 0x03 with ServiceType 1. A different
+ * NameOfStation during an AR is accepted and the AR aborts (ErrorCode2
+ * 0x1F, RTC1 stops) unless that AR's RejectDCPsetRequests bit is set.
+ * A different IP during an AR is BlockError 0x06 and leaves the AR up.
+ * ResetToFactory follows BlockQualifier>>1; factory name is empty and
+ * the IP suite is 0.0.0.0. An accepted reset during an AR aborts it
+ * (ErrorCode2 0x20). */
 static void test_t12_16_set_rules(void)
 {
     pn_stack_t *s = make_dcp_stack();
@@ -689,12 +779,34 @@ static void test_t12_16_set_rules(void)
     expect(stype == PN_DCP_RESP_SUCCESS && stype != PN_DCP_RESP_UNSUP,
            "invalid name ServiceType is success, not unsupported");
     expect(set_res_err(res, nres, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, &err) &&
-               err != 0x00,
-           "invalid name BlockError is not OK");
+               err == PN_DCP_BLOCK_ERR_SUB_NOT_SET,
+           "invalid name BlockError 0x03");
     expect(strcmp(s->cfg.station_name, "press-7") == 0, "invalid name not applied");
 
-    /* AR up: Name and IP are BlockError 0x06 and are not applied. */
+    /* RejectDCPsetRequests=0. The same name keeps the AR. A different
+     * name is accepted, applied, and aborts the AR. */
+    static const uint8_t err_name[4] = {0xCF, 0x81, 0xFD, 0x1F};
+    static const uint8_t err_factory[4] = {0xCF, 0x81, 0xFD, 0x20};
     s->ar.established = 1;
+    s->ar.reject_dcp_set = 0;
+    s->last_rt_ns = 0;
+    tx_reset();
+    pn_rt_send_if_due(s);
+    expect(g_ntx >= 1, "rtc1 while ar is up");
+
+    tx_reset();
+    flen = dcp_set_name_frame(frame, dst, src, "press-7");
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "set same name during ar");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(stype == PN_DCP_RESP_SUCCESS, "same name ServiceType success");
+    expect(set_res_err(res, nres, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, &err) &&
+               err == 0x00,
+           "same name BlockError 0");
+    expect(s->ar.established, "same name keeps ar");
+    expect(!tx_contains(err_name, sizeof(err_name)), "same name does not abort");
+    expect(rtc1_sends(s), "same name rtc1 continues");
+
     tx_reset();
     flen = dcp_set_name_frame(frame, dst, src, "during-ar");
     expect(pn_stack_handle_eth(s, frame, flen) == 0, "set name during ar");
@@ -702,12 +814,52 @@ static void test_t12_16_set_rules(void)
     nres = parse_set_responses(rsp, rlen, &stype, res, 8);
     expect(stype == PN_DCP_RESP_SUCCESS, "in-ar name ServiceType success");
     expect(set_res_err(res, nres, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, &err) &&
-               err == 0x06,
-           "in-ar name BlockError 0x06");
-    expect(strcmp(s->cfg.station_name, "press-7") == 0, "in-ar name not applied");
+               err == 0x00,
+           "in-ar name BlockError 0");
+    expect(strcmp(s->cfg.station_name, "during-ar") == 0, "in-ar name applied");
+    expect(!s->ar.established, "in-ar name releases ar");
+    expect(tx_contains(err_name, sizeof(err_name)),
+           "in-ar name abort ErrorCode2 0x1F");
+    expect(!rtc1_sends(s), "in-ar name stops rtc1");
+
+    /* Bit 27: a different name is BlockError 0x06. Name and AR stay. */
+    s->ar.established = 1;
+    s->ar.reject_dcp_set = 1;
+    s->last_rt_ns = 0;
+    tx_reset();
+    flen = dcp_set_name_frame(frame, dst, src, "other-name");
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "set name reject-dcp");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(stype == PN_DCP_RESP_SUCCESS, "reject-dcp ServiceType success");
+    expect(set_res_err(res, nres, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, &err) &&
+               err == PN_DCP_BLOCK_ERR_IN_OPERATION,
+           "reject-dcp name BlockError 0x06");
+    expect(strcmp(s->cfg.station_name, "during-ar") == 0,
+           "reject-dcp name not applied");
+    expect(s->ar.established, "reject-dcp keeps ar");
+    expect(!tx_contains(err_name, sizeof(err_name)), "reject-dcp does not abort");
+    expect(rtc1_sends(s), "reject-dcp rtc1 continues");
+
+    tx_reset();
+    flen = dcp_set_name_frame(frame, dst, src, "port-abc");
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "invalid name during ar");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(stype == PN_DCP_RESP_SUCCESS, "invalid name during ar ServiceType");
+    expect(set_res_err(res, nres, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, &err) &&
+               err == PN_DCP_BLOCK_ERR_SUB_NOT_SET,
+           "invalid name during ar BlockError 0x03");
+    expect(strcmp(s->cfg.station_name, "during-ar") == 0,
+           "invalid name during ar not applied");
+    expect(s->ar.established, "invalid name during ar keeps ar");
 
     uint32_t ip_before = s->cfg.ip;
+    uint32_t mask_before = s->cfg.netmask;
+    uint32_t gw_before = s->cfg.gateway;
     pn_wr_be32(ipb, 0x0A000001u);
+    pn_wr_be32(ipb + 4, 0xFFFFFF00u);
+    pn_wr_be32(ipb + 8, 0x0A000001u);
     bn = 0;
     bn = append_set_block(blocks, bn, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ipb,
                           sizeof(ipb));
@@ -716,109 +868,221 @@ static void test_t12_16_set_rules(void)
     expect(pn_stack_handle_eth(s, frame, flen) == 0, "set ip during ar");
     rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
     nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(stype == PN_DCP_RESP_SUCCESS, "in-ar ip ServiceType success");
     expect(set_res_err(res, nres, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, &err) &&
-               err == 0x06,
+               err == PN_DCP_BLOCK_ERR_IN_OPERATION,
            "in-ar ip BlockError 0x06");
-    expect(s->cfg.ip == ip_before, "in-ar ip not applied");
-    s->ar.established = 0;
+    expect(s->cfg.ip == ip_before && s->cfg.netmask == mask_before &&
+               s->cfg.gateway == gw_before,
+           "in-ar ip not applied");
+    expect(s->ar.established, "in-ar ip keeps ar");
 
-    /* ResetToFactory (5/6) and Reset Factory Settings (5/5) restore the
-     * create-time name, IP suite, and I&M1–4. */
-    uint8_t im[PN_IM1_FUNC_LEN + PN_IM1_LOC_LEN];
-    memset(im, 'X', sizeof(im));
-    expect(pn_record_write(s, 0, 1, PN_INDEX_IM1, im, sizeof(im)) == 0,
-           "write im1");
-    uint8_t im2[PN_IM2_DATE_LEN];
-    memset(im2, 'Y', sizeof(im2));
-    expect(pn_record_write(s, 0, 1, PN_INDEX_IM2, im2, sizeof(im2)) == 0,
-           "write im2");
-    uint8_t im4[PN_IM4_SIG_LEN];
-    memset(im4, 0x5A, sizeof(im4));
-    expect(pn_record_write(s, 0, 1, PN_INDEX_IM4, im4, sizeof(im4)) == 0,
-           "write im4");
+    pn_wr_be32(ipb, ip_before);
+    pn_wr_be32(ipb + 4, mask_before);
+    pn_wr_be32(ipb + 8, gw_before);
     bn = 0;
-    bn = append_set_block(blocks, bn, PN_DCP_OPT_CTRL, 0x06, NULL, 0);
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ipb,
+                          sizeof(ipb));
     tx_reset();
     flen = dcp_set_blocks_frame(frame, dst, src, 0x5105, blocks, bn);
-    expect(pn_stack_handle_eth(s, frame, flen) == 0, "reset to factory");
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "set same ip during ar");
     rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
     nres = parse_set_responses(rsp, rlen, &stype, res, 8);
-    expect(stype == PN_DCP_RESP_SUCCESS, "reset ServiceType success");
+    expect(set_res_err(res, nres, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, &err) &&
+               err == 0x00,
+           "same ip during ar BlockError 0");
+    expect(s->ar.established, "same ip keeps ar");
+    s->ar.established = 0;
+    s->ar.reject_dcp_set = 0;
+
+    /* ResetToFactory mode = BlockQualifier >> 1. Factory values are an
+     * empty NameOfStation and IP 0.0.0.0, not the create-time config. */
+    fill_im(s);
+    bn = 0;
+    bn = append_set_block_qual(blocks, bn, PN_DCP_OPT_CTRL, 0x06, 1u << 1, NULL,
+                              0);
+    tx_reset();
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5110, blocks, bn);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "reset mode 1");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(stype == PN_DCP_RESP_SUCCESS, "mode 1 ServiceType success");
     expect(set_res_err(res, nres, PN_DCP_OPT_CTRL, 0x06, &err) && err == 0x00,
-           "ResetToFactory BlockError 0");
-    expect(strcmp(s->cfg.station_name, "sensor-line1") == 0,
-           "reset restores station name");
+           "mode 1 BlockError 0");
+    expect(strcmp(s->cfg.station_name, "during-ar") == 0, "mode 1 keeps name");
+    expect(s->cfg.ip == ip_before, "mode 1 keeps ip");
+    expect(im_blank(s), "mode 1 clears I&M1-4");
+
+    fill_im(s);
+    bn = 0;
+    bn = append_set_block_qual(blocks, bn, PN_DCP_OPT_CTRL, 0x06, 2u << 1, NULL,
+                              0);
+    tx_reset();
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5111, blocks, bn);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "reset mode 2");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(set_res_err(res, nres, PN_DCP_OPT_CTRL, 0x06, &err) && err == 0x00,
+           "mode 2 BlockError 0");
+    expect(s->cfg.station_name[0] == '\0', "mode 2 clears name");
     expect(s->cfg.ip == 0 && s->cfg.netmask == 0 && s->cfg.gateway == 0,
-           "reset restores ip suite");
-    uint8_t got[128];
-    size_t got_n = 0;
-    expect(pn_record_read(s, 0, 1, PN_INDEX_IM1, got, sizeof(got), &got_n) == 0,
-           "read im1");
-    int im_blank = got_n >= 6 + sizeof(im);
-    for (size_t i = 0; im_blank && i < sizeof(im); i++) {
-        if (got[6 + i] != ' ') {
-            im_blank = 0;
-        }
+           "mode 2 clears ip suite");
+    expect(im_custom(s), "mode 2 leaves I&M1-4");
+
+    static const uint16_t all_modes[] = {3, 4, 8, 9};
+    for (size_t mi = 0; mi < sizeof(all_modes) / sizeof(all_modes[0]); mi++) {
+        uint16_t mode = all_modes[mi];
+        bn = 0;
+        bn = append_set_block(blocks, bn, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME,
+                              "again-1", 7);
+        flen = dcp_set_blocks_frame(frame, dst, src, 0x5120u + mode, blocks, bn);
+        pn_stack_handle_eth(s, frame, flen);
+        pn_wr_be32(ipb, 0xC0A80014u);
+        pn_wr_be32(ipb + 4, 0xFFFFFF00u);
+        pn_wr_be32(ipb + 8, 0xC0A80001u);
+        bn = 0;
+        bn = append_set_block(blocks, bn, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ipb,
+                              sizeof(ipb));
+        flen = dcp_set_blocks_frame(frame, dst, src, 0x5130u + mode, blocks, bn);
+        pn_stack_handle_eth(s, frame, flen);
+        fill_im(s);
+        bn = 0;
+        bn = append_set_block_qual(blocks, bn, PN_DCP_OPT_CTRL, 0x06,
+                                  (uint16_t)(mode << 1), NULL, 0);
+        tx_reset();
+        flen = dcp_set_blocks_frame(frame, dst, src, 0x5140u + mode, blocks, bn);
+        expect(pn_stack_handle_eth(s, frame, flen) == 0, "reset all-supported");
+        rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+        nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+        expect(set_res_err(res, nres, PN_DCP_OPT_CTRL, 0x06, &err) && err == 0x00,
+               "all-supported BlockError 0");
+        expect(s->cfg.station_name[0] == '\0', "all-supported clears name");
+        expect(s->cfg.ip == 0 && s->cfg.netmask == 0 && s->cfg.gateway == 0,
+               "all-supported clears ip");
+        expect(im_blank(s), "all-supported clears I&M");
     }
-    expect(im_blank, "reset clears I&M1 to spaces");
-    got_n = 0;
-    expect(pn_record_read(s, 0, 1, PN_INDEX_IM4, got, sizeof(got), &got_n) == 0,
-           "read im4");
-    int im4_zero = got_n >= 6 + PN_IM4_SIG_LEN;
-    for (size_t i = 0; im4_zero && i < PN_IM4_SIG_LEN; i++) {
-        if (got[6 + i] != 0) {
-            im4_zero = 0;
-        }
-    }
-    expect(im4_zero, "reset clears I&M4");
 
     bn = 0;
     bn = append_set_block(blocks, bn, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME,
-                          "again-1", 7);
-    flen = dcp_set_blocks_frame(frame, dst, src, 0x5106, blocks, bn);
+                          "stay-1", 6);
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5150, blocks, bn);
     pn_stack_handle_eth(s, frame, flen);
-    expect(pn_record_write(s, 0, 1, PN_INDEX_IM3, im2, sizeof(im2)) == 0,
-           "write im3");
+    pn_wr_be32(ipb, 0xC0A80021u);
+    pn_wr_be32(ipb + 4, 0xFFFFFF00u);
+    pn_wr_be32(ipb + 8, 0xC0A80001u);
     bn = 0;
-    bn = append_set_block(blocks, bn, PN_DCP_OPT_CTRL, 0x05, NULL, 0);
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ipb,
+                          sizeof(ipb));
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5151, blocks, bn);
+    pn_stack_handle_eth(s, frame, flen);
+    fill_im(s);
+    static const uint16_t reserved_modes[] = {0, 5, 6, 7, 10};
+    for (size_t mi = 0; mi < sizeof(reserved_modes) / sizeof(reserved_modes[0]);
+         mi++) {
+        uint16_t mode = reserved_modes[mi];
+        bn = 0;
+        bn = append_set_block_qual(blocks, bn, PN_DCP_OPT_CTRL, 0x06,
+                                  (uint16_t)(mode << 1), NULL, 0);
+        tx_reset();
+        flen = dcp_set_blocks_frame(frame, dst, src, 0x5160u + mode, blocks, bn);
+        expect(pn_stack_handle_eth(s, frame, flen) == 0, "reserved reset");
+        rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+        nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+        expect(stype == PN_DCP_RESP_SUCCESS, "reserved ServiceType success");
+        expect(set_res_err(res, nres, PN_DCP_OPT_CTRL, 0x06, &err) &&
+                   err == PN_DCP_BLOCK_ERR_SUB_NOT_SET,
+               "reserved BlockError 0x03");
+        expect(strcmp(s->cfg.station_name, "stay-1") == 0, "reserved keeps name");
+        expect(s->cfg.ip == 0xC0A80021u, "reserved keeps ip");
+        expect(im_custom(s), "reserved keeps I&M");
+    }
+
+    bn = 0;
+    bn = append_set_block_qual(blocks, bn, PN_DCP_OPT_CTRL, 0x05, 1, NULL, 0);
     tx_reset();
-    flen = dcp_set_blocks_frame(frame, dst, src, 0x5107, blocks, bn);
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5170, blocks, bn);
     expect(pn_stack_handle_eth(s, frame, flen) == 0, "reset factory settings");
     rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
     nres = parse_set_responses(rsp, rlen, &stype, res, 8);
     expect(set_res_err(res, nres, PN_DCP_OPT_CTRL, 0x05, &err) && err == 0x00,
            "Reset Factory Settings BlockError 0");
-    expect(strcmp(s->cfg.station_name, "sensor-line1") == 0,
-           "factory settings restores name");
-    got_n = 0;
-    expect(pn_record_read(s, 0, 1, PN_INDEX_IM3, got, sizeof(got), &got_n) == 0,
-           "read im3");
-    im_blank = got_n >= 6 + PN_IM3_DESC_LEN;
-    for (size_t i = 0; im_blank && i < PN_IM3_DESC_LEN; i++) {
-        if (got[6 + i] != ' ') {
-            im_blank = 0;
-        }
-    }
-    expect(im_blank, "factory settings clears I&M3");
+    expect(s->cfg.station_name[0] == '\0', "factory settings clears name");
+    expect(s->cfg.ip == 0 && s->cfg.netmask == 0 && s->cfg.gateway == 0,
+           "factory settings clears ip");
+    expect(im_blank(s), "factory settings clears I&M");
 
-    /* In operation, factory reset is refused and the name stays. */
     bn = 0;
     bn = append_set_block(blocks, bn, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME,
-                          "keep-me", 7);
-    flen = dcp_set_blocks_frame(frame, dst, src, 0x5108, blocks, bn);
+                          "live-1", 6);
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5180, blocks, bn);
     pn_stack_handle_eth(s, frame, flen);
-    s->ar.established = 1;
+    pn_wr_be32(ipb, 0xC0A80022u);
     bn = 0;
-    bn = append_set_block(blocks, bn, PN_DCP_OPT_CTRL, 0x06, NULL, 0);
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ipb,
+                          sizeof(ipb));
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5181, blocks, bn);
+    pn_stack_handle_eth(s, frame, flen);
+    fill_im(s);
+    s->ar.established = 1;
+    s->ar.reject_dcp_set = 0;
+    s->last_rt_ns = 0;
+    bn = 0;
+    bn = append_set_block_qual(blocks, bn, PN_DCP_OPT_CTRL, 0x06, 2u << 1, NULL,
+                              0);
     tx_reset();
-    flen = dcp_set_blocks_frame(frame, dst, src, 0x5109, blocks, bn);
-    expect(pn_stack_handle_eth(s, frame, flen) == 0, "reset during ar");
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5182, blocks, bn);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "reset mode 2 during ar");
     rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
     nres = parse_set_responses(rsp, rlen, &stype, res, 8);
-    expect(set_res_err(res, nres, PN_DCP_OPT_CTRL, 0x06, &err) && err == 0x06,
-           "in-ar ResetToFactory BlockError 0x06");
-    expect(strcmp(s->cfg.station_name, "keep-me") == 0,
-           "in-ar reset leaves name");
+    expect(stype == PN_DCP_RESP_SUCCESS, "in-ar reset ServiceType success");
+    expect(set_res_err(res, nres, PN_DCP_OPT_CTRL, 0x06, &err) && err == 0x00,
+           "in-ar ResetToFactory BlockError 0");
+    expect(s->cfg.station_name[0] == '\0', "in-ar reset clears name");
+    expect(s->cfg.ip == 0, "in-ar reset clears ip");
+    expect(im_custom(s), "in-ar mode 2 leaves I&M");
+    expect(!s->ar.established, "in-ar reset releases ar");
+    expect(tx_contains(err_factory, sizeof(err_factory)),
+           "in-ar reset abort ErrorCode2 0x20");
+    expect(!rtc1_sends(s), "in-ar reset stops rtc1");
+
+    bn = 0;
+    bn = append_set_block(blocks, bn, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME,
+                          "hold-1", 6);
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5190, blocks, bn);
+    pn_stack_handle_eth(s, frame, flen);
+    s->ar.established = 1;
+    s->last_rt_ns = 0;
+    bn = 0;
+    bn = append_set_block_qual(blocks, bn, PN_DCP_OPT_CTRL, 0x06, 0, NULL, 0);
+    tx_reset();
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5191, blocks, bn);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "reserved reset during ar");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(set_res_err(res, nres, PN_DCP_OPT_CTRL, 0x06, &err) &&
+               err == PN_DCP_BLOCK_ERR_SUB_NOT_SET,
+           "in-ar reserved BlockError 0x03");
+    expect(strcmp(s->cfg.station_name, "hold-1") == 0, "in-ar reserved keeps name");
+    expect(s->ar.established, "in-ar reserved keeps ar");
+    expect(!tx_contains(err_factory, sizeof(err_factory)),
+           "in-ar reserved does not abort");
+    expect(rtc1_sends(s), "in-ar reserved rtc1 continues");
+
+    bn = 0;
+    bn = append_set_block_qual(blocks, bn, PN_DCP_OPT_CTRL, 0x05, 1, NULL, 0);
+    tx_reset();
+    flen = dcp_set_blocks_frame(frame, dst, src, 0x5192, blocks, bn);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "factory settings during ar");
+    rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    expect(set_res_err(res, nres, PN_DCP_OPT_CTRL, 0x05, &err) && err == 0x00,
+           "in-ar factory settings BlockError 0");
+    expect(s->cfg.station_name[0] == '\0', "in-ar factory settings clears name");
+    expect(im_blank(s), "in-ar factory settings clears I&M");
+    expect(!s->ar.established, "in-ar factory settings releases ar");
+    expect(tx_contains(err_factory, sizeof(err_factory)),
+           "in-ar factory settings abort ErrorCode2 0x20");
+    expect(!rtc1_sends(s), "in-ar factory settings stops rtc1");
 
     pn_stack_destroy(s);
 
@@ -848,7 +1112,8 @@ static void test_t12_16_set_rules(void)
     nres = parse_set_responses(rsp, rlen, &stype, res, 8);
     expect(stype == PN_DCP_RESP_SUCCESS && stype != PN_DCP_RESP_UNSUP,
            "integrity failure ServiceType is success, not unsupported");
-    expect(nres >= 1 && res[0].err != 0x00, "integrity failure BlockError");
+    expect(nres >= 1 && res[0].err == PN_DCP_BLOCK_ERR_SUB_NOT_SET,
+           "integrity failure BlockError 0x03");
     expect(strcmp(s->cfg.station_name, "lab") == 0, "unsigned name not applied");
     pn_stack_destroy(s);
 }

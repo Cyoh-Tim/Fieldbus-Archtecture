@@ -257,27 +257,90 @@ static int ar_in_operation(const pn_stack_t *s)
     return s->ar.established != 0;
 }
 
-/* Name, IP suite, and I&M1–4 return to the values from pn_stack_create.
- * BlockQualifier is not stored (nonvolatile save is T12-20). */
-static void restore_factory(pn_stack_t *s)
+static int name_unchanged(const pn_stack_t *s, const uint8_t *val, size_t vlen)
 {
-    memcpy(s->cfg.station_name, s->factory_station_name,
-           sizeof(s->cfg.station_name));
-    s->cfg.ip = s->factory_ip;
-    s->cfg.netmask = s->factory_netmask;
-    s->cfg.gateway = s->factory_gateway;
+    size_t cur = strlen(s->cfg.station_name);
+    return cur == vlen && (vlen == 0 || memcmp(s->cfg.station_name, val, vlen) == 0);
+}
+
+static int ip_suite_unchanged(const pn_stack_t *s, const uint8_t *val)
+{
+    return pn_rd_be32(val) == s->cfg.ip && pn_rd_be32(val + 4) == s->cfg.netmask &&
+           pn_rd_be32(val + 8) == s->cfg.gateway;
+}
+
+/* I&M1–4 factory state is the blank fill from pn_stack_create. */
+static void clear_im_data(pn_stack_t *s)
+{
     memset(s->im1_function, ' ', sizeof(s->im1_function));
     memset(s->im1_location, ' ', sizeof(s->im1_location));
     memset(s->im2_date, ' ', sizeof(s->im2_date));
     memset(s->im3_desc, ' ', sizeof(s->im3_desc));
     memset(s->im4_sig, 0, sizeof(s->im4_sig));
-    LOG_INFO("pn_dcp", "ResetToFactory name=%s", s->cfg.station_name);
+}
+
+/* Factory communication parameters are an empty NameOfStation and
+ * IP 0.0.0.0. Not the values from pn_stack_create. */
+static void clear_comm_params(pn_stack_t *s, int *ip_changed)
+{
+    if (s->cfg.ip != 0 || s->cfg.netmask != 0 || s->cfg.gateway != 0) {
+        *ip_changed = 1;
+    }
+    memset(s->cfg.station_name, 0, sizeof(s->cfg.station_name));
+    s->cfg.ip = 0;
+    s->cfg.netmask = 0;
+    s->cfg.gateway = 0;
+}
+
+/* BlockQualifier bit 1..15. 1 = I&M1–4, 2 = name and IP, 3/4/8/9 = both.
+ * 0, 5–7, and >=10 are reserved. */
+static int reset_mode_supported(uint16_t mode)
+{
+    return mode == 1 || mode == 2 || mode == 3 || mode == 4 || mode == 8 ||
+           mode == 9;
+}
+
+/* all: Reset Factory Settings (5/5) clears name, IP, and I&M1–4.
+ * Otherwise mode is BlockQualifier >> 1. An accepted reset aborts an
+ * AR (ErrorCode2 0x20). A reserved mode changes nothing. BlockQualifier
+ * bit 0 (permanent storage) is T12-20 and is not stored. */
+static uint8_t apply_factory(pn_stack_t *s, int all, uint16_t mode,
+                             int *ip_changed)
+{
+    int do_im = 0;
+    int do_comm = 0;
+    if (all) {
+        do_im = 1;
+        do_comm = 1;
+    } else if (!reset_mode_supported(mode)) {
+        return PN_DCP_BLOCK_ERR_SUB_NOT_SET;
+    } else if (mode == 1) {
+        do_im = 1;
+    } else if (mode == 2) {
+        do_comm = 1;
+    } else {
+        do_im = 1;
+        do_comm = 1;
+    }
+    if (do_im) {
+        clear_im_data(s);
+    }
+    if (do_comm) {
+        clear_comm_params(s, ip_changed);
+    }
+    if (ar_in_operation(s)) {
+        pn_ar_abort(s, "DCP ResetToFactory");
+    }
+    LOG_INFO("pn_dcp", "ResetToFactory mode=%u name=%s", all ? 99u : mode,
+             s->cfg.station_name);
+    return PN_DCP_BLOCK_ERR_OK;
 }
 
 /* Set.req value is BlockQualifier(2) + payload. Returns BlockError.
  * *ip_changed is set when cfg.ip actually changes (Hello follows). */
 static uint8_t apply_set_block(pn_stack_t *s, uint8_t opt, uint8_t sub,
-                               const uint8_t *val, size_t vlen, int *ip_changed)
+                               uint16_t qual, const uint8_t *val, size_t vlen,
+                               int *ip_changed)
 {
     if (opt == PN_DCP_OPT_IP) {
         if (sub == PN_DCP_SUB_IP_MAC) {
@@ -286,37 +349,46 @@ static uint8_t apply_set_block(pn_stack_t *s, uint8_t opt, uint8_t sub,
         if (sub != PN_DCP_SUB_IP_PARAM) {
             return PN_DCP_BLOCK_ERR_SUB_UNSUP;
         }
-        if (ar_in_operation(s)) {
-            return PN_DCP_BLOCK_ERR_IN_OPERATION;
-        }
         if (vlen < 12) {
             return PN_DCP_BLOCK_ERR_SUB_NOT_SET;
         }
-        uint32_t ip = pn_rd_be32(val);
-        if (ip != s->cfg.ip) {
-            *ip_changed = 1;
+        if (ar_in_operation(s) && !ip_suite_unchanged(s, val)) {
+            return PN_DCP_BLOCK_ERR_IN_OPERATION;
         }
-        s->cfg.ip = ip;
-        s->cfg.netmask = pn_rd_be32(val + 4);
-        s->cfg.gateway = pn_rd_be32(val + 8);
-        LOG_INFO("pn_dcp", "IP set %u.%u.%u.%u", (s->cfg.ip >> 24) & 0xff,
-                 (s->cfg.ip >> 16) & 0xff, (s->cfg.ip >> 8) & 0xff,
-                 s->cfg.ip & 0xff);
+        uint32_t ip = pn_rd_be32(val);
+        uint32_t mask = pn_rd_be32(val + 4);
+        uint32_t gw = pn_rd_be32(val + 8);
+        if (ip != s->cfg.ip || mask != s->cfg.netmask || gw != s->cfg.gateway) {
+            *ip_changed = 1;
+            s->cfg.ip = ip;
+            s->cfg.netmask = mask;
+            s->cfg.gateway = gw;
+            LOG_INFO("pn_dcp", "IP set %u.%u.%u.%u", (s->cfg.ip >> 24) & 0xff,
+                     (s->cfg.ip >> 16) & 0xff, (s->cfg.ip >> 8) & 0xff,
+                     s->cfg.ip & 0xff);
+        }
         return PN_DCP_BLOCK_ERR_OK;
     }
     if (opt == PN_DCP_OPT_DEV) {
         if (sub == PN_DCP_SUB_DEV_NAME) {
-            if (ar_in_operation(s)) {
-                return PN_DCP_BLOCK_ERR_IN_OPERATION;
-            }
             if (!val || vlen == 0 || !pn_dcp_name_ok(val, vlen)) {
                 LOG_WARN("pn_dcp", "DCP Set NameOfStation invalid — 거부");
                 return PN_DCP_BLOCK_ERR_SUB_NOT_SET;
             }
+            if (name_unchanged(s, val, vlen)) {
+                return PN_DCP_BLOCK_ERR_OK;
+            }
+            /* A different name is rejected only when this AR asked for it. */
+            if (ar_in_operation(s) && s->ar.reject_dcp_set) {
+                return PN_DCP_BLOCK_ERR_IN_OPERATION;
+            }
             size_t n = vlen < PN_STATION_NAME_MAX ? vlen : PN_STATION_NAME_MAX;
+            memset(s->cfg.station_name, 0, sizeof(s->cfg.station_name));
             memcpy(s->cfg.station_name, val, n);
-            s->cfg.station_name[n] = '\0';
             LOG_INFO("pn_dcp", "NameOfStation=%s", s->cfg.station_name);
+            if (ar_in_operation(s)) {
+                pn_ar_abort(s, "DCP NameOfStation changed");
+            }
             return PN_DCP_BLOCK_ERR_OK;
         }
         if (sub == PN_DCP_SUB_DEV_TYPE || sub == PN_DCP_SUB_DEV_ID ||
@@ -335,16 +407,11 @@ static uint8_t apply_set_block(pn_stack_t *s, uint8_t opt, uint8_t sub,
             LOG_INFO("pn_dcp", "DCP Signal accepted (LED flash stub)");
             return PN_DCP_BLOCK_ERR_OK;
         }
-        if (sub == PN_DCP_SUB_CTRL_FACTORY || sub == PN_DCP_SUB_CTRL_RESET) {
-            if (ar_in_operation(s)) {
-                return PN_DCP_BLOCK_ERR_IN_OPERATION;
-            }
-            uint32_t old_ip = s->cfg.ip;
-            restore_factory(s);
-            if (s->cfg.ip != old_ip) {
-                *ip_changed = 1;
-            }
-            return PN_DCP_BLOCK_ERR_OK;
+        if (sub == PN_DCP_SUB_CTRL_FACTORY) {
+            return apply_factory(s, 1, 0, ip_changed);
+        }
+        if (sub == PN_DCP_SUB_CTRL_RESET) {
+            return apply_factory(s, 0, (uint16_t)(qual >> 1), ip_changed);
         }
         if (sub == PN_DCP_SUB_CTRL_RESPONSE) {
             return PN_DCP_BLOCK_ERR_SUB_NOT_SET;
@@ -588,10 +655,11 @@ void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
             /* HMAC is not a Set target and has no BlockQualifier. */
             if (!(opt == PN_DCP_OPT_SEC && sub == PN_DCP_SUB_SEC_HMAC)) {
                 const uint8_t *data = blocks + off + 4;
+                uint16_t qual = (bl >= 2) ? pn_rd_be16(data) : 0;
                 const uint8_t *val = (bl >= 2) ? data + 2 : data;
                 size_t vlen = (bl >= 2) ? (size_t)bl - 2 : 0;
                 uint8_t berr =
-                    apply_set_block(s, opt, sub, val, vlen, &ip_changed);
+                    apply_set_block(s, opt, sub, qual, val, vlen, &ip_changed);
                 wr_set_response(&w, opt, sub, berr);
             }
             off += total;
