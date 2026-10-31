@@ -15,7 +15,7 @@ steps:
     xid: 0xAABBCCDD
     expect:
       result: reject
-      station_name: old-name
+      station_name: old-name    # DUT cfg 불변
   - action: dcp_set
     signed: true                # HMAC over unsigned DCP body, option 0xF0/0x01
     name_of_station: new-name
