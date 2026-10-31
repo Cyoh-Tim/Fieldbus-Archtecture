@@ -1089,37 +1089,53 @@ static int rpc_assemble(pn_stack_t *s, const uint8_t *pdu, const rpc_hdr_t *h,
     return 1;
 }
 
+/* Tower floor integers are little-endian (protocol_tower_t, Wireshark
+ * packet-dcerpc-epm.c tvb_get_letohs). Only the UDP port and IP, which
+ * the caller places in rhs, are big-endian. */
 static size_t epm_floor_uuid(uint8_t *p, const uint8_t uuid_le[16],
                              uint16_t major, uint16_t minor)
 {
-    pn_wr_be16(p, 19);
+    pn_wr_le16(p, 19);
     p[2] = 0x0d;
     memcpy(p + 3, uuid_le, 16);
-    pn_wr_be16(p + 19, major);
-    pn_wr_be16(p + 21, 2);
-    pn_wr_be16(p + 23, minor);
+    pn_wr_le16(p + 19, major);
+    pn_wr_le16(p + 21, 2);
+    pn_wr_le16(p + 23, minor);
     return 25;
 }
 
 static size_t epm_floor_rhs(uint8_t *p, uint8_t proto, const uint8_t *rhs,
                             uint16_t rhslen)
 {
-    pn_wr_be16(p, 1);
+    pn_wr_le16(p, 1);
     p[2] = proto;
-    pn_wr_be16(p + 3, rhslen);
+    pn_wr_le16(p + 3, rhslen);
     if (rhslen > 0 && rhs) {
         memcpy(p + 5, rhs, rhslen);
     }
     return 5u + rhslen;
 }
 
-/* ept_lookup response: entry_handle(20) num_ents(4) one tower for the
- * PNIO Device interface on UDP 34964, status 0. */
+/* ept_max_annotation_size. p-net writes this many annotation bytes. */
+#define EPM_ANN_LEN 64u
+/* Non-null unique pointer. scapy's NDR full pointer default. */
+#define EPM_TOWER_REFERENT 0x00020000u
+
+/* ept_lookup response NDR (ept.idl ept_entry_t, p-net pf_put_tower_entry):
+ * entry_handle(20) num_ents
+ * entries: max_count, offset, actual_count, then each
+ *   object(16), tower referent(4),
+ *   annotation offset, actual_count, chars,
+ * deferred tower: length, length, octets (pad to 4),
+ * status.
+ * The two length words are the octet count twice: the deported conformant
+ * max_count and twr_t.tower_length. */
 static size_t epm_lookup_stub(const pn_stack_t *s, uint8_t *out, int be)
 {
     uint8_t tower[160];
-    size_t tn = 2;
-    pn_wr_be16(tower, 5);
+    size_t tn = 0;
+    pn_wr_le16(tower + tn, 5);
+    tn += 2;
     tn += epm_floor_uuid(tower + tn, k_pnio_if, 1, 0);
     tn += epm_floor_uuid(tower + tn, k_ndr_uuid_le, 2, 0);
     uint8_t minor0[2] = {0, 0};
@@ -1132,32 +1148,33 @@ static size_t epm_lookup_stub(const pn_stack_t *s, uint8_t *out, int be)
     tn += epm_floor_rhs(tower + tn, 0x09, ip, 4);
 
     memset(out, 0, 20);
-    wr32e(out + 20, 1, be);
-    wr32e(out + 24, 1, be);
-    wr32e(out + 28, 0, be);
-    wr32e(out + 32, 1, be);
-    uint8_t obj[16];
-    device_object_canon(s, obj);
-    uuid_canon_to_wire(out + 36, obj, be);
-    wr32e(out + 52, 0x00020000u, be);
-    wr32e(out + 56, 0x00020004u, be);
-    size_t pos = 60;
-    wr32e(out + pos, (uint32_t)tn, be);
+    size_t pos = 20;
+    wr32e(out + pos, 1, be);
     pos += 4;
-    wr32e(out + pos, (uint32_t)tn, be);
-    pos += 4;
-    memcpy(out + pos, tower, tn);
-    pos += tn;
-    while (pos & 3u) {
-        out[pos++] = 0;
-    }
     wr32e(out + pos, 1, be);
     pos += 4;
     wr32e(out + pos, 0, be);
     pos += 4;
     wr32e(out + pos, 1, be);
     pos += 4;
-    out[pos++] = 0;
+    uint8_t obj[16];
+    device_object_canon(s, obj);
+    uuid_canon_to_wire(out + pos, obj, be);
+    pos += 16;
+    wr32e(out + pos, EPM_TOWER_REFERENT, be);
+    pos += 4;
+    wr32e(out + pos, 0, be);
+    pos += 4;
+    wr32e(out + pos, EPM_ANN_LEN, be);
+    pos += 4;
+    memset(out + pos, 0, EPM_ANN_LEN);
+    pos += EPM_ANN_LEN;
+    wr32e(out + pos, (uint32_t)tn, be);
+    pos += 4;
+    wr32e(out + pos, (uint32_t)tn, be);
+    pos += 4;
+    memcpy(out + pos, tower, tn);
+    pos += tn;
     while (pos & 3u) {
         out[pos++] = 0;
     }
