@@ -1031,8 +1031,6 @@ def test_release_standard_block(pn_dut):
 UNSUPPORTED_INDEX = 0x7777  # GSDML 의 slot 1 파라미터 레코드는 index 1 뿐
 
 
-@known_defect("T12-18", "미지원 index Read 에 4바이트 0 을 정상 데이터로 돌려준다. "
-              "사양: PNIOStatus DE 80 B0 00 (IODReadRes, PNIORW, invalid index). 선행: T12-1")
 def test_record_read_unsupported_index_error(pn_dut):
     pn_dut.rpc(raw(connect_pdu()))
     req = IODReadReq(seqNum=1, ARUUID=AR_UUID, API=0, slotNumber=1, subslotNumber=1,
@@ -1043,8 +1041,6 @@ def test_record_read_unsupported_index_error(pn_dut):
     assert status == 0xDE80B000, f"PNIOStatus {status:08x}"
 
 
-@known_defect("T12-18", "미지원 index Write 를 성공으로 처리한다. "
-              "사양: PNIOStatus DF 80 B0 00 (IODWriteRes, PNIORW, invalid index). 선행: T12-1")
 def test_record_write_unsupported_index_error(pn_dut):
     pn_dut.rpc(raw(connect_pdu()))
     data = b"\x01\x02\x03\x04"

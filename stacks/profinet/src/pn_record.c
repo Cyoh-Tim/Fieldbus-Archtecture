@@ -1,8 +1,13 @@
 #include "pn_internal.h"
 
+#include <errno.h>
 #include <string.h>
 
 #include "pn_endian.h"
+
+/* GSDML ParameterRecordDataItem Index="1" Length="0". The record exists
+ * and is empty. It is not an unsupported index. */
+#define PN_RECORD_PARAM_INDEX 1u
 
 static void im_spaces(char *p, size_t n)
 {
@@ -87,13 +92,13 @@ int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
         return emit_im(out, cap, out_len, PN_BLOCK_IM4, s->im4_sig, PN_IM4_SIG_LEN);
     }
 
-    /* Unknown index: empty record (not an RPC reject). */
-    if (cap >= 4) {
-        memset(out, 0, 4);
-        *out_len = 4;
+    if (index == PN_RECORD_PARAM_INDEX) {
+        *out_len = 0;
         return 0;
     }
-    return -1;
+
+    *out_len = 0;
+    return -ENOENT;
 }
 
 int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
@@ -155,6 +160,12 @@ int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
         return 0;
     }
 
-    /* Parameter records (e.g. GSDML index 1) and other writes: accept. */
-    return 0;
+    /* I&M0 is read-only: accept the write and do not store it.
+     * Access-denied DF 80 B6 00 is outside T12-18. Index 1 is the empty
+     * GSDML parameter record and stays accepted. */
+    if (index == PN_INDEX_IM0 || index == PN_RECORD_PARAM_INDEX) {
+        return 0;
+    }
+
+    return -ENOENT;
 }

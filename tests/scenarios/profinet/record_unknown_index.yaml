@@ -1,4 +1,6 @@
-# Internal TC PN-B-NEG-005 — unknown record index is empty, not I&M0 leak.
+# Internal TC PN-B-NEG-005 — unknown record index is not an I&M0 leak.
+# The record payload is empty. PNIOStatus DE 80 B0 00 is the NDR status
+# (tests/test_pn_t12_18.c). This step only sees record bytes.
 name: record_unknown_index
 id: PN-B-NEG-005
 suite: PN-B-v1
@@ -16,6 +18,6 @@ steps:
     slot: 0
     subslot: 1
     expect:
-      min_len: 4
-      max_len: 4
+      min_len: 0
+      max_len: 0
       absent: FB-ARCH-PN-DEV

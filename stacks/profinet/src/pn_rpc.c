@@ -644,7 +644,8 @@ static size_t wr_block(uint8_t *p, uint16_t type, const uint8_t *body,
 static size_t iod_rw_res(uint8_t *out, size_t cap, uint16_t type, uint16_t seq,
                          const uint8_t aruuid[PN_UUID_LEN], uint32_t api,
                          uint16_t slot, uint16_t subslot, uint16_t index,
-                         uint32_t record_len, const uint8_t *rec, size_t rec_len)
+                         uint32_t record_len, uint32_t pnio_status,
+                         const uint8_t *rec, size_t rec_len)
 {
     uint8_t body[58];
     memset(body, 0, sizeof(body));
@@ -657,6 +658,10 @@ static size_t iod_rw_res(uint8_t *out, size_t cap, uint16_t type, uint16_t seq,
     pn_wr_be16(body + 24, subslot);
     pn_wr_be16(body + 28, index);
     pn_wr_be32(body + 30, record_len);
+    /* AdditionalValue1/2 stay 0. PNIOStatus is big-endian in the block
+     * (ErrorCode, ErrorDecode, ErrorCode1, ErrorCode2). The NDR copy of
+     * the same value follows drep. */
+    pn_wr_be32(body + 38, pnio_status);
     if (cap < 64u + rec_len) {
         return 0;
     }
@@ -1330,6 +1335,10 @@ static void queue_app_ready(pn_stack_t *s)
 #define PN_PNIO_ERR_IOCR_SCF 0xDB81020Au
 /* ErrorCode2 11 = ReductionRatio, including a period below cycle_us. */
 #define PN_PNIO_ERR_IOCR_RR  0xDB81020Bu
+/* PNIORW invalid index. ErrorDecode 0x80, ErrorCode1 0xB0, ErrorCode2 0.
+ * Read ErrorCode 0xDE, write ErrorCode 0xDF. */
+#define PN_PNIO_ERR_READ_INDEX  0xDE80B000u
+#define PN_PNIO_ERR_WRITE_INDEX 0xDF80B000u
 
 static int reply_pnio_err(const uint8_t *pdu, uint8_t *resp, size_t cap,
                           size_t *out_len, uint8_t *stub_out,
@@ -1697,14 +1706,29 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
             }
             ar_touch_cmi(s);
         }
-        pn_record_read(s, rw.slot, rw.subslot, rw.index, rec, sizeof(rec),
-                       &rlen);
+        int rec_rc = pn_record_read(s, rw.slot, rw.subslot, rw.index, rec,
+                                    sizeof(rec), &rlen);
+        uint32_t st = 0;
+        if (rec_rc == -ENOENT) {
+            rlen = 0;
+            st = PN_PNIO_ERR_READ_INDEX;
+            LOG_WARN("pn_rpc",
+                     "Read rejected: unsupported index 0x%04x slot=%u "
+                     "subslot=%u PNIOStatus DE 80 B0 00",
+                     rw.index, rw.slot, rw.subslot);
+        }
+        uint8_t status[4];
+        const uint8_t *stptr = NULL;
+        if (st != 0) {
+            wr32e(status, st, be);
+            stptr = status;
+        }
         uint8_t blocks_res[64 + 256];
         size_t bn = iod_rw_res(blocks_res, sizeof(blocks_res),
                                PN_BLOCK_IOD_READ_RES, rw.seq, rw.aruuid, rw.api,
-                               rw.slot, rw.subslot, rw.index, (uint32_t)rlen,
+                               rw.slot, rw.subslot, rw.index, (uint32_t)rlen, st,
                                rec, rlen);
-        so = ndr_res(stub_out, NULL, blocks_res, bn, be);
+        so = ndr_res(stub_out, stptr, blocks_res, bn, be);
     } else if (op == OP_WRITE) {
         write_walk_t ww;
         memset(&ww, 0, sizeof(ww));
@@ -1729,16 +1753,35 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
             return -EPERM;
         }
         ar_touch_cmi(s);
+        uint32_t st = 0;
+        uint32_t echo_len = ww.dlen;
         if (ww.saw) {
-            pn_record_write(s, ww.slot, ww.subslot, ww.index, ww.data, ww.dlen);
-            LOG_INFO("pn_rpc", "Write index=0x%04x slot=%u sub=%u len=%u",
-                     ww.index, ww.slot, ww.subslot, ww.dlen);
+            int wrc = pn_record_write(s, ww.slot, ww.subslot, ww.index, ww.data,
+                                      ww.dlen);
+            if (wrc == -ENOENT) {
+                st = PN_PNIO_ERR_WRITE_INDEX;
+                echo_len = 0;
+                LOG_WARN("pn_rpc",
+                         "Write rejected: unsupported index 0x%04x slot=%u "
+                         "subslot=%u PNIOStatus DF 80 B0 00",
+                         ww.index, ww.slot, ww.subslot);
+            } else {
+                LOG_INFO("pn_rpc", "Write index=0x%04x slot=%u sub=%u len=%u",
+                         ww.index, ww.slot, ww.subslot, ww.dlen);
+            }
+        }
+        uint8_t status[4];
+        const uint8_t *stptr = NULL;
+        if (st != 0) {
+            wr32e(status, st, be);
+            stptr = status;
         }
         uint8_t blocks_res[64];
         size_t bn = iod_rw_res(blocks_res, sizeof(blocks_res),
                                PN_BLOCK_IOD_WRITE_RES, ww.seq, ww.aruuid, ww.api,
-                               ww.slot, ww.subslot, ww.index, ww.dlen, NULL, 0);
-        so = ndr_res(stub_out, NULL, blocks_res, bn, be);
+                               ww.slot, ww.subslot, ww.index, echo_len, st, NULL,
+                               0);
+        so = ndr_res(stub_out, stptr, blocks_res, bn, be);
     } else {
         return -ENOSYS;
     }
