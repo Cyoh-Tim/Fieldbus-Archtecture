@@ -834,6 +834,23 @@ static int step_dcp_hello(ctt_run_t *run, pn_priv_t *priv,
     return rc;
 }
 
+/* CL RPC v4, LE drep, device object (instance, device, vendor) and PNIO IF.
+ * CTT DUTs use the stack default vendor 0xABCD / device 0x0001. */
+static void stamp_pnio_cl_req(uint8_t *pdu)
+{
+    static const uint8_t obj[16] = {
+        0x00, 0x00, 0xa0, 0xde, 0x97, 0x6c, 0xd1, 0x11,
+        0x82, 0x71, 0x00, 0x01, 0x00, 0x01, 0xab, 0xcd};
+    static const uint8_t iface[16] = {
+        0x01, 0x00, 0xa0, 0xde, 0x97, 0x6c, 0xd1, 0x11,
+        0x82, 0x71, 0x00, 0xa0, 0x24, 0x42, 0xdf, 0x7d};
+    pdu[0] = 4;
+    pdu[1] = 0;
+    pdu[4] = 0x10;
+    memcpy(pdu + 8, obj, 16);
+    memcpy(pdu + 24, iface, 16);
+}
+
 static size_t ndr_wrap(uint8_t *out, const uint8_t *blocks, size_t n)
 {
     pn_wr_le32(out, (uint32_t)n);
@@ -856,8 +873,7 @@ static size_t build_connect_pdu(uint8_t *pdu, size_t cap, int integrity,
         return 0;
     }
     memset(pdu, 0, cap);
-    pdu[0] = 1; /* rpcvers */
-    pdu[1] = 0; /* request */
+    stamp_pnio_cl_req(pdu);
     pn_wr_le16(pdu + 68, 0); /* Connect */
 
     uint8_t blocks[256];
@@ -1411,7 +1427,7 @@ static int step_rpc_release(ctt_run_t *run, pn_priv_t *priv,
 
     uint8_t pdu[256];
     memset(pdu, 0, sizeof(pdu));
-    pdu[0] = 1;
+    stamp_pnio_cl_req(pdu);
     pn_wr_le16(pdu + 68, RPC_OP_RELEASE);
     uint8_t rel[18];
     memset(rel, 0, sizeof(rel));
@@ -1465,8 +1481,7 @@ static int step_rpc_inject(ctt_run_t *run, pn_priv_t *priv,
     } else if (yaml_has(step, "opcode")) {
         uint16_t op = (uint16_t)yaml_ulong(step, "opcode", 0xFFFF);
         memset(pdu, 0, 80);
-        pdu[0] = 1;
-        pdu[1] = 0; /* request */
+        stamp_pnio_cl_req(pdu);
         pn_wr_le16(pdu + 68, op);
         plen = 80;
     } else {
@@ -1565,7 +1580,7 @@ static int step_rpc_write(ctt_run_t *run, pn_priv_t *priv,
 
     uint8_t pdu[512];
     memset(pdu, 0, sizeof(pdu));
-    pdu[0] = 1;
+    stamp_pnio_cl_req(pdu);
     pn_wr_le16(pdu + 68, RPC_OP_WRITE);
     size_t stub = ndr_wrap(pdu + 80, blocks, bn);
     pn_wr_le16(pdu + 74, (uint16_t)stub);
@@ -1605,7 +1620,7 @@ static int step_rpc_control(ctt_run_t *run, pn_priv_t *priv,
 
     uint8_t pdu[256];
     memset(pdu, 0, sizeof(pdu));
-    pdu[0] = 1;
+    stamp_pnio_cl_req(pdu);
     pn_wr_le16(pdu + 68, RPC_OP_CONTROL);
     size_t stub = ndr_wrap(pdu + 80, blocks, bn);
     pn_wr_le16(pdu + 74, (uint16_t)stub);
@@ -1876,7 +1891,7 @@ static int step_record_read(ctt_run_t *run, pn_priv_t *priv,
 
     uint8_t pdu[256];
     memset(pdu, 0, sizeof(pdu));
-    pdu[0] = 1;
+    stamp_pnio_cl_req(pdu);
     pn_wr_le16(pdu + 68, RPC_OP_READ);
     size_t stub = ndr_wrap(pdu + 80, blocks, bn);
     pn_wr_le16(pdu + 74, (uint16_t)stub);
@@ -2055,7 +2070,7 @@ static void soak_refresh_cmi(ctt_run_t *run, pn_priv_t *priv)
     size_t bn = wr_pn_block(blocks, PN_BLOCK_IOD_READ_REQ, body, sizeof(body));
     uint8_t pdu[256];
     memset(pdu, 0, sizeof(pdu));
-    pdu[0] = 1;
+    stamp_pnio_cl_req(pdu);
     pn_wr_le16(pdu + 68, RPC_OP_READ);
     size_t stub = ndr_wrap(pdu + 80, blocks, bn);
     pn_wr_le16(pdu + 74, (uint16_t)stub);

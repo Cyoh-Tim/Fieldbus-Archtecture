@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 
 #define PN_TXQ_MAX 8
+#define PN_RPC_ASM_MAX 8192
 
 typedef struct {
     uint8_t data[PN_FRAME_MAX];
@@ -89,6 +90,7 @@ typedef struct {
     int have_initiator_uuid;
     int startup_advanced; /* ARProperties bit 30; ARServerBlock only then */
     uint16_t initiator_udp_rt_port; /* CMInitiatorUDPRTPort; RT marker, not RPC dest */
+    uint16_t cmi_activity_factor; /* CMInitiatorActivityTimeoutFactor; 0 = 2 s */
     uint32_t owner_ip; /* host-order IPv4 of Connect sender; 0 = unset */
     int established;
     int prm_end;
@@ -112,13 +114,15 @@ typedef struct {
     pn_alarm_ch_t alarm_ch[2];
 } pn_ar_t;
 
-/* CMI activity (2 s) stays armed until the controller shows liveness
+/* CMI activity stays armed until the controller shows liveness
  * (O→T RTC1, or PrmEnd / ApplicationReady). Our own RTC1 TX does not
- * count. After liveness, data-hold is factor × negotiated O→T period.
+ * count. The window is CMInitiatorActivityTimeoutFactor × 100 ms when
+ * Connect carried a non-zero factor, otherwise 2 s. After liveness,
+ * data-hold is factor × negotiated O→T period.
  * Period = SendClockFactor × ReductionRatio × 31.25 µs (output CR).
  * Factor is IOCR DataHoldFactor, else WatchdogFactor, else 3.
  * cfg.cycle_us is not used. A zero SendClockFactor or ReductionRatio
- * keeps the 2 s CMI window (O→T refreshes it) so the AR is still
+ * keeps that same CMI window (O→T refreshes it) so the AR is still
  * reclaimed.
  * RTC1 transmit uses the input CR (in_send_clock_factor ×
  * in_reduction_ratio × 31.25 µs) when that period is at least
@@ -168,6 +172,15 @@ struct pn_stack {
     uint64_t pending_rpc_tx_ns; /* last ApplicationReady send; 0 = not yet */
 
     pthread_mutex_t io_lock;
+
+    /* CL DCE/RPC reassembly. One activity at a time (single AR). */
+    uint8_t rpc_asm[PN_RPC_ASM_MAX];
+    size_t rpc_asm_len;
+    uint16_t rpc_asm_next;
+    uint32_t rpc_asm_seq;
+    uint8_t rpc_asm_act[PN_UUID_LEN];
+    int rpc_asm_on;
+    int rpc_asm_be;
 
     /* Delayed DCP Identify.Res (ResponseDelay, 10 ms units). */
     int dcp_ident_pending;
