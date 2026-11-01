@@ -45,8 +45,22 @@
 #define PN_DCP_SUB_DEV_ID     0x03u
 #define PN_DCP_SUB_DEV_ROLE   0x04u
 #define PN_DCP_SUB_DEV_OPTS      0x05u
+#define PN_DCP_SUB_CTRL_START    0x01u
+#define PN_DCP_SUB_CTRL_STOP     0x02u
 #define PN_DCP_SUB_CTRL_SIGNAL   0x03u
 #define PN_DCP_SUB_CTRL_RESPONSE 0x04u
+#define PN_DCP_SUB_CTRL_FACTORY  0x05u /* Reset Factory Settings */
+#define PN_DCP_SUB_CTRL_RESET    0x06u /* Reset to Factory */
+
+/* Set.res Control/Response BlockError. ServiceType stays success (1);
+ * 5 means the ServiceID itself is not supported. */
+#define PN_DCP_BLOCK_ERR_OK           0x00u
+#define PN_DCP_BLOCK_ERR_OPT_UNSUP    0x01u
+#define PN_DCP_BLOCK_ERR_SUB_UNSUP    0x02u
+#define PN_DCP_BLOCK_ERR_SUB_NOT_SET  0x03u
+#define PN_DCP_BLOCK_ERR_RESOURCE     0x04u
+#define PN_DCP_BLOCK_ERR_LOCAL        0x05u
+#define PN_DCP_BLOCK_ERR_IN_OPERATION 0x06u
 
 /* Identify.res / Get.res / Hello.req value prefix. Not used on Set.res. */
 #define PN_DCP_BLOCKINFO_NONE   0x0000u

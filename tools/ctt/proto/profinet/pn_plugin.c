@@ -297,18 +297,51 @@ static int finish_eth_step(ctt_run_t *run, const yaml_node_t *step, int idx,
     return rc;
 }
 
+/* "reject" is ServiceType success (1). Set and Signal also require that
+ * block's Control/Response BlockError != 0. ServiceType 5 is only
+ * "unsupported": the ServiceID itself is unknown. */
 static uint8_t dcp_status_from_str(const char *s)
 {
     if (!s) {
         return 0xFF;
     }
-    if (strcmp(s, "success") == 0) {
+    if (strcmp(s, "success") == 0 || strcmp(s, "reject") == 0) {
         return PN_DCP_RESP_SUCCESS;
     }
-    if (strcmp(s, "unsupported") == 0 || strcmp(s, "reject") == 0) {
+    if (strcmp(s, "unsupported") == 0) {
         return PN_DCP_RESP_UNSUP;
     }
     return 0xFF;
+}
+
+/* Set.res Control/Response for the request block (opt, sub). */
+static int dcp_ctrl_block_error(const uint8_t *frame, size_t n, uint8_t opt,
+                                uint8_t sub, uint8_t *err)
+{
+    if (!frame || n < 26) {
+        return 0;
+    }
+    uint16_t dlen = pn_rd_be16(frame + 24);
+    if (26u + (size_t)dlen > n) {
+        return 0;
+    }
+    const uint8_t *blocks = frame + 26;
+    size_t off = 0;
+    while (off + 4 <= dlen) {
+        uint16_t bl = pn_rd_be16(blocks + off + 2);
+        size_t total = 4u + bl + (bl & 1u);
+        if (off + total > dlen) {
+            return 0;
+        }
+        if (blocks[off] == PN_DCP_OPT_CTRL &&
+            blocks[off + 1] == PN_DCP_SUB_CTRL_RESPONSE && bl >= 3 &&
+            blocks[off + 4] == opt && blocks[off + 5] == sub) {
+            *err = blocks[off + 6];
+            return 1;
+        }
+        off += total;
+    }
+    return 0;
 }
 
 static uint8_t dcp_service_from_str(const char *s)
@@ -541,15 +574,21 @@ static int step_dcp_set(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step
                     memcpy(match, buf, (size_t)n);
                     match_n = (size_t)n;
                 }
-                if (reject && st == PN_DCP_RESP_UNSUP) {
-                    ok = 1;
-                    memcpy(match, buf, (size_t)n);
-                    match_n = (size_t)n;
+                if (reject && st == PN_DCP_RESP_SUCCESS) {
+                    uint8_t berr = 0;
+                    if (dcp_ctrl_block_error(buf, (size_t)n, PN_DCP_OPT_DEV,
+                                             PN_DCP_SUB_DEV_NAME, &berr) &&
+                        berr != 0) {
+                        ok = 1;
+                        memcpy(match, buf, (size_t)n);
+                        match_n = (size_t)n;
+                    }
                 }
             }
         }
-        /* DUT cfg is the source of truth used by the migrated unit test. */
-        if (!ok && want_sta) {
+        /* Accept may still pass on the DUT name when the frame was not
+         * captured. Reject needs ServiceType 1 and BlockError != 0. */
+        if (!ok && want_sta && accept) {
             ok = (strcmp(got_sta, want_sta) == 0);
         }
         rc |= ctt_check(run, idx, action, ok,
@@ -787,11 +826,39 @@ static int step_dcp_signal(ctt_run_t *run, pn_priv_t *priv,
     const char *want_result = expect ? yaml_cstr(expect, "result", "accept")
                                      : "accept";
     int accept = strcmp(want_result, "accept") == 0;
+    int reject = strcmp(want_result, "reject") == 0;
     uint8_t match[CTT_FRAME_MAX];
     size_t match_n = 0;
-    int ok = pop_dcp_match(run, PN_FRAMEID_DCP_GETSET, PN_DCP_SET,
+    int ok = 0;
+    if (reject) {
+        uint8_t buf[CTT_FRAME_MAX];
+        int n = 0;
+        while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), NULL)) >
+               0) {
+            if (n < 18) {
+                continue;
+            }
+            uint16_t et = pn_rd_be16(buf + 12);
+            uint16_t fid = pn_rd_be16(buf + 14);
+            uint8_t sid = buf[16];
+            uint8_t st = buf[17];
+            if (et == PN_ETHTYPE_PN && fid == PN_FRAMEID_DCP_GETSET &&
+                sid == PN_DCP_SET && st == PN_DCP_RESP_SUCCESS) {
+                uint8_t berr = 0;
+                if (dcp_ctrl_block_error(buf, (size_t)n, PN_DCP_OPT_CTRL,
+                                         PN_DCP_SUB_CTRL_SIGNAL, &berr) &&
+                    berr != 0) {
+                    ok = 1;
+                    memcpy(match, buf, (size_t)n);
+                    match_n = (size_t)n;
+                }
+            }
+        }
+    } else {
+        ok = pop_dcp_match(run, PN_FRAMEID_DCP_GETSET, PN_DCP_SET,
                            accept ? PN_DCP_RESP_SUCCESS : PN_DCP_RESP_UNSUP,
                            NULL, match, &match_n);
+    }
     int rc = ctt_check(run, idx, action, ok,
                        "expect Signal Set.Res result=%s", want_result);
     rc |= finish_eth_step(run, step, idx, action, ok, match, match_n);
