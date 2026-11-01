@@ -297,18 +297,51 @@ static int finish_eth_step(ctt_run_t *run, const yaml_node_t *step, int idx,
     return rc;
 }
 
+/* "reject" is ServiceType success (1). Set and Signal also require that
+ * block's Control/Response BlockError != 0. ServiceType 5 is only
+ * "unsupported": the ServiceID itself is unknown. */
 static uint8_t dcp_status_from_str(const char *s)
 {
     if (!s) {
         return 0xFF;
     }
-    if (strcmp(s, "success") == 0) {
+    if (strcmp(s, "success") == 0 || strcmp(s, "reject") == 0) {
         return PN_DCP_RESP_SUCCESS;
     }
-    if (strcmp(s, "unsupported") == 0 || strcmp(s, "reject") == 0) {
+    if (strcmp(s, "unsupported") == 0) {
         return PN_DCP_RESP_UNSUP;
     }
     return 0xFF;
+}
+
+/* Set.res Control/Response for the request block (opt, sub). */
+static int dcp_ctrl_block_error(const uint8_t *frame, size_t n, uint8_t opt,
+                                uint8_t sub, uint8_t *err)
+{
+    if (!frame || n < 26) {
+        return 0;
+    }
+    uint16_t dlen = pn_rd_be16(frame + 24);
+    if (26u + (size_t)dlen > n) {
+        return 0;
+    }
+    const uint8_t *blocks = frame + 26;
+    size_t off = 0;
+    while (off + 4 <= dlen) {
+        uint16_t bl = pn_rd_be16(blocks + off + 2);
+        size_t total = 4u + bl + (bl & 1u);
+        if (off + total > dlen) {
+            return 0;
+        }
+        if (blocks[off] == PN_DCP_OPT_CTRL &&
+            blocks[off + 1] == PN_DCP_SUB_CTRL_RESPONSE && bl >= 3 &&
+            blocks[off + 4] == opt && blocks[off + 5] == sub) {
+            *err = blocks[off + 6];
+            return 1;
+        }
+        off += total;
+    }
+    return 0;
 }
 
 static uint8_t dcp_service_from_str(const char *s)
@@ -541,15 +574,21 @@ static int step_dcp_set(ctt_run_t *run, pn_priv_t *priv, const yaml_node_t *step
                     memcpy(match, buf, (size_t)n);
                     match_n = (size_t)n;
                 }
-                if (reject && st == PN_DCP_RESP_UNSUP) {
-                    ok = 1;
-                    memcpy(match, buf, (size_t)n);
-                    match_n = (size_t)n;
+                if (reject && st == PN_DCP_RESP_SUCCESS) {
+                    uint8_t berr = 0;
+                    if (dcp_ctrl_block_error(buf, (size_t)n, PN_DCP_OPT_DEV,
+                                             PN_DCP_SUB_DEV_NAME, &berr) &&
+                        berr != 0) {
+                        ok = 1;
+                        memcpy(match, buf, (size_t)n);
+                        match_n = (size_t)n;
+                    }
                 }
             }
         }
-        /* DUT cfg is the source of truth used by the migrated unit test. */
-        if (!ok && want_sta) {
+        /* Accept may still pass on the DUT name when the frame was not
+         * captured. Reject needs ServiceType 1 and BlockError != 0. */
+        if (!ok && want_sta && accept) {
             ok = (strcmp(got_sta, want_sta) == 0);
         }
         rc |= ctt_check(run, idx, action, ok,
@@ -787,11 +826,39 @@ static int step_dcp_signal(ctt_run_t *run, pn_priv_t *priv,
     const char *want_result = expect ? yaml_cstr(expect, "result", "accept")
                                      : "accept";
     int accept = strcmp(want_result, "accept") == 0;
+    int reject = strcmp(want_result, "reject") == 0;
     uint8_t match[CTT_FRAME_MAX];
     size_t match_n = 0;
-    int ok = pop_dcp_match(run, PN_FRAMEID_DCP_GETSET, PN_DCP_SET,
+    int ok = 0;
+    if (reject) {
+        uint8_t buf[CTT_FRAME_MAX];
+        int n = 0;
+        while ((n = ctt_ring_pop(&run->mock.to_ctl, buf, sizeof(buf), NULL)) >
+               0) {
+            if (n < 18) {
+                continue;
+            }
+            uint16_t et = pn_rd_be16(buf + 12);
+            uint16_t fid = pn_rd_be16(buf + 14);
+            uint8_t sid = buf[16];
+            uint8_t st = buf[17];
+            if (et == PN_ETHTYPE_PN && fid == PN_FRAMEID_DCP_GETSET &&
+                sid == PN_DCP_SET && st == PN_DCP_RESP_SUCCESS) {
+                uint8_t berr = 0;
+                if (dcp_ctrl_block_error(buf, (size_t)n, PN_DCP_OPT_CTRL,
+                                         PN_DCP_SUB_CTRL_SIGNAL, &berr) &&
+                    berr != 0) {
+                    ok = 1;
+                    memcpy(match, buf, (size_t)n);
+                    match_n = (size_t)n;
+                }
+            }
+        }
+    } else {
+        ok = pop_dcp_match(run, PN_FRAMEID_DCP_GETSET, PN_DCP_SET,
                            accept ? PN_DCP_RESP_SUCCESS : PN_DCP_RESP_UNSUP,
                            NULL, match, &match_n);
+    }
     int rc = ctt_check(run, idx, action, ok,
                        "expect Signal Set.Res result=%s", want_result);
     rc |= finish_eth_step(run, step, idx, action, ok, match, match_n);
@@ -834,6 +901,23 @@ static int step_dcp_hello(ctt_run_t *run, pn_priv_t *priv,
     return rc;
 }
 
+/* CL RPC v4, LE drep, device object (instance, device, vendor) and PNIO IF.
+ * CTT DUTs use the stack default vendor 0xABCD / device 0x0001. */
+static void stamp_pnio_cl_req(uint8_t *pdu)
+{
+    static const uint8_t obj[16] = {
+        0x00, 0x00, 0xa0, 0xde, 0x97, 0x6c, 0xd1, 0x11,
+        0x82, 0x71, 0x00, 0x01, 0x00, 0x01, 0xab, 0xcd};
+    static const uint8_t iface[16] = {
+        0x01, 0x00, 0xa0, 0xde, 0x97, 0x6c, 0xd1, 0x11,
+        0x82, 0x71, 0x00, 0xa0, 0x24, 0x42, 0xdf, 0x7d};
+    pdu[0] = 4;
+    pdu[1] = 0;
+    pdu[4] = 0x10;
+    memcpy(pdu + 8, obj, 16);
+    memcpy(pdu + 24, iface, 16);
+}
+
 static size_t ndr_wrap(uint8_t *out, const uint8_t *blocks, size_t n)
 {
     pn_wr_le32(out, (uint32_t)n);
@@ -856,8 +940,7 @@ static size_t build_connect_pdu(uint8_t *pdu, size_t cap, int integrity,
         return 0;
     }
     memset(pdu, 0, cap);
-    pdu[0] = 1; /* rpcvers */
-    pdu[1] = 0; /* request */
+    stamp_pnio_cl_req(pdu);
     pn_wr_le16(pdu + 68, 0); /* Connect */
 
     uint8_t blocks[256];
@@ -1411,7 +1494,7 @@ static int step_rpc_release(ctt_run_t *run, pn_priv_t *priv,
 
     uint8_t pdu[256];
     memset(pdu, 0, sizeof(pdu));
-    pdu[0] = 1;
+    stamp_pnio_cl_req(pdu);
     pn_wr_le16(pdu + 68, RPC_OP_RELEASE);
     /* ReleaseBlockReq 0x0114. Same body as Control: pad, ARUUID,
      * SessionKey (Connect uses 1), AlarmSequenceNumber,
@@ -1470,8 +1553,7 @@ static int step_rpc_inject(ctt_run_t *run, pn_priv_t *priv,
     } else if (yaml_has(step, "opcode")) {
         uint16_t op = (uint16_t)yaml_ulong(step, "opcode", 0xFFFF);
         memset(pdu, 0, 80);
-        pdu[0] = 1;
-        pdu[1] = 0; /* request */
+        stamp_pnio_cl_req(pdu);
         pn_wr_le16(pdu + 68, op);
         plen = 80;
     } else {
@@ -1570,7 +1652,7 @@ static int step_rpc_write(ctt_run_t *run, pn_priv_t *priv,
 
     uint8_t pdu[512];
     memset(pdu, 0, sizeof(pdu));
-    pdu[0] = 1;
+    stamp_pnio_cl_req(pdu);
     pn_wr_le16(pdu + 68, RPC_OP_WRITE);
     size_t stub = ndr_wrap(pdu + 80, blocks, bn);
     pn_wr_le16(pdu + 74, (uint16_t)stub);
@@ -1610,7 +1692,7 @@ static int step_rpc_control(ctt_run_t *run, pn_priv_t *priv,
 
     uint8_t pdu[256];
     memset(pdu, 0, sizeof(pdu));
-    pdu[0] = 1;
+    stamp_pnio_cl_req(pdu);
     pn_wr_le16(pdu + 68, RPC_OP_CONTROL);
     size_t stub = ndr_wrap(pdu + 80, blocks, bn);
     pn_wr_le16(pdu + 74, (uint16_t)stub);
@@ -1881,7 +1963,7 @@ static int step_record_read(ctt_run_t *run, pn_priv_t *priv,
 
     uint8_t pdu[256];
     memset(pdu, 0, sizeof(pdu));
-    pdu[0] = 1;
+    stamp_pnio_cl_req(pdu);
     pn_wr_le16(pdu + 68, RPC_OP_READ);
     size_t stub = ndr_wrap(pdu + 80, blocks, bn);
     pn_wr_le16(pdu + 74, (uint16_t)stub);
@@ -2060,7 +2142,7 @@ static void soak_refresh_cmi(ctt_run_t *run, pn_priv_t *priv)
     size_t bn = wr_pn_block(blocks, PN_BLOCK_IOD_READ_REQ, body, sizeof(body));
     uint8_t pdu[256];
     memset(pdu, 0, sizeof(pdu));
-    pdu[0] = 1;
+    stamp_pnio_cl_req(pdu);
     pn_wr_le16(pdu + 68, RPC_OP_READ);
     size_t stub = ndr_wrap(pdu + 80, blocks, bn);
     pn_wr_le16(pdu + 74, (uint16_t)stub);
