@@ -60,7 +60,7 @@
 | 36 | T12-16 | PN DCP Set 처리 규칙 | `stacks/profinet/`, `tests/`, `tools/ctt/proto/profinet/` (DCP Set `result: reject` 판정만) | T12-16 ×7 | 2026-10-29 오라클 정정 (#167 답): AR 중 이름 Set 은 기본 수락 + AR abort, ARProperties bit 27 RejectDCPsetRequests=1 일 때만 거부. AR 중 IP Set 거부. ResetToFactory 는 BlockQualifier 모드별, 공장값 = 빈 이름·0.0.0.0, AR 중 수락 + abort. 근거 p-net CMINA 상태표 구현·Wireshark — 보고서 [audits/20261029-pn-dcp-ar-epm.md](audits/20261029-pn-dcp-ar-epm.md). CTT 하네스 `reject` = ServiceType 1 + BlockError ≠ 0 |
 | 37 | T12-17 | PN 표준 Release(0x0114) | `stacks/profinet/`, `tests/`, `tools/ctt/` | T12-17 | |
 | 38 | T12-18 | PN 미지원 레코드 index 에러 | `stacks/profinet/`, `tests/` | T12-18 ×2 | T12-1 이후 |
-| 39 | T12-19 | PN SNMP 요청 파싱 | `stacks/profinet/`, `tests/` | T12-19 ×2 | |
+| 39 | T12-19 | PN SNMP 요청 파싱 | `stacks/profinet/`, `tests/` | T12-19 ×2 | 2026-11-01 감사 확인 필요 2 (같은 원인): community 불일치·SNMP 아닌 데이터는 무응답, 요청 version 에코, GetNext 는 다음 OID — 같은 PR 에서 함께 ([audits/20261101-pn-dcp-lldp-snmp.md](audits/20261101-pn-dcp-lldp-snmp.md)) |
 | 40 | T12-20 | PN DCP IP 적용·이름/I&M 저장 | `stacks/profinet/`, `tests/` | 없음 | 오라클 없음: OS IP 적용은 실제 NIC·root 필요, 비휘발 저장은 설정 인터페이스 미정 |
 | 41 | T12-21 | PN 어댑터 slot/subslot/index, 예제 입력 길이 | `adapters/profinet/`, `config/` | T12-21 | |
 | 42 | T12-22 | PN IOCRReference, DCP 지연 슬롯, DeviceRole 0x01 | `stacks/profinet/`, `tests/` | T12-22 | T12-2 이후 |
@@ -121,6 +121,11 @@
 | 97 | A20261025-4 | EIP 어댑터가 `length` 생략 숫자 포인트를 1바이트로, `data_type` 생략 포인트를 무변환으로 다룸 (uint16 300 → `01 00`) | `adapters/ethernetip/`, `tests/` | A20261025-4 ×4 | 같은 보고서. 기본 = data_type 크기·LE (CIP UINT/DINT, T0 A안). PN 어댑터 같은 패턴은 범위 밖 |
 | 98 | A20261025-5 | EIP Originator TCP connect 가 블로킹·타임아웃 없음 — 응답 없는 대상이면 `fb_open` 이 ~130 s 막힘 | `stacks/ethernetip/`, `tests/` | A20261025-5 | 같은 보고서. 근거 EIPScanner `TCPSocket.cpp` (non-blocking + 타임아웃), pycomm3 5 s. Modbus T9-5 와 같은 방식 |
 | 99 | A20261028-1 | EIP TCP·TLS 응답의 짧은 `send`·`EAGAIN`·`SSL_ERROR_WANT_WRITE` 를 성공으로 보고 나머지를 버림 — 스캐너가 잠시 안 읽으면 응답이 빠지고 잘린 프레임으로 스트림 경계가 깨짐 (연결 유지) | `stacks/ethernetip/`, `tests/` | A20261028-1 | 출처 #164 "발견한 다른 문제", 보고서 [audits/20261028-eip-partial-send.md](audits/20261028-eip-partial-send.md). 근거 OpENer (accept 소켓 blocking). Modbus T9-8 (큐 52) 과 같은 기준 |
+| 100 | A20261101-1 | PN DCP Set IPParameter 가 IP suite 유효성을 보지 않음 (비연속 넷마스크·멀티캐스트·루프백·브로드캐스트·다른 서브넷 게이트웨이도 BlockError 0 으로 적용). 길이도 정확히 12 만 | `stacks/profinet/`, `tests/` | A20261101-1 ×6 | 출처 12단계 일요일 감사 (opus), 보고서 [audits/20261101-pn-dcp-lldp-snmp.md](audits/20261101-pn-dcp-lldp-snmp.md). 근거 p-net `pf_cmina_is_ipsuite_valid` → 0x03. 0.0.0.0 (IP 지우기) 은 유효 |
+| 101 | A20261101-2 | PN NameOfStation 이 비면 LLDP Chassis ID TLV 가 subtype 만 (길이 1) — Wireshark·scapy 가 LLDPDU 전체를 버림. 이름이 없으면 subtype 4 + MAC | `stacks/profinet/`, `tests/` | A20261101-2 | 같은 보고서. 근거 p-net `pf_lldp.c`, Wireshark `packet-lldp.c` |
+| 102 | A20261101-3 | PN 빈 NameOfStation Set (이름 지우기) 을 0x03 으로 거부, AR 중 IP 0.0.0.0 (IP 지우기) 을 0x06 으로 거부. p-net: 빈 이름 유효, AR 중 IP 지우기는 수락 + AR abort | `stacks/profinet/`, `tests/` | A20261101-3 ×2 | 같은 보고서. 큐 100 과 같은 PR 이어도 된다 (그때 두 표시 모두 지움, 허용) |
+| 103 | A20261101-4 | PN Identify/Get DeviceOptions 가 (1,2)·(2,2) 두 쌍만 나열 (MAC·Vendor·DeviceID·Role·DeviceOptions·Signal·ResetToFactory 빠짐) | `stacks/profinet/`, `tests/` (`tests/golden/profinet/` 갱신 포함) | A20261101-4 | 같은 보고서. 근거 p-net `pf_dcp.c` `device_options[]` |
+| 104 | A20261101-5 | PN DCP Hello.req 목적지가 Identify 멀티캐스트 `01:0E:CF:00:00:00` — Hello 는 `…:00:01` | `stacks/profinet/`, `tests/` (`tests/golden/profinet/` 갱신 포함) | A20261101-5 | 같은 보고서. 근거 p-net `dcp_mc_addr_hello`. 입문서 D3 [사양 확인 필요] 정리는 큐 68 비고 |
 
 ## 이슈 본문 템플릿
 
