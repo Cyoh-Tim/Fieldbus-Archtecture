@@ -13,9 +13,12 @@ import xml.etree.ElementTree as ET
 
 import pytest
 from scapy.all import Dot1Q, Ether, raw
-from scapy.contrib.lldp import LLDPDU, LLDPDUGenericOrganisationSpecific, LLDPDUManagementAddress, LLDPDUPortID
+from scapy.config import conf
+from scapy.contrib.lldp import (LLDPDU, LLDPDUChassisID, LLDPDUGenericOrganisationSpecific, LLDPDUManagementAddress,
+                                LLDPDUPortID)
 from scapy.contrib.pnio import ProfinetIO
-from scapy.contrib.pnio_dcp import DCPIPBlock, DCPNameOfStationBlock, DCPDeviceRoleBlock, ProfinetDCP
+from scapy.contrib.pnio_dcp import (DCPDeviceOptionsBlock, DCPDeviceRoleBlock, DCPIPBlock, DCPNameOfStationBlock,
+                                    ProfinetDCP)
 from scapy.contrib.pnio_rpc import (
     AlarmCRBlockReq,
     AlarmCRBlockRes,
@@ -1200,3 +1203,128 @@ def test_adapter_scaled_point_read_roundtrip(pn_app):
     assert vals, "fb_read_f32 실패"
     v = struct.unpack(">f", vals[0])[0]
     assert abs(v - 300.0) < 1e-3, f"읽은 값 {v}"
+
+
+# ---------------------------------------------------------------- A20261101-1 DCP Set IP 유효성
+# 근거: p-net src/device/pf_cmina.c pf_cmina_dcp_set_ind — IPParameter Set 은 pf_cmina_is_ipsuite_valid 를 통과해야
+# 적용되고, 아니면 "Case 10, 22 in Profinet 2.4 Table 1096 CMINA state table" 로 BlockError 0x03 (SUBOPTION_NOT_SET).
+# 유효성 규칙 (pf_cmina.c pf_cmina_is_netmask_valid / _ipaddress_valid / _gateway_valid, "Profinet 2.4 4.3.1.4.21.2~5"):
+# 넷마스크는 연속 비트, 0.0.0.0/0 외에는 호스트부 0·전부 1 금지, 0.x·127.x·224~255.x 금지, 게이트웨이는 0 이거나 같은 서브넷.
+def _suite(ip, mask, gw):
+    return bytes(ip) + bytes(mask) + bytes(gw)
+
+
+INVALID_IP_SUITES = [
+    pytest.param(_suite((192, 168, 0, 60), (255, 0, 255, 0), (0, 0, 0, 0)), id="netmask-noncontiguous"),
+    pytest.param(_suite((224, 0, 0, 5), (255, 255, 255, 0), (0, 0, 0, 0)), id="ip-multicast"),
+    pytest.param(_suite((127, 0, 0, 1), (255, 0, 0, 0), (0, 0, 0, 0)), id="ip-loopback"),
+    pytest.param(_suite((192, 168, 0, 255), (255, 255, 255, 0), (0, 0, 0, 0)), id="ip-subnet-broadcast"),
+    pytest.param(_suite((192, 168, 0, 0), (255, 255, 255, 0), (0, 0, 0, 0)), id="ip-host-part-zero"),
+    pytest.param(_suite((192, 168, 0, 60), (255, 255, 255, 0), (10, 0, 0, 1)), id="gateway-other-subnet"),
+]
+
+
+@known_defect("A20261101-1", "DCP Set IPParameter 가 넷마스크·IP·게이트웨이 유효성을 보지 않고 BlockError 0 으로 적용한다 "
+              "(255.0.255.0, 224.0.0.5, 127.0.0.1, 브로드캐스트·네트워크 주소, 다른 서브넷 게이트웨이). "
+              "p-net: pf_cmina_is_ipsuite_valid 실패 → BlockError 0x03, IP 유지")
+@pytest.mark.parametrize("suite", INVALID_IP_SUITES)
+def test_dcp_set_rejects_invalid_ip_suite(pn_dut, suite):
+    before = dcp_ip(pn_dut, 0x8101)
+    p = dcp_set(pn_dut, [(0x01, 0x02, suite)], xid=0x8102)
+    assert p is not None, "Set.res 없음"
+    stype, res = dcp_set_results(p)
+    assert stype == 0x01, f"ServiceType {stype}"
+    assert res.get((0x01, 0x02)) not in (None, 0x00), f"잘못된 IP suite 를 받아들임: 응답 블록 {res}"
+    assert dcp_ip(pn_dut, 0x8103) == before, "거부했어야 할 IP suite 가 적용됨"
+
+
+# ---------------------------------------------------------------- A20261101-2 이름 없는 상태의 LLDP Chassis ID
+HELLO_MC = "01:0e:cf:00:00:01"
+
+
+def _raw_lldp_frames(lines):
+    return [b for tag, b in lines if tag == "TX" and b[12:14] == b"\x88\xcc"]
+
+
+@known_defect("A20261101-2", "NameOfStation 이 비면 Chassis ID TLV 를 subtype 7 + 빈 문자열(TLV 길이 1)로 보낸다. "
+              "IEEE 802.1AB chassis ID 는 1..255 옥텟 — Wireshark 는 'Invalid Chassis ID TLV' 로 LLDPDU 전체를 버리고 "
+              "scapy strict 해석도 실패한다. p-net: 이름이 없으면 subtype 4 (MAC)")
+def test_lldp_chassis_id_without_name_of_station(pn_dut):
+    p = dcp_set(pn_dut, [RESET_COMM], xid=0x8201)
+    assert p is not None and dcp_set_results(p)[1].get((0x05, 0x06)) == 0x00, "ResetToFactory 실패"
+    assert dcp_name(pn_dut, 0x8202) == b"", "이름이 비워지지 않음 (전제)"
+    frames = _raw_lldp_frames(pn_dut.cmd("POLL 5300"))  # LLDP 주기 5 s
+    assert frames, "ResetToFactory 뒤 5 s 안에 LLDP 송신 없음"
+    pdu = frames[-1][14:]
+    t_hdr = struct.unpack(">H", pdu[:2])[0]
+    assert t_hdr >> 9 == 1, f"첫 TLV type {t_hdr >> 9} (Chassis ID 기대)"
+    # Wireshark packet-lldp.c dissect_lldp_chassis_id: dataLen < 2 → "Invalid Chassis ID Length", 이후 TLV 해석 중단.
+    assert (t_hdr & 0x1FF) >= 2, f"Chassis ID TLV 길이 {t_hdr & 0x1FF} (subtype 뒤 ID 0 옥텟)"
+    assert conf.contribs["LLDP"].strict_mode()
+    f = Ether(frames[-1])  # scapy strict 모드 (기본) 해석
+    ch = f[LLDPDU].getlayer(LLDPDUChassisID)
+    # p-net src/common/pf_lldp.c pf_lldp_get_chassis_id: 이름 길이 0 → PF_LLDP_SUBTYPE_MAC + 장치 MAC.
+    assert ch.subtype == 4 and str(ch.id).lower() == DEVICE_MAC, f"Chassis ID subtype {ch.subtype} id {ch.id!r}"
+
+
+# ---------------------------------------------------------------- A20261101-3 이름 지우기·IP 지우기 Set
+NAME_EMPTY = (0x02, 0x02, b"")
+IP_RESET = (0x01, 0x02, bytes(12))
+
+
+@known_defect("A20261101-3", "빈 NameOfStation Set(DCPBlockLength 2, 값 없음)을 BlockError 0x03 으로 거부한다. "
+              "p-net pf_cmina_is_stationname_valid: 길이 0 은 유효 ('no station name has been set') → 수락, 이름 비움")
+def test_dcp_set_empty_name_of_station_accepted(pn_dut):
+    p = dcp_set(pn_dut, [NAME_EMPTY], xid=0x8301)
+    assert p is not None, "Set.res 없음"
+    stype, res = dcp_set_results(p)
+    assert stype == 0x01 and res.get((0x02, 0x02)) == 0x00, f"ServiceType {stype}, 응답 블록 {res}"
+    assert dcp_name(pn_dut, 0x8302) == b"", "이름이 비워지지 않음"
+
+
+@known_defect("A20261101-3", "AR 중 IP 0.0.0.0/0/0 (IP 지우기) Set 을 0x06 으로 거부하고 AR 을 유지한다. "
+              "p-net pf_cmina_dcp_set_ind W_CONNECT: have_ip == false → 'Case 27, 28 — Change name or reset IP — "
+              "Abort active ARs' (수락 + AR abort). 다른 IP 로의 변경(Case 26 거부)과 다르다")
+def test_dcp_set_ip_reset_during_ar_accepted_and_aborts_ar(pn_dut):
+    assert rtc1_frames(pn_dut, poll_ms=40), "AR 수립 후 RTC1 프레임 없음"
+    p = dcp_set(pn_dut, [IP_RESET], xid=0x8303)
+    assert p is not None, "Set.res 없음"
+    stype, res = dcp_set_results(p)
+    assert stype == 0x01 and res.get((0x01, 0x02)) == 0x00, f"ServiceType {stype}, 응답 블록 {res}"
+    assert dcp_ip(pn_dut, 0x8304)[0] == "0.0.0.0", "IP 가 지워지지 않음"
+    out = pn_dut.cmd("POLL 60")
+    assert not [f for f in tx_frames(out) if is_rtc1(f)], "IP 를 지운 뒤에도 AR 의 RTC1 이 계속 나간다 (abort 안 됨)"
+
+
+# ---------------------------------------------------------------- A20261101-4 DeviceOptions
+@known_defect("A20261101-4", "Identify.res DeviceOptions 가 (1,2) IP·(2,2) 이름 두 쌍뿐이다. 같은 응답에 실린 DeviceVendor·"
+              "DeviceID·DeviceRole·MAC·DeviceOptions 와 Set 으로 받는 Signal·ResetToFactory 가 빠짐. "
+              "p-net pf_dcp.c device_options[] 는 지원 옵션 전부를 나열한다")
+def test_dcp_identify_device_options_lists_supported_options(pn_dut):
+    f = identify_all(pn_dut)
+    assert f is not None, "Identify.Res 없음"
+    blocks = f["ProfinetDCP"].dcp_blocks
+    opts = [b for b in blocks if isinstance(b, DCPDeviceOptionsBlock)]
+    assert len(opts) == 1, f"DeviceOptions 블록 {len(opts)}개"
+    listed = {(o.option, o.sub_option) for o in opts[0].device_options}
+    carried = {(b.option, b.sub_option) for b in blocks}
+    # 이 장치가 Set 으로 받는 Control 서브옵션 (test_pn_oracle 의 ResetToFactory·Signal 동작): 5/3 Signal, 5/6 ResetToFactory.
+    required = carried | {(0x05, 0x03), (0x05, 0x06)}
+    missing = sorted(required - listed)
+    assert not missing, f"DeviceOptions 에 없는 (Option, Suboption): {missing} (목록 {sorted(listed)})"
+
+
+# ---------------------------------------------------------------- A20261101-5 Hello 목적지
+@known_defect("A20261101-5", "DCP Hello.req 를 Identify 멀티캐스트 01:0e:cf:00:00:00 으로 보낸다. "
+              "p-net pf_dcp.c dcp_mc_addr_hello = 01:0e:cf:00:00:01 (Hello 수신도 이 주소만 받는다)")
+def test_dcp_hello_destination_is_hello_multicast(pn_dut):
+    # 지금 장치는 DCP Set 으로 IP 가 바뀌면 Hello 를 보낸다. Hello 를 아예 보내지 않는 구현이면 이 검사는 통과한다
+    # (보낼 때의 목적지만 본다). Hello 를 보내는 시점(기동 시 DeviceInitiative)은 "확인 필요".
+    body = struct.pack(">BBHH", 0x01, 0x02, 14, 0x0001) + bytes([192, 168, 0, 61, 255, 255, 255, 0, 0, 0, 0, 0])
+    dcp = struct.pack(">BBIHH", 0x04, 0x00, 0x8501, 0, len(body)) + body
+    out = pn_dut.eth(raw(Ether(dst=DEVICE_MAC, src=CONTROLLER_MAC, type=0x8892) / ProfinetIO(frameID=0xFEFD) / dcp))
+    sets = [f for f in tx_frames(out) if f.haslayer(ProfinetIO) and f[ProfinetIO].frameID == 0xFEFD]
+    assert sets, "Set.res 없음 (요청 형식 확인)"
+    hellos = [f for f in tx_frames(out) if f.haslayer(ProfinetIO) and f[ProfinetIO].frameID == 0xFEFC]
+    bad = [f.dst for f in hellos if f.dst.lower() != HELLO_MC]
+    assert not bad, f"Hello 목적지 {bad} ({HELLO_MC} 기대)"
