@@ -1073,13 +1073,11 @@ def snmp_get(pn, oid, req_id):
     return rsp.PDU
 
 
-@known_defect("T12-19", "request-id 를 요청에서 복사하지 않고 항상 1 로 응답한다")
 def test_snmp_request_id_echo(pn_dut):
     pdu = snmp_get(pn_dut, SYS_NAME, req_id=0x1234)
     assert pdu.id.val == 0x1234, f"request-id {pdu.id.val}"
 
 
-@known_defect("T12-19", "요청 OID 와 관계없이 sysName.0 을 돌려준다. 사양: 요청한 OID 의 varbind (없으면 noSuchName)")
 def test_snmp_answers_requested_oid(pn_dut):
     pdu = snmp_get(pn_dut, SYS_DESCR, req_id=1)
     oids = [vb.oid.val for vb in pdu.varbindlist]
