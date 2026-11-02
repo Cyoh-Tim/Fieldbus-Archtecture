@@ -3,8 +3,11 @@
  * Read  PNIOStatus DE 80 B0 00 (NDR integer 0xDE80B000).
  * Write PNIOStatus DF 80 B0 00 (NDR integer 0xDF80B000).
  * Little-endian drep stores that integer as bytes 00 B0 80 DE / 00 B0 80 DF.
- * The IODReadRes/IODWriteRes header carries the same status big-endian
- * (bytes DE 80 B0 00 / DF 80 B0 00) and no record payload.
+ * IODWriteResHeader (0x8008) carries the same status big-endian
+ * (bytes DF 80 B0 00) and no record payload.
+ * IODReadResHeader (0x8009) does not. AdditionalValue1/2 are followed by
+ * 20 bytes of padding, which stay 0. The read error is only the NDR
+ * PNIOStatus.
  *
  * Supported and left successful: I&M0–4 reads, I&M1–4 writes, and the
  * empty GSDML parameter record (index 1, Length 0).
@@ -163,7 +166,8 @@ static size_t build_write(uint8_t *pdu, uint16_t index, const uint8_t *data,
     return wrap_rpc(pdu, 3, stub, sn);
 }
 
-/* Header PNIOStatus sits after AdditionalValue1/2: block offset 44. */
+/* IODWriteResHeader PNIOStatus is block offset 44, after AdditionalValue1/2.
+ * IODReadResHeader has 20 bytes of padding there, so that check expects 0. */
 static void expect_rw_error(const uint8_t *resp, size_t rlen, uint16_t res_type,
                             uint32_t want, const char *what)
 {
@@ -183,10 +187,18 @@ static void expect_rw_error(const uint8_t *resp, size_t rlen, uint16_t res_type,
     expect(pn_rd_be16(blk) == res_type, msg);
     snprintf(msg, sizeof(msg), "%s recordDataLength", what);
     expect_u32(pn_rd_be32(blk + 36), 0, msg);
-    uint8_t raw[4];
-    pn_wr_be32(raw, want);
     snprintf(msg, sizeof(msg), "%s header PNIOStatus", what);
-    expect(memcmp(blk + 44, raw, 4) == 0, msg);
+    if (res_type == PN_BLOCK_IOD_READ_RES) {
+        uint8_t pad[20];
+        memset(pad, 0, sizeof(pad));
+        if (memcmp(blk + 44, pad, sizeof(pad)) != 0) {
+            fprintf(stderr, "FAIL: %s (got 0x%08x want padding 0)\n", msg,
+                    pn_rd_be32(blk + 44));
+            g_fail = 1;
+        }
+    } else {
+        expect_u32(pn_rd_be32(blk + 44), want, msg);
+    }
 }
 
 static void test_direct_unsupported(pn_stack_t *s)

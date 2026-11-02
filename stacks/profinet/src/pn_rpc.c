@@ -641,7 +641,11 @@ static size_t wr_block(uint8_t *p, uint16_t type, const uint8_t *body,
 }
 
 /* IODReadResHeader (0x8009) or IODWriteResHeader (0x8008): fixed 64 bytes
- * (BlockLength 60). Read appends record bytes; write does not. */
+ * (BlockLength 60). Read appends record bytes; write does not.
+ * AdditionalValue1/2 stay 0. Only IODWriteResHeader stores PNIOStatus
+ * after them (big-endian ErrorCode, ErrorDecode, ErrorCode1, ErrorCode2).
+ * IODReadResHeader has 20 bytes of padding there. A read error is the
+ * NDR PNIOStatus alone. */
 static size_t iod_rw_res(uint8_t *out, size_t cap, uint16_t type, uint16_t seq,
                          const uint8_t aruuid[PN_UUID_LEN], uint32_t api,
                          uint16_t slot, uint16_t subslot, uint16_t index,
@@ -659,10 +663,9 @@ static size_t iod_rw_res(uint8_t *out, size_t cap, uint16_t type, uint16_t seq,
     pn_wr_be16(body + 24, subslot);
     pn_wr_be16(body + 28, index);
     pn_wr_be32(body + 30, record_len);
-    /* AdditionalValue1/2 stay 0. PNIOStatus is big-endian in the block
-     * (ErrorCode, ErrorDecode, ErrorCode1, ErrorCode2). The NDR copy of
-     * the same value follows drep. */
-    pn_wr_be32(body + 38, pnio_status);
+    if (type == PN_BLOCK_IOD_WRITE_RES) {
+        pn_wr_be32(body + 38, pnio_status);
+    }
     if (cap < 64u + rec_len) {
         return 0;
     }
