@@ -27,6 +27,30 @@ def mbap(tid: int, unit: int, pdu: bytes, proto: int = 0) -> bytes:
     return be16(tid) + be16(proto) + be16(1 + len(pdu)) + bytes([unit]) + pdu
 
 
+def ber(tag: int, value: bytes) -> bytes:
+    n = len(value)
+    length = bytes([n]) if n < 0x80 else bytes([0x81, n])
+    return bytes([tag]) + length + value
+
+
+def ber_oid(arcs: list) -> bytes:
+    out = bytes([40 * arcs[0] + arcs[1]])
+    for a in arcs[2:]:
+        enc = [a & 0x7F]
+        a >>= 7
+        while a:
+            enc.insert(0, (a & 0x7F) | 0x80)
+            a >>= 7
+        out += bytes(enc)
+    return ber(0x06, out)
+
+
+def snmp(version: int, pdu_tag: int, req_id: int, varbinds: list, community: bytes = b"public") -> bytes:
+    vbl = b"".join(ber(0x30, ber_oid(oid) + val) for oid, val in varbinds)
+    pdu = ber(pdu_tag, ber(0x02, bytes([req_id])) + ber(0x02, b"\x00") + ber(0x02, b"\x00") + ber(0x30, vbl))
+    return ber(0x30, ber(0x02, bytes([version])) + ber(0x04, community) + pdu)
+
+
 def main() -> None:
     # Modbus TCP FC03
     mb = be16(1) + be16(0) + be16(6) + bytes([1, 3]) + be16(0) + be16(2)
@@ -192,6 +216,16 @@ def main() -> None:
     w("pn_eth", "mode6_alarm.bin", bytes([6, 0]))
     w("pn_eth", "mode6_alarm_low.bin", bytes([6, 1]))
     w("pn_eth", "mode7_stitch_rtc.bin", bytes([7]) + eth + ident)
+    # SNMP (fuzz_pn_snmp.c): byte0 = response buffer size selector.
+    sys_name = [1, 3, 6, 1, 2, 1, 1, 5, 0]
+    null = b"\x05\x00"
+    w("pn_snmp", "v1_get.bin", bytes([200]) + snmp(0, 0xA0, 1, [(sys_name, null)]))
+    w("pn_snmp", "v2c_getnext.bin", bytes([200]) + snmp(1, 0xA1, 2, [([1, 3, 6, 1, 2, 1, 1], null)]))
+    w("pn_snmp", "v1_set.bin", bytes([200]) + snmp(0, 0xA3, 3, [(sys_name, ber(0x04, b"x"))]))
+    w("pn_snmp", "v2c_multi.bin", bytes([200]) + snmp(1, 0xA0, 4, [(sys_name, null), ([1, 3, 6, 1, 2, 1, 1, 1, 0], null)]))
+    w("pn_snmp", "v2c_bulk.bin", bytes([200]) + snmp(1, 0xA5, 5, [([1, 3, 6, 1, 2, 1, 1], null)]))
+    w("pn_snmp", "wrong_community.bin", bytes([200]) + snmp(0, 0xA0, 6, [(sys_name, null)], b"wrong"))
+    w("pn_snmp", "tiny_buf.bin", bytes([3]) + snmp(0, 0xA0, 7, [(sys_name, null)]))
     print("wrote", ROOT)
 
 

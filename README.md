@@ -60,7 +60,7 @@ xdg-open docs/ctt_board.html
 
 ## 프로토콜 범위
 
-- **PROFINET**: `stacks/profinet/` 자체 Device 스택 (CC-B + RT Class 1 + Sec Class 1).
+- **PROFINET**: `stacks/profinet/` 자체 Device 스택 (CC-B + RT Class 1 + 자체 보안 프로파일, PI Security Class 1 인증 주장 아님).
   **IRT / CC-C 는 목표 아님.** 상세: [`docs/profinet_stack.md`](docs/profinet_stack.md)
 - **Modbus TCP**: `stacks/modbus/` 자체 스택 (기본 서버/슬레이브, **libmodbus 없음**).
   가이드: [`docs/modbus_stack.md`](docs/modbus_stack.md)
