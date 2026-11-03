@@ -1040,8 +1040,14 @@ def test_record_read_unsupported_index_error(pn_dut):
                      index=UNSUPPORTED_INDEX, recordDataLength=4096)
     rsp = rpc_response(pn_dut.rpc(raw(pnio_request(2, [req], seqnum=50))))
     assert rsp is not None, "Read 응답 없음"
-    status, _ = ndr_response(rsp)
+    status, blocks = ndr_response(rsp)
     assert status == 0xDE80B000, f"PNIOStatus {status:08x}"
+    # 에러는 NDR PNIOStatus 로만 알린다. IODReadResHeader 에는 PNIOStatus 필드가 없다 — AdditionalValue1·2 뒤는
+    # padding 20 (Wireshark packet-dcerpc-pn-io.c dissect_IODReadResHeader_block dissect_pn_padding 20,
+    # p-net pf_block_writer.c pf_put_read_result). PNIOStatus 는 IODWriteResHeader 에만 있다.
+    if len(blocks) >= 64 and blocks[:2] == b"\x80\x09":
+        hdr = IODReadRes(blocks[:64])
+        assert hdr.RWPadding == bytes(20), f"IODReadResHeader padding {hdr.RWPadding.hex()} (0 이어야 한다)"
 
 
 @known_defect("T12-18", "미지원 index Write 를 성공으로 처리한다. "
