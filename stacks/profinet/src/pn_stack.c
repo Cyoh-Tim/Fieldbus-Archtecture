@@ -306,3 +306,220 @@ int pn_stack_write_input(pn_stack_t *s, size_t off, const uint8_t *src,
     pthread_mutex_unlock(&s->io_lock);
     return 0;
 }
+
+_Static_assert(sizeof(((pn_nvm_image_t *)0)->im1_function) == PN_IM1_FUNC_LEN,
+               "nvm I&M1 function");
+_Static_assert(sizeof(((pn_nvm_image_t *)0)->im1_location) == PN_IM1_LOC_LEN,
+               "nvm I&M1 location");
+_Static_assert(sizeof(((pn_nvm_image_t *)0)->im2_date) == PN_IM2_DATE_LEN,
+               "nvm I&M2");
+_Static_assert(sizeof(((pn_nvm_image_t *)0)->im3_desc) == PN_IM3_DESC_LEN,
+               "nvm I&M3");
+_Static_assert(sizeof(((pn_nvm_image_t *)0)->im4_sig) == PN_IM4_SIG_LEN,
+               "nvm I&M4");
+
+static void nvm_copy_im_from_stack(pn_stack_t *s)
+{
+    memcpy(s->nvm.im1_function, s->im1_function, PN_IM1_FUNC_LEN);
+    memcpy(s->nvm.im1_location, s->im1_location, PN_IM1_LOC_LEN);
+    memcpy(s->nvm.im2_date, s->im2_date, PN_IM2_DATE_LEN);
+    memcpy(s->nvm.im3_desc, s->im3_desc, PN_IM3_DESC_LEN);
+    memcpy(s->nvm.im4_sig, s->im4_sig, PN_IM4_SIG_LEN);
+}
+
+static void nvm_im_factory(pn_nvm_image_t *img)
+{
+    memset(img->im1_function, ' ', sizeof(img->im1_function));
+    memset(img->im1_location, ' ', sizeof(img->im1_location));
+    memset(img->im2_date, ' ', sizeof(img->im2_date));
+    memset(img->im3_desc, ' ', sizeof(img->im3_desc));
+    memset(img->im4_sig, 0, sizeof(img->im4_sig));
+}
+
+/* Power-on baseline: user config is the nonvolatile ASE until a Set saves
+ * it (p-net copies pnet_cfg into cmina_nonvolatile before the first file
+ * write). present stays 0 so a missing file does not override config. */
+static void nvm_seed(pn_stack_t *s)
+{
+    memset(&s->nvm, 0, sizeof(s->nvm));
+    memcpy(s->nvm.station_name, s->cfg.station_name, sizeof(s->nvm.station_name));
+    s->nvm.station_name[PN_STATION_NAME_MAX] = '\0';
+    s->nvm.ip = s->cfg.ip;
+    s->nvm.netmask = s->cfg.netmask;
+    s->nvm.gateway = s->cfg.gateway;
+    nvm_copy_im_from_stack(s);
+}
+
+static void nvm_apply(pn_stack_t *s)
+{
+    if (s->nvm.present & PN_NVM_NAME) {
+        memcpy(s->cfg.station_name, s->nvm.station_name,
+               sizeof(s->cfg.station_name));
+        s->cfg.station_name[PN_STATION_NAME_MAX] = '\0';
+    }
+    if (s->nvm.present & PN_NVM_IP) {
+        s->cfg.ip = s->nvm.ip;
+        s->cfg.netmask = s->nvm.netmask;
+        s->cfg.gateway = s->nvm.gateway;
+        pn_os_apply_configured_ip(s);
+    }
+    if (s->nvm.present & PN_NVM_IM) {
+        memcpy(s->im1_function, s->nvm.im1_function, PN_IM1_FUNC_LEN);
+        memcpy(s->im1_location, s->nvm.im1_location, PN_IM1_LOC_LEN);
+        memcpy(s->im2_date, s->nvm.im2_date, PN_IM2_DATE_LEN);
+        memcpy(s->im3_desc, s->nvm.im3_desc, PN_IM3_DESC_LEN);
+        memcpy(s->im4_sig, s->nvm.im4_sig, PN_IM4_SIG_LEN);
+    }
+    LOG_INFO("pn_stack", "nvm load present=0x%x name=%s", s->nvm.present,
+             (s->nvm.present & PN_NVM_NAME) ? s->cfg.station_name : "(cfg)");
+}
+
+static int nvm_save(pn_stack_t *s)
+{
+    int rc = s->nvm_ops.save(s->nvm_ops.ctx, &s->nvm);
+    if (rc != 0) {
+        LOG_ERROR("pn_stack", "nvm save 실패 (%d)", rc);
+    }
+    return rc;
+}
+
+static int nvm_erase(pn_stack_t *s)
+{
+    int rc = s->nvm_ops.erase(s->nvm_ops.ctx);
+    if (rc != 0) {
+        LOG_ERROR("pn_stack", "nvm erase 실패 (%d)", rc);
+    }
+    memset(&s->nvm, 0, sizeof(s->nvm));
+    return rc;
+}
+
+void pn_stack_set_nvm_ops(pn_stack_t *s, const pn_nvm_ops_t *ops)
+{
+    if (!s) {
+        return;
+    }
+    if (!ops || !ops->load || !ops->save || !ops->erase) {
+        memset(&s->nvm_ops, 0, sizeof(s->nvm_ops));
+        s->nvm_on = 0;
+        memset(&s->nvm, 0, sizeof(s->nvm));
+        return;
+    }
+    s->nvm_ops = *ops;
+    s->nvm_on = 1;
+    pn_nvm_image_t loaded;
+    memset(&loaded, 0, sizeof(loaded));
+    int rc = ops->load(ops->ctx, &loaded);
+    if (rc == 0) {
+        s->nvm = loaded;
+        s->nvm.station_name[PN_STATION_NAME_MAX] = '\0';
+        nvm_apply(s);
+        return;
+    }
+    if (rc < 0) {
+        LOG_WARN("pn_stack", "nvm load 실패 (%d) — config 사용", rc);
+    }
+    nvm_seed(s);
+}
+
+void pn_stack_set_os_ip_fn(pn_stack_t *s, pn_os_apply_ip_fn fn, void *ctx)
+{
+    if (!s) {
+        return;
+    }
+    s->os_ip_fn = fn;
+    s->os_ip_ctx = ctx;
+}
+
+void pn_os_apply_configured_ip(pn_stack_t *s)
+{
+    if (!s || !s->cfg.apply_os_ip) {
+        return;
+    }
+    int rc;
+    if (s->os_ip_fn) {
+        rc = s->os_ip_fn(s->os_ip_ctx, s->cfg.iface, s->cfg.ip, s->cfg.netmask,
+                         s->cfg.gateway);
+    } else {
+        rc = pn_os_apply_ip_default(s->cfg.iface, s->cfg.ip, s->cfg.netmask,
+                                    s->cfg.gateway);
+    }
+    if (rc != 0) {
+        LOG_ERROR("pn_dcp", "OS IP 적용 실패 (%d) iface=%s", rc,
+                  s->cfg.iface[0] ? s->cfg.iface : "(none)");
+        return;
+    }
+    LOG_INFO("pn_dcp", "OS IP 적용 %u.%u.%u.%u", (s->cfg.ip >> 24) & 0xff,
+             (s->cfg.ip >> 16) & 0xff, (s->cfg.ip >> 8) & 0xff, s->cfg.ip & 0xff);
+}
+
+void pn_nvm_after_name(pn_stack_t *s, int permanent)
+{
+    if (!s || !s->nvm_on) {
+        return;
+    }
+    if (permanent) {
+        memcpy(s->nvm.station_name, s->cfg.station_name,
+               sizeof(s->nvm.station_name));
+        s->nvm.station_name[PN_STATION_NAME_MAX] = '\0';
+    } else {
+        memset(s->nvm.station_name, 0, sizeof(s->nvm.station_name));
+    }
+    /* One ASE file: the first name or IP Set stores both fields. */
+    s->nvm.present |= PN_NVM_NAME | PN_NVM_IP;
+    nvm_save(s);
+}
+
+void pn_nvm_after_ip(pn_stack_t *s, int permanent)
+{
+    if (!s || !s->nvm_on) {
+        return;
+    }
+    if (permanent) {
+        s->nvm.ip = s->cfg.ip;
+        s->nvm.netmask = s->cfg.netmask;
+        s->nvm.gateway = s->cfg.gateway;
+    } else {
+        s->nvm.ip = 0;
+        s->nvm.netmask = 0;
+        s->nvm.gateway = 0;
+    }
+    s->nvm.present |= PN_NVM_NAME | PN_NVM_IP;
+    nvm_save(s);
+}
+
+void pn_nvm_after_im(pn_stack_t *s)
+{
+    if (!s || !s->nvm_on) {
+        return;
+    }
+    nvm_copy_im_from_stack(s);
+    s->nvm.present |= PN_NVM_IM;
+    nvm_save(s);
+}
+
+void pn_nvm_after_reset(pn_stack_t *s, int clear_comm, int clear_im)
+{
+    if (!s || !s->nvm_on || (!clear_comm && !clear_im)) {
+        return;
+    }
+    if (clear_comm && clear_im) {
+        nvm_erase(s);
+        return;
+    }
+    if (clear_comm) {
+        s->nvm.present &= ~(PN_NVM_NAME | PN_NVM_IP);
+        memset(s->nvm.station_name, 0, sizeof(s->nvm.station_name));
+        s->nvm.ip = 0;
+        s->nvm.netmask = 0;
+        s->nvm.gateway = 0;
+    }
+    if (clear_im) {
+        s->nvm.present &= ~PN_NVM_IM;
+        nvm_im_factory(&s->nvm);
+    }
+    if (s->nvm.present == 0) {
+        nvm_erase(s);
+        return;
+    }
+    nvm_save(s);
+}

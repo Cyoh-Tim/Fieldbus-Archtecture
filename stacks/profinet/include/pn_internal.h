@@ -188,6 +188,17 @@ struct pn_stack {
     uint8_t dcp_ident_dst[6];
     uint32_t dcp_ident_xid;
     uint64_t dcp_ident_due_ns;
+
+    /* Non-volatile shadow. nvm_on is set only when ops are installed.
+     * The image is the permanent copy (p-net cmina_nonvolatile_dcp_ase):
+     * a temporary DCP Set clears that field here and saves. I&M1–4 are
+     * stored on Write. Without ops, nothing is saved. */
+    pn_nvm_ops_t nvm_ops;
+    int nvm_on;
+    pn_nvm_image_t nvm;
+
+    pn_os_apply_ip_fn os_ip_fn;
+    void *os_ip_ctx;
 };
 
 uint64_t pn_now_ns(void);
@@ -250,6 +261,19 @@ int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                    uint16_t index, uint8_t *out, size_t cap, size_t *out_len);
 int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                     uint16_t index, const uint8_t *data, size_t len);
+
+/* DCP Set committed a NameOfStation or IP suite. permanent is BlockQualifier
+ * bit 0. Temporary clears the stored field (p-net pf_cmina_dcp_set_ind). */
+void pn_nvm_after_name(pn_stack_t *s, int permanent);
+void pn_nvm_after_ip(pn_stack_t *s, int permanent);
+void pn_nvm_after_im(pn_stack_t *s);
+/* clear_comm / clear_im match ResetToFactory modes. Both set erases the
+ * store. One side drops only that part. */
+void pn_nvm_after_reset(pn_stack_t *s, int clear_comm, int clear_im);
+/* apply_os_ip gate. Hook if installed, otherwise ioctl on a real iface. */
+void pn_os_apply_configured_ip(pn_stack_t *s);
+int pn_os_apply_ip_default(const char *iface, uint32_t ip, uint32_t netmask,
+                           uint32_t gateway);
 
 int pn_alarm_send_dummy(pn_stack_t *s, uint16_t frame_id);
 /* After Connect parse: default endpoint/timer when AlarmCRBlockReq was

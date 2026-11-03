@@ -44,8 +44,45 @@ typedef struct {
     uint16_t input_len;  /* device -> controller */
     uint16_t output_len; /* controller -> device */
     uint32_t cycle_us;
+    /* Non-zero: DCP IP suite changes are pushed to the OS interface.
+     * Zero (default): the stack keeps the address internally and does not
+     * change the NIC. A test hook is installed with pn_stack_set_os_ip_fn. */
     int apply_os_ip;
 } pn_cfg_t;
+
+/* Stored NameOfStation / IP suite / I&M1–4. IPv4 values are host order,
+ * the same as pn_cfg_t. present bits select which fields the image holds.
+ * PN_NVM_NAME with an empty station_name is a stored empty name. */
+#define PN_NVM_NAME 0x1u
+#define PN_NVM_IP   0x2u
+#define PN_NVM_IM   0x4u
+
+typedef struct pn_nvm_image {
+    uint32_t present;
+    char station_name[PN_STATION_NAME_MAX + 1];
+    uint32_t ip;
+    uint32_t netmask;
+    uint32_t gateway;
+    char im1_function[32];
+    char im1_location[22];
+    char im2_date[16];
+    char im3_desc[54];
+    uint8_t im4_sig[54];
+} pn_nvm_image_t;
+
+/* load: 0 = image filled, 1 = nothing stored, <0 = error (config is kept).
+ * save/erase: 0 = ok, <0 = error. The stack logs and continues. */
+typedef struct pn_nvm_ops {
+    int (*load)(void *ctx, pn_nvm_image_t *out);
+    int (*save)(void *ctx, const pn_nvm_image_t *image);
+    int (*erase)(void *ctx);
+    void *ctx;
+} pn_nvm_ops_t;
+
+/* Called when apply_os_ip is set and a DCP operation commits an IP suite.
+ * Addresses are host order. Return 0 on success, negative errno-style. */
+typedef int (*pn_os_apply_ip_fn)(void *ctx, const char *iface, uint32_t ip,
+                                 uint32_t netmask, uint32_t gateway);
 
 typedef struct {
     int (*send)(void *ctx, const uint8_t *frame, size_t len);
@@ -68,6 +105,15 @@ int pn_stack_write_input(pn_stack_t *s, size_t off, const uint8_t *src,
 
 /* Test / mock Ethernet. Replaces AF_PACKET. */
 void pn_stack_set_eth_ops(pn_stack_t *s, pn_eth_ops_t ops);
+
+/* Install non-volatile storage. NULL or a NULL callback detaches it.
+ * A stored image is applied immediately (power-on read). Install an OS
+ * IP hook first if apply_os_ip should run for that loaded suite. */
+void pn_stack_set_nvm_ops(pn_stack_t *s, const pn_nvm_ops_t *ops);
+
+/* Replaces the default ioctl apply while apply_os_ip is set. NULL restores
+ * the default. The default is not used for iface "mock". */
+void pn_stack_set_os_ip_fn(pn_stack_t *s, pn_os_apply_ip_fn fn, void *ctx);
 int pn_stack_handle_eth(pn_stack_t *s, const uint8_t *frame, size_t len);
 int pn_stack_handle_rpc(pn_stack_t *s, const uint8_t *udp_payload, size_t len,
                         uint8_t *resp, size_t resp_cap, size_t *resp_len);

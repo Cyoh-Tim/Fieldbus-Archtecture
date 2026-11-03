@@ -301,8 +301,8 @@ static int ip_suite_same(const pn_stack_t *s, const uint8_t *val, size_t vlen)
  * 1 = I&M1–4, 2 = name+IP, 3/4/8/9 = all of those.
  * 0, 5–7, and >=10 are reserved: change nothing, BlockError 0x03.
  * Reset Factory Settings (5/5) is all supported, ignoring the mode.
- * An accepted reset aborts an AR (ErrorCode2 0x20). BlockQualifier is
- * not stored (nonvolatile save is T12-20). */
+ * An accepted reset aborts an AR (ErrorCode2 0x20). The cleared fields
+ * are erased from nonvolatile storage when a store is attached. */
 static uint8_t apply_reset(pn_stack_t *s, int factory_settings, uint16_t qual,
                            int *ip_changed, int *abort_code2)
 {
@@ -330,6 +330,10 @@ static uint8_t apply_reset(pn_stack_t *s, int factory_settings, uint16_t qual,
     if (im) {
         clear_im_factory(s);
     }
+    pn_nvm_after_reset(s, comm, im);
+    if (comm) {
+        pn_os_apply_configured_ip(s);
+    }
     if (ar_in_operation(s)) {
         note_abort(abort_code2, 0x20);
     }
@@ -354,6 +358,9 @@ static uint8_t apply_set_block(pn_stack_t *s, uint8_t opt, uint8_t sub,
         /* Same suite is not a change (CMINA case 24). A different value
          * during an AR is rejected and the AR stays (case 26). */
         if (ip_suite_same(s, val, vlen)) {
+            /* Still commit the qualifier. Temporary clears the stored suite
+             * even when the running value does not change (p-net). */
+            pn_nvm_after_ip(s, (qual & 1) != 0);
             return PN_DCP_BLOCK_ERR_OK;
         }
         if (ar_in_operation(s)) {
@@ -369,6 +376,9 @@ static uint8_t apply_set_block(pn_stack_t *s, uint8_t opt, uint8_t sub,
         s->cfg.ip = ip;
         s->cfg.netmask = pn_rd_be32(val + 4);
         s->cfg.gateway = pn_rd_be32(val + 8);
+        /* Bit 0 set = permanent. Temporary zeros the stored suite. */
+        pn_nvm_after_ip(s, (qual & 1) != 0);
+        pn_os_apply_configured_ip(s);
         LOG_INFO("pn_dcp", "IP set %u.%u.%u.%u", (s->cfg.ip >> 24) & 0xff,
                  (s->cfg.ip >> 16) & 0xff, (s->cfg.ip >> 8) & 0xff,
                  s->cfg.ip & 0xff);
@@ -382,6 +392,7 @@ static uint8_t apply_set_block(pn_stack_t *s, uint8_t opt, uint8_t sub,
             }
             size_t cur = strlen(s->cfg.station_name);
             if (vlen == cur && memcmp(val, s->cfg.station_name, cur) == 0) {
+                pn_nvm_after_name(s, (qual & 1) != 0);
                 return PN_DCP_BLOCK_ERR_OK;
             }
             /* Reject only when this AR asked for it. Otherwise accept
@@ -392,6 +403,7 @@ static uint8_t apply_set_block(pn_stack_t *s, uint8_t opt, uint8_t sub,
             size_t n = vlen < PN_STATION_NAME_MAX ? vlen : PN_STATION_NAME_MAX;
             memcpy(s->cfg.station_name, val, n);
             s->cfg.station_name[n] = '\0';
+            pn_nvm_after_name(s, (qual & 1) != 0);
             LOG_INFO("pn_dcp", "NameOfStation=%s", s->cfg.station_name);
             if (ar_in_operation(s)) {
                 note_abort(abort_code2, 0x1F);

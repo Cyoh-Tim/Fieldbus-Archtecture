@@ -1024,6 +1024,547 @@ static void test_t12_16_set_rules(void)
     pn_stack_destroy(s);
 }
 
+typedef struct {
+    int calls;
+    struct {
+        char iface[16];
+        uint32_t ip;
+        uint32_t netmask;
+        uint32_t gateway;
+    } ev[4];
+} os_hook_t;
+
+static int os_hook_fn(void *ctx, const char *iface, uint32_t ip, uint32_t mask,
+                      uint32_t gw)
+{
+    os_hook_t *h = ctx;
+    if (h->calls < 4) {
+        snprintf(h->ev[h->calls].iface, sizeof(h->ev[h->calls].iface), "%s",
+                 iface ? iface : "");
+        h->ev[h->calls].ip = ip;
+        h->ev[h->calls].netmask = mask;
+        h->ev[h->calls].gateway = gw;
+    }
+    h->calls++;
+    return 0;
+}
+
+typedef struct {
+    int have;
+    int saves;
+    int erases;
+    pn_nvm_image_t img;
+} mem_nvm_t;
+
+static int mem_load(void *ctx, pn_nvm_image_t *out)
+{
+    mem_nvm_t *m = ctx;
+    if (!m->have) {
+        return 1;
+    }
+    *out = m->img;
+    return 0;
+}
+
+static int mem_save(void *ctx, const pn_nvm_image_t *image)
+{
+    mem_nvm_t *m = ctx;
+    m->img = *image;
+    m->have = 1;
+    m->saves++;
+    return 0;
+}
+
+static int mem_erase(void *ctx)
+{
+    mem_nvm_t *m = ctx;
+    int erases = m->erases + 1;
+    memset(m, 0, sizeof(*m));
+    m->erases = erases;
+    return 0;
+}
+
+static pn_stack_t *open_nvm_stack(const char *name, uint32_t ip, uint32_t mask,
+                                  uint32_t gw, int apply_os, mem_nvm_t *mem,
+                                  os_hook_t *hook)
+{
+    pn_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    snprintf(cfg.iface, sizeof(cfg.iface), "mock");
+    snprintf(cfg.station_name, sizeof(cfg.station_name), "%s", name ? name : "");
+    cfg.ip = ip;
+    cfg.netmask = mask;
+    cfg.gateway = gw;
+    cfg.apply_os_ip = apply_os;
+    cfg.input_len = 32;
+    cfg.output_len = 8;
+    cfg.vendor_id = 0xABCD;
+    cfg.device_id = 0x0001;
+    pn_stack_t *s = pn_stack_create(&cfg);
+    if (!s) {
+        fprintf(stderr, "FAIL: nvm stack create\n");
+        g_fail = 1;
+        return NULL;
+    }
+    pn_eth_ops_t eops = {.send = capture_send, .recv = NULL, .ctx = NULL};
+    pn_stack_set_eth_ops(s, eops);
+    if (hook) {
+        pn_stack_set_os_ip_fn(s, os_hook_fn, hook);
+    }
+    if (mem) {
+        pn_nvm_ops_t nops = {
+            .load = mem_load,
+            .save = mem_save,
+            .erase = mem_erase,
+            .ctx = mem,
+        };
+        pn_stack_set_nvm_ops(s, &nops);
+    }
+    if (pn_stack_start(s) != 0) {
+        fprintf(stderr, "FAIL: nvm stack start\n");
+        g_fail = 1;
+        pn_stack_destroy(s);
+        return NULL;
+    }
+    return s;
+}
+
+static int dcp_set_ok(pn_stack_t *s, const uint8_t *blocks, size_t bn,
+                      uint32_t xid, uint8_t opt, uint8_t sub)
+{
+    uint8_t dst[6];
+    memcpy(dst, s->cfg.mac, 6);
+    uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t frame[PN_FRAME_MAX];
+    tx_reset();
+    size_t flen = dcp_set_blocks_frame(frame, dst, src, xid, blocks, bn);
+    if (pn_stack_handle_eth(s, frame, flen) != 0) {
+        fprintf(stderr, "FAIL: handle set xid=0x%x\n", xid);
+        g_fail = 1;
+        return 0;
+    }
+    size_t rlen = 0;
+    const uint8_t *rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    uint8_t stype = 0;
+    set_res_t res[8];
+    int nres = parse_set_responses(rsp, rlen, &stype, res, 8);
+    uint8_t err = 0xFF;
+    if (stype != PN_DCP_RESP_SUCCESS ||
+        !set_res_err(res, nres, opt, sub, &err) || err != 0) {
+        fprintf(stderr,
+                "FAIL: set xid=0x%x opt=%u sub=%u stype=%u err=%u nres=%d\n",
+                xid, opt, sub, stype, err, nres);
+        g_fail = 1;
+        return 0;
+    }
+    return 1;
+}
+
+static void set_name_qual(pn_stack_t *s, const char *name, uint16_t qual,
+                          uint32_t xid)
+{
+    uint8_t blocks[320];
+    size_t bn = append_set_block_qual(blocks, 0, PN_DCP_OPT_DEV,
+                                      PN_DCP_SUB_DEV_NAME, qual, name,
+                                      strlen(name));
+    dcp_set_ok(s, blocks, bn, xid, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME);
+}
+
+static void set_ip_qual(pn_stack_t *s, uint32_t ip, uint32_t mask, uint32_t gw,
+                        uint16_t qual, uint32_t xid)
+{
+    uint8_t ipb[12];
+    pn_wr_be32(ipb, ip);
+    pn_wr_be32(ipb + 4, mask);
+    pn_wr_be32(ipb + 8, gw);
+    uint8_t blocks[64];
+    size_t bn = append_set_block_qual(blocks, 0, PN_DCP_OPT_IP,
+                                      PN_DCP_SUB_IP_PARAM, qual, ipb,
+                                      sizeof(ipb));
+    dcp_set_ok(s, blocks, bn, xid, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM);
+}
+
+static void set_reset_qual(pn_stack_t *s, uint8_t sub, uint16_t qual,
+                           uint32_t xid)
+{
+    uint8_t blocks[16];
+    size_t bn =
+        append_set_block_qual(blocks, 0, PN_DCP_OPT_CTRL, sub, qual, NULL, 0);
+    dcp_set_ok(s, blocks, bn, xid, PN_DCP_OPT_CTRL, sub);
+}
+
+static void write_im_pattern(pn_stack_t *s)
+{
+    uint8_t im1[PN_IM1_FUNC_LEN + PN_IM1_LOC_LEN];
+    memset(im1, 'A', PN_IM1_FUNC_LEN);
+    memset(im1 + PN_IM1_FUNC_LEN, 'B', PN_IM1_LOC_LEN);
+    expect(pn_record_write(s, 0, 1, PN_INDEX_IM1, im1, sizeof(im1)) == 0,
+           "write im1 pattern");
+    uint8_t im2[PN_IM2_DATE_LEN];
+    memset(im2, 'C', sizeof(im2));
+    expect(pn_record_write(s, 0, 1, PN_INDEX_IM2, im2, sizeof(im2)) == 0,
+           "write im2 pattern");
+    uint8_t im3[PN_IM3_DESC_LEN];
+    memset(im3, 'D', sizeof(im3));
+    expect(pn_record_write(s, 0, 1, PN_INDEX_IM3, im3, sizeof(im3)) == 0,
+           "write im3 pattern");
+    uint8_t im4[PN_IM4_SIG_LEN];
+    memset(im4, 0x11, sizeof(im4));
+    expect(pn_record_write(s, 0, 1, PN_INDEX_IM4, im4, sizeof(im4)) == 0,
+           "write im4 pattern");
+}
+
+/* I&M1 is function then location. im_is() fills one byte, so check both. */
+static int im1_pattern_ok(pn_stack_t *s)
+{
+    uint8_t got[128];
+    size_t n = 0;
+    if (pn_record_read(s, 0, 1, PN_INDEX_IM1, got, sizeof(got), &n) != 0 ||
+        n < 6 + PN_IM1_FUNC_LEN + PN_IM1_LOC_LEN) {
+        return 0;
+    }
+    for (size_t i = 0; i < PN_IM1_FUNC_LEN; i++) {
+        if (got[6 + i] != 'A') {
+            return 0;
+        }
+    }
+    for (size_t i = 0; i < PN_IM1_LOC_LEN; i++) {
+        if (got[6 + PN_IM1_FUNC_LEN + i] != 'B') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int im_factory_ok(pn_stack_t *s)
+{
+    return im_is(s, PN_INDEX_IM1, ' ', PN_IM1_FUNC_LEN + PN_IM1_LOC_LEN) &&
+           im_is(s, PN_INDEX_IM2, ' ', PN_IM2_DATE_LEN) &&
+           im_is(s, PN_INDEX_IM3, ' ', PN_IM3_DESC_LEN) &&
+           im_is(s, PN_INDEX_IM4, 0, PN_IM4_SIG_LEN);
+}
+
+static void expect_suite(pn_stack_t *s, uint32_t ip, uint32_t mask, uint32_t gw,
+                         const char *what)
+{
+    if (s->cfg.ip != ip || s->cfg.netmask != mask || s->cfg.gateway != gw) {
+        fprintf(stderr,
+                "FAIL: %s ip=%08x/%08x gw=%08x want %08x/%08x gw=%08x\n", what,
+                s->cfg.ip, s->cfg.netmask, s->cfg.gateway, ip, mask, gw);
+        g_fail = 1;
+    }
+}
+
+/* T12-20: DCP Set IP calls the OS apply hook when apply_os_ip is set.
+ * The flag at 0 does not. Reset that clears the suite calls it with 0. */
+static void test_t12_20_os_ip_hook(void)
+{
+    os_hook_t hook;
+    memset(&hook, 0, sizeof(hook));
+    pn_stack_t *s = open_nvm_stack("sensor-line1", 0, 0, 0, 1, NULL, &hook);
+    if (!s) {
+        return;
+    }
+    expect(hook.calls == 0, "start does not apply a zero suite");
+    set_ip_qual(s, 0xC0A80014u, 0xFFFFFF00u, 0xC0A80001u, 1, 0x7120);
+    if (hook.calls != 1 || hook.ev[0].ip != 0xC0A80014u ||
+        hook.ev[0].netmask != 0xFFFFFF00u || hook.ev[0].gateway != 0xC0A80001u ||
+        strcmp(hook.ev[0].iface, "mock") != 0) {
+        fprintf(stderr,
+                "FAIL: Set IP did not call OS hook calls=%d ip=%08x iface=%s\n",
+                hook.calls, hook.calls ? hook.ev[0].ip : 0,
+                hook.calls ? hook.ev[0].iface : "");
+        g_fail = 1;
+    }
+    set_reset_qual(s, PN_DCP_SUB_CTRL_RESET, 2u << 1, 0x7121);
+    if (hook.calls != 2 || hook.ev[1].ip != 0 || hook.ev[1].netmask != 0 ||
+        hook.ev[1].gateway != 0) {
+        fprintf(stderr, "FAIL: reset did not apply 0.0.0.0 calls=%d ip=%08x\n",
+                hook.calls, hook.calls > 1 ? hook.ev[1].ip : 0);
+        g_fail = 1;
+    }
+    pn_stack_destroy(s);
+
+    memset(&hook, 0, sizeof(hook));
+    s = open_nvm_stack("sensor-line1", 0, 0, 0, 0, NULL, &hook);
+    if (!s) {
+        return;
+    }
+    set_ip_qual(s, 0xC0A80014u, 0xFFFFFF00u, 0xC0A80001u, 1, 0x7122);
+    expect(hook.calls == 0, "apply_os_ip 0 does not call the hook");
+    expect(s->cfg.ip == 0xC0A80014u, "IP still stored in the stack");
+    pn_stack_destroy(s);
+}
+
+/* BlockQualifier 1 name, IP, and I&M1–4 survive a new stack on the same store.
+ * I&M Write alone is permanent (no DCP qualifier) and does not freeze the
+ * config name. */
+static void test_t12_20_permanent_survives(void)
+{
+    mem_nvm_t mem;
+    memset(&mem, 0, sizeof(mem));
+    pn_stack_t *s =
+        open_nvm_stack("orig", 0x0A000001u, 0xFFFFFF00u, 0x0A000001u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    set_name_qual(s, "press-7", 1, 0x7201);
+    set_ip_qual(s, 0xC0A80014u, 0xFFFFFF00u, 0xC0A80001u, 1, 0x7202);
+    write_im_pattern(s);
+    pn_stack_destroy(s);
+
+    s = open_nvm_stack("other", 0x01020304u, 0xFFFF0000u, 0x01020301u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    if (strcmp(s->cfg.station_name, "press-7") != 0) {
+        fprintf(stderr, "FAIL: permanent name got '%s'\n", s->cfg.station_name);
+        g_fail = 1;
+    }
+    expect_suite(s, 0xC0A80014u, 0xFFFFFF00u, 0xC0A80001u, "permanent ip");
+    if (!im1_pattern_ok(s) || !im_is(s, PN_INDEX_IM2, 'C', PN_IM2_DATE_LEN) ||
+        !im_is(s, PN_INDEX_IM3, 'D', PN_IM3_DESC_LEN) ||
+        !im_is(s, PN_INDEX_IM4, 0x11, PN_IM4_SIG_LEN)) {
+        fprintf(stderr, "FAIL: permanent I&M1-4 did not survive recreate\n");
+        g_fail = 1;
+    }
+    pn_stack_destroy(s);
+
+    memset(&mem, 0, sizeof(mem));
+    s = open_nvm_stack("orig", 0x0A000001u, 0xFFFFFF00u, 0x0A000001u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    write_im_pattern(s);
+    pn_stack_destroy(s);
+    s = open_nvm_stack("other", 0x01020304u, 0xFFFF0000u, 0x01020301u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    if (strcmp(s->cfg.station_name, "other") != 0) {
+        fprintf(stderr, "FAIL: I&M-only save froze name '%s'\n",
+                s->cfg.station_name);
+        g_fail = 1;
+    }
+    if (!im1_pattern_ok(s) || !im_is(s, PN_INDEX_IM4, 0x11, PN_IM4_SIG_LEN)) {
+        fprintf(stderr, "FAIL: I&M write did not survive recreate\n");
+        g_fail = 1;
+    }
+    pn_stack_destroy(s);
+}
+
+/* BlockQualifier 0 is applied in RAM and is not what the next stack loads.
+ * p-net clears the stored field, so a later permanent value is dropped too. */
+static void test_t12_20_temporary_does_not(void)
+{
+    mem_nvm_t mem;
+    memset(&mem, 0, sizeof(mem));
+    pn_stack_t *s =
+        open_nvm_stack("orig", 0x0A000001u, 0xFFFFFF00u, 0x0A000001u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    set_name_qual(s, "temp-name", 0, 0x7301);
+    expect(strcmp(s->cfg.station_name, "temp-name") == 0,
+           "temporary name is in RAM");
+    pn_stack_destroy(s);
+    s = open_nvm_stack("other", 0x01020304u, 0xFFFF0000u, 0x01020301u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    if (s->cfg.station_name[0] != '\0') {
+        fprintf(stderr, "FAIL: temporary name survived as '%s'\n",
+                s->cfg.station_name);
+        g_fail = 1;
+    }
+    expect_suite(s, 0x0A000001u, 0xFFFFFF00u, 0x0A000001u,
+                 "temporary name keeps stored ip");
+    pn_stack_destroy(s);
+
+    memset(&mem, 0, sizeof(mem));
+    s = open_nvm_stack("orig", 0x0A000001u, 0xFFFFFF00u, 0x0A000001u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    set_ip_qual(s, 0x0A000063u, 0xFFFFFF00u, 0x0A000001u, 0, 0x7302);
+    expect(s->cfg.ip == 0x0A000063u, "temporary ip is in RAM");
+    pn_stack_destroy(s);
+    s = open_nvm_stack("other", 0x01020304u, 0xFFFF0000u, 0x01020301u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    if (strcmp(s->cfg.station_name, "orig") != 0) {
+        fprintf(stderr, "FAIL: temporary ip disturbed name '%s'\n",
+                s->cfg.station_name);
+        g_fail = 1;
+    }
+    expect_suite(s, 0, 0, 0, "temporary ip cleared the stored suite");
+    pn_stack_destroy(s);
+
+    memset(&mem, 0, sizeof(mem));
+    s = open_nvm_stack("orig", 0x0A000001u, 0xFFFFFF00u, 0x0A000001u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    set_name_qual(s, "keep-me", 1, 0x7303);
+    set_name_qual(s, "gone", 0, 0x7304);
+    expect(strcmp(s->cfg.station_name, "gone") == 0, "temporary replaces RAM");
+    pn_stack_destroy(s);
+    s = open_nvm_stack("other", 0, 0, 0, 0, &mem, NULL);
+    if (!s) {
+        return;
+    }
+    if (s->cfg.station_name[0] != '\0') {
+        fprintf(stderr,
+                "FAIL: temporary set left stored name '%s' (want empty)\n",
+                s->cfg.station_name);
+        g_fail = 1;
+    }
+    pn_stack_destroy(s);
+}
+
+/* ResetToFactory drops the stored fields it clears. A new stack must not
+ * load the pre-reset name, IP, or I&M. */
+static void test_t12_20_reset_erases_store(void)
+{
+    mem_nvm_t mem;
+    memset(&mem, 0, sizeof(mem));
+    pn_stack_t *s =
+        open_nvm_stack("orig", 0x0A000001u, 0xFFFFFF00u, 0x0A000001u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    set_name_qual(s, "press-7", 1, 0x7401);
+    set_ip_qual(s, 0xC0A80014u, 0xFFFFFF00u, 0xC0A80001u, 1, 0x7402);
+    write_im_pattern(s);
+    pn_stack_destroy(s);
+    s = open_nvm_stack("other", 0x01020304u, 0xFFFF0000u, 0x01020301u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    if (strcmp(s->cfg.station_name, "press-7") != 0) {
+        fprintf(stderr, "FAIL: reset setup name got '%s'\n", s->cfg.station_name);
+        g_fail = 1;
+    }
+    set_reset_qual(s, PN_DCP_SUB_CTRL_FACTORY, 1, 0x7403);
+    expect(s->cfg.station_name[0] == '\0', "factory reset clears RAM name");
+    expect(im_factory_ok(s), "factory reset clears RAM I&M");
+    pn_stack_destroy(s);
+    s = open_nvm_stack("from-cfg", 0x11111111u, 0xFFFFFF00u, 0x11111101u, 0,
+                       &mem, NULL);
+    if (!s) {
+        return;
+    }
+    if (strcmp(s->cfg.station_name, "from-cfg") != 0) {
+        fprintf(stderr, "FAIL: factory reset left stored name '%s'\n",
+                s->cfg.station_name);
+        g_fail = 1;
+    }
+    expect_suite(s, 0x11111111u, 0xFFFFFF00u, 0x11111101u,
+                 "factory reset dropped stored ip");
+    if (!im_factory_ok(s)) {
+        fprintf(stderr, "FAIL: factory reset left stored I&M\n");
+        g_fail = 1;
+    }
+    pn_stack_destroy(s);
+
+    /* Mode 1 clears stored I&M and keeps name/IP. */
+    memset(&mem, 0, sizeof(mem));
+    s = open_nvm_stack("orig", 0x0A000001u, 0xFFFFFF00u, 0x0A000001u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    set_name_qual(s, "press-7", 1, 0x7410);
+    set_ip_qual(s, 0xC0A80014u, 0xFFFFFF00u, 0xC0A80001u, 1, 0x7411);
+    write_im_pattern(s);
+    set_reset_qual(s, PN_DCP_SUB_CTRL_RESET, 1u << 1, 0x7412);
+    pn_stack_destroy(s);
+    s = open_nvm_stack("from-cfg", 0x01020304u, 0xFFFF0000u, 0x01020301u, 0,
+                       &mem, NULL);
+    if (!s) {
+        return;
+    }
+    if (strcmp(s->cfg.station_name, "press-7") != 0) {
+        fprintf(stderr, "FAIL: mode 1 name got '%s'\n", s->cfg.station_name);
+        g_fail = 1;
+    }
+    expect_suite(s, 0xC0A80014u, 0xFFFFFF00u, 0xC0A80001u, "mode 1 keeps ip");
+    if (!im_factory_ok(s)) {
+        fprintf(stderr, "FAIL: mode 1 left stored I&M\n");
+        g_fail = 1;
+    }
+    pn_stack_destroy(s);
+
+    /* Mode 2 clears stored name/IP and keeps I&M. */
+    memset(&mem, 0, sizeof(mem));
+    s = open_nvm_stack("orig", 0x0A000001u, 0xFFFFFF00u, 0x0A000001u, 0, &mem,
+                       NULL);
+    if (!s) {
+        return;
+    }
+    set_name_qual(s, "press-7", 1, 0x7420);
+    set_ip_qual(s, 0xC0A80014u, 0xFFFFFF00u, 0xC0A80001u, 1, 0x7421);
+    write_im_pattern(s);
+    set_reset_qual(s, PN_DCP_SUB_CTRL_RESET, 2u << 1, 0x7422);
+    pn_stack_destroy(s);
+    s = open_nvm_stack("from-cfg", 0x01020304u, 0xFFFF0000u, 0x01020301u, 0,
+                       &mem, NULL);
+    if (!s) {
+        return;
+    }
+    if (strcmp(s->cfg.station_name, "from-cfg") != 0) {
+        fprintf(stderr, "FAIL: mode 2 name got '%s'\n", s->cfg.station_name);
+        g_fail = 1;
+    }
+    expect_suite(s, 0x01020304u, 0xFFFF0000u, 0x01020301u, "mode 2 drops ip");
+    if (!im1_pattern_ok(s) || !im_is(s, PN_INDEX_IM4, 0x11, PN_IM4_SIG_LEN)) {
+        fprintf(stderr, "FAIL: mode 2 dropped stored I&M\n");
+        g_fail = 1;
+    }
+    pn_stack_destroy(s);
+}
+
+/* Stored IP is applied on the next stack when apply_os_ip is set. */
+static void test_t12_20_os_ip_on_load(void)
+{
+    mem_nvm_t mem;
+    os_hook_t hook;
+    memset(&mem, 0, sizeof(mem));
+    memset(&hook, 0, sizeof(hook));
+    pn_stack_t *s =
+        open_nvm_stack("orig", 0, 0, 0, 1, &mem, &hook);
+    if (!s) {
+        return;
+    }
+    set_ip_qual(s, 0xC0A80014u, 0xFFFFFF00u, 0xC0A80001u, 1, 0x7501);
+    pn_stack_destroy(s);
+    memset(&hook, 0, sizeof(hook));
+    s = open_nvm_stack("other", 0x01020304u, 0xFFFF0000u, 0x01020301u, 1, &mem,
+                       &hook);
+    if (!s) {
+        return;
+    }
+    if (hook.calls != 1 || hook.ev[0].ip != 0xC0A80014u ||
+        hook.ev[0].netmask != 0xFFFFFF00u || hook.ev[0].gateway != 0xC0A80001u) {
+        fprintf(stderr, "FAIL: power-on did not apply stored IP calls=%d ip=%08x\n",
+                hook.calls, hook.calls ? hook.ev[0].ip : 0);
+        g_fail = 1;
+    }
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
     test_name_ok();
@@ -1031,6 +1572,11 @@ int main(void)
     test_set_name_and_enforce();
     test_response_blockinfo();
     test_t12_16_set_rules();
+    test_t12_20_os_ip_hook();
+    test_t12_20_permanent_survives();
+    test_t12_20_temporary_does_not();
+    test_t12_20_reset_erases_store();
+    test_t12_20_os_ip_on_load();
     if (g_fail) {
         fprintf(stderr, "test_pn_dcp: FAILED\n");
         return 1;

@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -12,6 +13,7 @@
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
 #include <net/if.h>
+#include <net/route.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
@@ -208,4 +210,72 @@ int pn_udp_open(uint16_t port)
     }
     set_nonblock(fd);
     return fd;
+}
+
+/* Host-order IPv4. iface "mock" or empty does not touch the NIC.
+ * Needs CAP_NET_ADMIN. A non-zero gateway is installed as the default
+ * route on that device (SIOCADDRT). Gateway 0 leaves existing routes. */
+int pn_os_apply_ip_default(const char *iface, uint32_t ip, uint32_t netmask,
+                           uint32_t gateway)
+{
+    if (!iface || !iface[0] || strcmp(iface, "mock") == 0) {
+        return -ENODEV;
+    }
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        return -errno;
+    }
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof(ifr));
+    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", iface);
+    struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
+    sin->sin_family = AF_INET;
+    sin->sin_addr.s_addr = htonl(ip);
+    if (ioctl(fd, SIOCSIFADDR, &ifr) < 0) {
+        int e = errno;
+        close(fd);
+        return -e;
+    }
+    memset(&ifr, 0, sizeof(ifr));
+    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", iface);
+    sin = (struct sockaddr_in *)&ifr.ifr_addr;
+    sin->sin_family = AF_INET;
+    sin->sin_addr.s_addr = htonl(netmask);
+    if (ioctl(fd, SIOCSIFNETMASK, &ifr) < 0) {
+        int e = errno;
+        close(fd);
+        return -e;
+    }
+    memset(&ifr, 0, sizeof(ifr));
+    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", iface);
+    if (ioctl(fd, SIOCGIFFLAGS, &ifr) == 0) {
+        ifr.ifr_flags = (short)(ifr.ifr_flags | IFF_UP);
+        if (ioctl(fd, SIOCSIFFLAGS, &ifr) < 0) {
+            int e = errno;
+            close(fd);
+            return -e;
+        }
+    }
+    if (gateway != 0) {
+        struct rtentry rt;
+        char dev[IFNAMSIZ];
+        memset(&rt, 0, sizeof(rt));
+        snprintf(dev, sizeof(dev), "%s", iface);
+        struct sockaddr_in *dst = (struct sockaddr_in *)&rt.rt_dst;
+        struct sockaddr_in *gw = (struct sockaddr_in *)&rt.rt_gateway;
+        struct sockaddr_in *gen = (struct sockaddr_in *)&rt.rt_genmask;
+        dst->sin_family = AF_INET;
+        gw->sin_family = AF_INET;
+        gw->sin_addr.s_addr = htonl(gateway);
+        gen->sin_family = AF_INET;
+        rt.rt_flags = RTF_UP | RTF_GATEWAY;
+        rt.rt_dev = dev;
+        if (ioctl(fd, SIOCADDRT, &rt) < 0 && errno != EEXIST) {
+            int e = errno;
+            close(fd);
+            return -e;
+        }
+    }
+    close(fd);
+    return 0;
 }
