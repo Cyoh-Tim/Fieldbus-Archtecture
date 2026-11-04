@@ -23,6 +23,9 @@
 
 typedef struct pn_stack pn_stack_t;
 
+/* pn_cfg_t.nvm_dir capacity, including the terminating NUL. */
+#define PN_NVM_DIR_MAX 256
+
 typedef struct {
     char iface[16];
     uint8_t mac[6];
@@ -48,6 +51,11 @@ typedef struct {
      * Zero (default): the stack keeps the address internally and does not
      * change the NIC. A test hook is installed with pn_stack_set_os_ip_fn. */
     int apply_os_ip;
+    /* Directory of pn-ip.bin (NameOfStation + IP suite) and pn-im.bin
+     * (I&M1–4). Empty: RAM only, same model as an empty p-net
+     * pnet_cfg.file_directory. pn_stack_set_nvm_ops replaces this file
+     * backend while the injected ops are installed. */
+    char nvm_dir[PN_NVM_DIR_MAX];
 } pn_cfg_t;
 
 /* Stored NameOfStation / IP suite / I&M1–4. IPv4 values are host order,
@@ -106,9 +114,12 @@ int pn_stack_write_input(pn_stack_t *s, size_t off, const uint8_t *src,
 /* Test / mock Ethernet. Replaces AF_PACKET. */
 void pn_stack_set_eth_ops(pn_stack_t *s, pn_eth_ops_t ops);
 
-/* Install non-volatile storage. NULL or a NULL callback detaches it.
- * A stored image is applied immediately (power-on read). Install an OS
- * IP hook first if apply_os_ip should run for that loaded suite. */
+/* Install non-volatile storage. NULL or a NULL callback detaches an
+ * injected backend; a non-empty cfg.nvm_dir then uses the file backend
+ * again. Injected ops take precedence over that file backend. A stored
+ * image is applied immediately (power-on read). Install an OS IP hook
+ * first if apply_os_ip should run for that loaded suite. The file
+ * backend itself loads inside pn_stack_create. */
 void pn_stack_set_nvm_ops(pn_stack_t *s, const pn_nvm_ops_t *ops);
 
 /* Replaces the default ioctl apply while apply_os_ip is set. NULL restores
