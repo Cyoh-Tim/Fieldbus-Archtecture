@@ -212,6 +212,9 @@ if(BUILD_DAEMON)
         target_link_libraries(test_pn_t12_9 PRIVATE fieldbus)
         target_link_options(test_pn_t12_9 PRIVATE "LINKER:--wrap=pn_stack_create")
 
+        add_executable(test_pn_t12_21 tests/test_pn_t12_21.c)
+        target_link_libraries(test_pn_t12_21 PRIVATE fieldbus)
+
         install(FILES include/fb_api.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
     endif()
 endif()
@@ -490,6 +493,9 @@ if(BUILD_DAEMON AND BUILD_API)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     add_test(NAME test_pn_scale COMMAND test_pn_scale)
     add_test(NAME test_pn_t12_9 COMMAND test_pn_t12_9)
+    add_test(NAME test_pn_t12_21 COMMAND test_pn_t12_21)
+    set_tests_properties(test_pn_t12_21 PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     # Keep example_fake_sensor_once as Modbus (existing path).
     set(_fake_sensor_tests
         example_fake_sensor_once|example.fake_sensor.json

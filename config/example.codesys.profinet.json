@@ -15,7 +15,7 @@
     "netmask": "255.255.255.0",
     "gateway": "192.168.0.1",
     "security_class": 0,
-    "input_len": 40,
+    "input_len": 32,
     "output_len": 8,
     "cycle_us": 8000
   },
@@ -24,14 +24,14 @@
       "name": "barcode_value",
       "access": "read",
       "data_type": "string",
-      "length": 32,
+      "length": 28,
       "address": {
         "profinet": {
           "slot": 1,
           "subslot": 1,
           "index": 1,
           "byte_offset": 0,
-          "length": 32
+          "length": 28
         }
       }
     },
@@ -45,7 +45,7 @@
           "slot": 1,
           "subslot": 1,
           "index": 1,
-          "byte_offset": 32,
+          "byte_offset": 28,
           "length": 4
         }
       }

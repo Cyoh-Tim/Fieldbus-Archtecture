@@ -558,9 +558,32 @@ static pn_point_t *find_point(pn_ctx_t *ctx, const char *name)
     return NULL;
 }
 
+/*
+ * GSDML ModuleItem MOD_IO / VirtualSubmoduleItem FixedInSubslots="1".
+ * That submodule is the cyclic input and output image. byte_offset is
+ * the offset inside it. index is the acyclic record index (the GSDML
+ * parameter record at index 1 is empty) and is not an image offset.
+ * DAP interface subslot 0x8000 and any other slot do not share this image.
+ */
+static int pn_cyclic_submodule(const pn_point_t *pt)
+{
+    if (pt->slot == 1 && pt->subslot == 1) {
+        return 0;
+    }
+    LOG_WARN("profinet",
+             "point %s slot %d subslot %d index %d is not the IO submodule "
+             "(slot 1 subslot 1); cyclic image not used",
+             pt->name, pt->slot, pt->subslot, pt->index);
+    return -EINVAL;
+}
+
 static int pn_read_image(pn_ctx_t *ctx, const pn_point_t *pt, uint8_t *dst,
                          size_t n)
 {
+    int gate = pn_cyclic_submodule(pt);
+    if (gate != 0) {
+        return gate;
+    }
     if (strcmp(pt->access, "write") == 0) {
         return pn_stack_read_output(ctx->stack, (size_t)pt->byte_offset, dst,
                                     n);
@@ -615,6 +638,10 @@ static int pn_write_point(protocol_adapter_t *self, const char *point_name,
     pn_point_t *pt = find_point(ctx, point_name);
     if (!pt || !value || !value->data) {
         return -EINVAL;
+    }
+    int gate = pn_cyclic_submodule(pt);
+    if (gate != 0) {
+        return gate;
     }
     /* T0 A안: float32(BE) 공학값 → raw = (eng-offset)/scale → data_type 크기, BE. */
     if (pt->apply_scale) {
