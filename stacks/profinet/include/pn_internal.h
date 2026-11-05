@@ -188,6 +188,30 @@ struct pn_stack {
     uint8_t dcp_ident_dst[6];
     uint32_t dcp_ident_xid;
     uint64_t dcp_ident_due_ns;
+
+    /* Non-volatile shadow. nvm_on is set only when ops are installed.
+     * The image is the permanent copy (p-net cmina_nonvolatile_dcp_ase):
+     * a temporary DCP Set clears that field here and saves. I&M1–4 are
+     * stored on Write. Without ops, nothing is saved. */
+    pn_nvm_ops_t nvm_ops;
+    int nvm_on;
+    int nvm_file_active;
+    pn_nvm_image_t nvm;
+    /* User config captured before any NVM load. Injected ops restore
+     * this, then apply their own image, so a file load cannot win. */
+    int nvm_base_ready;
+    char nvm_base_name[PN_STATION_NAME_MAX + 1];
+    uint32_t nvm_base_ip;
+    uint32_t nvm_base_mask;
+    uint32_t nvm_base_gw;
+    char nvm_base_im1f[PN_IM1_FUNC_LEN];
+    char nvm_base_im1l[PN_IM1_LOC_LEN];
+    char nvm_base_im2[PN_IM2_DATE_LEN];
+    char nvm_base_im3[PN_IM3_DESC_LEN];
+    uint8_t nvm_base_im4[PN_IM4_SIG_LEN];
+
+    pn_os_apply_ip_fn os_ip_fn;
+    void *os_ip_ctx;
 };
 
 uint64_t pn_now_ns(void);
@@ -250,6 +274,54 @@ int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                    uint16_t index, uint8_t *out, size_t cap, size_t *out_len);
 int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                     uint16_t index, const uint8_t *data, size_t len);
+
+/* Fixed names, split like p-net PF_FILENAME_IP / PF_FILENAME_IM.
+ * On-disk record is little-endian and packed:
+ *   magic[4] "PNIP" or "PNIM"
+ *   version u16  (PN_NVM_FILE_VERSION)
+ *   length  u32  payload bytes
+ *   payload[length]
+ *   crc32   u32  IEEE CRC-32 of every preceding byte
+ * IP payload: present u32, station_name[PN_STATION_NAME_MAX+1],
+ * ip/netmask/gateway u32 host order.
+ * IM payload: I&M1 function, I&M1 location, I&M2, I&M3, I&M4.
+ * A short, wrong-magic, wrong-version, wrong-length, or bad-CRC file is
+ * ignored. The stack keeps the config value and emits LOG_WARN. */
+#define PN_NVM_FILE_IP       "pn-ip.bin"
+#define PN_NVM_FILE_IM       "pn-im.bin"
+#define PN_NVM_FILE_VERSION  1u
+#define PN_NVM_FILE_HDR_LEN  10u
+#define PN_NVM_IP_PAYLOAD_LEN (4u + PN_STATION_NAME_MAX + 1u + 12u)
+#define PN_NVM_IM_PAYLOAD_LEN                                                  \
+    (PN_IM1_FUNC_LEN + PN_IM1_LOC_LEN + PN_IM2_DATE_LEN + PN_IM3_DESC_LEN +    \
+     PN_IM4_SIG_LEN)
+
+/* Delete each previous default gateway, then add new_gw when it is not 0.
+ * ioctl_rt returns 0 or a negative errno. SIOCDELRT -ESRCH/-ENOENT and
+ * SIOCADDRT -EEXIST are success. Gateways are host order. */
+int pn_os_install_default_route(const char *iface, const uint32_t *prev,
+                                int nprev, uint32_t new_gw,
+                                int (*ioctl_rt)(void *ctx, unsigned long req,
+                                                uint32_t gw_host),
+                                void *ctx);
+/* Parse /proc/net/route text. Writes up to cap host-order default
+ * gateways for iface. Returns the count. -E2BIG means more than cap
+ * exist and gws holds the first cap. Other negatives are errno. */
+int pn_os_parse_proc_routes(const char *text, const char *iface,
+                            uint32_t *gws, int cap);
+
+/* DCP Set committed a NameOfStation or IP suite. permanent is BlockQualifier
+ * bit 0. Temporary clears the stored field (p-net pf_cmina_dcp_set_ind). */
+void pn_nvm_after_name(pn_stack_t *s, int permanent);
+void pn_nvm_after_ip(pn_stack_t *s, int permanent);
+void pn_nvm_after_im(pn_stack_t *s);
+/* clear_comm / clear_im match ResetToFactory modes. Both set erases the
+ * store. One side drops only that part. */
+void pn_nvm_after_reset(pn_stack_t *s, int clear_comm, int clear_im);
+/* apply_os_ip gate. Hook if installed, otherwise ioctl on a real iface. */
+void pn_os_apply_configured_ip(pn_stack_t *s);
+int pn_os_apply_ip_default(const char *iface, uint32_t ip, uint32_t netmask,
+                           uint32_t gateway);
 
 int pn_alarm_send_dummy(pn_stack_t *s, uint16_t frame_id);
 /* After Connect parse: default endpoint/timer when AlarmCRBlockReq was

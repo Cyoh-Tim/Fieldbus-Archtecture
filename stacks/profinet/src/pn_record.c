@@ -130,6 +130,7 @@ int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
                 memcpy(s->im1_location, p + PN_IM1_FUNC_LEN, l);
             }
         }
+        pn_nvm_after_im(s);
         return 0;
     }
     if (index == PN_INDEX_IM2) {
@@ -139,6 +140,7 @@ int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
         if (n) {
             memcpy(s->im2_date, p, n);
         }
+        pn_nvm_after_im(s);
         return 0;
     }
     if (index == PN_INDEX_IM3) {
@@ -148,6 +150,7 @@ int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
         if (n) {
             memcpy(s->im3_desc, p, n);
         }
+        pn_nvm_after_im(s);
         return 0;
     }
     if (index == PN_INDEX_IM4) {
@@ -157,6 +160,7 @@ int pn_record_write(pn_stack_t *s, uint16_t slot, uint16_t subslot,
         if (n) {
             memcpy(s->im4_sig, p, n);
         }
+        pn_nvm_after_im(s);
         return 0;
     }
 

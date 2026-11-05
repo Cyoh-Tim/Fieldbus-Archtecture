@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -12,6 +13,7 @@
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
 #include <net/if.h>
+#include <net/route.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
@@ -208,4 +210,182 @@ int pn_udp_open(uint16_t port)
     }
     set_nonblock(fd);
     return fd;
+}
+
+/* Host-order IPv4. iface "mock" or empty does not touch the NIC.
+ * Needs CAP_NET_ADMIN. Default routes already on this device are
+ * removed with SIOCDELRT before the new one is added. Gateway 0
+ * deletes the previous route and does not add another. */
+
+struct pn_route_apply {
+    int fd;
+    char dev[IFNAMSIZ];
+};
+
+static int pn_route_ioctl(void *ctx, unsigned long req, uint32_t gw_host)
+{
+    struct pn_route_apply *a = ctx;
+    struct rtentry rt;
+    memset(&rt, 0, sizeof(rt));
+    struct sockaddr_in *dst = (struct sockaddr_in *)&rt.rt_dst;
+    struct sockaddr_in *gw = (struct sockaddr_in *)&rt.rt_gateway;
+    struct sockaddr_in *gen = (struct sockaddr_in *)&rt.rt_genmask;
+    dst->sin_family = AF_INET;
+    gw->sin_family = AF_INET;
+    gw->sin_addr.s_addr = htonl(gw_host);
+    gen->sin_family = AF_INET;
+    rt.rt_flags = RTF_UP | RTF_GATEWAY;
+    rt.rt_dev = a->dev;
+    if (ioctl(a->fd, req, &rt) < 0) {
+        return -errno;
+    }
+    return 0;
+}
+
+static int pn_os_read_default_gws(const char *iface, uint32_t *gws, int cap)
+{
+    FILE *f = fopen("/proc/net/route", "r");
+    if (!f) {
+        return -errno;
+    }
+    char buf[8192];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    int bad = ferror(f);
+    fclose(f);
+    if (bad) {
+        return -EIO;
+    }
+    buf[n] = '\0';
+    if (n == sizeof(buf) - 1) {
+        LOG_WARN("pn_eth", "기본 경로 표가 잘림 iface=%s", iface);
+    }
+    return pn_os_parse_proc_routes(buf, iface, gws, cap);
+}
+
+int pn_os_apply_ip_default(const char *iface, uint32_t ip, uint32_t netmask,
+                           uint32_t gateway)
+{
+    if (!iface || !iface[0] || strcmp(iface, "mock") == 0) {
+        return -ENODEV;
+    }
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        return -errno;
+    }
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof(ifr));
+    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", iface);
+    struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
+    sin->sin_family = AF_INET;
+    sin->sin_addr.s_addr = htonl(ip);
+    if (ioctl(fd, SIOCSIFADDR, &ifr) < 0) {
+        int e = errno;
+        close(fd);
+        return -e;
+    }
+    memset(&ifr, 0, sizeof(ifr));
+    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", iface);
+    sin = (struct sockaddr_in *)&ifr.ifr_addr;
+    sin->sin_family = AF_INET;
+    sin->sin_addr.s_addr = htonl(netmask);
+    if (ioctl(fd, SIOCSIFNETMASK, &ifr) < 0) {
+        int e = errno;
+        close(fd);
+        return -e;
+    }
+    memset(&ifr, 0, sizeof(ifr));
+    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", iface);
+    if (ioctl(fd, SIOCGIFFLAGS, &ifr) == 0) {
+        ifr.ifr_flags = (short)(ifr.ifr_flags | IFF_UP);
+        if (ioctl(fd, SIOCSIFFLAGS, &ifr) < 0) {
+            int e = errno;
+            close(fd);
+            return -e;
+        }
+    }
+    uint32_t prev[8];
+    int nprev = pn_os_read_default_gws(iface, prev, 8);
+    if (nprev == -E2BIG) {
+        LOG_WARN("pn_eth", "기본 경로가 많아 앞의 8개만 삭제 iface=%s", iface);
+        nprev = 8;
+    } else if (nprev < 0) {
+        LOG_WARN("pn_eth", "기본 경로 조회 실패 (%d) iface=%s", nprev, iface);
+        nprev = 0;
+    }
+    struct pn_route_apply ra;
+    ra.fd = fd;
+    snprintf(ra.dev, sizeof(ra.dev), "%s", iface);
+    int rc = pn_os_install_default_route(iface, prev, nprev, gateway,
+                                        pn_route_ioctl, &ra);
+    close(fd);
+    return rc;
+}
+
+int pn_os_parse_proc_routes(const char *text, const char *iface, uint32_t *gws,
+                            int cap)
+{
+    if (!text || !iface || !iface[0] || !gws || cap <= 0) {
+        return -EINVAL;
+    }
+    int n = 0;
+    int extra = 0;
+    const char *p = text;
+    while (*p) {
+        const char *nl = strchr(p, '\n');
+        size_t len = nl ? (size_t)(nl - p) : strlen(p);
+        char line[256];
+        if (len >= sizeof(line)) {
+            len = sizeof(line) - 1;
+        }
+        memcpy(line, p, len);
+        line[len] = '\0';
+        char ifn[IFNAMSIZ];
+        unsigned int dest = 0;
+        unsigned int gw = 0;
+        unsigned int flags = 0;
+        unsigned int mask = 0;
+        int got = sscanf(line, "%15s %x %x %x %*u %*u %*u %x", ifn, &dest, &gw,
+                         &flags, &mask);
+        if (got == 5 && strcmp(ifn, iface) == 0 && dest == 0 && mask == 0 &&
+            (flags & RTF_GATEWAY) != 0) {
+            if (n < cap) {
+                gws[n++] = ntohl(gw);
+            } else {
+                extra = 1;
+            }
+        }
+        if (!nl) {
+            break;
+        }
+        p = nl + 1;
+    }
+    if (extra) {
+        return -E2BIG;
+    }
+    return n;
+}
+
+int pn_os_install_default_route(const char *iface, const uint32_t *prev,
+                                int nprev, uint32_t new_gw,
+                                int (*ioctl_rt)(void *ctx, unsigned long req,
+                                                uint32_t gw_host),
+                                void *ctx)
+{
+    if (!iface || !iface[0] || !ioctl_rt || nprev < 0 || (nprev > 0 && !prev)) {
+        return -EINVAL;
+    }
+    for (int i = 0; i < nprev; i++) {
+        int rc = ioctl_rt(ctx, SIOCDELRT, prev[i]);
+        if (rc != 0 && rc != -ESRCH && rc != -ENOENT) {
+            return rc;
+        }
+    }
+    if (new_gw == 0) {
+        return 0;
+    }
+    int rc = ioctl_rt(ctx, SIOCADDRT, new_gw);
+    if (rc != 0 && rc != -EEXIST) {
+        return rc;
+    }
+    return 0;
 }
