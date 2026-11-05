@@ -2223,12 +2223,61 @@ static void test_t12_20_route_replace(void)
     }
 }
 
+/* T12-22: this station is an IO-Device. Identify.res DeviceRole details
+ * are 0x01 (not 0x02 IO-Controller), and a DeviceRole filter matches
+ * 0x01 only. docs/protocols/profinet.md D2 and 5.b.4. */
+static void test_t12_22_device_role(void)
+{
+    pn_stack_t *s = make_dcp_stack();
+    expect(s != NULL, "t12-22 role stack");
+    if (!s) {
+        return;
+    }
+    uint8_t mc[6] = {0x01, 0x0E, 0xCF, 0x00, 0x00, 0x00};
+    uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t frame[PN_FRAME_MAX];
+    uint8_t role[2] = {0x01, 0x00};
+    uint8_t all[4] = {PN_DCP_OPT_ALL, 0xFF, 0x00, 0x00};
+
+    tx_reset();
+    size_t flen = dcp_ident_frame(frame, mc, src, 0, all, sizeof(all));
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "t12-22 ident all");
+    const uint8_t *blocks = NULL;
+    uint16_t dlen = 0;
+    if (blocks_of_tx(PN_FRAMEID_DCP_ID_RES, &blocks, &dlen, "t12-22 Identify.Res")) {
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ROLE, 0,
+                         role, sizeof(role), "t12-22 Identify DeviceRole 0x01");
+    }
+
+    uint8_t filt[6];
+    filt[0] = PN_DCP_OPT_DEV;
+    filt[1] = PN_DCP_SUB_DEV_ROLE;
+    pn_wr_be16(filt + 2, 2);
+    filt[4] = 0x01;
+    filt[5] = 0x00;
+    tx_reset();
+    flen = dcp_ident_frame(frame, mc, src, 0, filt, sizeof(filt));
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "t12-22 role filter 0x01");
+    expect(tx_has_fid(PN_FRAMEID_DCP_ID_RES),
+           "t12-22 DeviceRole filter 0x01 is answered");
+
+    filt[4] = 0x02;
+    tx_reset();
+    flen = dcp_ident_frame(frame, mc, src, 0, filt, sizeof(filt));
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "t12-22 role filter 0x02");
+    expect(!tx_has_fid(PN_FRAMEID_DCP_ID_RES),
+           "t12-22 DeviceRole filter 0x02 is not answered");
+
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
     test_name_ok();
     test_ident_filter_and_delay();
     test_set_name_and_enforce();
     test_response_blockinfo();
+    test_t12_22_device_role();
     test_t12_16_set_rules();
     test_t12_20_os_ip_hook();
     test_t12_20_permanent_survives();

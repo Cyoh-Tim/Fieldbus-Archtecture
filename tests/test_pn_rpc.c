@@ -1565,8 +1565,125 @@ static void test_t12_14_epm_ndr_tower(void)
     pn_stack_destroy(s);
 }
 
+/* T12-22: IOCRBlockRes echoes the request IOCRReference. A request that
+ * is not 1/2 must not be answered with the fixed pair 1/2.
+ * docs/protocols/profinet.md 5.d.5. */
+static size_t build_connect_iocr_refs(uint8_t *pdu, uint16_t in_ref,
+                                      uint16_t out_ref)
+{
+    uint8_t blocks[256];
+    size_t bn = 0;
+    uint8_t ar[26];
+    memset(ar, 0, sizeof(ar));
+    pn_wr_be16(ar, 0x0001);
+    fill_aruuid(ar + 2);
+    pn_wr_be16(ar + 18, 1);
+    bn += wr_block(blocks + bn, PN_BLOCK_AR_REQ, ar, sizeof(ar));
+
+    uint8_t outb[30];
+    memset(outb, 0, sizeof(outb));
+    pn_wr_be16(outb, PN_IOCR_OUTPUT);
+    pn_wr_be16(outb + 2, out_ref);
+    pn_wr_be16(outb + 10, 9);
+    pn_wr_be16(outb + 12, 0x8002);
+    pn_wr_be16(outb + 14, 32);
+    pn_wr_be16(outb + 16, 32);
+    pn_wr_be16(outb + 26, 9);
+    pn_wr_be16(outb + 28, 3);
+    bn += wr_block(blocks + bn, PN_BLOCK_IOCR_REQ, outb, sizeof(outb));
+
+    uint8_t inb[18];
+    memset(inb, 0, sizeof(inb));
+    pn_wr_be16(inb, PN_IOCR_INPUT);
+    pn_wr_be16(inb + 2, in_ref);
+    pn_wr_be16(inb + 12, 0x8001);
+    pn_wr_be16(inb + 14, 32);
+    pn_wr_be16(inb + 16, 16);
+    bn += wr_block(blocks + bn, PN_BLOCK_IOCR_REQ, inb, sizeof(inb));
+
+    uint8_t stub[384];
+    size_t sn = ndr_wrap(stub, blocks, bn);
+    return wrap_rpc(pdu, 0, stub, sn);
+}
+
+static void iocr_res_refs(const uint8_t *blocks, size_t n, uint16_t *in_ref,
+                          uint16_t *out_ref, int *n_in, int *n_out)
+{
+    size_t off = 0;
+    *n_in = 0;
+    *n_out = 0;
+    *in_ref = 0;
+    *out_ref = 0;
+    while (off + 6 <= n) {
+        uint16_t btype = pn_rd_be16(blocks + off);
+        uint16_t blen = pn_rd_be16(blocks + off + 2);
+        if (blen < 2 || off + 4u + blen > n) {
+            break;
+        }
+        if (btype == PN_BLOCK_IOCR_RES && blen >= 8) {
+            uint16_t iocr_type = pn_rd_be16(blocks + off + 6);
+            uint16_t ref = pn_rd_be16(blocks + off + 8);
+            if (iocr_type == PN_IOCR_INPUT) {
+                *in_ref = ref;
+                (*n_in)++;
+            } else if (iocr_type == PN_IOCR_OUTPUT) {
+                *out_ref = ref;
+                (*n_out)++;
+            }
+        }
+        off += 4u + blen;
+        if (off < n && (off & 1u)) {
+            off++;
+        }
+    }
+}
+
+static void expect_iocr_refs(uint16_t in_ref, uint16_t out_ref, const char *what)
+{
+    pn_stack_t *s = make_stack();
+    expect(s != NULL, what);
+    if (!s) {
+        return;
+    }
+    uint8_t pdu[512];
+    uint8_t resp[1024];
+    size_t rlen = 0;
+    size_t plen = build_connect_iocr_refs(pdu, in_ref, out_ref);
+    int rc = pn_rpc_handle(s, pdu, plen, resp, sizeof(resp), &rlen, 0x0a000001);
+    expect(rc == 0 && rlen >= 100, what);
+    if (rc != 0 || rlen < 100) {
+        fprintf(stderr, "FAIL: %s connect rc=%d rlen=%zu\n", what, rc, rlen);
+        g_fail = 1;
+        pn_stack_destroy(s);
+        return;
+    }
+    const uint8_t *stub = resp + 80;
+    uint32_t args_len = pn_rd_le32(stub + 4);
+    uint16_t got_in = 0;
+    uint16_t got_out = 0;
+    int n_in = 0;
+    int n_out = 0;
+    iocr_res_refs(stub + 20, args_len, &got_in, &got_out, &n_in, &n_out);
+    if (n_in != 1 || n_out != 1 || got_in != in_ref || got_out != out_ref) {
+        fprintf(stderr,
+                "FAIL: %s IOCRReference in=%u (0x%04x, n=%d) out=%u (0x%04x, n=%d)"
+                " want in=0x%04x out=0x%04x\n",
+                what, got_in, got_in, n_in, got_out, got_out, n_out, in_ref,
+                out_ref);
+        g_fail = 1;
+    }
+    pn_stack_destroy(s);
+}
+
+static void test_t12_22_iocr_reference(void)
+{
+    expect_iocr_refs(0x0011, 0x0022, "t12-22 IOCRReference echo");
+    expect_iocr_refs(1, 2, "t12-22 IOCRReference 1/2 still echoed");
+}
+
 int main(void)
 {
+    test_t12_22_iocr_reference();
     test_t12_14_be_drep();
     test_t12_14_rpc_vers_and_uuids();
     test_t12_14_fragment_and_epm();
