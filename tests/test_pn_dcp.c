@@ -429,7 +429,7 @@ static int blocks_of_tx(uint16_t fid, const uint8_t **blocks, uint16_t *dlen,
  * first two value bytes as BlockInfo, so the station name must follow them
  * intact ("sensor-line1", not "nsor-line1") and the IP must not shift.
  * Set.res Control/Response stays BlockError without BlockInfo.
- * DeviceRole details stay 0x02 (T12-22). */
+ * DeviceRole details are 0x01 (IO-Device, T12-22). */
 static void test_response_blockinfo(void)
 {
     pn_stack_t *s = make_dcp_stack();
@@ -445,7 +445,7 @@ static void test_response_blockinfo(void)
     uint8_t devid[4];
     pn_wr_be16(devid, 0xABCD);
     pn_wr_be16(devid + 2, 0x0001);
-    uint8_t role[2] = {0x02, 0x00};
+    uint8_t role[2] = {0x01, 0x00};
     uint8_t ip_zero[12];
     memset(ip_zero, 0, sizeof(ip_zero));
     uint8_t mac[6] = {0x02, 0xFB, 0x00, 0x00, 0x00, 0x01};

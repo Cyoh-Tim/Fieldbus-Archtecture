@@ -65,6 +65,13 @@ typedef struct {
     uint16_t session_key;
     uint16_t in_frame_id;
     uint16_t out_frame_id;
+    /* IOCRBlockReq IOCRReference, echoed in IOCRBlockRes. have_* is set
+     * when that direction's request block was present (reference 0 is
+     * still echoed). Without a request block the response keeps 1 / 2. */
+    uint16_t in_iocr_ref;
+    uint16_t out_iocr_ref;
+    int have_in_iocr;
+    int have_out_iocr;
     uint16_t in_data_len;  /* legacy: no IODataObject list → DataLength-1 */
     uint16_t out_data_len;
     uint16_t in_csdu_len;  /* IOCR DataLength when a layout was parsed */

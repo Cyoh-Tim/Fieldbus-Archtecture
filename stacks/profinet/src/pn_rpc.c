@@ -517,6 +517,16 @@ static int parse_ar_iocr(uint16_t type, const uint8_t *body, uint16_t blen,
         uint16_t rr = pn_rd_be16(body + 16);
         int is_out = (iocr_type == PN_IOCR_OUTPUT);
         int is_in = (iocr_type == PN_IOCR_INPUT);
+        /* IOCRReference sits at body+2. IOCRBlockRes must echo it.
+         * One response block per direction: the last request of that
+         * type supplies the reference. */
+        if (is_in) {
+            ar->have_in_iocr = 1;
+            ar->in_iocr_ref = pn_rd_be16(body + 2);
+        } else if (is_out) {
+            ar->have_out_iocr = 1;
+            ar->out_iocr_ref = pn_rd_be16(body + 2);
+        }
         /* Data-hold watches O→T, so only the output CR supplies that
          * clock. The input CR clock is the RTC1 transmit period and
          * CycleCounter step. Neither CR may replace the other. */
@@ -860,7 +870,7 @@ static size_t build_connect_res_blocks(pn_stack_t *s, uint8_t *out, size_t cap)
 
     uint8_t iocr_in[6];
     pn_wr_be16(iocr_in, PN_IOCR_INPUT);
-    pn_wr_be16(iocr_in + 2, 1);
+    pn_wr_be16(iocr_in + 2, s->ar.have_in_iocr ? s->ar.in_iocr_ref : 1);
     pn_wr_be16(iocr_in + 4, s->ar.in_frame_id ? s->ar.in_frame_id : 0x8001);
     if (append_block(out, cap, &n, PN_BLOCK_IOCR_RES, iocr_in, sizeof(iocr_in)) !=
         0) {
@@ -869,7 +879,7 @@ static size_t build_connect_res_blocks(pn_stack_t *s, uint8_t *out, size_t cap)
 
     uint8_t iocr_out[6];
     pn_wr_be16(iocr_out, PN_IOCR_OUTPUT);
-    pn_wr_be16(iocr_out + 2, 2);
+    pn_wr_be16(iocr_out + 2, s->ar.have_out_iocr ? s->ar.out_iocr_ref : 2);
     pn_wr_be16(iocr_out + 4, s->ar.out_frame_id ? s->ar.out_frame_id : 0x8002);
     if (append_block(out, cap, &n, PN_BLOCK_IOCR_RES, iocr_out,
                      sizeof(iocr_out)) != 0) {

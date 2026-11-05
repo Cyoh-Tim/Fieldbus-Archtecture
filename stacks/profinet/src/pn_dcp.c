@@ -483,7 +483,7 @@ static int ident_filters_match(const pn_stack_t *s, const uint8_t *blocks,
                 return 0;
             }
         } else if (o == PN_DCP_OPT_DEV && su == PN_DCP_SUB_DEV_ROLE) {
-            if (bl < 1 || data[0] != 0x02) {
+            if (bl < 1 || data[0] != PN_DCP_ROLE_IO_DEVICE) {
                 return 0;
             }
         } else {
@@ -507,8 +507,8 @@ static size_t build_identify_blocks(const pn_stack_t *s, uint8_t *out,
     pn_wr_be16(devid + 2, s->cfg.device_id);
     wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ID, PN_DCP_BLOCKINFO_NONE, devid,
              4);
-    /* RoleDetails stays 0x02 (IO-Controller). 0x01 is T12-22. */
-    uint8_t role[2] = {0x02, 0x00};
+    /* RoleDetails bit0 = IO-Device. Reserved byte stays 0. */
+    uint8_t role[2] = {PN_DCP_ROLE_IO_DEVICE, 0x00};
     wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ROLE, PN_DCP_BLOCKINFO_NONE,
              role, sizeof(role));
     uint8_t ipb[12];
