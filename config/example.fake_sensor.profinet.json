@@ -29,7 +29,6 @@
         "profinet": {
           "slot": 1,
           "subslot": 1,
-          "index": 1,
           "byte_offset": 0,
           "length": 28
         }
@@ -44,7 +43,6 @@
         "profinet": {
           "slot": 1,
           "subslot": 1,
-          "index": 1,
           "byte_offset": 28,
           "length": 4
         }
