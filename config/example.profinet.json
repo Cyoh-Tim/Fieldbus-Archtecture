@@ -26,7 +26,7 @@
       "data_type": "string",
       "length": 32,
       "address": {
-        "profinet": { "slot": 1, "subslot": 1, "index": 1, "byte_offset": 0, "length": 32 }
+        "profinet": { "slot": 1, "subslot": 1, "byte_offset": 0, "length": 32 }
       }
     },
     {
@@ -35,7 +35,7 @@
       "data_type": "bool",
       "length": 1,
       "address": {
-        "profinet": { "slot": 1, "subslot": 1, "index": 1, "byte_offset": 0, "length": 1 }
+        "profinet": { "slot": 1, "subslot": 1, "byte_offset": 0, "length": 1 }
       }
     }
   ]

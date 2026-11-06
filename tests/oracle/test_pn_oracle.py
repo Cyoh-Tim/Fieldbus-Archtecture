@@ -1110,7 +1110,6 @@ def gsdml_io_lengths():
     return out
 
 
-@known_defect("T12-21", "CODESYS·fake-sensor 예제 config 는 input_len 40 인데 GSDML IO 서브모듈 입력은 32바이트다")
 def test_example_configs_match_gsdml_io_length():
     lengths = gsdml_io_lengths()
     assert lengths, "GSDML 에 IO 서브모듈이 없다"
