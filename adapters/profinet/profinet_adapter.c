@@ -352,8 +352,19 @@ static void pn_encode_number(pn_dt_t dt, double raw, uint8_t *b, size_t n)
     }
 }
 
+/*
+ * GSDML ModuleItem MOD_IO / VirtualSubmoduleItem FixedInSubslots="1".
+ * That submodule is the cyclic input and output image. byte_offset is
+ * the offset inside it. Another slot or subslot is rejected here, at
+ * configuration, and is not loaded. index is the acyclic record index
+ * (the GSDML parameter record at index 1 is empty). A cyclic point that
+ * still carries index is kept for older configs: the field is ignored
+ * and not passed to pn_record_read / pn_record_write. One warning per
+ * init covers every such point.
+ */
 static int parse_points(pn_ctx_t *ctx, const char *points_json)
 {
+    int index_warned = 0;
     cJSON *arr = cJSON_Parse(points_json);
     if (!cJSON_IsArray(arr)) {
         cJSON_Delete(arr);
@@ -403,6 +414,21 @@ static int parse_points(pn_ctx_t *ctx, const char *points_json)
         pt->subslot = cJSON_IsNumber(sub) ? sub->valueint : 1;
         pt->index = cJSON_IsNumber(idx) ? idx->valueint : 1;
         pt->byte_offset = cJSON_IsNumber(off) ? off->valueint : 0;
+        if (pt->slot != 1 || pt->subslot != 1) {
+            LOG_ERROR("profinet",
+                      "point %s slot %d subslot %d is not the IO submodule "
+                      "(slot 1 subslot 1)",
+                      pt->name, pt->slot, pt->subslot);
+            cJSON_Delete(arr);
+            return -EINVAL;
+        }
+        if (cJSON_IsNumber(idx) && !index_warned) {
+            LOG_WARN("profinet",
+                     "point %s index %d ignored; cyclic IO uses byte_offset, "
+                     "not a record index",
+                     pt->name, idx->valueint);
+            index_warned = 1;
+        }
         ctx->point_count++;
     }
     cJSON_Delete(arr);
@@ -506,7 +532,11 @@ static int pn_init(protocol_adapter_t *self, const char *protocol_params_json,
         return -EINVAL;
     }
 
-    parse_points(ctx, points_json);
+    int parsed = parse_points(ctx, points_json);
+    if (parsed != 0) {
+        free(ctx);
+        return parsed;
+    }
     ctx->stack = pn_stack_create(&cfg);
     if (!ctx->stack) {
         free(ctx);

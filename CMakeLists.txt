@@ -40,7 +40,7 @@ option(BUILD_PN_LAB_TOOLS "Build dcp_probe / pn_device_run (manual lab; not ctes
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
 
-# ---- PROFINET IO Device 스택 (자체 구현, CC-B / RT Class 1 / Sec Class 1) ----
+# ---- PROFINET IO Device 스택 (자체 구현, CC-B / RT Class 1 / 자체 보안 프로파일) ----
 # 데몬과 CTT가 공유. BUILD_DAEMON=OFF 이면 cJSON/어댑터 없이 스택+ctt 만 빌드.
 add_library(pn_stack STATIC
     stacks/profinet/src/pn_crypto.c
@@ -211,6 +211,9 @@ if(BUILD_DAEMON)
         target_include_directories(test_pn_t12_9 PRIVATE stacks/profinet/include)
         target_link_libraries(test_pn_t12_9 PRIVATE fieldbus)
         target_link_options(test_pn_t12_9 PRIVATE "LINKER:--wrap=pn_stack_create")
+
+        add_executable(test_pn_t12_21 tests/test_pn_t12_21.c)
+        target_link_libraries(test_pn_t12_21 PRIVATE fieldbus)
 
         install(FILES include/fb_api.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
     endif()
@@ -490,6 +493,9 @@ if(BUILD_DAEMON AND BUILD_API)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     add_test(NAME test_pn_scale COMMAND test_pn_scale)
     add_test(NAME test_pn_t12_9 COMMAND test_pn_t12_9)
+    add_test(NAME test_pn_t12_21 COMMAND test_pn_t12_21)
+    set_tests_properties(test_pn_t12_21 PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     # Keep example_fake_sensor_once as Modbus (existing path).
     set(_fake_sensor_tests
         example_fake_sensor_once|example.fake_sensor.json
@@ -702,4 +708,5 @@ if(BUILD_FUZZERS)
     fb_add_fuzzer(fuzz_eip_io tests/fuzz/fuzz_eip_io.c eip_stack)
     fb_add_fuzzer(fuzz_pn_eth tests/fuzz/fuzz_pn_eth.c pn_stack)
     fb_add_fuzzer(fuzz_pn_rpc tests/fuzz/fuzz_pn_rpc.c pn_stack)
+    fb_add_fuzzer(fuzz_pn_snmp tests/fuzz/fuzz_pn_snmp.c pn_stack)
 endif()

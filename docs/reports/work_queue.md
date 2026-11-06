@@ -126,6 +126,10 @@
 | 102 | A20261101-3 | PN 빈 NameOfStation Set (이름 지우기) 을 0x03 으로 거부, AR 중 IP 0.0.0.0 (IP 지우기) 을 0x06 으로 거부. p-net: 빈 이름 유효, AR 중 IP 지우기는 수락 + AR abort | `stacks/profinet/`, `tests/` | A20261101-3 ×2 | 같은 보고서. 큐 100 과 같은 PR 이어도 된다 (그때 두 표시 모두 지움, 허용) |
 | 103 | A20261101-4 | PN Identify/Get DeviceOptions 가 (1,2)·(2,2) 두 쌍만 나열 (MAC·Vendor·DeviceID·Role·DeviceOptions·Signal·ResetToFactory 빠짐) | `stacks/profinet/`, `tests/` (`tests/golden/profinet/` 갱신 포함) | A20261101-4 | 같은 보고서. 근거 p-net `pf_dcp.c` `device_options[]` |
 | 104 | A20261101-5 | PN DCP Hello.req 목적지가 Identify 멀티캐스트 `01:0E:CF:00:00:00` — Hello 는 `…:00:01` | `stacks/profinet/`, `tests/` (`tests/golden/profinet/` 갱신 포함) | A20261101-5 | 같은 보고서. 근거 p-net `dcp_mc_addr_hello`. 입문서 D3 [사양 확인 필요] 정리는 큐 68 비고 |
+| 105 | A20261103-1 | PN SNMPv2c GetBulkRequest(0xA5) 무응답 — v2c bulk walk 시간 초과 | `stacks/profinet/`, `tests/` | A20261103-1 | 담당자 결정 (2026-11-03) CC-B 범위. 보고서 [audits/20261103-pn-snmp-lldp-ccb.md](audits/20261103-pn-snmp-lldp-ccb.md). 근거 net-snmp `SNMP_MSG_GETBULK` |
+| 106 | A20261103-2 | PN MIB-II system 그룹이 sysName.0 뿐 (sysDescr·sysObjectID·sysUpTime·sysContact·sysLocation·sysServices 없음, sysContact·sysLocation Set 불가) | `stacks/profinet/`, `tests/` | A20261103-2 ×2 | 같은 보고서. 근거 p-net `pf_snmp.h`, SNMPv2-MIB. sysObjectID 값·sysName 분리는 `[Claude 확인 요청]` 으로. 영구 저장은 T12-20 방식 |
+| 107 | A20261103-3 | PN LLDP-MIB 로컬 데이터 없음 (lldpLocChassisId·Subtype, lldpLocPortTable) — 값은 송신 LLDPDU 와 같아야 함 | `stacks/profinet/`, `tests/` | A20261103-3 | 같은 보고서. 근거 p-net `pf_snmp.h`, LLDP-MIB |
+| 108 | A20261103-4 | PN LLDP 수신 없음 → lldpRemTable 없음 (이웃 Chassis·Port, TTL 만료) | `stacks/profinet/`, `tests/` | A20261103-4 | 같은 보고서. 큐 107 이후. 근거 p-net `pf_lldp.c` 수신, LLDP-MIB. LLDP-EXT-PNO-MIB 는 후속 판단 |
 
 ## 이슈 본문 템플릿
 

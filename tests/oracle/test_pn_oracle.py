@@ -14,8 +14,8 @@ import xml.etree.ElementTree as ET
 import pytest
 from scapy.all import Dot1Q, Ether, raw
 from scapy.config import conf
-from scapy.contrib.lldp import (LLDPDU, LLDPDUChassisID, LLDPDUGenericOrganisationSpecific, LLDPDUManagementAddress,
-                                LLDPDUPortID)
+from scapy.contrib.lldp import (LLDPDU, LLDPDUChassisID, LLDPDUEndOfLLDPDU, LLDPDUGenericOrganisationSpecific,
+                                LLDPDUManagementAddress, LLDPDUPortID, LLDPDUTimeToLive)
 from scapy.contrib.pnio import ProfinetIO
 from scapy.contrib.pnio_dcp import (DCPDeviceOptionsBlock, DCPDeviceRoleBlock, DCPIPBlock, DCPNameOfStationBlock,
                                     ProfinetDCP)
@@ -46,7 +46,7 @@ from scapy.contrib.pnio_rpc import (
 from scapy.layers.dcerpc import DceRpc4, NDRContextHandle
 from scapy.layers.msrpce.ept import protocol_tower_t
 from scapy.layers.msrpce.raw.ept import ept_lookup_Request, ept_lookup_Response
-from scapy.layers.snmp import SNMP, SNMPget, SNMPresponse, SNMPvarbind
+from scapy.layers.snmp import SNMP, SNMPbulk, SNMPget, SNMPnext, SNMPresponse, SNMPset, SNMPvarbind
 
 from conftest import REPO, PnPipe, dut_path, known_defect
 
@@ -1108,7 +1108,6 @@ def gsdml_io_lengths():
     return out
 
 
-@known_defect("T12-21", "CODESYS·fake-sensor 예제 config 는 input_len 40 인데 GSDML IO 서브모듈 입력은 32바이트다")
 def test_example_configs_match_gsdml_io_length():
     lengths = gsdml_io_lengths()
     assert lengths, "GSDML 에 IO 서브모듈이 없다"
@@ -1326,3 +1325,91 @@ def test_dcp_hello_destination_is_hello_multicast(pn_dut):
     hellos = [f for f in tx_frames(out) if f.haslayer(ProfinetIO) and f[ProfinetIO].frameID == 0xFEFC]
     bad = [f.dst for f in hellos if f.dst.lower() != HELLO_MC]
     assert not bad, f"Hello 목적지 {bad} ({HELLO_MC} 기대)"
+
+
+# ---------------------------------------------------------------- SNMP·LLDP CC-B 범위 (A20261103, 담당자 결정 2026-11-03)
+# 근거: p-net src/common/pf_snmp.h — PROFINET 장치의 SNMP 변수는 MIB-II (RFC 3418), LLDP-MIB (IEEE 802.1AB),
+# LLDP-EXT-DOT3-MIB, LLDP-EXT-PNO-MIB 에 있고 PN-Topology 6.2 가 사용을 정한다. p-net 은 외부 SNMP 에이전트(net-snmp)에
+# 이 변수들을 넘긴다. OID 는 SNMPv2-MIB / LLDP-MIB 원문 (system 1~7, lldpLocalSystemData 1.0.8802.1.1.2.1.3,
+# lldpRemTable 1.0.8802.1.1.2.1.4.1).
+LLDP_LOC = "1.0.8802.1.1.2.1.3"
+LLDP_REM_CHASSIS_ID = "1.0.8802.1.1.2.1.4.1.1.5"   # lldpRemEntry 5 (INDEX lldpRemTimeMark, lldpRemLocalPortNum, lldpRemIndex)
+SYSTEM = "1.3.6.1.2.1.1"
+
+
+def snmp_ask(pn, pdu, version=1):
+    """SNMP 요청을 UDP 161 페이로드로 넣고 응답을 scapy SNMP 로 돌려준다. 응답이 없으면 None."""
+    b = raw_rsp(pn.cmd("SNMP " + raw(SNMP(version=version, community=b"public", PDU=pdu)).hex()))
+    return SNMP(b) if b is not None else None
+
+
+@known_defect("A20261103-1", "SNMPv2c GetBulkRequest(0xA5)에 응답하지 않는다 (v2c 매니저의 bulk walk 가 시간 초과). "
+              "net-snmp 에이전트 (agent/snmp_agent.c SNMP_MSG_GETBULK) 는 처리한다")
+def test_snmp_v2c_getbulk_answered(pn_dut):
+    r = snmp_ask(pn_dut, SNMPbulk(id=0x51, non_repeaters=0, max_repetitions=4,
+                                  varbindlist=[SNMPvarbind(oid=SYSTEM)]))
+    assert r is not None, "GetBulk 응답 없음"
+    assert r.version.val == 1 and isinstance(r.PDU, SNMPresponse), f"version {r.version.val} PDU {type(r.PDU).__name__}"
+    assert r.PDU.id.val == 0x51 and r.PDU.error.val == 0, f"id {r.PDU.id.val} error {r.PDU.error.val}"
+    oids = [vb.oid.val for vb in r.PDU.varbindlist]
+    assert oids and oids[0].startswith(SYSTEM + "."), f"varbind OID {oids}"
+
+
+@known_defect("A20261103-2", "MIB-II system 그룹 중 sysName.0 만 있다 (sysDescr·sysObjectID·sysUpTime·sysContact·"
+              "sysLocation·sysServices 는 noSuchName). p-net pf_snmp.h + SNMPv2-MIB system 1~7")
+def test_snmp_mib2_system_group(pn_dut):
+    oids = [f"{SYSTEM}.{n}.0" for n in range(1, 8)]
+    r = snmp_ask(pn_dut, SNMPget(id=0x52, varbindlist=[SNMPvarbind(oid=o) for o in oids]), version=0)
+    assert r is not None, "Get 응답 없음"
+    assert r.PDU.error.val == 0, f"error {r.PDU.error.val} index {r.PDU.error_index.val}"
+    got = {vb.oid.val: type(vb.value).__name__ for vb in r.PDU.varbindlist}
+    assert list(got) == oids, f"varbind OID {list(got)}"
+    # SNMPv2-MIB SYNTAX: sysDescr DisplayString, sysObjectID OBJECT IDENTIFIER, sysUpTime TimeTicks, sysServices INTEGER
+    assert got[oids[1]] == "ASN1_OID" and got[oids[2]] == "ASN1_TIME_TICKS", f"type {got}"
+
+
+@known_defect("A20261103-2", "sysContact.0 / sysLocation.0 Set 을 받지 않는다. SNMPv2-MIB MAX-ACCESS read-write, "
+              "p-net pf_snmp.h 는 setter 를 둔다 (영구 저장은 T12-20 과 같은 방식)")
+def test_snmp_mib2_syscontact_set(pn_dut):
+    contact = "1.3.6.1.2.1.1.4.0"
+    r = snmp_ask(pn_dut, SNMPset(id=0x53, varbindlist=[SNMPvarbind(oid=contact, value=b"oracle@example")]), version=0)
+    assert r is not None and r.PDU.error.val == 0, f"Set 응답 {None if r is None else r.PDU.error.val}"
+    r = snmp_ask(pn_dut, SNMPget(id=0x54, varbindlist=[SNMPvarbind(oid=contact)]), version=0)
+    assert r is not None and r.PDU.error.val == 0, "Get 실패"
+    assert bytes(r.PDU.varbindlist[0].value.val) == b"oracle@example", f"sysContact {r.PDU.varbindlist[0].value!r}"
+
+
+@known_defect("A20261103-3", "LLDP-MIB lldpLocalSystemData 가 없다. 송신 LLDPDU 의 Chassis ID·Port ID 를 "
+              "lldpLocChassisId.0 / lldpLocPortId.<port> 로 읽을 수 있어야 한다 (p-net pf_snmp.h, LLDP-MIB)")
+def test_snmp_lldp_local_matches_lldpdu(pn_dut):
+    frames = _raw_lldp_frames(pn_dut.cmd("POLL 5300"))  # LLDP 주기 5 s
+    assert frames, "LLDP 송신 없음"
+    f = Ether(frames[-1])
+    ch = f[LLDPDU].getlayer(LLDPDUChassisID)
+    pt = f[LLDPDU].getlayer(LLDPDUPortID)
+    r = snmp_ask(pn_dut, SNMPget(id=0x55, varbindlist=[SNMPvarbind(oid=f"{LLDP_LOC}.1.0"),
+                                                       SNMPvarbind(oid=f"{LLDP_LOC}.2.0")]), version=0)
+    assert r is not None and r.PDU.error.val == 0, f"lldpLocChassisId 응답 {None if r is None else r.PDU.error.val}"
+    subtype, cid = (vb.value.val for vb in r.PDU.varbindlist)
+    assert int(subtype) == ch.subtype and bytes(cid) == raw(ch)[3:], f"lldpLocChassisId {subtype} {bytes(cid)!r}"
+    # lldpLocPortTable 은 lldpLocPortNum 으로 색인된다. 첫 행을 GetNext 로 찾는다.
+    r = snmp_ask(pn_dut, SNMPnext(id=0x56, varbindlist=[SNMPvarbind(oid=f"{LLDP_LOC}.7.1.3")]), version=0)
+    assert r is not None and r.PDU.error.val == 0, "lldpLocPortId GetNext 실패"
+    vb = r.PDU.varbindlist[0]
+    assert vb.oid.val.startswith(f"{LLDP_LOC}.7.1.3."), f"OID {vb.oid.val}"
+    assert bytes(vb.value.val) == raw(pt)[3:], f"lldpLocPortId {bytes(vb.value.val)!r} (LLDPDU {raw(pt)[3:]!r})"
+
+
+@known_defect("A20261103-4", "LLDP 를 수신하지 않는다 (0x88CC 프레임을 버림). 이웃의 LLDPDU 가 lldpRemTable 에 "
+              "나타나야 한다 (PN-Topology, p-net pf_lldp.c 수신 + pf_snmp.h lldpRem*)")
+def test_lldp_neighbor_in_rem_table(pn_dut):
+    neighbor = (Ether(dst="01:80:c2:00:00:0e", src="00:11:22:33:44:77", type=0x88CC)
+                / LLDPDU() / LLDPDUChassisID(subtype=7, id=b"neighbor-sw")
+                / LLDPDUPortID(subtype=7, id=b"port-003")
+                / LLDPDUTimeToLive(ttl=120) / LLDPDUEndOfLLDPDU())
+    pn_dut.eth(raw(neighbor))
+    r = snmp_ask(pn_dut, SNMPnext(id=0x57, varbindlist=[SNMPvarbind(oid=LLDP_REM_CHASSIS_ID)]), version=0)
+    assert r is not None and r.PDU.error.val == 0, f"lldpRemChassisId GetNext {None if r is None else r.PDU.error.val}"
+    vb = r.PDU.varbindlist[0]
+    assert vb.oid.val.startswith(LLDP_REM_CHASSIS_ID + "."), f"이웃 행 없음: OID {vb.oid.val}"
+    assert bytes(vb.value.val) == b"neighbor-sw", f"lldpRemChassisId {vb.value!r}"

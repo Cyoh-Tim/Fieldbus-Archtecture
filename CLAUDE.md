@@ -32,7 +32,8 @@
    `tools/ctt/proto/ethernetip/` (DUT=자체 스택, 구매 스텁 아님).
    공식 ODVA DoC 는 멤버십+랩 제품 프로세스. 상세 `docs/ethernetip_stack.md`,
    `docs/ctt_odva_matrix.md`.
-5. PROFINET 어댑터 — 자체 스택 (`stacks/profinet/`). RT Class 1 + Security Class 1.
+5. PROFINET 어댑터 — 자체 스택 (`stacks/profinet/`). RT Class 1. 보안은 자체 프로파일
+   (PI Security Class 1 일부 기능 포함, 인증 주장 아님 — `docs/protocols/profinet.md` 8장).
    IRT / CC-C 는 켜지 않는다 (permanent non-goal). 인증/CRA 는 제품 프로세스.
 6. CC-Link 스텁은 사양이 확정되기 전까지 건드리지 않는다.
 

@@ -130,7 +130,7 @@ jobs:
         run: |
           cmake -S . -B build-fuzz -DCMAKE_C_COMPILER=clang -DBUILD_DAEMON=OFF -DBUILD_CTT=OFF -DBUILD_FUZZERS=ON -DENABLE_PN_TESTS=OFF -DENABLE_EIP_TESTS=OFF -DENABLE_MB_TESTS=OFF -DENABLE_SLMP_TESTS=OFF
       - name: Build fuzzers
-        run: cmake --build build-fuzz --target fuzz_mb_adu fuzz_slmp_request fuzz_eip_encap fuzz_eip_io fuzz_pn_eth fuzz_pn_rpc
+        run: cmake --build build-fuzz --target fuzz_mb_adu fuzz_slmp_request fuzz_eip_encap fuzz_eip_io fuzz_pn_eth fuzz_pn_rpc fuzz_pn_snmp
       - name: Seed corpora
         run: python3 tests/fuzz/gen_corpus.py
       - name: Run each target ~60s
@@ -149,6 +149,7 @@ jobs:
           run_one fuzz_eip_io tests/fuzz/corpus/eip_io -dict=tests/fuzz/dict/eip_io.dict
           run_one fuzz_pn_eth tests/fuzz/corpus/pn_eth -dict=tests/fuzz/dict/pn_eth.dict
           run_one fuzz_pn_rpc tests/fuzz/corpus/pn_rpc -dict=tests/fuzz/dict/pn_rpc.dict
+          run_one fuzz_pn_snmp tests/fuzz/corpus/pn_snmp -dict=tests/fuzz/dict/pn_snmp.dict
 
 
   daemon:
