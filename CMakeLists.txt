@@ -40,7 +40,7 @@ option(BUILD_PN_LAB_TOOLS "Build dcp_probe / pn_device_run (manual lab; not ctes
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
 
-# ---- PROFINET IO Device 스택 (자체 구현, CC-B / RT Class 1 / Sec Class 1) ----
+# ---- PROFINET IO Device 스택 (자체 구현, CC-B / RT Class 1 / 자체 보안 프로파일) ----
 # 데몬과 CTT가 공유. BUILD_DAEMON=OFF 이면 cJSON/어댑터 없이 스택+ctt 만 빌드.
 add_library(pn_stack STATIC
     stacks/profinet/src/pn_crypto.c
@@ -702,4 +702,5 @@ if(BUILD_FUZZERS)
     fb_add_fuzzer(fuzz_eip_io tests/fuzz/fuzz_eip_io.c eip_stack)
     fb_add_fuzzer(fuzz_pn_eth tests/fuzz/fuzz_pn_eth.c pn_stack)
     fb_add_fuzzer(fuzz_pn_rpc tests/fuzz/fuzz_pn_rpc.c pn_stack)
+    fb_add_fuzzer(fuzz_pn_snmp tests/fuzz/fuzz_pn_snmp.c pn_stack)
 endif()

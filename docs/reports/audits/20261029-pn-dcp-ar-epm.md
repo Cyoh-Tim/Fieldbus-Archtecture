@@ -22,6 +22,8 @@
   거부는 AR 이 그렇게 요청했을 때의 동작이다.
 - BlockError 값: Wireshark `packet-pn-dcp.c` 0x06 "In operation, SET not possible" 이 의미상 맞지만 1차 출처(IEC 61158-6-10 표)는
   직접 확인하지 못했다. p-net 은 AR 중 IP 거부에 초기값 0x02 를 남긴다 (의도한 값이 아님). 오라클은 0 이 아닌 것만 본다.
+- **담당자 결정 (2026-11-03):** 구현은 0x06 을 쓴다. 원문 확인은 실 컨트롤러 랩 때로 미루고, 오라클은 0 이 아닌 값만 본다
+  (`20261103-pn-snmp-lldp-ccb.md`).
 
 **새 기대값 (오라클 테스트, `@known_defect("T12-16")`):**
 - `test_dcp_set_name_during_ar_accepted_and_aborts_ar` — RejectDCPsetRequests=0: BlockError 0, 이름 적용, RTC1 멈춤 (AR abort).
