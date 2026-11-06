@@ -46,6 +46,7 @@ def _o2t_sender(iface, hdr, stop):
         time.sleep(max(0.0, nxt - time.monotonic()))
     sock.close()
 RUN_S = 2.0
+LAB_HOLD = 30
 
 
 def _lab_ready():
@@ -109,7 +110,9 @@ def session():
         u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         u.bind((ctl_ip, 34964))
         u.settimeout(1.0)
-        u.sendto(raw(pn.connect_pdu(scf=SCF, rr=RR)), (dev_ip, 34964))
+        # DataHold·Watchdog 30 × 16 ms = 480 ms. 기본값 3 (48 ms) 이면 부하가 걸린 CI 에서 O->T 송신 프로세스가
+        # 그 이상 밀려 장치가 AR 을 끊는다 (10-26·11-02·11-03 oracle job). 판정(O->T 가 오는 동안 AR 유지)은 그대로다.
+        u.sendto(raw(pn.connect_pdu(scf=SCF, rr=RR, hold=LAB_HOLD)), (dev_ip, 34964))
         data, src = u.recvfrom(4096)
         res["connect_status"], _ = pn.ndr_response(DceRpc4(data))
 
