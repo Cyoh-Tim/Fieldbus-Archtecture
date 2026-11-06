@@ -297,7 +297,9 @@ static void test_bad_path_and_segment(void)
                    "FO unknown assembly is 0x01/0x0117");
     expect(eip_stack_class1_up(s) == 0, "bad path leaves class1 down");
 
-    /* Simple Data Segment 0x80 is not a valid connection-path segment here. */
+    /* Symbolic segment 0x60 is not a connection-path segment. A Simple
+     * Data Segment (0x80) is configuration data and is accepted by T11-8.
+     */
     uint8_t fo[96];
     size_t off = 0;
     fo[off++] = 0x0A;
@@ -323,7 +325,7 @@ static void test_bad_path_and_segment(void)
     eip_wr_le16(fo + off, 10);
     off += 2;
     fo[off++] = 0x01;
-    /* 6 words: normal 4-word path plus 0x80, size 1, two data bytes. */
+    /* 6 words: normal 4-word path plus an unknown 0x60 segment. */
     fo[off++] = 6;
     fo[off++] = 0x20;
     fo[off++] = CIP_CLASS_ASSEMBLY;
@@ -333,7 +335,7 @@ static void test_bad_path_and_segment(void)
     fo[off++] = 101;
     fo[off++] = 0x2C;
     fo[off++] = 150;
-    fo[off++] = 0x80;
+    fo[off++] = 0x60;
     fo[off++] = 0x01;
     fo[off++] = 0xAA;
     fo[off++] = 0xBB;

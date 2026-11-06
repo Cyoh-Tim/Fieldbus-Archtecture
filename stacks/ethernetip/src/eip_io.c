@@ -68,40 +68,65 @@ int eip_io_handle_udp(eip_stack_t *s, const uint8_t *frame, size_t len,
                  c->o2t_conn_id);
         return 0;
     }
+    /* Encapsulation sequence: a packet that is not strictly newer than the
+     * last accepted one is a reorder or a duplicate. Drop it before the
+     * destination or the output image moves (ethernetip.md M6). The first
+     * packet sets the baseline, including sequence 0. Compare is modular.
+     */
+    if (c->o2t_seq_valid && (int32_t)(seq - c->o2t_seq) <= 0) {
+        return 0;
+    }
+    c->o2t_seq = seq;
+    c->o2t_seq_valid = 1;
+
     /* Real connections fix the destination at Forward Open. Mock UCMM has
-     * no Originator address, so the first injected O->T supplies one and
+     * no Originator address, so the first accepted O->T supplies one and
      * later packets do not move it. */
     if (!c->t2o_dst_fixed) {
         c->peer_ip = src_ip;
         c->peer_udp_port = src_port;
         c->t2o_dst_fixed = 1;
     }
-    c->o2t_seq = seq;
-    c->last_rx_ns = eip_now_ns();
 
     const uint8_t *data = payload;
     size_t dlen = payload_len;
+    int have_cip = 0;
+    uint16_t cip_seq = 0;
     if (dlen >= 2) {
+        cip_seq = eip_rd_le16(data);
         data += 2;
         dlen -= 2;
+        have_cip = 1;
     }
+    int idle = 0;
     if (c->o2t_run_idle) {
         /* 32-bit header, little-endian. Bit 0 = 1 Run, 0 Idle (PROGRAM). */
         if (dlen < 4) {
             LOG_WARN("ethernetip",
                      "Class1 O->T run/idle header short (%zu bytes)", dlen);
+            c->last_rx_ns = eip_now_ns();
             return 0;
         }
         uint32_t hdr = eip_rd_le32(data);
         data += 4;
         dlen -= 4;
-        if ((hdr & 1u) == 0) {
-            /* Idle must not leave the last Run image driving outputs. */
-            if (s->output_data && s->output_size > 0) {
-                memset(s->output_data, 0, s->output_size);
-            }
-            return 0;
+        idle = (hdr & 1u) == 0;
+    }
+    /* Watchdog refreshes even when the CIP sequence repeats. */
+    c->last_rx_ns = eip_now_ns();
+    if (have_cip && c->o2t_cip_valid && cip_seq == c->o2t_cip_seq) {
+        return 0;
+    }
+    if (have_cip) {
+        c->o2t_cip_seq = cip_seq;
+        c->o2t_cip_valid = 1;
+    }
+    if (idle) {
+        /* Idle must not leave the last Run image driving outputs. */
+        if (s->output_data && s->output_size > 0) {
+            memset(s->output_data, 0, s->output_size);
         }
+        return 0;
     }
     if (s->output_data && dlen > 0) {
         size_t n = dlen;
