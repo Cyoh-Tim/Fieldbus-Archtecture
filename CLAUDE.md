@@ -28,7 +28,8 @@
    특정 PLC 가이드의 주소·디바이스 표는 config로 수용(코드 수정 없이).
    상세 `docs/slmp_stack.md`. ASCII/4E는 frame enum 예약만 (제품 목표 아님).
 4. EtherNet/IP 어댑터 — 자체 스택 (`stacks/ethernetip/`). Adapter Class 1 +
-   Originator explicit + Security Class 1/2(HMAC/TLS-PSK). CTT 플러그인
+   Originator explicit. 보안은 자체 프로파일 (HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님,
+   인증 주장 아님 — 큐 46 T11-11). CTT 플러그인
    `tools/ctt/proto/ethernetip/` (DUT=자체 스택, 구매 스텁 아님).
    공식 ODVA DoC 는 멤버십+랩 제품 프로세스. 상세 `docs/ethernetip_stack.md`,
    `docs/ctt_odva_matrix.md`.
