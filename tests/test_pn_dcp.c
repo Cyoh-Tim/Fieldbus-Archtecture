@@ -158,20 +158,28 @@ static pn_stack_t *make_dcp_stack(void)
     return s;
 }
 
-static size_t dcp_ident_frame(uint8_t *out, const uint8_t *dst,
-                              const uint8_t *src, uint16_t delay,
-                              const uint8_t *blocks, size_t blen)
+static size_t dcp_ident_frame_xid(uint8_t *out, const uint8_t *dst,
+                                  const uint8_t *src, uint16_t delay,
+                                  uint32_t xid, const uint8_t *blocks,
+                                  size_t blen)
 {
     uint8_t pay[64];
     pn_wr_be16(pay, PN_FRAMEID_DCP_ID_REQ);
     pay[2] = PN_DCP_IDENTIFY;
     pay[3] = PN_DCP_REQ;
-    pn_wr_be32(pay + 4, 0x11223344);
+    pn_wr_be32(pay + 4, xid);
     pn_wr_be16(pay + 8, delay);
     pn_wr_be16(pay + 10, (uint16_t)blen);
     memcpy(pay + 12, blocks, blen);
     return pn_eth_build(out, PN_FRAME_MAX, dst, src, PN_ETHTYPE_PN, pay,
                         12 + blen);
+}
+
+static size_t dcp_ident_frame(uint8_t *out, const uint8_t *dst,
+                              const uint8_t *src, uint16_t delay,
+                              const uint8_t *blocks, size_t blen)
+{
+    return dcp_ident_frame_xid(out, dst, src, delay, 0x11223344u, blocks, blen);
 }
 
 static size_t dcp_get_frame(uint8_t *out, const uint8_t *dst, const uint8_t *src)
@@ -429,7 +437,7 @@ static int blocks_of_tx(uint16_t fid, const uint8_t **blocks, uint16_t *dlen,
  * first two value bytes as BlockInfo, so the station name must follow them
  * intact ("sensor-line1", not "nsor-line1") and the IP must not shift.
  * Set.res Control/Response stays BlockError without BlockInfo.
- * DeviceRole details stay 0x02 (T12-22). */
+ * DeviceRole details are 0x01 (IO-Device, T12-22). */
 static void test_response_blockinfo(void)
 {
     pn_stack_t *s = make_dcp_stack();
@@ -445,7 +453,7 @@ static void test_response_blockinfo(void)
     uint8_t devid[4];
     pn_wr_be16(devid, 0xABCD);
     pn_wr_be16(devid + 2, 0x0001);
-    uint8_t role[2] = {0x02, 0x00};
+    uint8_t role[2] = {0x01, 0x00};
     uint8_t ip_zero[12];
     memset(ip_zero, 0, sizeof(ip_zero));
     uint8_t mac[6] = {0x02, 0xFB, 0x00, 0x00, 0x00, 0x01};
@@ -2223,12 +2231,204 @@ static void test_t12_20_route_replace(void)
     }
 }
 
+/* T12-22: this station is an IO-Device. Identify.res DeviceRole details
+ * are 0x01 (not 0x02 IO-Controller), and a DeviceRole filter matches
+ * 0x01 only. docs/protocols/profinet.md D2 and 5.b.4. */
+static void test_t12_22_device_role(void)
+{
+    pn_stack_t *s = make_dcp_stack();
+    expect(s != NULL, "t12-22 role stack");
+    if (!s) {
+        return;
+    }
+    uint8_t mc[6] = {0x01, 0x0E, 0xCF, 0x00, 0x00, 0x00};
+    uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    uint8_t frame[PN_FRAME_MAX];
+    uint8_t role[2] = {0x01, 0x00};
+    uint8_t all[4] = {PN_DCP_OPT_ALL, 0xFF, 0x00, 0x00};
+
+    tx_reset();
+    size_t flen = dcp_ident_frame(frame, mc, src, 0, all, sizeof(all));
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "t12-22 ident all");
+    const uint8_t *blocks = NULL;
+    uint16_t dlen = 0;
+    if (blocks_of_tx(PN_FRAMEID_DCP_ID_RES, &blocks, &dlen, "t12-22 Identify.Res")) {
+        expect_blockinfo(blocks, dlen, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ROLE, 0,
+                         role, sizeof(role), "t12-22 Identify DeviceRole 0x01");
+    }
+
+    uint8_t filt[6];
+    filt[0] = PN_DCP_OPT_DEV;
+    filt[1] = PN_DCP_SUB_DEV_ROLE;
+    pn_wr_be16(filt + 2, 2);
+    filt[4] = 0x01;
+    filt[5] = 0x00;
+    tx_reset();
+    flen = dcp_ident_frame(frame, mc, src, 0, filt, sizeof(filt));
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "t12-22 role filter 0x01");
+    expect(tx_has_fid(PN_FRAMEID_DCP_ID_RES),
+           "t12-22 DeviceRole filter 0x01 is answered");
+
+    filt[4] = 0x02;
+    tx_reset();
+    flen = dcp_ident_frame(frame, mc, src, 0, filt, sizeof(filt));
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, "t12-22 role filter 0x02");
+    expect(!tx_has_fid(PN_FRAMEID_DCP_ID_RES),
+           "t12-22 DeviceRole filter 0x02 is not answered");
+
+    pn_stack_destroy(s);
+}
+
+/* Identify.Res unicast to the requester. Xid is DCP header offset 4
+ * (Ethernet offset 18). */
+static int count_ident_res(const uint8_t mac[6], uint32_t xid)
+{
+    int n = 0;
+    for (int i = 0; i < g_ntx; i++) {
+        if (g_txlen[i] < 22 || memcmp(g_tx[i], mac, 6) != 0) {
+            continue;
+        }
+        if (pn_rd_be16(g_tx[i] + 14) != PN_FRAMEID_DCP_ID_RES) {
+            continue;
+        }
+        if (pn_rd_be32(g_tx[i] + 18) != xid) {
+            continue;
+        }
+        n++;
+    }
+    return n;
+}
+
+static void expect_ident_res_n(const uint8_t mac[6], uint32_t xid, int want,
+                               const char *what)
+{
+    int got = count_ident_res(mac, xid);
+    if (got != want) {
+        fprintf(stderr, "FAIL: %s responses=%d want %d xid=0x%08x\n", what, got,
+                want, xid);
+        g_fail = 1;
+    }
+}
+
+static void send_delayed_ident(pn_stack_t *s, const uint8_t src[6], uint32_t xid)
+{
+    uint8_t mc[6] = {0x01, 0x0E, 0xCF, 0x00, 0x00, 0x00};
+    uint8_t all[4] = {PN_DCP_OPT_ALL, 0xFF, 0x00, 0x00};
+    uint8_t frame[PN_FRAME_MAX];
+    /* Default station MAC …:00:01, factor 2 → 1×10 ms. */
+    size_t flen =
+        dcp_ident_frame_xid(frame, mc, src, 2, xid, all, sizeof(all));
+    expect(flen > 0 && pn_stack_handle_eth(s, frame, flen) == 0,
+           "t12-22 delayed Identify");
+}
+
+static void wait_delayed_ident(pn_stack_t *s)
+{
+    usleep(40000);
+    pn_stack_poll(s);
+}
+
+/* T12-22: two delayed Identify requests from different MACs both get a
+ * response. A one-slot queue keeps only the second. */
+static void test_t12_22_ident_two_macs(void)
+{
+    pn_stack_t *s = make_dcp_stack();
+    expect(s != NULL, "t12-22 two-mac stack");
+    if (!s) {
+        return;
+    }
+    uint8_t mac_a[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x0A};
+    uint8_t mac_b[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x0B};
+    tx_reset();
+    send_delayed_ident(s, mac_a, 0xA0000001u);
+    send_delayed_ident(s, mac_b, 0xB0000002u);
+    expect(!tx_has_fid(PN_FRAMEID_DCP_ID_RES), "t12-22 two-mac not immediate");
+    wait_delayed_ident(s);
+    expect_ident_res_n(mac_a, 0xA0000001u, 1, "t12-22 delayed Identify MAC A");
+    expect_ident_res_n(mac_b, 0xB0000002u, 1, "t12-22 delayed Identify MAC B");
+    pn_stack_destroy(s);
+}
+
+/* T12-22: the same (requester MAC, Xid) again is a retransmission, so
+ * exactly one response. A different key queued after it is still answered.
+ * One slot keeps only the last request, so the retransmitted key is lost. */
+static void test_t12_22_ident_retransmit(void)
+{
+    pn_stack_t *s = make_dcp_stack();
+    expect(s != NULL, "t12-22 retransmit stack");
+    if (!s) {
+        return;
+    }
+    uint8_t mac_a[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x1A};
+    uint8_t mac_b[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x1B};
+    tx_reset();
+    send_delayed_ident(s, mac_a, 0x11111111u);
+    send_delayed_ident(s, mac_a, 0x11111111u);
+    send_delayed_ident(s, mac_b, 0x22222222u);
+    expect(!tx_has_fid(PN_FRAMEID_DCP_ID_RES),
+           "t12-22 retransmit not immediate");
+    wait_delayed_ident(s);
+    expect_ident_res_n(mac_a, 0x11111111u, 1,
+                       "t12-22 same (MAC, Xid) retransmission");
+    expect_ident_res_n(mac_b, 0x22222222u, 1,
+                       "t12-22 retransmission still answers the other MAC");
+    pn_stack_destroy(s);
+}
+
+/* T12-22: four pending responses are kept. The fifth new key is ignored
+ * (LOG_WARN) and does not replace the oldest. */
+static void test_t12_22_ident_fifth_ignored(void)
+{
+    pn_stack_t *s = make_dcp_stack();
+    expect(s != NULL, "t12-22 fifth stack");
+    if (!s) {
+        return;
+    }
+    uint8_t mac[5][6];
+    uint32_t xid[5];
+    tx_reset();
+    for (int i = 0; i < 4; i++) {
+        memset(mac[i], 0, 6);
+        mac[i][0] = 0x02;
+        mac[i][5] = (uint8_t)(0x30 + i);
+        xid[i] = 0x30000000u + (uint32_t)i;
+        send_delayed_ident(s, mac[i], xid[i]);
+    }
+    memset(mac[4], 0, 6);
+    mac[4][0] = 0x02;
+    mac[4][5] = 0x34;
+    xid[4] = 0x30000004u;
+    int saved = -1;
+    int pfd[2] = {-1, -1};
+    capture_begin(&saved, pfd);
+    send_delayed_ident(s, mac[4], xid[4]);
+    capture_end(saved, pfd);
+    if (!strstr(g_logbuf, "Identify delay queue full")) {
+        fprintf(stderr,
+                "FAIL: t12-22 fifth Identify ignored without LOG_WARN\n");
+        g_fail = 1;
+    }
+    expect(!tx_has_fid(PN_FRAMEID_DCP_ID_RES), "t12-22 fifth not immediate");
+    wait_delayed_ident(s);
+    for (int i = 0; i < 4; i++) {
+        char what[64];
+        snprintf(what, sizeof(what), "t12-22 delayed Identify slot %d", i);
+        expect_ident_res_n(mac[i], xid[i], 1, what);
+    }
+    expect_ident_res_n(mac[4], xid[4], 0, "t12-22 fifth Identify is ignored");
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
     test_name_ok();
     test_ident_filter_and_delay();
     test_set_name_and_enforce();
     test_response_blockinfo();
+    test_t12_22_device_role();
+    test_t12_22_ident_two_macs();
+    test_t12_22_ident_retransmit();
+    test_t12_22_ident_fifth_ignored();
     test_t12_16_set_rules();
     test_t12_20_os_ip_hook();
     test_t12_20_permanent_survives();

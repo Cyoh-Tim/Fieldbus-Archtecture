@@ -44,6 +44,8 @@
 #define PN_DCP_SUB_DEV_NAME   0x02u
 #define PN_DCP_SUB_DEV_ID     0x03u
 #define PN_DCP_SUB_DEV_ROLE   0x04u
+/* DeviceRoleDetails bit0. This station is an IO-Device. */
+#define PN_DCP_ROLE_IO_DEVICE 0x01u
 #define PN_DCP_SUB_DEV_OPTS      0x05u
 #define PN_DCP_SUB_CTRL_START    0x01u
 #define PN_DCP_SUB_CTRL_STOP     0x02u

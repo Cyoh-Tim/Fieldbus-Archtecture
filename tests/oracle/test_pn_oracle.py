@@ -213,8 +213,6 @@ def test_dcp_identify_name_of_station(pn_dut):
     assert names == [b"oracle-dut"]
 
 
-@known_defect("T12-22", "DeviceRole 을 0x02(IO Controller)로 응답한다. IO Device 는 0x01 "
-              "(T12-2 가 고쳐지기 전에는 블록 해석 자체가 안 돼서 빈 목록이 나온다)")
 def test_dcp_identify_device_role(pn_dut):
     # T12-2 가 먼저 고쳐져야 블록 해석이 맞는다.
     f = identify_all(pn_dut)

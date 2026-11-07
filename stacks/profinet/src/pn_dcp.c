@@ -483,7 +483,7 @@ static int ident_filters_match(const pn_stack_t *s, const uint8_t *blocks,
                 return 0;
             }
         } else if (o == PN_DCP_OPT_DEV && su == PN_DCP_SUB_DEV_ROLE) {
-            if (bl < 1 || data[0] != 0x02) {
+            if (bl < 1 || data[0] != PN_DCP_ROLE_IO_DEVICE) {
                 return 0;
             }
         } else {
@@ -507,8 +507,8 @@ static size_t build_identify_blocks(const pn_stack_t *s, uint8_t *out,
     pn_wr_be16(devid + 2, s->cfg.device_id);
     wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ID, PN_DCP_BLOCKINFO_NONE, devid,
              4);
-    /* RoleDetails stays 0x02 (IO-Controller). 0x01 is T12-22. */
-    uint8_t role[2] = {0x02, 0x00};
+    /* RoleDetails bit0 = IO-Device. Reserved byte stays 0. */
+    uint8_t role[2] = {PN_DCP_ROLE_IO_DEVICE, 0x00};
     wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ROLE, PN_DCP_BLOCKINFO_NONE,
              role, sizeof(role));
     uint8_t ipb[12];
@@ -574,30 +574,56 @@ static void send_identify_res(pn_stack_t *s, const uint8_t dst[6], uint32_t xid)
              xid, 0, b, n);
 }
 
+static int ident_slot_key(const pn_dcp_ident_pend_t *slot, const uint8_t src[6],
+                          uint32_t xid)
+{
+    return slot->used && slot->xid == xid && memcmp(slot->dst, src, 6) == 0;
+}
+
 static void queue_or_send_ident(pn_stack_t *s, const uint8_t src[6], uint32_t xid,
                                 uint16_t delay)
 {
+    for (int i = 0; i < PN_DCP_IDENT_PENDING_MAX; i++) {
+        if (ident_slot_key(&s->dcp_ident_q[i], src, xid)) {
+            /* Retransmission of a response already waiting. */
+            return;
+        }
+    }
     uint64_t wait = ident_delay_ns(s, delay);
     if (wait == 0) {
         send_identify_res(s, src, xid);
         return;
     }
-    memcpy(s->dcp_ident_dst, src, 6);
-    s->dcp_ident_xid = xid;
-    s->dcp_ident_due_ns = pn_now_ns() + wait;
-    s->dcp_ident_pending = 1;
+    for (int i = 0; i < PN_DCP_IDENT_PENDING_MAX; i++) {
+        pn_dcp_ident_pend_t *slot = &s->dcp_ident_q[i];
+        if (slot->used) {
+            continue;
+        }
+        memcpy(slot->dst, src, 6);
+        slot->xid = xid;
+        slot->due_ns = pn_now_ns() + wait;
+        slot->used = 1;
+        return;
+    }
+    LOG_WARN("pn_dcp",
+             "Identify delay queue full (max %d); ignoring xid=0x%08x",
+             PN_DCP_IDENT_PENDING_MAX, (unsigned)xid);
 }
 
 void pn_dcp_poll(pn_stack_t *s)
 {
-    if (!s || !s->dcp_ident_pending) {
+    if (!s) {
         return;
     }
-    if (pn_now_ns() < s->dcp_ident_due_ns) {
-        return;
+    uint64_t now = pn_now_ns();
+    for (int i = 0; i < PN_DCP_IDENT_PENDING_MAX; i++) {
+        pn_dcp_ident_pend_t *slot = &s->dcp_ident_q[i];
+        if (!slot->used || now < slot->due_ns) {
+            continue;
+        }
+        send_identify_res(s, slot->dst, slot->xid);
+        slot->used = 0;
     }
-    send_identify_res(s, s->dcp_ident_dst, s->dcp_ident_xid);
-    s->dcp_ident_pending = 0;
 }
 
 /* Signature failure: ServiceType success, BlockError 0x03 on each Set

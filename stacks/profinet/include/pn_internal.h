@@ -65,6 +65,13 @@ typedef struct {
     uint16_t session_key;
     uint16_t in_frame_id;
     uint16_t out_frame_id;
+    /* IOCRBlockReq IOCRReference, echoed in IOCRBlockRes. have_* is set
+     * when that direction's request block was present (reference 0 is
+     * still echoed). Without a request block the response keeps 1 / 2. */
+    uint16_t in_iocr_ref;
+    uint16_t out_iocr_ref;
+    int have_in_iocr;
+    int have_out_iocr;
     uint16_t in_data_len;  /* legacy: no IODataObject list → DataLength-1 */
     uint16_t out_data_len;
     uint16_t in_csdu_len;  /* IOCR DataLength when a layout was parsed */
@@ -139,6 +146,15 @@ typedef struct {
 #define PN_IM3_DESC_LEN 54
 #define PN_IM4_SIG_LEN  54
 
+/* Delayed Identify.Res queue. Slot key is (requester MAC, Xid). */
+#define PN_DCP_IDENT_PENDING_MAX 4
+typedef struct {
+    int used;
+    uint8_t dst[6];
+    uint32_t xid;
+    uint64_t due_ns;
+} pn_dcp_ident_pend_t;
+
 struct pn_stack {
     pn_cfg_t cfg;
     int running;
@@ -183,11 +199,11 @@ struct pn_stack {
     int rpc_asm_on;
     int rpc_asm_be;
 
-    /* Delayed DCP Identify.Res (ResponseDelay, 10 ms units). */
-    int dcp_ident_pending;
-    uint8_t dcp_ident_dst[6];
-    uint32_t dcp_ident_xid;
-    uint64_t dcp_ident_due_ns;
+    /* Delayed DCP Identify.Res (ResponseDelay, 10 ms units).
+     * A repeat of (dst, xid) is a retransmission and does not take
+     * another slot. A new key when every slot is used is ignored;
+     * responses already waiting stay. Each slot has its own due time. */
+    pn_dcp_ident_pend_t dcp_ident_q[PN_DCP_IDENT_PENDING_MAX];
 
     /* Non-volatile shadow. nvm_on is set only when ops are installed.
      * The image is the permanent copy (p-net cmina_nonvolatile_dcp_ase):
