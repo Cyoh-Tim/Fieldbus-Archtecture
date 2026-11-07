@@ -98,7 +98,7 @@ DEFAULT_LAYOUT = (IN_LAYOUT_DATA, IN_LAYOUT_IOCS, OUT_LAYOUT_DATA, OUT_LAYOUT_IO
 
 def connect_pdu(station=b"controller", scf=32, rr=16, slot1_module=0x00000010,
                 alarm_ref=1, layout=DEFAULT_LAYOUT, startup_mode=0,
-                iocr_prio=6, alarm_tag_low=0xA000, alarm_tag_high=0xC000, rta_tf=1, rta_retries=3):
+                iocr_prio=6, alarm_tag_low=0xA000, alarm_tag_high=0xC000, rta_tf=1, rta_retries=3, hold=3):
     """사양 형태의 Connect.req (ARBlockReq + 입력/출력 IOCR + AlarmCR + ExpectedSubmodule).
 
     기본 주기는 SCF=32 × RR=16 × 31.25µs = 16ms (GSDML 이 허용해야 하는 값, 장치 최소 8ms 이상).
@@ -106,11 +106,12 @@ def connect_pdu(station=b"controller", scf=32, rr=16, slot1_module=0x00000010,
     layout 은 (입력 IODataObjects, 입력 IOCS, 출력 IODataObjects, 출력 IOCS) 의 (slot, subslot, FrameOffset) 목록.
     startup_mode 는 ARProperties.StartupMode (bit 30): 0 Legacy, 1 Advanced.
     iocr_prio / alarm_tag_low / alarm_tag_high 는 IOCRTagHeader 우선순위와 AlarmCRTagHeaderLow/High (사양 고정값 6 / 0xA000 / 0xC000, 거부 시험용).
+    hold 는 IOCR 의 WatchdogFactor·DataHoldFactor (기본 3). 랩 하네스가 부하 여유를 둘 때만 키운다.
     """
     in_data, in_iocs, out_data, out_iocs = layout
     common = dict(LT=0x8892, IOCRProperties_RTClass=2, DataLength=C_SDU_LEN,
-                  SendClockFactor=scf, ReductionRatio=rr, Phase=1, WatchdogFactor=3,
-                  DataHoldFactor=3, IOCRTagHeader_IOUserPriority=iocr_prio,
+                  SendClockFactor=scf, ReductionRatio=rr, Phase=1, WatchdogFactor=hold,
+                  DataHoldFactor=hold, IOCRTagHeader_IOUserPriority=iocr_prio,
                   IOCRMulticastMACAdd="01:0e:cf:00:00:00")
     in_iocr = IOCRBlockReq(
         IOCRType=1, IOCRReference=1, FrameID=0x8001, **common,
