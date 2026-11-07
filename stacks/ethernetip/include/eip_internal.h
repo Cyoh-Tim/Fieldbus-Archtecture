@@ -29,7 +29,10 @@ typedef struct {
     uint32_t peer_ip;       /* T->O destination, host order */
     uint16_t peer_udp_port;
     int t2o_dst_fixed; /* 1 once the produce destination is chosen */
-    uint32_t o2t_seq;
+    uint32_t o2t_seq; /* last accepted O->T encapsulation sequence */
+    uint8_t o2t_seq_valid; /* 0 until the first O->T sets the baseline */
+    uint16_t o2t_cip_seq;  /* last CIP sequence whose data was applied */
+    uint8_t o2t_cip_valid;
     uint32_t t2o_seq;
     uint64_t last_rx_ns;
     uint64_t last_tx_ns; /* next Class1 produce due (0 = immediately) */
@@ -217,7 +220,10 @@ int eip_path_parse(const uint8_t *path, size_t path_bytes, uint16_t *class_id,
 
 uint64_t eip_now_ns(void);
 
-/* CIP Vol1: timeout = 4 * RPI * 2^timeout_multiplier. TM=0 is valid (4*RPI). */
+/* CIP Vol 1: timeout = 4 * RPI * 2^N, N = 0..7. N = 0 is valid (4*RPI).
+ * Forward Open rejects N > 7 with 0x0133. The shift stays capped so a
+ * corrupt stored multiplier cannot shift by 8..255.
+ */
 static inline uint32_t eip_class1_watchdog_us(uint32_t rpi_us,
                                               uint8_t timeout_mult)
 {

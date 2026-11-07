@@ -91,9 +91,14 @@
 #define CIP_EXT_CONN_SIZE           0x0109
 #define CIP_EXT_RPI_NOT_ACCEPTABLE  0x0112 /* RPI too short; additional status carries the minimum */
 #define CIP_EXT_OUT_OF_CONNECTIONS  0x0113
+#define CIP_EXT_EKEY_VENDOR_PRODUCT 0x0114 /* electronic key vendor ID or product code */
+#define CIP_EXT_EKEY_DEVICE_TYPE    0x0115 /* electronic key device type */
+#define CIP_EXT_EKEY_REVISION       0x0116 /* electronic key revision */
 #define CIP_EXT_INVALID_APP_PATH    0x0117 /* produced/consumed application path */
 #define CIP_EXT_INVALID_O2T_TYPE    0x0123 /* O->T connection type multicast or reserved */
 #define CIP_EXT_INVALID_T2O_TYPE    0x0124 /* T->O connection type multicast or reserved */
+#define CIP_EXT_CONFIG_DATA_SIZE    0x0126 /* data segment word count vs config assembly */
+#define CIP_EXT_TIMEOUT_MULTIPLIER  0x0133 /* timeout multiplier 8..255 is reserved */
 #define CIP_EXT_PARAM_ERROR         0x0205 /* parameter error in unconnected request */
 #define CIP_EXT_NO_BUFFER           0x0301
 #define CIP_EXT_INVALID_SEGMENT     0x0315 /* invalid segment in connection path */

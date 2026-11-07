@@ -216,12 +216,64 @@ static int exclusive_owner_active(const eip_stack_t *s)
     return 0;
 }
 
-/* Exclusive-owner path: Assembly class + config inst + O->T + T->O points. */
-static int parse_fo_path(const uint8_t *path, size_t path_bytes,
-                         uint16_t *insts, int *n_insts, int insts_cap)
+/* Format-4 electronic key (ethernetip.md 5.6.6). 0 skips vendor, device
+ * type, or product code. Major 0 with the compatibility bit clear skips
+ * the revision check. Minor 0 in that mode skips the minor only.
+ * Compatibility bit set: major must match and minor is in 1..device minor.
+ * *ext is 0x0114, 0x0115, or 0x0116. Returns 0 on match.
+ */
+static int ekey_check(const eip_stack_t *s, const uint8_t *key, uint16_t *ext)
+{
+    uint16_t vendor = eip_rd_le16(key);
+    uint16_t dtype = eip_rd_le16(key + 2);
+    uint16_t product = eip_rd_le16(key + 4);
+    uint8_t major_byte = key[6];
+    uint8_t minor = key[7];
+    int compat = (major_byte & 0x80u) != 0;
+    uint8_t major = (uint8_t)(major_byte & 0x7fu);
+
+    if ((vendor != 0 && vendor != s->cfg.vendor_id) ||
+        (product != 0 && product != s->cfg.product_code)) {
+        *ext = CIP_EXT_EKEY_VENDOR_PRODUCT;
+        return -1;
+    }
+    if (dtype != 0 && dtype != s->cfg.device_type) {
+        *ext = CIP_EXT_EKEY_DEVICE_TYPE;
+        return -1;
+    }
+    if (!compat) {
+        if (major == 0) {
+            return 0;
+        }
+        if (major != s->cfg.major_rev ||
+            (minor != s->cfg.minor_rev && minor != 0)) {
+            *ext = CIP_EXT_EKEY_REVISION;
+            return -1;
+        }
+        return 0;
+    }
+    if (major == s->cfg.major_rev && minor > 0 && minor <= s->cfg.minor_rev) {
+        return 0;
+    }
+    *ext = CIP_EXT_EKEY_REVISION;
+    return -1;
+}
+
+/* Exclusive-owner path: Assembly class + config inst + O->T + T->O points.
+ * An optional Electronic Key (0x34) is checked. A Simple Data Segment
+ * (0x80) is configuration data; *cfg_data / *cfg_len receive the last one.
+ * *ext is set when the failure is a key or a segment, not a short path.
+ */
+static int parse_fo_path(eip_stack_t *s, const uint8_t *path, size_t path_bytes,
+                         uint16_t *insts, int *n_insts, int insts_cap,
+                         uint16_t *ext, const uint8_t **cfg_data,
+                         size_t *cfg_len, int *cfg_present)
 {
     size_t i = 0;
     *n_insts = 0;
+    *cfg_data = NULL;
+    *cfg_len = 0;
+    *cfg_present = 0;
     while (i < path_bytes) {
         uint8_t seg = path[i++];
         uint16_t val = 0;
@@ -239,21 +291,39 @@ static int parse_fo_path(const uint8_t *path, size_t path_bytes,
             i += 2;
             is_inst = 1;
         } else if (seg == 0x34 && i < path_bytes) {
-            /* Electronic key: key format in low nibble of next, then 8 bytes. */
+            /* Electronic key. Format 4 is 8 bytes; anything else is not
+             * a segment this target understands. */
             uint8_t key_fmt = path[i++];
-            size_t key_len = (key_fmt == 4) ? 8u : 8u;
-            if (i + key_len > path_bytes) {
+            if (key_fmt != 4 || i + 8 > path_bytes) {
+                *ext = CIP_EXT_INVALID_SEGMENT;
                 return -EINVAL;
             }
-            i += key_len;
+            if (ekey_check(s, path + i, ext) != 0) {
+                return -EINVAL;
+            }
+            i += 8;
+        } else if (seg == 0x80 && i < path_bytes) {
+            /* Simple Data Segment: length in words, then that many bytes. */
+            uint8_t words = path[i++];
+            size_t nbytes = (size_t)words * 2u;
+            if (i + nbytes > path_bytes) {
+                *ext = CIP_EXT_INVALID_SEGMENT;
+                return -EINVAL;
+            }
+            *cfg_data = path + i;
+            *cfg_len = nbytes;
+            *cfg_present = 1;
+            i += nbytes;
         } else if (seg == 0x01 && i < path_bytes) {
             /* Port segment — skip remaining of this word. */
             i += 1;
         } else {
+            *ext = CIP_EXT_INVALID_SEGMENT;
             return -EINVAL;
         }
         if (is_inst) {
             if (*n_insts >= insts_cap) {
+                *ext = CIP_EXT_INVALID_SEGMENT;
                 return -EINVAL;
             }
             insts[(*n_insts)++] = val;
@@ -263,20 +333,34 @@ static int parse_fo_path(const uint8_t *path, size_t path_bytes,
 }
 
 /* 1 when the path names both configured assemblies.
- * Otherwise *ext is 0x0315 (segment not understood) or 0x0117
+ * Otherwise *ext is 0x0315 (segment not understood), 0x0114..0x0116
+ * (electronic key), 0x0126 (config data word count), or 0x0117
  * (produced/consumed application path does not match).
+ * On success, *cfg_present is 1 when a Simple Data Segment was parsed
+ * and *cfg_data / *cfg_len point at those bytes (still inside `path`).
  */
 static int fo_path_ok(eip_stack_t *s, const uint8_t *path, size_t path_bytes,
-                      uint16_t *ext)
+                      uint16_t *ext, const uint8_t **cfg_data, size_t *cfg_len,
+                      int *cfg_present)
 {
     uint16_t insts[8];
     int n = 0;
+    *cfg_data = NULL;
+    *cfg_len = 0;
+    *cfg_present = 0;
     if (path_bytes == 0) {
         *ext = CIP_EXT_INVALID_APP_PATH;
         return 0;
     }
-    if (parse_fo_path(path, path_bytes, insts, &n, 8) != 0) {
-        *ext = CIP_EXT_INVALID_SEGMENT;
+    if (parse_fo_path(s, path, path_bytes, insts, &n, 8, ext, cfg_data,
+                      cfg_len, cfg_present) != 0) {
+        if (*ext == 0) {
+            *ext = CIP_EXT_INVALID_SEGMENT;
+        }
+        return 0;
+    }
+    if (*cfg_present && *cfg_len != s->config_size) {
+        *ext = CIP_EXT_CONFIG_DATA_SIZE;
         return 0;
     }
     int saw_out = 0;
@@ -383,8 +467,25 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
         return 0;
     }
 
+    /* Multiplier 0..7 selects 4*RPI*2^N. 8..255 are reserved (0x0133).
+     * Do not clamp them to 7 and accept the connection.
+     */
+    if (timeout_mult > 7u) {
+        LOG_WARN("ethernetip",
+                 "Forward Open rejected: timeout multiplier %u serial=0x%04x "
+                 "vendor=0x%04x orig=0x%08x",
+                 timeout_mult, conn_serial, orig_vendor, orig_serial);
+        *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_TIMEOUT_MULTIPLIER,
+                           conn_serial, orig_vendor, orig_serial, 0);
+        return 0;
+    }
+
     uint16_t path_ext = 0;
-    if (!fo_path_ok(s, data + off, path_bytes, &path_ext)) {
+    const uint8_t *cfg_data = NULL;
+    size_t cfg_len = 0;
+    int cfg_present = 0;
+    if (!fo_path_ok(s, data + off, path_bytes, &path_ext, &cfg_data, &cfg_len,
+                    &cfg_present)) {
         LOG_WARN("ethernetip",
                  "Forward Open rejected: connection path ext=0x%04x in=%u "
                  "out=%u",
@@ -557,6 +658,10 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
         *resp_len = cm_err(resp, resp_cap, service, CIP_EXT_NO_BUFFER,
                            conn_serial, orig_vendor, orig_serial, 0);
         return 0;
+    }
+    /* Apply configuration data only once the connection is accepted. */
+    if (cfg_present && s->config_data && cfg_len == s->config_size) {
+        memcpy(s->config_data, cfg_data, cfg_len);
     }
     size_t r = 0;
     resp[r++] = (uint8_t)(service | CIP_SVC_REPLY);

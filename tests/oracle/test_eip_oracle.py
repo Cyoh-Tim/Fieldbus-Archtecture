@@ -866,7 +866,6 @@ def test_adapter_min_rpi_follows_cycle_ms(tmp_path):
 
 
 # ---------------------------------------------------------------- Class 1 소비 규칙·FO 검사 (T11-8)
-@known_defect("T11-8", "O→T 순번을 비교하지 않아 늦게 온 옛 패킷(seq 9)이 새 데이터(seq 10)를 덮어쓴다. 사양은 새롭지 않은 순번 폐기")
 def test_o2t_older_sequence_discarded(sess, eip_dut):
     u = io_socket()
     try:
@@ -881,7 +880,6 @@ def test_o2t_older_sequence_discarded(sess, eip_dut):
         u.close()
 
 
-@known_defect("T11-8", "timeout multiplier 8(예약값)을 7로 클램프해 수락한다. 사양은 0x01/0x0133")
 def test_reserved_timeout_multiplier_rejected(sess):
     rsp = sess.cip(fo_ex(next(_serial), mult=8))
     assert (rsp[2], ext_status(rsp)) == (0x01, 0x0133), rsp.hex()
@@ -897,7 +895,6 @@ def test_electronic_key_exact_match_accepted(sess):
     open_class1(sess, path=ekey() + DEFAULT_FO_PATH)
 
 
-@known_defect("T11-8", "Electronic Key 를 검사하지 않고 건너뛴다. 사양은 vendor/product 0x0114, device type 0x0115, revision 0x0116")
 @pytest.mark.parametrize("key,ext", [
     (dict(vendor=0x1234), 0x0114),
     (dict(dtype=0x0099), 0x0115),
@@ -908,7 +905,6 @@ def test_electronic_key_mismatch_rejected(sess, key, ext):
     assert (rsp[2], ext_status(rsp)) == (0x01, ext), rsp.hex()
 
 
-@known_defect("T11-8", "연결 경로의 Simple Data Segment(0x80, config 데이터)를 0x05 로 거부한다. 사양은 config 데이터와 함께 수락")
 def test_forward_open_with_config_data_segment(adapter_dut):
     d = adapter_dut("--config-size", "2")
     s = Session(d.port)
