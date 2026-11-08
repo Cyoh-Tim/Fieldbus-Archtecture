@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <netinet/ip.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -15,6 +16,41 @@
 #include <unistd.h>
 
 #include "logger.h"
+
+static void set_socket_dscp(int fd, uint8_t dscp)
+{
+    int tos;
+    if (fd < 0) {
+        return;
+    }
+    /* DSCP occupies the top 6 bits of the TOS byte. */
+    tos = (int)((dscp & 0x3fu) << 2);
+    if (setsockopt(fd, IPPROTO_IP, IP_TOS, &tos, sizeof(tos)) != 0) {
+        LOG_WARN("ethernetip", "IP_TOS DSCP %u fd %d failed (%d)", dscp, fd,
+                 errno);
+    }
+}
+
+void eip_stack_apply_qos(eip_stack_t *s)
+{
+    if (!s) {
+        return;
+    }
+    set_socket_dscp(s->udp_fd, s->dscp_scheduled);
+    set_socket_dscp(s->udp_encap_fd, s->dscp_explicit);
+    set_socket_dscp(s->listen_fd, s->dscp_explicit);
+    set_socket_dscp(s->originator_fd, s->dscp_explicit);
+    for (int i = 0; i < EIP_TCP_CLIENTS_MAX; i++) {
+        if (s->clients[i].active) {
+            set_socket_dscp(s->clients[i].fd, s->dscp_explicit);
+        }
+    }
+    for (int i = 0; i < EIP_TLS_CLIENTS_MAX; i++) {
+        if (s->tls_clients[i].active) {
+            set_socket_dscp(s->tls_clients[i].fd, s->dscp_explicit);
+        }
+    }
+}
 
 static int set_nonblock(int fd)
 {
@@ -130,6 +166,9 @@ eip_stack_t *eip_stack_create(const eip_cfg_t *cfg)
     s->tls_listen_fd = -1;
     s->device_state = 3;
     s->config_consistency = 1;
+    s->qos_8021q_enable = 0;
+    s->dscp_ptp_event = EIP_DSCP_PTP_EVENT;
+    s->dscp_ptp_general = EIP_DSCP_PTP_GENERAL;
     s->dscp_urgent = EIP_DSCP_URGENT;
     s->dscp_scheduled = EIP_DSCP_SCHEDULED;
     s->dscp_high = EIP_DSCP_HIGH;
@@ -312,6 +351,7 @@ static int connect_originator(eip_stack_t *s)
     }
     set_nonblock(fd);
     s->originator_fd = fd;
+    eip_stack_apply_qos(s);
 
     /* RegisterSession */
     uint8_t req[EIP_ENCAP_HDR_SIZE + 4];
@@ -421,6 +461,7 @@ int eip_stack_start(eip_stack_t *s)
         LOG_INFO("ethernetip", "originator connected to %s:%d session=%u",
                  s->cfg.remote_ip, s->cfg.remote_port, s->clients[0].session);
     }
+    eip_stack_apply_qos(s);
     s->running = 1;
     return 0;
 }
@@ -517,6 +558,7 @@ static void accept_clients(eip_stack_t *s, int budget)
         s->clients[slot].active = 1;
         s->clients[slot].peer_ip = ip;
         s->clients[slot].last_rx_ns = eip_now_ns();
+        set_socket_dscp(fd, s->dscp_explicit);
     }
 }
 
@@ -801,10 +843,10 @@ int eip_stack_acd_conflict(eip_stack_t *s, int conflict)
     s->acd_conflict = conflict ? 1 : 0;
     if (conflict) {
         s->acd_activity++;
-        s->device_state = 2; /* minor recoverable fault */
-        LOG_WARN("ethernetip", "ACD conflict detected — Identity state=MinorRF");
-    } else if (s->device_state == 2) {
-        s->device_state = 3;
+        /* State 2 is Standby, not a fault. Minor recoverable fault is
+         * Identity Status bit 8, set by eip_identity_status(). */
+        LOG_WARN("ethernetip",
+                 "ACD conflict detected — Identity Status minor recoverable fault");
     }
     pthread_mutex_unlock(&s->lock);
     return 0;

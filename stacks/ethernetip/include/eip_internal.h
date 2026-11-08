@@ -119,12 +119,15 @@ struct eip_stack {
     uint16_t config_consistency;
     uint8_t device_state; /* Identity state */
 
-    /* QoS DSCP */
-    uint8_t dscp_urgent;
-    uint8_t dscp_scheduled;
-    uint8_t dscp_high;
-    uint8_t dscp_low;
-    uint8_t dscp_explicit;
+    /* QoS object, Vol 2 attribute order. */
+    uint8_t qos_8021q_enable; /* attr 1 */
+    uint8_t dscp_ptp_event;   /* attr 2 */
+    uint8_t dscp_ptp_general; /* attr 3 */
+    uint8_t dscp_urgent;      /* attr 4 */
+    uint8_t dscp_scheduled;   /* attr 5 — Class 1 UDP */
+    uint8_t dscp_high;        /* attr 6 */
+    uint8_t dscp_low;         /* attr 7 */
+    uint8_t dscp_explicit;    /* attr 8 — TCP / UDP encapsulation */
 
     /* ACD */
     int acd_conflict;
@@ -157,6 +160,9 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
 /* Identity attr 5 (Status) and attr 8 (State). ListIdentity must copy these. */
 uint16_t eip_identity_status(const eip_stack_t *s);
 uint8_t eip_identity_state(const eip_stack_t *s);
+
+/* Apply QoS DSCP values to open sockets (Class 1 = Scheduled, explicit = Explicit). */
+void eip_stack_apply_qos(eip_stack_t *s);
 
 /* Host-order IPv4 of a connected or bound socket. 0 if unknown. */
 uint32_t eip_ipv4_local(int fd);
