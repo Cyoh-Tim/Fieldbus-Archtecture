@@ -109,10 +109,14 @@ void eip_stack_set_transport_ops(eip_stack_t *s, eip_transport_ops_t ops);
 
 /* Inject encapsulation PDU (mock / tests). Bound to EIP_ENCAP_OWNER_MOCK.
  * 0 and *resp_len > 0: a reply is in resp.
- * 0 and *resp_len == 0: no reply (NOP, SendUnitData, or a discarded
- * non-zero header Options field). The connection stays up.
- * -ECONNRESET: UnRegisterSession. No reply; the caller closes this
- * TCP/TLS connection. An unowned session handle is not dropped.
+ * 0 and *resp_len == 0: no reply (NOP, SendUnitData on a session this
+ * connection owns, or a discarded non-zero header Options field). The
+ * connection stays up. SendUnitData with a missing or foreign session
+ * handle replies with status 0x0064.
+ * -ECONNRESET: UnRegisterSession for a session this connection owns.
+ * No reply; the caller closes this TCP/TLS connection.
+ * A missing or foreign session handle is status 0x0064. That session
+ * is not dropped and this connection is not closed.
  * Other negative errno: the request was not processed. */
 int eip_stack_handle_encap(eip_stack_t *s, const uint8_t *req, size_t req_len,
                            uint8_t *resp, size_t resp_cap, size_t *resp_len);

@@ -1,12 +1,15 @@
 /*
  * T11-9: Encapsulation deviations.
  *
- * NOP has no reply. UnRegisterSession has no reply and the TCP connection
- * that sent it is closed (an unowned session handle is not dropped).
- * RegisterSession protocol version != 1 is status 0x0069; option flags != 0
- * is status 0x0003. A non-zero encapsulation header Options field is
- * discarded. SendUnitData has no encapsulation reply. ListInterfaces is
- * status 0 and an empty item list.
+ * NOP has no reply. UnRegisterSession for a session this connection owns
+ * has no reply and closes that TCP connection. A missing or foreign
+ * session handle is status 0x0064: nothing is deleted and this TCP stays
+ * open. RegisterSession protocol version != 1 and option flags != 0 are
+ * both status 0x0069, with body version 1, option flags 0, and session
+ * handle 0. A non-zero encapsulation header Options field is discarded.
+ * SendUnitData on a registered session has no encapsulation reply. An
+ * invalid session handle is status 0x0064. ListInterfaces is status 0
+ * and an empty item list.
  *
  * Wire values follow docs/protocols/ethernetip.md 5.1–5.2 and the T11-9 row
  * of docs/reports/structure_handoff_20260930.md. This file does not include
@@ -57,9 +60,11 @@ static eip_stack_t *make_stack(void)
     return s;
 }
 
-static void fill_hdr(uint8_t *req, uint16_t cmd, uint16_t length, uint32_t session)
+/* Zero the whole request, including command data past the 24-byte header. */
+static void fill_hdr(uint8_t *req, size_t req_len, uint16_t cmd, uint16_t length,
+                     uint32_t session)
 {
-    memset(req, 0, EIP_ENCAP_HDR_SIZE);
+    memset(req, 0, req_len);
     eip_wr_le16(req + 0, cmd);
     eip_wr_le16(req + 2, length);
     eip_wr_le32(req + 4, session);
@@ -80,7 +85,7 @@ static uint32_t register_ok(eip_stack_t *s, uint32_t owner)
     uint8_t req[EIP_ENCAP_HDR_SIZE + 4];
     uint8_t resp[64];
     size_t n = 0;
-    fill_hdr(req, EIP_CMD_REGISTERSESSION, 4, 0);
+    fill_hdr(req, sizeof(req), EIP_CMD_REGISTERSESSION, 4, 0);
     eip_wr_le16(req + 24, 1);
     eip_wr_le16(req + 26, 0);
     if (exchange(s, owner, req, sizeof(req), resp, sizeof(resp), &n) != 0 ||
@@ -103,7 +108,7 @@ static void test_nop_has_no_reply(void)
     if (!s) {
         return;
     }
-    fill_hdr(req, EIP_CMD_NOP, 4, 0);
+    fill_hdr(req, sizeof(req), EIP_CMD_NOP, 4, 0);
     memset(req + 24, 0xAB, 4);
     memset(resp, 0xCC, sizeof(resp));
     int rc = exchange(s, 0xA0000001u, req, sizeof(req), resp, sizeof(resp), &n);
@@ -126,7 +131,7 @@ static void test_unregister_owned_closes_without_reply(void)
     uint32_t h = register_ok(s, owner);
     expect(h != 0, "register before unregister");
     expect(eip_stack_session_count(s) == 1, "one session before unregister");
-    fill_hdr(req, EIP_CMD_UNREGISTERSESSION, 0, h);
+    fill_hdr(req, sizeof(req), EIP_CMD_UNREGISTERSESSION, 0, h);
     memset(resp, 0xCC, sizeof(resp));
     int rc = exchange(s, owner, req, sizeof(req), resp, sizeof(resp), &n);
     expect(rc == -ECONNRESET, "Unregister asks the caller to close TCP");
@@ -148,12 +153,24 @@ static void test_unregister_foreign_keeps_session(void)
     uint32_t ha = register_ok(s, 0xA0000001u);
     uint32_t hb = register_ok(s, 0xA0000002u);
     expect(ha != 0 && hb != 0 && ha != hb, "two sessions");
-    fill_hdr(req, EIP_CMD_UNREGISTERSESSION, 0, ha);
+    fill_hdr(req, sizeof(req), EIP_CMD_UNREGISTERSESSION, 0, ha);
     memset(resp, 0xCC, sizeof(resp));
     int rc = exchange(s, 0xA0000002u, req, sizeof(req), resp, sizeof(resp), &n);
-    expect(rc == -ECONNRESET, "foreign Unregister still closes the sender");
-    expect(n == 0, "foreign Unregister has no encapsulation reply");
+    expect(rc == 0, "foreign Unregister leaves the sender TCP open");
+    expect(n == EIP_ENCAP_HDR_SIZE, "foreign Unregister encapsulation reply");
+    expect_u32(eip_rd_le32(resp + 8), 0x0064, "foreign Unregister status 0x0064");
     expect(eip_stack_session_count(s) == 2, "unowned session is not dropped");
+
+    fill_hdr(req, sizeof(req), EIP_CMD_UNREGISTERSESSION, 0, 0);
+    n = 99;
+    memset(resp, 0xCC, sizeof(resp));
+    rc = exchange(s, 0xA0000002u, req, sizeof(req), resp, sizeof(resp), &n);
+    expect(rc == 0, "missing Unregister handle leaves TCP open");
+    expect(n == EIP_ENCAP_HDR_SIZE, "missing Unregister handle reply");
+    expect_u32(eip_rd_le32(resp + 8), 0x0064, "missing Unregister handle 0x0064");
+    expect(eip_stack_session_count(s) == 2, "missing handle drops nothing");
+    expect(register_ok(s, 0xA0000001u) == ha, "owner A session remains");
+    expect(register_ok(s, 0xA0000002u) == hb, "owner B session remains");
     eip_stack_destroy(s);
 }
 
@@ -169,7 +186,7 @@ static void test_register_version_and_options(void)
         return;
     }
 
-    fill_hdr(req, EIP_CMD_REGISTERSESSION, 4, 0);
+    fill_hdr(req, sizeof(req), EIP_CMD_REGISTERSESSION, 4, 0);
     eip_wr_le16(req + 24, 2);
     eip_wr_le16(req + 26, 0);
     expect(exchange(s, owner, req, sizeof(req), resp, sizeof(resp), &n) == 0,
@@ -181,30 +198,37 @@ static void test_register_version_and_options(void)
     expect(eip_rd_le16(resp + 26) == 0, "rejected register option flags are 0");
     expect(eip_stack_session_count(s) == 0, "bad version allocates no session");
 
-    fill_hdr(req, EIP_CMD_REGISTERSESSION, 4, 0);
+    fill_hdr(req, sizeof(req), EIP_CMD_REGISTERSESSION, 4, 0);
     eip_wr_le16(req + 24, 1);
     eip_wr_le16(req + 26, 1);
     n = 0;
     expect(exchange(s, owner, req, sizeof(req), resp, sizeof(resp), &n) == 0,
            "bad options encap rc");
-    expect(n >= 12, "bad options reply header");
-    expect_u32(eip_rd_le32(resp + 8), 0x0003, "option flags != 0 status");
+    expect(n == EIP_ENCAP_HDR_SIZE + 4, "bad options reply has 4 data bytes");
+    expect_u32(eip_rd_le32(resp + 8), 0x0069, "option flags != 0 status");
     expect_u32(eip_rd_le32(resp + 4), 0, "bad options does not issue a handle");
+    expect(eip_rd_le16(resp + 24) == 1, "bad options reports version 1");
+    expect(eip_rd_le16(resp + 26) == 0, "bad options reports option flags 0");
     expect(eip_stack_session_count(s) == 0, "bad options allocates no session");
 
-    fill_hdr(req, EIP_CMD_REGISTERSESSION, 4, 0);
+    fill_hdr(req, sizeof(req), EIP_CMD_REGISTERSESSION, 4, 0);
     eip_wr_le16(req + 24, 2);
     eip_wr_le16(req + 26, 1);
     n = 0;
     expect(exchange(s, owner, req, sizeof(req), resp, sizeof(resp), &n) == 0,
            "version and options encap rc");
-    expect_u32(eip_rd_le32(resp + 8), 0x0069, "version is checked before options");
+    expect(n == EIP_ENCAP_HDR_SIZE + 4, "both wrong reply has 4 data bytes");
+    expect_u32(eip_rd_le32(resp + 8), 0x0069, "version and options both wrong");
+    expect_u32(eip_rd_le32(resp + 4), 0, "both wrong does not issue a handle");
+    expect(eip_rd_le16(resp + 24) == 1, "both wrong reports version 1");
+    expect(eip_rd_le16(resp + 26) == 0, "both wrong reports option flags 0");
+    expect(eip_stack_session_count(s) == 0, "both wrong allocates no session");
 
     uint32_t h = register_ok(s, owner);
     expect(h != 0, "version 1 options 0 still registers");
     expect(eip_stack_session_count(s) == 1, "one good session");
 
-    fill_hdr(req, EIP_CMD_REGISTERSESSION, 4, 0);
+    fill_hdr(req, sizeof(req), EIP_CMD_REGISTERSESSION, 4, 0);
     eip_wr_le16(req + 24, 2);
     eip_wr_le16(req + 26, 0);
     n = 0;
@@ -227,14 +251,14 @@ static void test_header_options_discarded(void)
     if (!s) {
         return;
     }
-    fill_hdr(req, EIP_CMD_LISTSERVICES, 0, 0);
+    fill_hdr(req, sizeof(req), EIP_CMD_LISTSERVICES, 0, 0);
     eip_wr_le32(req + 20, 1);
     memset(resp, 0xCC, sizeof(resp));
     int rc = exchange(s, 0xA0000001u, req, sizeof(req), resp, sizeof(resp), &n);
     expect(rc == 0, "non-zero header Options is not a hard error");
     expect(n == 0, "non-zero header Options is discarded");
 
-    fill_hdr(req, EIP_CMD_LISTSERVICES, 0, 0);
+    fill_hdr(req, sizeof(req), EIP_CMD_LISTSERVICES, 0, 0);
     n = 0;
     expect(exchange(s, 0xA0000001u, req, sizeof(req), resp, sizeof(resp), &n) ==
                0,
@@ -255,14 +279,33 @@ static void test_sendunitdata_has_no_encap_reply(void)
     if (!s) {
         return;
     }
-    uint32_t h = register_ok(s, owner);
-    expect(h != 0, "session before SendUnitData");
-    fill_hdr(req, EIP_CMD_SENDUNITDATA, 0, h);
+    fill_hdr(req, sizeof(req), EIP_CMD_SENDUNITDATA, 0, 0);
     memset(resp, 0xCC, sizeof(resp));
     int rc = exchange(s, owner, req, sizeof(req), resp, sizeof(resp), &n);
+    expect(rc == 0, "unregistered SendUnitData stays connected");
+    expect(n == EIP_ENCAP_HDR_SIZE, "unregistered SendUnitData reply");
+    expect_u32(eip_rd_le32(resp + 8), 0x0064, "unregistered SendUnitData 0x0064");
+    expect(eip_stack_session_count(s) == 0, "unregistered SendUnitData adds no session");
+
+    uint32_t h = register_ok(s, owner);
+    expect(h != 0, "session before SendUnitData");
+    uint32_t hb = register_ok(s, 0xA0000002u);
+    expect(hb != 0 && hb != h, "second session before SendUnitData");
+    fill_hdr(req, sizeof(req), EIP_CMD_SENDUNITDATA, 0, h);
+    memset(resp, 0xCC, sizeof(resp));
+    rc = exchange(s, owner, req, sizeof(req), resp, sizeof(resp), &n);
     expect(rc == 0, "SendUnitData does not close the connection");
-    expect(n == 0, "SendUnitData has no encapsulation reply");
-    expect(eip_stack_session_count(s) == 1, "SendUnitData keeps the session");
+    expect(n == 0, "registered SendUnitData has no encapsulation reply");
+    expect(eip_stack_session_count(s) == 2, "SendUnitData keeps the session");
+
+    fill_hdr(req, sizeof(req), EIP_CMD_SENDUNITDATA, 0, h);
+    n = 99;
+    memset(resp, 0xCC, sizeof(resp));
+    rc = exchange(s, 0xA0000002u, req, sizeof(req), resp, sizeof(resp), &n);
+    expect(rc == 0, "foreign SendUnitData stays connected");
+    expect(n == EIP_ENCAP_HDR_SIZE, "foreign SendUnitData reply");
+    expect_u32(eip_rd_le32(resp + 8), 0x0064, "foreign SendUnitData 0x0064");
+    expect(eip_stack_session_count(s) == 2, "foreign SendUnitData drops nothing");
     eip_stack_destroy(s);
 }
 
@@ -276,7 +319,7 @@ static void test_list_interfaces_empty(void)
     if (!s) {
         return;
     }
-    fill_hdr(req, EIP_CMD_LISTINTERFACES, 0, 0);
+    fill_hdr(req, sizeof(req), EIP_CMD_LISTINTERFACES, 0, 0);
     expect(exchange(s, 0xA0000001u, req, sizeof(req), resp, sizeof(resp), &n) ==
                0,
            "ListInterfaces rc");
@@ -377,15 +420,16 @@ static void test_live_nop_and_unregister(void)
     inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
     expect(connect(fd, (struct sockaddr *)&dst, sizeof(dst)) == 0, "connect");
 
-    fill_hdr(req, EIP_CMD_REGISTERSESSION, 4, 0);
+    fill_hdr(req, sizeof(req), EIP_CMD_REGISTERSESSION, 4, 0);
     eip_wr_le16(req + 24, 1);
+    eip_wr_le16(req + 26, 0);
     rc = tcp_round(s, fd, req, sizeof(req), resp, sizeof(resp), &n);
     if (rc == 0 && n >= 8) {
         sess = eip_rd_le32(resp + 4);
     }
     expect(rc == 0 && sess != 0, "live register");
 
-    fill_hdr(req, EIP_CMD_NOP, 0, sess);
+    fill_hdr(req, sizeof(req), EIP_CMD_NOP, 0, sess);
     rc = tcp_round(s, fd, req, EIP_ENCAP_HDR_SIZE, resp, sizeof(resp), &n);
     if (rc == 0) {
         fprintf(stderr, "FAIL: live NOP got a %zu-byte reply\n", n);
@@ -394,12 +438,12 @@ static void test_live_nop_and_unregister(void)
         expect(rc == -1, "live NOP leaves the TCP connection open");
     }
 
-    fill_hdr(req, EIP_CMD_LISTSERVICES, 0, 0);
+    fill_hdr(req, sizeof(req), EIP_CMD_LISTSERVICES, 0, 0);
     rc = tcp_round(s, fd, req, EIP_ENCAP_HDR_SIZE, resp, sizeof(resp), &n);
     expect(rc == 0 && n >= 24 && eip_rd_le32(resp + 8) == 0,
            "ListServices after NOP (connection still open)");
 
-    fill_hdr(req, EIP_CMD_UNREGISTERSESSION, 0, sess);
+    fill_hdr(req, sizeof(req), EIP_CMD_UNREGISTERSESSION, 0, sess);
     rc = tcp_round(s, fd, req, EIP_ENCAP_HDR_SIZE, resp, sizeof(resp), &n);
     if (rc == 0) {
         fprintf(stderr,

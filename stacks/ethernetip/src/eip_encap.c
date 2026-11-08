@@ -432,17 +432,14 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
             ver = eip_rd_le16(body);
             opt = eip_rd_le16(body + 2);
         }
-        /* Response data names the highest supported revision. */
+        /* Response data names the highest supported revision.
+         * Unsupported version and non-zero option flags are both 0x0069.
+         * No session is issued. */
         eip_wr_le16(body_resp, 1);
         eip_wr_le16(body_resp + 2, 0);
         body_len = 4;
-        if (length >= 4 && ver != 1) {
+        if (length >= 4 && (ver == 0 || ver > 1 || opt != 0)) {
             status = EIP_ENCAP_STATUS_UNSUPPORTED_REV;
-            out_session = 0;
-            break;
-        }
-        if (length >= 4 && opt != 0) {
-            status = EIP_ENCAP_STATUS_INCORRECT_DATA;
             out_session = 0;
             break;
         }
@@ -456,13 +453,18 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
     }
 
     case EIP_CMD_UNREGISTERSESSION:
-        /* No encapsulation reply. The caller closes this TCP/TLS connection.
-         * A handle owned by someone else is left in place. */
+        /* This connection's session: no reply, drop it, caller closes
+         * this TCP/TLS connection. A missing handle or another
+         * connection's session is status 0x0064. Nothing is deleted
+         * and this TCP stays open. */
         if (session_owned(s, session, owner_id)) {
             session_drop(s, session, owner_id);
+            *resp_len = 0;
+            return -ECONNRESET;
         }
-        *resp_len = 0;
-        return -ECONNRESET;
+        status = EIP_ENCAP_STATUS_INVALID_SESSION;
+        body_len = 0;
+        break;
 
     case EIP_CMD_LISTIDENTITY:
         if (build_list_identity(s, body_resp, sizeof(body_resp), &body_len) !=
@@ -501,8 +503,15 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
     }
 
     case EIP_CMD_SENDUNITDATA:
-        /* No encapsulation reply (ethernetip.md 5.2.8). Class 3 connected
-         * explicit is not implemented; T11-7 rejects that Forward Open. */
+        /* Class 3 connected explicit is not implemented; T11-7 rejects
+         * that Forward Open. A registered session has no connection to
+         * answer, so there is no encapsulation reply. An unregistered
+         * or foreign handle is status 0x0064. */
+        if (!session_owned(s, session, owner_id)) {
+            status = EIP_ENCAP_STATUS_INVALID_SESSION;
+            body_len = 0;
+            break;
+        }
         *resp_len = 0;
         return 0;
 
