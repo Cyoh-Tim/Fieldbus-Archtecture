@@ -12,20 +12,30 @@ device:
 steps:
   - action: acd_conflict
     conflict: true
+  # State 2 is Standby. An ACD conflict is Identity Status bit 8
+  # (minor recoverable fault); State stays Operational (3).
   - action: get_attr
     class_id: 0x01
     instance: 1
     attribute: 8
     expect:
       cip_status: 0
-      u8: 2
+      u8: 3
+  - action: get_attr
+    class_id: 0x01
+    instance: 1
+    attribute: 5
+    expect:
+      cip_status: 0
+      u16: 0x0100
+  # SelectAcd is a BOOL, not a UDINT conflict counter.
   - action: get_attr
     class_id: 0xF5
     instance: 1
     attribute: 10
     expect:
       cip_status: 0
-      u32: 1
+      u8: 1
   - action: acd_conflict
     conflict: false
   - action: get_attr
@@ -35,3 +45,10 @@ steps:
     expect:
       cip_status: 0
       u8: 3
+  - action: get_attr
+    class_id: 0x01
+    instance: 1
+    attribute: 5
+    expect:
+      cip_status: 0
+      u16: 0
