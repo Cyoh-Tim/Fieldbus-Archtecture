@@ -1414,3 +1414,134 @@ def test_lldp_neighbor_in_rem_table(pn_dut):
     vb = r.PDU.varbindlist[0]
     assert vb.oid.val.startswith(LLDP_REM_CHASSIS_ID + "."), f"이웃 행 없음: OID {vb.oid.val}"
     assert bytes(vb.value.val) == b"neighbor-sw", f"lldpRemChassisId {vb.value!r}"
+
+
+# ---------------------------------------------------------------- 감사 2026-11-08 PROFINET RPC·레코드 (A20261108-1 ~ -4)
+# 근거: p-net master src/device/pf_cmrpc.c (opnum 5 Read Implicit, ControlCommand, AR UUID unknown), pf_fspm.c (I&M Write),
+# Wireshark plugins/epan/profinet/packet-dcerpc-pn-io.c (opnum 5 "Read Implicit"), packet-pn.c (ErrorCode1/2 표).
+A1108_NIL_UUID = "00000000-0000-0000-0000-000000000000"
+A1108_IM2_INDEX = 0xAFF2
+
+
+def a1108_im_block(btype, payload):
+    """I&M 레코드 = BlockHeader(BlockType, BlockLength = 2 + payload, Version 1.0) + payload."""
+    return struct.pack(">HHBB", btype, 2 + len(payload), 1, 0) + payload
+
+
+def a1108_write(pn, index, data, aruuid=AR_UUID, seqnum=1):
+    req = IODWriteReq(seqNum=seqnum, ARUUID=aruuid, API=0, slotNumber=0, subslotNumber=1,
+                      index=index, recordDataLength=len(data)) / data
+    return rpc_response(pn.rpc(raw(pnio_request(3, [req], seqnum=60 + seqnum))))
+
+
+# ---------------------------------------------------------------- A20261108-1 Read Implicit (opnum 5)
+@known_defect("A20261108-1", "Read Implicit (opnum 5) 에 응답하지 않는다 (-ENOSYS). AR 없이 I&M0 를 읽는 엔지니어링 툴·"
+              "컨트롤러가 시간 초과. Wireshark pn_io_dissectors opnum 5, p-net pf_cmrpc.c PF_RPC_DEV_OPNUM_READ_IMPLICIT")
+def test_record_read_implicit_im0_without_ar(pn_dut):
+    # AR 없이(Connect 전), ARUUID = NIL 인 IODReadReq 를 opnum 5 로 보낸다. TargetARUUID(RWPadding 앞 16) 도 NIL.
+    # p-net pf_cmrpc_rm_read_ind: NIL ARUUID + opnum 5 → implicit AR (p_ar NULL) 로 pf_cmrdr_rm_read_ind 가 I&M0 를 읽는다.
+    req = IODReadReq(seqNum=1, ARUUID=A1108_NIL_UUID, API=0, slotNumber=0, subslotNumber=1,
+                     index=IM0_INDEX, recordDataLength=4096)
+    rsp = rpc_response(pn_dut.rpc(raw(pnio_request(5, [req], seqnum=70))))
+    assert rsp is not None, "Read Implicit (opnum 5) 응답 없음"
+    assert rsp.opnum == 5, f"응답 opnum {rsp.opnum}"
+    status, blocks = ndr_response(rsp)
+    assert status == 0, f"PNIOStatus {status:08x}"
+    im0 = IM0Block(read_res_record(blocks))
+    assert im0.block_type == 0x0020
+    assert (im0.VendorIDHigh << 8 | im0.VendorIDLow) == 0xABCD
+
+
+# ---------------------------------------------------------------- A20261108-2 I&M Write 접근·길이 규칙
+@known_defect("A20261108-2", "I&M0 Write 를 성공(PNIOStatus 0)으로 응답한다. I&M0 는 읽기 전용 — "
+              "p-net pf_fspm.c PF_IDX_SUB_IM_0 'read-only' → DF 80 B6 00 (access denied)")
+def test_record_write_im0_access_denied(pn_dut):
+    pn_dut.rpc(raw(connect_pdu()))
+    rsp = a1108_write(pn_dut, IM0_INDEX, raw(IM0Block()))
+    assert rsp is not None, "Write 응답 없음"
+    status, _ = ndr_response(rsp)
+    # 0xDF Write, 0x80 PNIORW, 0xB6 access denied (Wireshark packet-pn.c, p-net PNET_ERROR_CODE_1_ACC_ACCESS_DENIED)
+    assert status == 0xDF80B600, f"PNIOStatus {status:08x}"
+
+
+A1108_IM_BAD_LENGTH = [
+    # (index, 레코드 바이트, 설명) — BlockHeader 뒤 길이: I&M1 54, I&M2 16 (p-net pf_fspm.c, Wireshark dissect_IandM1/2_block)
+    (IM1_INDEX, a1108_im_block(0x0021, b"F" * 10), "I&M1 payload 10"),
+    (IM1_INDEX, a1108_im_block(0x0021, b"F" * 32 + b"L" * 22 + b"XXXXX"), "I&M1 payload 59"),
+    (A1108_IM2_INDEX, a1108_im_block(0x0022, b"2026-11-08 12:0"), "I&M2 payload 15"),
+]
+
+
+@known_defect("A20261108-2", "I&M1–4 Write 의 길이를 보지 않는다 (짧으면 공백·0 으로 채우고, 길면 잘라서 성공). "
+              "p-net pf_fspm.c: BlockHeader 뒤 길이가 I&M1 54 / I&M2 16 / I&M3 54 / I&M4 54 가 아니면 DF 80 B1 00")
+@pytest.mark.parametrize("index,data,desc", A1108_IM_BAD_LENGTH, ids=[d for _, _, d in A1108_IM_BAD_LENGTH])
+def test_record_write_im_wrong_length_error(pn_dut, index, data, desc):
+    pn_dut.rpc(raw(connect_pdu()))
+    rsp = a1108_write(pn_dut, index, data)
+    assert rsp is not None, "Write 응답 없음"
+    status, _ = ndr_response(rsp)
+    # 0xDF Write, 0x80 PNIORW, 0xB1 write length error (p-net PNET_ERROR_CODE_1_ACC_WRITE_LENGTH_ERROR)
+    assert status == 0xDF80B100, f"{desc}: PNIOStatus {status:08x}"
+
+
+# ---------------------------------------------------------------- A20261108-3 Control ControlCommand 검사
+A1108_BAD_CONTROL = [
+    ({"ControlCommand_PrmEnd": 1, "ControlCommand_Done": 1}, "PrmEnd+Done 0x0009"),
+    ({"ControlCommand_ApplicationReady": 1}, "ApplicationReady 0x0002"),
+    ({"ControlCommand_Release": 1}, "Release 0x0004"),
+    ({}, "none 0x0000"),
+]
+
+
+@known_defect("A20261108-3", "IODControlReq(0x0110) 의 ControlCommand 를 보지 않고 무엇이든 Done 으로 응답한다 "
+              "(PrmEnd 비트가 아니면 아무것도 하지 않음). p-net pf_cmrpc.c DControl 'wrong bit pattern' → DD 81 14 08")
+@pytest.mark.parametrize("cmd,desc", A1108_BAD_CONTROL, ids=[d for _, d in A1108_BAD_CONTROL])
+def test_control_rejects_wrong_control_command(pn_dut, cmd, desc):
+    pn_dut.rpc(raw(connect_pdu()))
+    # block_type 를 0x0110 (PrmEnd 의 IODControlReq) 으로 고정한다. scapy 는 비워 두면 명령 비트로 블록 타입을 고른다.
+    req = IODControlReq(block_type=0x0110, ARUUID=AR_UUID, SessionKey=SESSION_KEY, **cmd)
+    rsp = rpc_response(pn_dut.rpc(raw(pnio_request(4, [req], seqnum=80))))
+    assert rsp is not None, "Control 응답 없음"
+    status, blocks = ndr_response(rsp)
+    # 0xDD Control, 0x81 PNIO, 0x14 "IODControl: Faulty ControlBlockConnect", 0x08 "Error in Parameter ControlCommand"
+    # (Wireshark packet-pn.c pn_io_error_code1_pnio / pn_io_error_code2_pnio_20, p-net PNET_ERROR_CODE_1_DCTRL_FAULTY_CONNECT,
+    #  PNET_ERROR_CODE_2_DCTRL_FAULTY_CONNECT_CONTROLCOMMAND). 에러면 IODControlRes 를 싣지 않는다 (p-net pf_cmrpc_rm_dcontrol_rsp).
+    assert status == 0xDD811408, f"{desc}: PNIOStatus {status:08x}, 블록 {[hex(t) for t, _ in split_blocks(blocks)]}"
+    assert not [t for t, _ in split_blocks(blocks) if t == 0x8110], f"{desc}: 에러인데 IODControlRes(Done) 를 보냄"
+
+
+# ---------------------------------------------------------------- A20261108-4 AR UUID unknown
+def _a1108_release_req(aruuid):
+    return IODControlReq(ARUUID=aruuid, SessionKey=SESSION_KEY, ControlCommand_Release=1)  # scapy → 0x0114
+
+
+@known_defect("A20261108-4", "AR 이 없을 때 Release 에 성공(PNIOStatus 0) + 블록 아닌 4바이트 00000000 으로 응답한다. "
+              "p-net pf_cmrpc_rm_release_ind: AR 을 못 찾으면 DC 81 40 05 (CMRPC AR UUID unknown)")
+def test_release_without_ar_ar_uuid_unknown(pn_dut):
+    rsp = rpc_response(pn_dut.rpc(raw(pnio_request(1, [_a1108_release_req(AR_UUID)], seqnum=90))))
+    assert rsp is not None, "Release 응답 없음"
+    status, blocks = ndr_response(rsp)
+    assert status == 0xDC814005, f"PNIOStatus {status:08x}, 블록 {blocks.hex()}"
+
+
+A1108_UNKNOWN_AR = [
+    (1, lambda: _a1108_release_req(OTHER_AR_UUID), 0xDC814005, "Release"),
+    (4, lambda: IODControlReq(ARUUID=OTHER_AR_UUID, SessionKey=SESSION_KEY, ControlCommand_PrmEnd=1), 0xDD814005,
+     "Control"),
+    (3, lambda: IODWriteReq(seqNum=1, ARUUID=OTHER_AR_UUID, API=0, slotNumber=0, subslotNumber=1, index=IM1_INDEX,
+                            recordDataLength=60) / raw(IM1Block()), 0xDF814005, "Write"),
+]
+
+
+@known_defect("A20261108-4", "AR 이 있는 동안 다른 ARUUID 의 Release·Control·Write 를 응답 없이 버린다 (-EPERM). "
+              "p-net pf_cmrpc.c: AR 을 못 찾으면 DC/DD/DF 81 40 05 로 응답 (Wireshark CMRPC ErrorCode2 5 'AR UUID unknown')")
+@pytest.mark.parametrize("opnum,mk,expected,desc", A1108_UNKNOWN_AR, ids=[d for *_, d in A1108_UNKNOWN_AR])
+def test_rpc_unknown_ar_uuid_error_response(pn_dut, opnum, mk, expected, desc):
+    pn_dut.rpc(raw(connect_pdu()))
+    rsp = rpc_response(pn_dut.rpc(raw(pnio_request(opnum, [mk()], seqnum=91))))
+    assert rsp is not None, f"{desc}: 모르는 ARUUID 에 응답 없음"
+    status, _ = ndr_response(rsp)
+    assert status == expected, f"{desc}: PNIOStatus {status:08x}"
+    # 모르는 ARUUID 의 요청은 기존 AR 을 건드리지 않는다.
+    out = pn_dut.cmd("POLL 60")
+    assert [f for f in tx_frames(out) if is_rtc1(f)], f"{desc}: 거부 뒤 기존 AR 의 RTC1 이 멈췄다"

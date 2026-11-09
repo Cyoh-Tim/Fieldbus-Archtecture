@@ -207,7 +207,6 @@ def test_class3_transport_to_assembly_rejected(sess):
     assert rsp[2] == 0x01
 
 
-@known_defect("T11-9", "NOP 에 응답한다. 사양은 무응답")
 def test_nop_has_no_reply(sess):
     sess.sock.sendall(encap(0x0000, b"", sess.handle))
     sess.sock.settimeout(0.5)

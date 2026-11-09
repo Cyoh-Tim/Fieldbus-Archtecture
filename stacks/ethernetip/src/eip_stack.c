@@ -634,6 +634,10 @@ static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
                 c->session = sess;
             }
             pthread_mutex_unlock(&s->lock);
+            if (rc == -ECONNRESET) {
+                eip_tcp_client_drop(s, c);
+                return;
+            }
             if (resp_len > 0 && rc == 0) {
                 if (s->tops_set && s->tops.tcp_send) {
                     s->tops.tcp_send(s->tops.ctx, resp, resp_len);

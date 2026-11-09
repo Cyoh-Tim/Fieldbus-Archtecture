@@ -10,8 +10,9 @@
  *   - protected (protection_mode=1 → Set/Reset privilege reject)
  *   - integrity (security_class=1 + PSK; mutating UCMM needs HMAC)
  *
- * SendUnitData is not implemented (invalid-cmd). ListInterfaces returns an
- * empty interface list. CIP Multiple Service Packet is not a service here
+ * SendUnitData has no encapsulation reply (Class 3 explicit is not
+ * implemented). ListInterfaces returns an empty interface list. CIP
+ * Multiple Service Packet is not a service here
  * (0x0A = ATTR_READONLY status).
  * Unconnected Send 0x52 is defined but not handled (service not supported).
  *
@@ -550,7 +551,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         send_cmd(&g_open, cmds[u8_at(p, plen, 0, 0) % 4u]);
         break;
     }
-    case 6: /* Unregister + re-register, SendUnitData (invalid cmd) */
+    case 6: /* Unregister + re-register, SendUnitData (no encap reply) */
         if (u8_at(p, plen, 0, 0) & 1) {
             send_cmd(&g_open, EIP_CMD_UNREGISTERSESSION);
             g_open.session = 0;

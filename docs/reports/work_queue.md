@@ -65,7 +65,7 @@
 | 41 | T12-21 | PN 어댑터 slot/subslot/index, 예제 입력 길이 | `adapters/profinet/`, `config/` | T12-21 | |
 | 42 | T12-22 | PN IOCRReference, DCP 지연 슬롯, DeviceRole 0x01 | `stacks/profinet/`, `tests/` | T12-22 | T12-2 이후 |
 | 43 | T11-8 | EIP Class 1 소비 규칙·FO 파라미터 검증 | `stacks/ethernetip/`, `tests/` | T11-8 ×4 (테스트 6개) | |
-| 44 | T11-9 | EIP Encapsulation 편차 | `stacks/ethernetip/`, `tests/` | T11-9 | |
+| 44 | T11-9 | EIP Encapsulation 편차 | `stacks/ethernetip/`, `tests/` | T11-9 | #179 답 (OpENer 기준): RegisterSession 의 프로토콜 버전·options 오류는 인수인계의 0x0003 대신 **0x0069** (OpENer `encap.c`), 그 밖의 명령에서 options ≠ 0 은 버림. UnRegisterSession 은 응답 없이 세션 닫기 |
 | 45 | T11-10 | EIP 표준 객체 속성 | `stacks/ethernetip/`, `tests/` | T11-10 ×10 | |
 | 46 | T11-11 | EIP 자체 보안 프로파일 명칭 정리 | `stacks/ethernetip/`, `docs/` | 없음 | |
 | 47 | T11-12 | EIP Originator Logix 태그 서비스 | `stacks/ethernetip/`, `tests/` | T11-12 ×3 | |
@@ -131,6 +131,10 @@
 | 107 | A20261103-3 | PN LLDP-MIB 로컬 데이터 없음 (lldpLocChassisId·Subtype, lldpLocPortTable) — 값은 송신 LLDPDU 와 같아야 함 | `stacks/profinet/`, `tests/` | A20261103-3 | 같은 보고서. 근거 p-net `pf_snmp.h`, LLDP-MIB |
 | 108 | A20261103-4 | PN LLDP 수신 없음 → lldpRemTable 없음 (이웃 Chassis·Port, TTL 만료) | `stacks/profinet/`, `tests/` | A20261103-4 | 같은 보고서. 큐 107 이후. 근거 p-net `pf_lldp.c` 수신, LLDP-MIB. LLDP-EXT-PNO-MIB 는 후속 판단 |
 | 109 | T12-20 후속 | PN 어댑터가 `protocol_params.nvm_dir`·`apply_os_ip` 를 읽어 `pn_cfg_t` 에 넣지 않아, 데몬은 DCP 로 받은 이름·IP·I&M 을 재시작 뒤 잃고 NIC 주소도 바꾸지 않음 (스택은 #180 으로 지원) | `adapters/profinet/`, `config/`, `tests/` | 없음 | 오라클 없음 (OS IP 는 root·실 NIC, 저장은 데몬 재시작). 단위 테스트: config 의 두 키가 `pn_cfg_t` 로 들어가는지, `nvm_dir` 이 없거나 쓸 수 없으면 `LOG_WARN` 후 RAM 만. 스키마·예제 config 에 키 설명. 근거 #171 답 |
+| 110 | A20261108-1 | PN Read Implicit (opnum 5) 무응답 (-ENOSYS) — AR 없이 I&M0 를 읽는 엔지니어링 툴·컨트롤러 식별이 시간 초과 | `stacks/profinet/`, `tests/` | A20261108-1 | 2026-11-08 감사. 보고서 [audits/20261108-pn-rpc-records.md](audits/20261108-pn-rpc-records.md). 근거 p-net `pf_cmrpc.c` READ_IMPLICIT, Wireshark "Read Implicit". 입문서 `docs/protocols/profinet.md` ReadImplicit 행도 같이 고쳐도 됨 |
+| 111 | A20261108-2 | PN I&M0 Write 를 성공으로 응답 (`DF 80 B6 00` 이어야), I&M1–4 Write 길이 미검사 (정확히 54/16/54/54 아니면 `DF 80 B1 00`) | `stacks/profinet/`, `tests/` | A20261108-2 ×2 | 같은 보고서. 근거 p-net `pf_fspm.c`, Wireshark. 같이 바뀌는 고정값: CTT `tests/scenarios/profinet/rpc_write_prmend_appready.yaml`, `rpc_ar_lifetime_cm.yaml` (I&M1 헤더 없는 6바이트 → 60바이트 블록), 단위 `tests/test_pn_t12_18.c:287-290`, `tests/test_pn_rpc.c:296-312` |
+| 112 | A20261108-3 | PN IODControlReq(0x0110) ControlCommand 미검사 — PrmEnd 가 아니어도 Done (`DD 81 14 08` 이어야) | `stacks/profinet/`, `tests/` | A20261108-3 | 같은 보고서. 근거 p-net `pf_cmrpc_rm_dcontrol_interpret_req`, Wireshark ErrorCode1 0x14 / 0x08 |
+| 113 | A20261108-4 | PN AR 없는 Release 를 성공(+블록 아닌 4바이트)으로, 다른 ARUUID 의 Release·Control·Write 를 무응답으로 처리 — "AR UUID unknown" `DC/DD/DF 81 40 05` 이어야 | `stacks/profinet/`, `tests/` | A20261108-4 ×2 | 같은 보고서. 근거 p-net `pf_cmrpc.c` CMRPC_AR_UUID_UNKNOWN, Wireshark. 송신 IP 불일치·AR 없는 Control/Write 무응답은 보안 결정 G4·CTT PN-B-NEG-008 그대로 (보고서 확인 필요 4). 단위 `tests/test_pn_rpc.c:272-281` 기대 변경 |
 
 ## 이슈 본문 템플릿
 

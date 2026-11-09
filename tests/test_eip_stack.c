@@ -1279,6 +1279,7 @@ static void test_g5_session_owner_and_close(void)
     expect(eip_stack_handle_encap_owned(s, 0xA0000002u, req, EIP_ENCAP_HDR_SIZE,
                                         resp, sizeof(resp), &resp_len) == 0,
            "g5o foreign Unregister encap");
+    expect(resp_len == EIP_ENCAP_HDR_SIZE, "g5o foreign Unregister reply");
     expect(eip_rd_le32(resp + 8) == EIP_ENCAP_STATUS_INVALID_SESSION,
            "g5o foreign Unregister 0x64");
     expect(eip_stack_session_count(s) == 2, "g5o session kept");
