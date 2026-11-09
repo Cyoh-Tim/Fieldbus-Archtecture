@@ -51,8 +51,10 @@
 /* Encapsulation status (Vol 2) */
 #define EIP_ENCAP_STATUS_SUCCESS          0x0000
 #define EIP_ENCAP_STATUS_INVALID_CMD      0x0001
+#define EIP_ENCAP_STATUS_INCORRECT_DATA   0x0003 /* incorrectly formed data */
 #define EIP_ENCAP_STATUS_INVALID_SESSION  0x0064
 #define EIP_ENCAP_STATUS_INVALID_LENGTH   0x0065
+#define EIP_ENCAP_STATUS_UNSUPPORTED_REV  0x0069 /* RegisterSession protocol version != 1 */
 
 /* CPF item types */
 #define EIP_ITEM_NULL_ADDR          0x0000

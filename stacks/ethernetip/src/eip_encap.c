@@ -408,6 +408,11 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
     if ((size_t)EIP_ENCAP_HDR_SIZE + (size_t)length > req_len) {
         return -EINVAL;
     }
+    /* Header Options must be 0 (ethernetip.md 5.1). A non-zero value is
+     * discarded: no reply, and the command is not processed. */
+    if (eip_rd_le32(req + 20) != 0) {
+        return 0;
+    }
 
     uint8_t body_resp[EIP_TCP_BUF_MAX];
     size_t body_len = 0;
@@ -416,39 +421,50 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
 
     switch (cmd) {
     case EIP_CMD_NOP:
-        encap_hdr(resp, cmd, 0, session, 0, ctx);
-        *resp_len = EIP_ENCAP_HDR_SIZE;
+        /* Keep-alive. The body is ignored and there is no reply. */
+        *resp_len = 0;
         return 0;
 
-    case EIP_CMD_REGISTERSESSION:
+    case EIP_CMD_REGISTERSESSION: {
+        uint16_t ver = 1;
+        uint16_t opt = 0;
+        if (length >= 4) {
+            ver = eip_rd_le16(body);
+            opt = eip_rd_le16(body + 2);
+        }
+        /* Response data names the highest supported revision.
+         * Unsupported version and non-zero option flags are both 0x0069.
+         * No session is issued. */
+        eip_wr_le16(body_resp, 1);
+        eip_wr_le16(body_resp + 2, 0);
+        body_len = 4;
+        if (length >= 4 && (ver == 0 || ver > 1 || opt != 0)) {
+            status = EIP_ENCAP_STATUS_UNSUPPORTED_REV;
+            out_session = 0;
+            break;
+        }
         out_session = session_alloc(s, owner_id);
         if (out_session == 0) {
             status = EIP_ENCAP_STATUS_INVALID_CMD;
             body_len = 0;
             break;
         }
-        /* protocol version + options echo */
-        if (length >= 4 && sizeof(body_resp) >= 4) {
-            memcpy(body_resp, body, 4);
-            body_len = 4;
-        } else {
-            eip_wr_le16(body_resp, 1);
-            eip_wr_le16(body_resp + 2, 0);
-            body_len = 4;
-        }
         break;
+    }
 
     case EIP_CMD_UNREGISTERSESSION:
-        if (!session_owned(s, session, owner_id)) {
-            encap_hdr(resp, cmd, 0, session, EIP_ENCAP_STATUS_INVALID_SESSION,
-                      ctx);
-            *resp_len = EIP_ENCAP_HDR_SIZE;
-            return 0;
+        /* This connection's session: no reply, drop it, caller closes
+         * this TCP/TLS connection. A missing handle or another
+         * connection's session is status 0x0064. Nothing is deleted
+         * and this TCP stays open. */
+        if (session_owned(s, session, owner_id)) {
+            session_drop(s, session, owner_id);
+            *resp_len = 0;
+            return -ECONNRESET;
         }
-        session_drop(s, session, owner_id);
-        encap_hdr(resp, cmd, 0, session, 0, ctx);
-        *resp_len = EIP_ENCAP_HDR_SIZE;
-        return 0;
+        status = EIP_ENCAP_STATUS_INVALID_SESSION;
+        body_len = 0;
+        break;
 
     case EIP_CMD_LISTIDENTITY:
         if (build_list_identity(s, body_resp, sizeof(body_resp), &body_len) !=
@@ -485,6 +501,19 @@ int eip_encap_process(eip_stack_t *s, const uint8_t *req, size_t req_len,
         }
         break;
     }
+
+    case EIP_CMD_SENDUNITDATA:
+        /* Class 3 connected explicit is not implemented; T11-7 rejects
+         * that Forward Open. A registered session has no connection to
+         * answer, so there is no encapsulation reply. An unregistered
+         * or foreign handle is status 0x0064. */
+        if (!session_owned(s, session, owner_id)) {
+            status = EIP_ENCAP_STATUS_INVALID_SESSION;
+            body_len = 0;
+            break;
+        }
+        *resp_len = 0;
+        return 0;
 
     default:
         status = EIP_ENCAP_STATUS_INVALID_CMD;
