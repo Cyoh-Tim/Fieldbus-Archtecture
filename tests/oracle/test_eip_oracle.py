@@ -1617,3 +1617,24 @@ def test_originator_connect_has_timeout(tmp_path):
         srv.close()
     assert out is not None and elapsed < 10, f"fb_open 이 {elapsed:.1f} s 동안 반환하지 않음 (출력 {out!r})"
     assert out.startswith("OPEN "), out  # 연결 실패를 에러로 돌려준다
+
+
+# ---------------------------------------------------------------- 선별 2026-11-09 (A20261109-1)
+# 근거: OpENer master source/src/cip/cipcommon.c SetAttributeSingle — 있는 속성인데 set_bit_mask 에 없으면
+# kCipErrorAttributeNotSetable (0x0E). 0x05 (Path destination unknown) 는 경로의 객체·인스턴스가 없을 때다.
+A1109_READ_ONLY = [
+    (0xF5, 1, 1, "TCP/IP Status"),
+    (0xF5, 1, 2, "TCP/IP Configuration Capability"),
+    (0xF6, 1, 1, "Ethernet Link Interface Speed"),
+    (0xF4, 1, 1, "Port Type"),
+]
+
+
+@known_defect("A20261109-1", "TCP/IP·Ethernet Link·Port 의 읽기 전용 속성 Set 에 0x05 (Path destination unknown) 로 응답한다. "
+              "있는 속성이 settable 이 아니면 0x0E (Attribute not settable)")
+@pytest.mark.parametrize("cls,inst,attr,desc", A1109_READ_ONLY, ids=[d for *_, d in A1109_READ_ONLY])
+def test_set_read_only_standard_object_attribute_not_settable(sess, cls, inst, attr, desc):
+    get = sess.cip(mr(0x0E, cls, inst, attr))
+    assert get[2] == 0x00, f"{desc} Get {get.hex()}"  # 속성은 있다
+    rsp = sess.cip(mr(Services.set_attribute_single[0], cls, inst, attr, reply_data(get)))
+    assert rsp[0] == 0x90 and rsp[2] == 0x0E, f"{desc} Set {rsp.hex()}"
