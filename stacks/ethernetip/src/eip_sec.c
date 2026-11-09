@@ -78,8 +78,8 @@ int eip_sec_check_ucmm(eip_stack_t *s, uint32_t session, const uint8_t *cip,
     }
     if (!mac_item || mac_len < EIP_HMAC_LEN) {
         LOG_WARN("ethernetip",
-                 "Security Class %d: mutating UCMM 에 integrity MAC 없음 — 거부",
-                 s->cfg.security_class);
+                 "%s: mutating UCMM 에 integrity MAC 없음 — 거부 (security_class=%d)",
+                 EIP_OWN_SECURITY_PROFILE, s->cfg.security_class);
         return -EPERM;
     }
     uint8_t material[4 + EIP_EXPLICIT_DATA_MAX + 64];
@@ -87,8 +87,9 @@ int eip_sec_check_ucmm(eip_stack_t *s, uint32_t session, const uint8_t *cip,
     mac_input(session, cip, cip_len, material, &mlen, sizeof(material));
     if (eip_hmac_verify(s->cfg.psk, EIP_PSK_LEN, material, mlen, mac_item) !=
         0) {
-        LOG_WARN("ethernetip", "Security Class %d: integrity MAC 검증 실패",
-                 s->cfg.security_class);
+        LOG_WARN("ethernetip",
+                 "%s: integrity MAC 검증 실패 (security_class=%d)",
+                 EIP_OWN_SECURITY_PROFILE, s->cfg.security_class);
         return -EPERM;
     }
     return 0;
@@ -337,7 +338,7 @@ int eip_sec_tls_start(eip_stack_t *s)
         return -ENOMEM;
     }
     SSL_CTX_set_min_proto_version(s->tls_ctx, TLS1_2_VERSION);
-    /* Prefer PSK suites for CIP Security–style shared secret. */
+    /* PSK cipher suites for the repository TLS-PSK profile. Not ODVA CIP Security. */
     if (SSL_CTX_set_cipher_list(
             s->tls_ctx, "PSK-AES128-CBC-SHA256:PSK-AES128-CBC-SHA") != 1) {
         LOG_WARN("ethernetip", "PSK cipher list 설정 실패 — 기본 cipher 사용");
@@ -377,9 +378,8 @@ int eip_sec_tls_start(eip_stack_t *s)
         return -ENOMEM;
     }
     s->tls_listen_fd = fd;
-    LOG_INFO("ethernetip",
-             "CIP Security confidentiality: TLS PSK listen port %d",
-             s->cfg.secure_tcp_port);
+    LOG_INFO("ethernetip", "%s: TLS-PSK listen port %d",
+             EIP_OWN_SECURITY_PROFILE, s->cfg.secure_tcp_port);
     return 0;
 }
 
@@ -534,7 +534,8 @@ static int tls_handshake(eip_stack_t *s, eip_tls_client_t *c)
     int n = SSL_accept(c->ssl);
     if (n == 1) {
         c->hs_done = 1;
-        LOG_INFO("ethernetip", "TLS session accepted (CIP Security port)");
+        LOG_INFO("ethernetip", "%s: TLS session accepted",
+                 EIP_OWN_SECURITY_PROFILE);
         return 0;
     }
     int err = SSL_get_error(c->ssl, n);

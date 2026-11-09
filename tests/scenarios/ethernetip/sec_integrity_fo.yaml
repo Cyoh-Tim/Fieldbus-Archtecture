@@ -1,4 +1,5 @@
 # Internal TC EIP-A-SEC-001 — unsigned FO reject + HMAC accept. Not ODVA CT.
+# 자체 보안 프로파일 (HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님, 인증 주장 아님).
 name: sec_integrity_fo
 id: EIP-A-SEC-001
 suite: EIP-A-v1

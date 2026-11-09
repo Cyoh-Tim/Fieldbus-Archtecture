@@ -239,8 +239,8 @@ static int gate_set_reset(eip_stack_t *s, unsigned auth, uint8_t service,
     }
     if (eip_sec_required(s) && !(auth & EIP_CIP_AUTH_SECURE)) {
         LOG_WARN("ethernetip",
-                 "CIP Set/Reset without authenticated channel (sec class %d)",
-                 s->cfg.security_class);
+                 "%s: CIP Set/Reset without authenticated channel (security_class=%d)",
+                 EIP_OWN_SECURITY_PROFILE, s->cfg.security_class);
         *resp_len = cip_error(resp, resp_cap, service, CIP_STATUS_PRIVILEGE, 0);
         return -1;
     }
@@ -531,7 +531,7 @@ static int handle_object(eip_stack_t *s, unsigned auth, uint8_t service,
         return 0;
     }
 
-    /* EtherNet/IP Security Object — advertise profile capabilities */
+    /* Class 0x5E attributes are the repository profile, not ODVA CIP Security. */
     if (class_id == CIP_CLASS_EIP_SECURITY && instance == 1 &&
         service == CIP_SVC_GET_ATTR_SINGLE) {
         size_t hdr = cip_ok_header(resp, resp_cap, service);

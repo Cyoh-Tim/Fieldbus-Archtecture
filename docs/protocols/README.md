@@ -192,8 +192,12 @@ CTT green ≠ 인증.
 | 연결 수립 | TCP 연결이 전부 | TCP 연결(또는 없음, UDP) | RegisterSession → Forward Open | DCP 이름/IP → RPC Connect → PrmEnd → AppReady |
 | 장치 기술 파일 | 없음 | 없음 | EDS | GSDML (XML) |
 | 장치 탐색 | 없음 | 없음(일부 제품 전용 기능) | ListIdentity (UDP 브로드캐스트) | DCP Identify (L2 멀티캐스트) |
-| 보안 | 없음 (Modbus/TCP Security 별도 사양) | 없음 | CIP Security | PROFINET Security Class 1~3 |
+| 보안 (표준) | 없음 (Modbus/TCP Security 별도 사양) | 없음 | ODVA CIP Security (Volume 8) | PROFINET Security Class 1~3 |
 | 이 저장소 스택 크기 | ~1.2k 줄 | ~1.2k 줄 | ~3.5k 줄 | ~2.5k 줄 |
+
+위 표의 EtherNet/IP "보안 (표준)" 은 ODVA Volume 8 이다. 이 저장소 스택은 그것을
+구현하지 않는다. 구현은 자체 보안 프로파일 (HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님, 인증 주장 아님) 이다
+([`ethernetip.md`](ethernetip.md) 7장).
 
 ---
 

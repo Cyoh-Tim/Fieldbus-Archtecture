@@ -111,7 +111,8 @@ struct eip_stack {
     uint8_t *config_data;
     uint16_t config_size;
 
-    /* CIP Security confidentiality (class >= 2) */
+    /* TLS-PSK listener for the repository profile (security_class >= 2).
+     * Not ODVA CIP Security. */
     SSL_CTX *tls_ctx;
     int tls_listen_fd;
     eip_tls_client_t tls_clients[EIP_TLS_CLIENTS_MAX];
@@ -180,7 +181,7 @@ static inline uint32_t eip_tls_owner_id(int slot)
 
 /* CIP request auth (SendRR fills these; originator mock Set uses both). */
 #define EIP_CIP_AUTH_SESSION 0x01u /* registered session owned by this conn */
-#define EIP_CIP_AUTH_SECURE  0x02u /* HMAC verified, TLS, or lab class 0 */
+#define EIP_CIP_AUTH_SECURE  0x02u /* HMAC verified, TLS-PSK, or security_class 0 */
 
 int eip_cip_route(eip_stack_t *s, const uint8_t *req, size_t req_len,
                   uint8_t *resp, size_t resp_cap, size_t *resp_len);
