@@ -55,7 +55,10 @@ typedef struct {
     int security_class; /* config key. 0 off, 1 HMAC, 2 HMAC + TLS-PSK */
     uint8_t psk[EIP_PSK_LEN];
     int psk_set;
-    uint32_t protection_mode; /* Identity attr 17 */
+    /* Internal Set/Reset gate. Not CIP Identity attr 17 (that attribute is
+     * Geographic_Location). The Protection Mode attribute number is not
+     * confirmed, so this value is not exposed as a CIP attribute. */
+    uint32_t protection_mode;
 
     /* TCP DoS: idle drop / per-source cap. 0 = use stack defaults. */
     int idle_timeout_ms;

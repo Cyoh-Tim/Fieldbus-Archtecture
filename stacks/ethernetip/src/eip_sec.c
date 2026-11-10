@@ -526,6 +526,7 @@ static void tls_accept(eip_stack_t *s, int budget)
         s->tls_clients[slot].hs_done = 0;
         s->tls_clients[slot].peer_ip = ip;
         s->tls_clients[slot].last_rx_ns = eip_now_ns();
+        eip_stack_apply_qos(s);
     }
 }
 

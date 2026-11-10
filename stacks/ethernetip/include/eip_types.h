@@ -84,6 +84,7 @@
 #define CIP_STATUS_PATH_SEGMENT     0x04
 #define CIP_STATUS_SERVICE_NSUP     0x08
 #define CIP_STATUS_ATTR_NSUP        0x14
+#define CIP_STATUS_NOT_SETTABLE     0x0E /* Attribute not settable */
 #define CIP_STATUS_ATTR_READONLY    0x0A
 #define CIP_STATUS_INVALID_PARAM    0x20
 #define CIP_STATUS_RESOURCE         0x02
@@ -121,7 +122,11 @@
 
 #define CIP_STATUS_PRIVILEGE        0x0F
 
-/* QoS DSCP defaults (EtherNet/IP Vol2 typical values used in CT manuals) */
+/* QoS defaults (EtherNet/IP Vol 2). Attribute numbers:
+ * 1 = 802.1Q Tag Enable, 2 = PTP Event, 3 = PTP General,
+ * 4 = Urgent, 5 = Scheduled, 6 = High, 7 = Low, 8 = Explicit. */
+#define EIP_DSCP_PTP_EVENT          59   /* 0x3B */
+#define EIP_DSCP_PTP_GENERAL        47   /* 0x2F */
 #define EIP_DSCP_EXPLICIT           0x1B /* 27 — ListIdentity / UCMM */
 #define EIP_DSCP_SCHEDULED          0x2F /* 47 — Class1 scheduled */
 #define EIP_DSCP_HIGH               0x2B /* 43 */
@@ -134,7 +139,7 @@
 #define EIP_POLL_TLS_BUDGET         4
 
 /* TCP DoS limits (lab-overridable via protocol_params) */
-#define EIP_IDLE_TIMEOUT_MS_DEFAULT 60000
+#define EIP_IDLE_TIMEOUT_MS_DEFAULT 120000 /* TCP/IP attr 13 default, 120 s */
 #define EIP_MAX_CONN_PER_IP_DEFAULT 4
 
 /* Class1 watchdog: close if no O->T for 4*RPI*2^timeout_multiplier (CIP) */
