@@ -1545,3 +1545,59 @@ def test_rpc_unknown_ar_uuid_error_response(pn_dut, opnum, mk, expected, desc):
     # 모르는 ARUUID 의 요청은 기존 AR 을 건드리지 않는다.
     out = pn_dut.cmd("POLL 60")
     assert [f for f in tx_frames(out) if is_rtc1(f)], f"{desc}: 거부 뒤 기존 AR 의 RTC1 이 멈췄다"
+
+
+# ---------------------------------------------------------------- 담당자 결정 2026-11-10 (A20261110-2, -3)
+# 근거: p-net master src/device/pf_cmrpc.c pf_cmrpc_rm_read_ind — NIL ARUUID 는 Read Implicit(opnum 5) 에서만 허용
+# (opnum 2 면 PNET_ERROR_CODE_1_CONN_FAULTY_FAULTY_RECORD 0x08 / CMRPC_AR_UUID_UNKNOWN 0x05 → DE 81 08 05),
+# AR 이 없는 opnum 2 Read 는 CMRPC 0x40 / CMRPC_IOCR_MISSING 0x02 → DE 81 40 02. AR 을 못 찾은 DControl·Write 는
+# DD/DF 81 40 05 (pf_cmrpc_rm_dcontrol_ind, pf_cmrpc_perform_one_write). 상수 include/pnet_api.h.
+# 담당자 결정 (2026-11-10): AR 없는 opnum 2 Read 는 Read Implicit (A20261108-1) 이 들어온 뒤 거부한다.
+# 거부는 무응답이 아니라 에러 PNIOStatus 로 알린다 (fail-closed = 실행하지 않음). 보고서 20261110-owner-decisions.md.
+A1110_OPNUM2_NO_AR = [
+    ("00000000-0000-0000-0000-000000000000", 0xDE810805, "NIL ARUUID"),
+    (AR_UUID, 0xDE814002, "unknown ARUUID"),
+]
+
+
+@known_defect("A20261110-2", "AR 없는 Read(opnum 2) 를 받아 레코드를 돌려준다 (보안 결정 G4 의 관용). 담당자 결정 2026-11-10: "
+              "Read Implicit 뒤 거부 — p-net: NIL ARUUID DE 81 08 05, AR 없음 DE 81 40 02")
+@pytest.mark.parametrize("aruuid,expected,desc", A1110_OPNUM2_NO_AR, ids=[d for *_, d in A1110_OPNUM2_NO_AR])
+def test_record_read_opnum2_without_ar_rejected(pn_dut, aruuid, expected, desc):
+    req = IODReadReq(seqNum=1, ARUUID=aruuid, API=0, slotNumber=0, subslotNumber=1,
+                     index=IM0_INDEX, recordDataLength=4096)
+    rsp = rpc_response(pn_dut.rpc(raw(pnio_request(2, [req], seqnum=95))))
+    assert rsp is not None, f"{desc}: 응답 없음 (에러 응답이어야 한다)"
+    status, blocks = ndr_response(rsp)
+    assert status == expected, f"{desc}: PNIOStatus {status:08x}, 블록 {blocks[:8].hex()}"
+
+
+A1110_NO_AR = [
+    (4, lambda: IODControlReq(ARUUID=AR_UUID, SessionKey=SESSION_KEY, ControlCommand_PrmEnd=1), 0xDD814005, "Control"),
+    (3, lambda: IODWriteReq(seqNum=1, ARUUID=AR_UUID, API=0, slotNumber=0, subslotNumber=1, index=IM1_INDEX,
+                            recordDataLength=60) / raw(IM1Block()), 0xDF814005, "Write"),
+]
+
+
+@known_defect("A20261110-3", "AR 이 없을 때 Control·Write 를 응답 없이 버린다. 담당자 결정 2026-11-10: 에러 응답 — "
+              "p-net 은 AR 을 못 찾으면 DD/DF 81 40 05")
+@pytest.mark.parametrize("opnum,mk,expected,desc", A1110_NO_AR, ids=[d for *_, d in A1110_NO_AR])
+def test_rpc_without_ar_error_response(pn_dut, opnum, mk, expected, desc):
+    rsp = rpc_response(pn_dut.rpc(raw(pnio_request(opnum, [mk()], seqnum=96))))
+    assert rsp is not None, f"{desc}: AR 없는 요청에 응답 없음"
+    status, _ = ndr_response(rsp)
+    assert status == expected, f"{desc}: PNIOStatus {status:08x}"
+
+
+@known_defect("A20261110-3", "AR 이 있는 동안 다른 ARUUID 의 Read(opnum 2) 를 응답 없이 버린다. 담당자 결정 2026-11-10: 에러 응답 — "
+              "p-net 은 AR 을 못 찾은 opnum 2 Read 에 DE 81 40 02")
+def test_read_other_ar_uuid_during_ar_error_response(pn_dut):
+    pn_dut.rpc(raw(connect_pdu()))
+    req = IODReadReq(seqNum=1, ARUUID=OTHER_AR_UUID, API=0, slotNumber=0, subslotNumber=1,
+                     index=IM0_INDEX, recordDataLength=4096)
+    rsp = rpc_response(pn_dut.rpc(raw(pnio_request(2, [req], seqnum=97))))
+    assert rsp is not None, "다른 ARUUID 의 Read 에 응답 없음"
+    status, _ = ndr_response(rsp)
+    assert status == 0xDE814002, f"PNIOStatus {status:08x}"
+    out = pn_dut.cmd("POLL 60")
+    assert [f for f in tx_frames(out) if is_rtc1(f)], "거부 뒤 기존 AR 의 RTC1 이 멈췄다"
