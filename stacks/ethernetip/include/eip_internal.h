@@ -226,6 +226,11 @@ int eip_path_parse(const uint8_t *path, size_t path_bytes, uint16_t *class_id,
 
 uint64_t eip_now_ns(void);
 
+/* Read one encapsulation message, reassembling TCP segments until the
+ * header length is satisfied. timeout_ms covers the whole read.
+ * Returns the byte count, or a negative errno. */
+int eip_originator_recv_encap(int fd, uint8_t *buf, size_t cap, int timeout_ms);
+
 /* CIP Vol 1: timeout = 4 * RPI * 2^N, N = 0..7. N = 0 is valid (4*RPI).
  * Forward Open rejects N > 7 with 0x0133. The shift stays capped so a
  * corrupt stored multiplier cannot shift by 8..255.

@@ -1093,7 +1093,6 @@ def test_originator_get_attribute_single():
         plc.close()
 
 
-@known_defect("T11-12", "태그 읽기에 Logix Read Tag(0x4C) 대신 심볼 경로 Get_Attribute_Single(0x0E)을 보낸다")
 def test_originator_tag_read_uses_logix_read_tag():
     plc = FakeLogix({"Sensor1": (0x00C4, struct.pack("<i", 42))})
     try:
@@ -1107,7 +1106,6 @@ def test_originator_tag_read_uses_logix_read_tag():
     assert rc == 0 and data.endswith(struct.pack("<i", 42)), (rc, data.hex())
 
 
-@known_defect("T11-12", "태그 쓰기에 Logix Write Tag(0x4D) 대신 심볼 경로 Set_Attribute_Single(0x10)을 보낸다")
 def test_originator_tag_write_uses_logix_write_tag():
     plc = FakeLogix({"Sensor1": (0x00C4, struct.pack("<i", 42))})
     try:
@@ -1118,7 +1116,6 @@ def test_originator_tag_write_uses_logix_write_tag():
     assert plc.tags["Sensor1"] == (0x00C4, struct.pack("<i", 7))
 
 
-@known_defect("T11-12", "응답을 recv 한 번으로만 읽어 TCP 로 나뉘어 온 응답을 -EIO 로 버린다. 사양은 encapsulation 길이만큼 재조립")
 def test_originator_reassembles_split_tcp_reply():
     plc = FakeLogix(split_reply=True)
     try:
