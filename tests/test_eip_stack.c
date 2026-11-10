@@ -598,11 +598,14 @@ static void test_qos_dscp_ct_defaults(void)
     expect(s != NULL, "qos stack");
     uint8_t data[8];
     size_t n = sizeof(data);
-    expect(sendrr_get(s, CIP_CLASS_QOS, 1, 5, data, &n) == 0, "qos explicit get");
-    expect(n >= 1 && data[0] == EIP_DSCP_EXPLICIT, "DSCP Explicit=0x1B");
+    expect(sendrr_get(s, CIP_CLASS_QOS, 1, 8, data, &n) == 0, "qos explicit get");
+    expect(n >= 1 && data[0] == EIP_DSCP_EXPLICIT, "DSCP Explicit attr 8=0x1B");
     n = sizeof(data);
-    expect(sendrr_get(s, CIP_CLASS_QOS, 1, 2, data, &n) == 0, "qos scheduled get");
-    expect(n >= 1 && data[0] == EIP_DSCP_SCHEDULED, "DSCP Scheduled=0x2F");
+    expect(sendrr_get(s, CIP_CLASS_QOS, 1, 5, data, &n) == 0, "qos scheduled get");
+    expect(n >= 1 && data[0] == EIP_DSCP_SCHEDULED, "DSCP Scheduled attr 5=0x2F");
+    n = sizeof(data);
+    expect(sendrr_get(s, CIP_CLASS_QOS, 1, 1, data, &n) == 0, "qos tag enable get");
+    expect(n >= 1 && data[0] == 0, "802.1Q Tag Enable attr 1=0");
     eip_stack_destroy(s);
 }
 
@@ -620,10 +623,18 @@ static void test_acd_identity_state(void)
     uint8_t data[8];
     size_t n = sizeof(data);
     expect(sendrr_get(s, CIP_CLASS_IDENTITY, 1, 8, data, &n) == 0, "id state");
-    expect(n >= 1 && data[0] == 2, "Identity state=MinorRF on ACD");
+    expect(n >= 1 && data[0] == 3,
+           "Identity state stays Operational on ACD (2 is Standby)");
     n = sizeof(data);
-    expect(sendrr_get(s, CIP_CLASS_TCPIP, 1, 10, data, &n) == 0, "acd status");
-    expect(n >= 4 && eip_rd_le32(data) == 1, "TCP/IP ACD Status=1");
+    expect(sendrr_get(s, CIP_CLASS_IDENTITY, 1, 5, data, &n) == 0, "id status");
+    expect(n >= 2 && (eip_rd_le16(data) & 0x0100) != 0,
+           "ACD sets Status minor recoverable fault");
+    n = sizeof(data);
+    expect(sendrr_get(s, CIP_CLASS_TCPIP, 1, 10, data, &n) == 0, "select acd");
+    expect(n == 1 && data[0] == 1, "TCP/IP Select ACD BOOL=1");
+    n = sizeof(data);
+    expect(sendrr_get(s, CIP_CLASS_TCPIP, 1, 1, data, &n) == 0, "tcpip status");
+    expect(n >= 4 && (eip_rd_le32(data) & 0x40) != 0, "TCP/IP ACD status bit");
     expect(eip_stack_acd_conflict(s, 0) == 0, "clear conflict");
     n = sizeof(data);
     expect(sendrr_get(s, CIP_CLASS_IDENTITY, 1, 8, data, &n) == 0, "id state2");
@@ -831,9 +842,9 @@ static void test_list_identity_and_protection(void)
 
     uint8_t data[8];
     size_t n = sizeof(data);
-    expect(sendrr_get(s, CIP_CLASS_IDENTITY, 1, 17, data, &n) == 0,
-           "protection mode");
-    expect(n >= 4 && eip_rd_le32(data) == 0x1, "protection mode value");
+    /* Attr 17 is Geographic_Location. protection_mode is not that attribute. */
+    expect(sendrr_get(s, CIP_CLASS_IDENTITY, 1, 17, data, &n) != 0,
+           "attr 17 is not Protection Mode");
     eip_stack_destroy(s);
 }
 

@@ -915,20 +915,17 @@ def test_forward_open_with_config_data_segment(adapter_dut):
 
 
 # ---------------------------------------------------------------- 표준 객체 속성 (T11-10)
-@known_defect("T11-10", "Exclusive Owner 연결 후 Identity Status 에 Owned(bit 0) 대신 Configured(bit 2)를 세운다")
 def test_identity_status_owned_bit_after_forward_open(sess, driver):
     open_class1(sess, mult=5)
     status = get_attr(driver, 0x01, 1, 5, UINT)
     assert status & 0x0001, f"Status {status:#06x}"
 
 
-@known_defect("T11-10", "QoS 속성 번호가 3 밀렸다 (attr 1~5 = DSCP Urgent~Explicit, 6~8 없음). 사양은 attr 1 = 802.1Q Tag Enable(0), 4~8 = DSCP Urgent 55/Scheduled 47/High 43/Low 31/Explicit 27")
 def test_qos_attribute_numbers(driver):
     got = {a: get_attr(driver, 0x48, 1, a, USINT) for a in (1, 4, 5, 6, 7, 8)}
     assert got == {1: 0, 4: 55, 5: 47, 6: 43, 7: 31, 8: 27}, got
 
 
-@known_defect("T11-10", "QoS DSCP 를 소켓에 적용하지 않아 Scheduled 우선순위 T→O 가 TOS 0 으로 나간다. 사양은 DSCP Scheduled 47 (TOS 0xBC)")
 def test_t2o_packets_carry_dscp_scheduled(sess, eip_dut):
     u = io_socket()
     try:
@@ -942,7 +939,6 @@ def test_t2o_packets_carry_dscp_scheduled(sess, eip_dut):
         u.close()
 
 
-@known_defect("T11-10", "TCP/IP Interface attr 2 에 ACD 가능을 bit 2(DHCP)로 표시한다. 사양은 bit 7 = ACD capable")
 def test_tcpip_config_capability_acd_bit(adapter_dut):
     d = adapter_dut("--acd")
     drv = CIPDriver(f"127.0.0.1:{d.port}")
@@ -954,7 +950,6 @@ def test_tcpip_config_capability_acd_bit(adapter_dut):
     assert cap & 0x80, f"Configuration Capability {cap:#010x}"
 
 
-@known_defect("T11-10", "TCP/IP Interface attr 10/11 이 UDINT(ACD 상태/횟수)다. 사양은 attr 10 SelectAcd BOOL(1B), attr 11 LastConflictDetected STRUCT(35B)")
 def test_tcpip_acd_attribute_types(adapter_dut):
     d = adapter_dut("--acd")
     s = Session(d.port)
@@ -967,7 +962,6 @@ def test_tcpip_acd_attribute_types(adapter_dut):
     assert a11[2] == 0 and len(reply_data(a11)) == 35, a11.hex()
 
 
-@known_defect("T11-10", "TCP/IP Interface attr 5(Interface Configuration)가 없다. 사양은 IP·mask·gateway·DNS 2개·domain 구조체")
 def test_tcpip_interface_configuration_attr5(sess):
     rsp = sess.cip(mr(0x0E, 0xF5, 1, 5))
     assert rsp[2] == 0x00, rsp.hex()
@@ -977,17 +971,14 @@ def test_tcpip_interface_configuration_attr5(sess):
     assert len(data) in (22 + dlen, 22 + dlen + (dlen & 1)), data.hex()
 
 
-@known_defect("T11-10", "TCP/IP Interface attr 13(Encapsulation Inactivity Timeout)이 없다. 사양은 UINT, 기본 120 s")
 def test_tcpip_encapsulation_inactivity_timeout_attr13(driver):
     assert get_attr(driver, 0xF5, 1, 13, UINT) == 120
 
 
-@known_defect("T11-10", "Port 객체 attr 1(Port Type)이 0 이다. 사양은 TCP/IP 포트 = 4")
 def test_port_object_type_tcpip(driver):
     assert get_attr(driver, 0xF4, 1, 1, UINT) == 4
 
 
-@known_defect("T11-10", "클래스 레벨 속성(instance 0)이 없다. 사양은 attr 1 Revision (UINT, ≥1)")
 def test_identity_class_revision_attribute(sess):
     rsp = sess.cip(mr(0x0E, 0x01, 0, 1))
     assert rsp[2] == 0x00, rsp.hex()
@@ -995,7 +986,6 @@ def test_identity_class_revision_attribute(sess):
     assert rev >= 1
 
 
-@known_defect("T11-10", "읽기 전용 속성(Identity Vendor ID) Set 에 0x05 로 응답한다. 사양은 0x0E Attribute not settable")
 def test_set_read_only_attribute_not_settable(sess):
     rsp = sess.cip(mr(Services.set_attribute_single[0], 0x01, 1, 1, struct.pack("<H", 0x1111)))
     assert rsp[0] == 0x90 and rsp[2] == 0x0E, rsp.hex()
