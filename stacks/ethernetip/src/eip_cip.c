@@ -335,14 +335,37 @@ static int handle_object(eip_stack_t *s, unsigned auth, uint8_t service,
             return 0;
         }
         if (service == CIP_SVC_RESET) {
-            /* Type 0 = power-cycle equivalent soft reset of IO image */
-            memset(s->input_data, 0, s->input_size);
-            memset(s->output_data, 0, s->output_size);
+            /* Parameter is one USINT. Omitted means type 0 (power-cycle
+             * emulation): clear the I/O image and Class 1 connections.
+             * The success reply is filled before that runs. Types 1 and 2
+             * need a factory-default store this stack does not have, so
+             * they are rejected with 0x20 along with every other
+             * unsupported type. */
+            uint8_t rtype = 0;
+            if (data_len > 0 && data) {
+                rtype = data[0];
+            }
+            if (rtype != 0) {
+                LOG_WARN("ethernetip",
+                         "Identity Reset type %u is not supported", rtype);
+                *resp_len = cip_error(resp, resp_cap, service,
+                                      CIP_STATUS_INVALID_PARAM, 0);
+                return 0;
+            }
+            *resp_len = cip_ok_header(resp, resp_cap, service);
+            if (*resp_len == 0) {
+                return 0;
+            }
+            if (s->input_data && s->input_size > 0) {
+                memset(s->input_data, 0, s->input_size);
+            }
+            if (s->output_data && s->output_size > 0) {
+                memset(s->output_data, 0, s->output_size);
+            }
             for (int i = 0; i < EIP_CLASS1_CONN_MAX; i++) {
                 s->class1[i].in_use = 0;
             }
             s->config_consistency++;
-            *resp_len = cip_ok_header(resp, resp_cap, service);
             return 0;
         }
         if (service == CIP_SVC_SET_ATTR_SINGLE) {

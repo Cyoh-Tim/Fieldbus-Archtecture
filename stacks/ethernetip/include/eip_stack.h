@@ -77,6 +77,9 @@ typedef struct {
     int (*udp_send)(void *ctx, const uint8_t *data, size_t len,
                     uint32_t dst_ip_be, uint16_t dst_port);
     void *ctx;
+    /* Optional Ethernet transmit for LLDP. NULL keeps AF_PACKET when the
+     * stack is not mock and cfg.iface is set. */
+    int (*l2_send)(void *ctx, const uint8_t *frame, size_t len);
 } eip_transport_ops_t;
 
 eip_stack_t *eip_stack_create(const eip_cfg_t *cfg);

@@ -41,6 +41,7 @@ typedef struct {
     uint32_t originator_serial;
     uint8_t timeout_multiplier;
     uint8_t exclusive_owner; /* 1 = this connection owns the output assembly */
+    uint8_t o2t_seen; /* 0 until an O->T refreshes the watchdog */
     uint32_t watchdog_us; /* derived close timeout */
     /* CPF: item count(2) + seq addr(12) + connected hdr(4) + seq(2) + data */
     uint8_t last_produce[20 + EIP_ASSEMBLY_SIZE_MAX];
@@ -54,7 +55,7 @@ typedef struct {
     uint32_t session;
     uint32_t peer_ip; /* host-order IPv4 */
     uint64_t last_rx_ns;
-    uint8_t rx[EIP_TCP_BUF_MAX];
+    uint8_t rx[EIP_TCP_RX_MAX];
     size_t rx_len;
 } eip_tcp_client_t;
 
@@ -144,6 +145,11 @@ struct eip_stack {
     size_t lldp_last_frame_len;
     uint64_t lldp_last_tx_ns;
     uint64_t lldp_uptime_anchor_ns;
+    int lldp_fd; /* AF_PACKET, -1 when closed */
+    int lldp_ifindex;
+    uint8_t lldp_mac[6];
+    int lldp_mac_set;
+    int lldp_tx_error_logged;
 
     /* Real-time accounting */
     uint64_t last_poll_ns;
@@ -231,6 +237,12 @@ uint64_t eip_now_ns(void);
  * Forward Open rejects N > 7 with 0x0133. The shift stays capped so a
  * corrupt stored multiplier cannot shift by 8..255.
  */
+/* Until the first O->T, the inactivity timer is at least this long.
+ * ethernetip.md M5 writes max(RPI×multiplier, 10s). The CIP clause for
+ * that initial value is unconfirmed in the handoff; 10 s is the
+ * convention the T11-13 oracle names. */
+#define EIP_CLASS1_FIRST_PACKET_GRACE_US 10000000u
+
 static inline uint32_t eip_class1_watchdog_us(uint32_t rpi_us,
                                               uint8_t timeout_mult)
 {
@@ -248,8 +260,9 @@ static inline uint32_t eip_class1_watchdog_us(uint32_t rpi_us,
 /* Class1 watchdog — close stale connections */
 void eip_io_watchdog(eip_stack_t *s);
 
-/* LLDP TX-only helpers */
+/* LLDP TX helpers */
 int eip_lldp_build(eip_stack_t *s);
 void eip_lldp_poll(eip_stack_t *s);
+void eip_lldp_close(eip_stack_t *s);
 
 #endif /* EIP_INTERNAL_H */
