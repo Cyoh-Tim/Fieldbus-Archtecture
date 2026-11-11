@@ -99,6 +99,18 @@ static void lldp_tx_warn(eip_stack_t *s, const char *what, int err)
 
 /* Open AF_PACKET once and remember the interface MAC. Failures are
  * logged once; the in-memory frame is still built for CIP/tests. */
+/* ifr_name is IFNAMSIZ (16). cfg.iface is longer, so reject a name
+ * that would not fit instead of truncating it. */
+static int copy_ifname(struct ifreq *ifr, const char *name)
+{
+    size_t n = strlen(name);
+    if (n == 0 || n >= sizeof(ifr->ifr_name)) {
+        return -ENAMETOOLONG;
+    }
+    memcpy(ifr->ifr_name, name, n + 1);
+    return 0;
+}
+
 static int eip_lldp_nic_open(eip_stack_t *s)
 {
     struct ifreq ifr;
@@ -116,7 +128,10 @@ static int eip_lldp_nic_open(eip_stack_t *s)
         return -errno;
     }
     memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", s->cfg.iface);
+    if (copy_ifname(&ifr, s->cfg.iface) != 0) {
+        close(fd);
+        return -ENAMETOOLONG;
+    }
     if (ioctl(fd, SIOCGIFINDEX, &ifr) < 0) {
         int err = errno;
         close(fd);
@@ -124,7 +139,10 @@ static int eip_lldp_nic_open(eip_stack_t *s)
     }
     s->lldp_ifindex = ifr.ifr_ifindex;
     memset(&ifr, 0, sizeof(ifr));
-    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", s->cfg.iface);
+    if (copy_ifname(&ifr, s->cfg.iface) != 0) {
+        close(fd);
+        return -ENAMETOOLONG;
+    }
     if (ioctl(fd, SIOCGIFHWADDR, &ifr) == 0) {
         memcpy(s->lldp_mac, ifr.ifr_hwaddr.sa_data, 6);
         s->lldp_mac_set = 1;
