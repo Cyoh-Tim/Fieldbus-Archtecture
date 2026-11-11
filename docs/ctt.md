@@ -377,7 +377,7 @@ ctest --output-on-failure
 - DUT = `stacks/ethernetip/` 자체 스택. 구매 스택 스텁은 대상 아님
 - `tools/ctt/proto/ethernetip/` Scanner/Originator stub
 - `tests/scenarios/ethernetip/*.yaml` — register / identity / assembly+FO+IO /
-  lifetime Close / Sec1 FO reject/accept / bad HMAC / truncated Encaps /
+  lifetime Close / 자체 보안 프로파일 FO reject/accept / bad HMAC / truncated Encaps /
   QoS / ACD / LLDP / watchdog / Class1 cyclic metrics / ListIdentity
 - HMAC 단위 테스트 `tests/test_eip_crypto.c`. 잔여 `tests/test_eip_stack.c`
 - 같은 `./build/ctt` 엔트리. `protocol: ethernetip`

@@ -15,9 +15,11 @@
  *   - Originator (client): RegisterSession + explicit Get/Set Attribute
  *     Single and symbolic tag read/write (UCMM)
  *
- * Designed for an ODVA conformance path (EDS + SOC + CT objects/security).
+ * EDS and object coverage are a product path toward ODVA CT.
  * Official Declaration of Conformity still requires ODVA membership and an
  * authorized CT lab — the stack alone is not a certificate.
+ * Security is the repository profile in eip_sec.h (HMAC integrity / TLS-PSK).
+ * That profile is not ODVA CIP Security and is not a certification claim.
  */
 
 typedef struct eip_stack eip_stack_t;
@@ -49,8 +51,8 @@ typedef struct {
     uint32_t rpi_us; /* Minimum Class 1 RPI, µs (default 8000 = 8 ms cycle) */
     int mock;        /* 1 = no real sockets (unit tests) */
 
-    /* Security — see docs/ethernetip_stack.md */
-    int security_class; /* 0/1/2 */
+    /* Repository profile — see EIP_OWN_SECURITY_PROFILE. Not ODVA CIP Security. */
+    int security_class; /* config key. 0 off, 1 HMAC, 2 HMAC + TLS-PSK */
     uint8_t psk[EIP_PSK_LEN];
     int psk_set;
     /* Internal Set/Reset gate. Not CIP Identity attr 17 (that attribute is

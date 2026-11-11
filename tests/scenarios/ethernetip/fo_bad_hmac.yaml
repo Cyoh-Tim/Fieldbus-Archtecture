@@ -1,4 +1,5 @@
-# Internal TC EIP-A-NEG-001 — Sec1 FO with wrong HMAC must reject Class1.
+# Internal TC EIP-A-NEG-001 — repository profile FO with a bad HMAC must reject Class 1.
+# 자체 보안 프로파일 (HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님, 인증 주장 아님).
 name: fo_bad_hmac
 id: EIP-A-NEG-001
 suite: EIP-A-v1

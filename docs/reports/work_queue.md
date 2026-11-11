@@ -134,11 +134,41 @@
 | 110 | A20261108-1 | PN Read Implicit (opnum 5) 무응답 (-ENOSYS) — AR 없이 I&M0 를 읽는 엔지니어링 툴·컨트롤러 식별이 시간 초과 | `stacks/profinet/`, `tests/` | A20261108-1 | 2026-11-08 감사. 보고서 [audits/20261108-pn-rpc-records.md](audits/20261108-pn-rpc-records.md). 근거 p-net `pf_cmrpc.c` READ_IMPLICIT, Wireshark "Read Implicit". 입문서 `docs/protocols/profinet.md` ReadImplicit 행도 같이 고쳐도 됨 |
 | 111 | A20261108-2 | PN I&M0 Write 를 성공으로 응답 (`DF 80 B6 00` 이어야), I&M1–4 Write 길이 미검사 (정확히 54/16/54/54 아니면 `DF 80 B1 00`) | `stacks/profinet/`, `tests/` | A20261108-2 ×2 | 같은 보고서. 근거 p-net `pf_fspm.c`, Wireshark. 같이 바뀌는 고정값: CTT `tests/scenarios/profinet/rpc_write_prmend_appready.yaml`, `rpc_ar_lifetime_cm.yaml` (I&M1 헤더 없는 6바이트 → 60바이트 블록), 단위 `tests/test_pn_t12_18.c:287-290`, `tests/test_pn_rpc.c:296-312` |
 | 112 | A20261108-3 | PN IODControlReq(0x0110) ControlCommand 미검사 — PrmEnd 가 아니어도 Done (`DD 81 14 08` 이어야) | `stacks/profinet/`, `tests/` | A20261108-3 | 같은 보고서. 근거 p-net `pf_cmrpc_rm_dcontrol_interpret_req`, Wireshark ErrorCode1 0x14 / 0x08 |
-| 113 | A20261108-4 | PN AR 없는 Release 를 성공(+블록 아닌 4바이트)으로, 다른 ARUUID 의 Release·Control·Write 를 무응답으로 처리 — "AR UUID unknown" `DC/DD/DF 81 40 05` 이어야 | `stacks/profinet/`, `tests/` | A20261108-4 ×2 | 같은 보고서. 근거 p-net `pf_cmrpc.c` CMRPC_AR_UUID_UNKNOWN, Wireshark. 송신 IP 불일치·AR 없는 Control/Write 무응답은 보안 결정 G4·CTT PN-B-NEG-008 그대로 (보고서 확인 필요 4). 단위 `tests/test_pn_rpc.c:272-281` 기대 변경 |
+| 113 | A20261108-4 | PN AR 없는 Release 를 성공(+블록 아닌 4바이트)으로, 다른 ARUUID 의 Release·Control·Write 를 무응답으로 처리 — "AR UUID unknown" `DC/DD/DF 81 40 05` 이어야 | `stacks/profinet/`, `tests/` | A20261108-4 ×2 | 같은 보고서. 근거 p-net `pf_cmrpc.c` CMRPC_AR_UUID_UNKNOWN, Wireshark. 송신 IP 불일치·AR 없는 Control/Write 무응답은 보안 결정 G4·CTT PN-B-NEG-008 그대로 (보고서 확인 필요 4). 단위 `tests/test_pn_rpc.c:272-281` 기대 변경. 이 PR 에서 `A20261110-3` (큐 120) 테스트도 통과하면 그 표시도 지워도 된다 (허용) |
 | 114 | A20261109-1 | EIP TCP/IP·Ethernet Link·Port 의 읽기 전용 속성 Set 에 0x05 (Path destination unknown) — 있는 속성은 0x0E (Attribute not settable) | `stacks/ethernetip/`, `tests/` | A20261109-1 | 출처 #192 "발견한 다른 문제" 2. 보고서 [audits/20261109-eip-t11-9-10-followups.md](audits/20261109-eip-t11-9-10-followups.md). 근거 OpENer `cipcommon.c` `SetAttributeSingle`. settable 속성 Set 은 그대로. #192 (큐 45) 이후 |
 | 115 | A20261109-2 | EIP 거부된 RegisterSession(핸들 0) 이 그 연결의 `c->session` 을 0 으로 덮어 어댑터 연결 상태가 내려감 (세션은 살아 있음) | `stacks/ethernetip/`, `tests/` | 없음 | 출처 #190 "발견한 다른 문제" 4. 같은 보고서. 근거 OpENer `encap.c`. 단위 테스트 (TCP·TLS) |
 | 116 | A20261109-3 | EIP Identity Protection Mode attr 19 (WORD) 미노출, TCP/IP·Ethernet Link·QoS·Port 클래스 속성 (instance 0) 없음, TCP/IP attr 5 mask·gateway·DNS 가 호스트 값이 아님 (낮음) | `stacks/ethernetip/`, `tests/` | 없음 | #183 답 후속. 같은 보고서. 근거 Wireshark `packet-cip.c` (attr 19), OpENer class revision. `protection_mode` 비트 대응은 `[Claude 확인 요청]` 으로 |
-| 117 | A20261109-4 | EIP 문서가 T11-8~T11-10 이전 동작을 적음 (`docs/protocols/ethernetip.md`, `docs/ethernetip_stack.md`, `tools/ctt/proto/ethernetip/README.md`) | `docs/`, `tools/ctt/proto/ethernetip/README.md` | 없음 | 출처 #190·#192 "발견한 다른 문제". 같은 보고서에 위치 목록. 문서만. #192 이후 |
+| 117 | A20261109-4 | EIP 문서가 T11-8~T11-10 이전 동작을 적음 (`docs/protocols/ethernetip.md`, `docs/ethernetip_stack.md`, `tools/ctt/proto/ethernetip/README.md`) | `docs/`, `tools/ctt/proto/ethernetip/README.md`, `README.md`, `config/example.codesys.ethernetip.json` (`_comment` 만) | 없음 | 출처 #190·#192 "발견한 다른 문제". 같은 보고서에 위치 목록. 문서만. #192 이후. #195 추가분: `config/example.codesys.ethernetip.json:9` `_comment` 의 "CIP Security HMAC", `README.md` EIP 범위에 자체 보안 프로파일 문장 ([audits/20261110-eip-security-object-0x5e.md](audits/20261110-eip-security-object-0x5e.md)) |
+| 118 | A20261110-1 | EIP 자체 보안 프로파일이 표준 클래스 0x5E (EtherNet/IP Security Object) 로 응답 — attr 1 security_class UINT·attr 3 TLS 포트로 CIP Security 객체가 있는 것처럼 보임 | `stacks/ethernetip/`, `tests/` | A20261110-1 | 출처 #186 답·#195. 보고서 [audits/20261110-eip-security-object-0x5e.md](audits/20261110-eip-security-object-0x5e.md). 근거 Wireshark `packet-enip.c` 0x5E 속성 표. 벤더 클래스로 옮길지 지울지는 `[Claude 확인 요청]` 으로. CTT `sec_integrity_fo.yaml` 0x5E 단계 함께. #195 (큐 46) 이후 |
+| 119 | A20261110-2 | PN AR 없는 Read(opnum 2) 를 받아 레코드를 돌려줌 — Read Implicit 뒤 거부 (NIL ARUUID `DE 81 08 05`, AR 없음 `DE 81 40 02`) | `stacks/profinet/`, `tests/`, `tests/scenarios/profinet/`, `tools/ctt/proto/profinet/` (`record_read` 의 opnum 만) | A20261110-2 | 담당자 결정 (2026-11-10). 보고서 [audits/20261110-owner-decisions.md](audits/20261110-owner-decisions.md). 근거 p-net `pf_cmrpc_rm_read_ind`. 보안 결정 G4 의 "Read without an AR remains allowed" 를 대신한다. 큐 110 이후. CTT `record_read_*`·`record_unknown_index`·`rpc_cm_without_ar` 의 AR 없는 읽기를 opnum 5 로 |
+| 120 | A20261110-3 | PN 거부를 무응답으로 처리 — AR 없는 Control·Write, AR 중 다른 ARUUID 의 Read, 송신 IP 불일치 요청에 에러 PNIOStatus 로 답해야 (AR 유지) | `stacks/profinet/`, `tests/`, `tests/scenarios/profinet/rpc_cm_without_ar.yaml` | A20261110-3 ×2 | 담당자 결정 (2026-11-10). 같은 보고서. 근거 p-net (`DD/DF 81 40 05`, Read `DE 81 40 02`). 송신 IP 불일치 코드는 `[Claude 확인 요청]` 으로 (단위 테스트). 큐 113 이후 |
+
+## v0.2.0 릴리스 게이트
+
+담당자 결정 (2026-11-10, [audits/20261110-owner-decisions.md](audits/20261110-owner-decisions.md) 결정 1): 아래 행이 모두 끝나면 v0.2.0 을 태그한다.
+나머지 행은 v0.3 이후. 분류는 검증 담당이 하고, 새 행이 기준에 들면 검증 담당이 더한다. 빼는 것은 담당자가 정한다.
+기준: (a) 인수인계 치명·높음 (b) 보안·가용성 (c) 조용히 틀리는 데이터 (d) 인증·표준 지원의 잘못된 주장.
+
+| 큐 | 항목 | 기준 | 한 줄 |
+|---|---|---|---|
+| 46 | T11-11 | d | EIP 보안 명칭 (PR #195 검증 PASS, 충돌 해소 대기) |
+| 60 | A20261003-1 | c | scale 있는 uint32/int32 읽기가 float 비트를 정수로 |
+| 63 | A20261004-2 | b, c | Modbus 클라이언트가 Byte Count 다른 응답 수락 (초기화 안 된 메모리 노출) |
+| 64 | A20261004-3 | c | Modbus 클라이언트가 Unit ID 다른 응답 수락 |
+| 65 | A20261004-4 | c | Modbus 클라이언트 실패한 쓰기 값이 미러에 남음 |
+| 67 | A20261007-2 | a, b | PN 고정 MAC — 실 NIC 에서 AR 끊김 |
+| 78 | A20261012-2 | b | EIP 다른 IP 의 Forward Close 가 남의 연결을 닫음 |
+| 80 | T11-5 후속 | a | EIP 멀티캐스트 T→O·Listen Only·Input Only (인수인계 높음) |
+| 81 | A20261015-1 | b | EIP Forward Open 응답 힙 오버플로 (내부 API) |
+| 84 | A20261018-1 | c | EIP O→T 길이 불일치 데이터를 출력에 씀 |
+| 90 | A20261019-1 | c | SLMP 클라이언트 선두 번호 24비트 절단 (다른 주소 읽기 성공) |
+| 94 | A20261025-1 | b | EIP SIGPIPE 원격 비인증 DoS |
+| 95 | A20261025-2 | c | EIP Originator 늦은 응답을 다음 요청 결과로 |
+| 98 | A20261025-5 | b | EIP Originator connect 블로킹 (~130 s) |
+| 99 | A20261028-1 | b, c | EIP 짧은 send 로 응답 유실·스트림 경계 깨짐 |
+| 118 | A20261110-1 | d | EIP 자체 보안이 표준 클래스 0x5E 로 응답 |
+
+(2026-11-10 기준 16행. 이슈 발행 순서는 운영 규칙대로 큐 번호순이다.)
 
 ## 이슈 본문 템플릿
 

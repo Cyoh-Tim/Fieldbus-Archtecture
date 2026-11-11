@@ -1625,3 +1625,15 @@ def test_set_read_only_standard_object_attribute_not_settable(sess, cls, inst, a
     assert get[2] == 0x00, f"{desc} Get {get.hex()}"  # 속성은 있다
     rsp = sess.cip(mr(Services.set_attribute_single[0], cls, inst, attr, reply_data(get)))
     assert rsp[0] == 0x90 and rsp[2] == 0x0E, f"{desc} Set {rsp.hex()}"
+
+
+# ---------------------------------------------------------------- 선별 2026-11-10 (A20261110-1)
+# 근거: Wireshark epan/dissectors/packet-enip.c — class 0x5E (EtherNet/IP Security, CIP Volume 8) 인스턴스 속성:
+# 1 State (USINT), 2 Capability Flags, 3 Available Cipher Suites, 4 Allowed Cipher Suites, 5 Pre-Shared Keys …
+# 저장소 보안은 자체 프로파일 (ODVA CIP Security 아님) 이므로 표준 클래스 0x5E 를 갖고 있다고 답하면 안 된다.
+# 객체가 없거나 (에러), 있다면 attr 1 은 USINT 1바이트여야 한다.
+@known_defect("A20261110-1", "자체 보안 프로파일이 표준 클래스 0x5E (EtherNet/IP Security Object) 로 응답한다: attr 1 = security_class (UINT 2바이트), "
+              "attr 3 = TLS 포트 (UINT). Vol 8 의 attr 1 은 State (USINT), attr 3 은 Available Cipher Suites")
+def test_eip_security_object_not_misrepresented(sess):
+    rsp = sess.cip(mr(0x0E, 0x5E, 1, 1))
+    assert rsp[2] != 0x00 or len(reply_data(rsp)) == 1, f"class 0x5E attr 1 {rsp.hex()}"

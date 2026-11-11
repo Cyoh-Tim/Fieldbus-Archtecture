@@ -12,7 +12,7 @@
 
 #define EIP_TCP_PORT_DEFAULT     44818
 #define EIP_UDP_IO_PORT_DEFAULT  2222
-#define EIP_SECURE_PORT_DEFAULT  2221 /* CIP Security–oriented TLS port */
+#define EIP_SECURE_PORT_DEFAULT  2221 /* TLS-PSK port of the repository profile. Not ODVA CIP Security. */
 
 #define EIP_ENCAP_HDR_SIZE       24
 #define EIP_CPF_ITEM_HDR         4
@@ -33,10 +33,11 @@
 #define EIP_PSK_LEN                 32
 #define EIP_HMAC_LEN                32
 
-/* Security class (Fieldbus profile — see docs/ethernetip_stack.md) */
-#define EIP_SECURITY_CLASS_0  0 /* lab / open */
-#define EIP_SECURITY_CLASS_1  1 /* Integrity PSK (HMAC) */
-#define EIP_SECURITY_CLASS_2  2 /* Integrity + TLS confidentiality port */
+/* security_class values for the repository profile (see eip_sec.h).
+ * Not ODVA CIP Security. The config key name stays security_class. */
+#define EIP_SECURITY_CLASS_0  0 /* profile off / lab */
+#define EIP_SECURITY_CLASS_1  1 /* HMAC integrity */
+#define EIP_SECURITY_CLASS_2  2 /* HMAC + TLS-PSK port */
 
 /* Encapsulation commands (LE on wire) */
 #define EIP_CMD_NOP                 0x0000
