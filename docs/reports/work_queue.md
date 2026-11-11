@@ -182,7 +182,10 @@
 main 최신 기준으로 새 브랜치를 만들어 작업한다. 이 이슈 하나당 PR 하나.
 
 1. `CLAUDE.md` 를 먼저 읽고 규칙을 지킨다. 작업 범위: <작업 범위>. 그 밖의 디렉토리는 건드리지 않는다.
-   새 테스트 실행 파일이 필요하면 `CMakeLists.txt` 에 테스트 타깃(`add_executable`/`add_test`)을 추가하는 것만 허용한다.
+   새 단위 테스트는 `tests/test_<proto>_t<번호>.c` (예: `tests/test_eip_t11_13.c`, `tests/test_slmp_t10_5.c`) 파일로 둔다.
+   스택 라이브러리만 링크하는 이 형태는 CMake 가 자동으로 빌드·등록한다 (`fb_add_item_tests`). **`CMakeLists.txt` 는 고치지 않는다**
+   (PR 마다 같은 자리에 `add_test` 를 넣어 서로 충돌하던 것을 막는다). 어댑터 링크·compile definition 이 꼭 필요한 테스트만
+   `CMakeLists.txt` 에 테스트 타깃(`add_executable`/`add_test`)을 직접 추가하고 PR 설명에 이유를 적는다.
 2. `docs/reports/structure_handoff_20260930.md` 의 "공통 규칙" 과 "<T 항목>" 만 읽고 그 작업만 한다.
    (감사 발견 항목 `A<ID>` 는 인수인계 문서 대신 비고에 링크된 `docs/reports/audits/…` 보고서의 해당 절을 읽는다.)
    관련 설명이 `docs/protocols/<프로토콜>.md` 에 있으면 함께 읽는다.
