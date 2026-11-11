@@ -5,8 +5,9 @@
 필요하다. 카테고리 이름은 공개 EtherNet/IP Adapter 기능 묶음에 맞춘
 **내부 라벨** 이다.
 
-DUT: self-implemented `stacks/ethernetip/` (Adapter Class 1 + UCMM + Sec 1/2
-lab profile). `adapters/ethernetip/` 데몬 어댑터는 DUT 가 아니다.
+DUT: self-implemented `stacks/ethernetip/` (Adapter Class 1 + UCMM +
+자체 보안 프로파일). `adapters/ethernetip/` 데몬 어댑터는 DUT 가 아니다.
+보안은 자체 보안 프로파일 (HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님, 인증 주장 아님).
 
 내부 bundle-grade 카탈로그·여섯 기둥: [`docs/ctt_eip_bundle.md`](ctt_eip_bundle.md)
 (`EIP-A-*`, **≠ ODVA 인증**).
@@ -34,8 +35,8 @@ lab profile). `adapters/ethernetip/` 데몬 어댑터는 DUT 가 아니다.
 | `class1_lifetime_dual.yaml` | two Class 1 connections | mock | FO A+B, Close A, B stays. `EIP-A-CM-003` |
 | `class1_cyclic_metrics.yaml` | Class 1 cyclic metrics | mock | 48 cycles, late/missed/jitter vs RPI. `EIP-A-CYC-002` |
 | `class1_cycle_4ms.yaml` | Class 1 4 ms metrics | mock | `rpi_us: 4000`. `EIP-A-CYC-003` |
-| `sec_integrity_fo.yaml` | Security Class 1 integrity (lab profile) | mock | unsigned FO 거부, HMAC 수락. CPF item `0x00C1` 은 이 저장소 프로파일. `EIP-A-SEC-001` |
-| `fo_bad_hmac.yaml` | Security Class 1 reject (bad HMAC) | mock | item 있음, MAC 불량. `EIP-A-NEG-001` |
+| `sec_integrity_fo.yaml` | 자체 보안 프로파일 HMAC (lab) | mock | unsigned FO 거부, HMAC 수락. CPF item `0x00C1` 은 이 저장소 프로파일. ODVA CIP Security 아님. `EIP-A-SEC-001` |
+| `fo_bad_hmac.yaml` | 자체 보안 프로파일 bad HMAC | mock | item 있음, MAC 불량. `EIP-A-NEG-001` |
 | `encap_malformed.yaml` | Encapsulation truncated / unknown cmd | mock | fail closed. `EIP-A-NEG-002` |
 | `io_without_fo.yaml` | Class 1 reject (no FO) | mock | produce 없음. `EIP-A-NEG-003` |
 | `qos_dscp.yaml` | QoS Object DSCP defaults | mock | Explicit 0x1B / Scheduled 0x2F. `EIP-A-QOS-001` |
@@ -50,16 +51,17 @@ lab profile). `adapters/ethernetip/` 데몬 어댑터는 DUT 가 아니다.
 |----------|------|------|
 | Encapsulation ListInterfaces | not yet | ListServices 는 `EIP-A-ENC-003`. ListInterfaces **DUT not implemented** |
 | Originator UCMM tag R/W | not yet | Adapter DUT 경로 |
-| CIP Security TLS (Class 2) port 2221 | not yet | 스택은 있으나 CTT mock 미연결 |
+| 자체 보안 프로파일 TLS-PSK port 2221 | not yet | ODVA CIP Security 아님. 스택은 있으나 CTT mock 미연결 |
 | Ethernet Link / Port objects | not yet | DUT 객체는 있음 |
 | Official ODVA CT lab execution / DoC | N/A | 멤버십 + 공인 랩. 이 하네스가 대체하지 않음 |
 
-## Security lab profile
+## 자체 보안 프로파일
 
-Security Class 1 HMAC 은 이 저장소 프로파일이다 (`docs/ethernetip_stack.md`).
-ODVA CIP Security 할당 item 코드를 사칭하지 않는다. 매트릭스의 “integrity”
-은 mutating UCMM / Forward Open 에 CPF `0x00C1` HMAC 이 없으면 거부하는
-회귀를 뜻한다. HMAC 불량은 `EIP-A-NEG-001`.
+자체 보안 프로파일 (HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님, 인증 주장 아님).
+상세는 `docs/ethernetip_stack.md`. config 키는 `security_class` 다.
+ODVA CIP Security 할당 item 코드를 사칭하지 않는다. 매트릭스의 HMAC 행은
+mutating UCMM / Forward Open 에 CPF `0x00C1` 이 없으면 거부하는 회귀다.
+HMAC 불량은 `EIP-A-NEG-001`.
 
 ## 이 표가 말해 주지 않는 것
 

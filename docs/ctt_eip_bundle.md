@@ -9,8 +9,9 @@
 > 아니다. 공식 ODVA CT 실행·Declaration of Conformity 는 멤버십+공인 랩
 > 제품 프로세스다.
 
-범위: EtherNet/IP **Adapter Class 1** + UCMM + Security Class 1 lab profile
-(HMAC CPF `0x00C1` — 이 저장소 프로파일, ODVA CIP Security item 사칭 아님).
+범위: EtherNet/IP **Adapter Class 1** + UCMM + 자체 보안 프로파일
+(HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님, 인증 주장 아님).
+HMAC CPF `0x00C1` 은 이 저장소 프로파일이다. ODVA CIP Security item 을 사칭하지 않는다.
 DUT = in-repo `stacks/ethernetip/` 자체 스택. `adapters/ethernetip/` 데몬
 어댑터와 구매 ODVA CT 소프트웨어는 DUT 가 아니다.
 
@@ -116,7 +117,7 @@ Wave 3 (DUT 가 이미 하던 경로를 YAML 로 잠금):
 | Encapsulation ListInterfaces | **DUT not implemented** (default 은 unsupported status). gap |
 | Originator UCMM tag R/W | Adapter DUT 경로. 시나리오 없음 = 미커버 |
 | Ethernet Link / Port objects | DUT 객체는 있음. CTT YAML 없음 = gap |
-| CIP Security TLS (Class 2) port 2221 | 스택은 있으나 CTT mock 미연결. gap |
+| 자체 보안 프로파일 TLS-PSK port 2221 | 스택은 있으나 CTT mock 미연결. ODVA CIP Security 아님. gap |
 | Lab 프로파일 Class1 jitter | mock soft ms. EIP AF_PACKET 은 CIP TCP 미연결 |
 
 ## 4. 명시적 범위 밖 / 갭
@@ -125,7 +126,7 @@ Wave 3 (DUT 가 이미 하던 경로를 YAML 로 잠금):
 |-----------|------|------|
 | ListInterfaces YAML | **gap** | DUT 미구현. ListServices 는 `EIP-A-ENC-003`. 가짜 pass 금지 |
 | Originator tag R/W | **gap** | Adapter DUT 가 아님 |
-| CIP Security TLS Class 2 mock | **gap** | DUT-not-wired-to-CTT |
+| 자체 보안 프로파일 TLS-PSK mock | **gap** | DUT-not-wired-to-CTT. ODVA CIP Security 아님 |
 | Ethernet Link / Port CTT | **gap** | 객체만 있고 시나리오 없음 |
 | **공식 ODVA CT 실행 / DoC** | **oos** | 멤버십 + 공인 랩. 이 하네스가 대체하지 않음 |
 | 공식 CT 버전·TC 번호·판정 절차 | **oos** | 라이선스 텍스트를 재구성하지 않음 |

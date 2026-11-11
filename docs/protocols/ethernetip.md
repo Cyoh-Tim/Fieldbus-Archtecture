@@ -9,6 +9,7 @@
 >
 > 이 문서는 학습·구현 자료다. ODVA 공식 사양서(The CIP Networks Library)를 대체하지 않는다.
 > 저장소 CTT 통과는 **ODVA 인증이 아니다** (13장).
+> 스택의 보안은 자체 보안 프로파일 (HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님, 인증 주장 아님) 이다 (7장).
 
 ---
 
@@ -21,7 +22,7 @@
 - [4. 데이터/객체 모델](#4-데이터객체-모델)
 - [5. 프레임 포맷 (바이트 단위)](#5-프레임-포맷-바이트-단위)
 - [6. 동작과 상태](#6-동작과-상태)
-- [7. CIP Security — 사양과 이 저장소 구현](#7-cip-security--사양과-이-저장소-구현)
+- [7. ODVA CIP Security 와 자체 보안 프로파일](#7-odva-cip-security-와-자체-보안-프로파일)
 - [8. 에러 처리, 타이밍, 제한값](#8-에러-처리-타이밍-제한값)
 - [9. 직접 구현하기 — 단계별 로드맵](#9-직접-구현하기--단계별-로드맵)
 - [10. 이 저장소의 구현 지도](#10-이-저장소의-구현-지도)
@@ -78,7 +79,7 @@ O→T I/O)은 실행 검증이 불가능하므로 **사양 지식으로 작성**
 | **44818** (0xAF12) | TCP | explicit(명시적) 메시징: 설정 읽기/쓰기, 연결 수립(Forward Open) | 전화 통화 — 연결을 맺고 묻고 답함 |
 | **44818** | UDP | ListIdentity 브로드캐스트(장치 찾기) 등 | 확성기 — "여기 EtherNet/IP 장치 있나요?" |
 | **2222** (0x08AE) | UDP | Class 1 implicit(암시적) I/O: 주기 데이터 | 컨베이어 벨트 — 요청 없이 매 주기 상자가 흘러옴 |
-| **2221** (0x08AD) | TCP(TLS) / UDP(DTLS) | CIP Security 보안 포트 | 금고가 달린 전화 |
+| **2221** (0x08AD) | TCP(TLS) / UDP(DTLS) | ODVA CIP Security 가 쓰는 포트. 이 저장소 TLS-PSK 도 이 번호를 듣지만 그 사양이 아님 (7장) | 금고가 달린 전화 |
 
 - TCP 는 "바이트의 강물"이다. 메시지 경계가 없으므로 **Encapsulation 헤더의 Length** 로 한 메시지를 잘라낸다.
 - UDP 는 "봉투"다. 한 번 보낸 것은 통째로 도착하거나 사라진다. 주기 I/O 는 늦은 옛 데이터보다
@@ -254,7 +255,7 @@ Modbus 처럼 "줘 → 여기" 를 반복하면 PLC 가 장비 수만큼 요청�
 | **LLDP** | 이웃 장비 알림 L2 프로토콜 (IEEE 802.1AB). ODVA 최근 CT 가 요구 | 4.11 |
 | **DLR** | Device Level Ring. 링 토폴로지 이중화 (이 저장소 범위 밖) | 10.8 |
 | **CIP Sync** | IEEE 1588 PTP 기반 시간 동기 (범위 밖) | 10.8 |
-| **CIP Security** | TLS/DTLS 기반 보안 확장 (Volume 8) | 7장 |
+| **CIP Security** | ODVA Volume 8 TLS/DTLS. 이 저장소는 구현하지 않음. 저장소 구현은 7장의 자체 보안 프로파일 | 7장 |
 | **General status / Extended status** | CIP 응답 1바이트 결과 코드 / 추가 16비트 코드 | 부록 C |
 | **CT / DoC** | ODVA Conformance Test / Declaration of Conformity | 13장 |
 | **CTT** | 이 저장소의 내부 회귀 하네스 (Controller Test Tool). 인증 아님 | 11장 |
@@ -585,9 +586,9 @@ EtherNet/IP 패킷 IP 헤더의 **DSCP** (우선순위) 값을 정하는 객체.
 
 - **Port (0xF4)** [사양] 인스턴스 attr: 1 Port Type (UINT, TCP/IP = 4 — 사양서 확인 필요), 2 Port Number,
   3 Link Object, 4 Port Name, 7 Node Address. [저장소] attr 1 = 0, attr 2 = 1 만 (`eip_cip.c:501-516`).
-- **EtherNet/IP Security (0x5E)** 는 CIP Security(Volume 8) 가 정의한 클래스 코드다. [저장소] 는 이 클래스 코드에
-  **저장소 고유 의미** 의 속성을 얹었다: attr 1 = `security_class`, attr 2 = 능력 비트(bit0 integrity, bit1 TLS),
-  attr 3 = 보안 TCP 포트 (`eip_cip.c:519-546`). 사양의 0x5E 속성(State, Capability Flags, Available/Allowed
+- **EtherNet/IP Security (0x5E)** 는 ODVA CIP Security(Volume 8) 가 정의한 클래스 코드다. [저장소] 는 이 클래스 코드에
+  **자체 보안 프로파일** 의 속성을 얹었다 (ODVA CIP Security 아님, 인증 주장 아님): attr 1 = `security_class`, attr 2 = 능력 비트(bit0 HMAC, bit1 TLS-PSK),
+  attr 3 = TLS-PSK TCP 포트 (`eip_cip.c` 의 0x5E Get). 사양의 0x5E 속성(State, Capability Flags, Available/Allowed
   Cipher Suites, PSK, Active Certificate 등 — 사양서 확인 필요)과 **호환되지 않는다**. 7장 참고.
 
 ### 4.11 LLDP Management (0x109) / LLDP Data Table (0x10A)
@@ -1653,19 +1654,22 @@ O→T 32비트 헤더의 bit 0 이 1 이면 Run — PLC 가 RUN 모드라 출력
 
 ---
 
-## 7. CIP Security — 사양과 이 저장소 구현
+## 7. ODVA CIP Security 와 자체 보안 프로파일
 
 ### 7.1 먼저 결론
 
-| | ODVA CIP Security (Volume 8) | 이 저장소 "Security Class" |
-|---|---|---|
-| 정체 | TLS(TCP)/DTLS(UDP) 기반 표준 보안 | **저장소 자체 프로파일** (HMAC CPF 아이템 + TLS-PSK 리스너) |
-| 이름 | "Profiles" (Confidentiality, Integrity(사양서 확인 필요), Authorization, User Authentication, Resource-Constrained …) | Class 0 / 1 / 2 (PROFINET 의 Security Class 명명을 빌린 내부 용어) |
-| 상호운용 | 표준 준수 스캐너/툴과 동작 | **이 저장소 CTT/자체 Originator 외에는 동작하지 않음** |
-| 인증 | ODVA CIP Security CT | 해당 없음 |
+이 저장소가 구현한 것은 **자체 보안 프로파일 (HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님, 인증 주장 아님)** 이다.
+config 키 이름은 `security_class` 다. 아래 표의 ODVA 열은 표준 설명이고, 저장소 구현이 아니다.
 
-저장소 문서도 이 점을 명시한다: "ODVA CIP Security 할당 item 코드를 사칭하지 않는다" (`docs/ctt_odva_matrix.md`),
-`0x00C1` 은 "vendor-profile integrity item" (`stacks/ethernetip/include/eip_sec.h:21`).
+| | ODVA CIP Security (Volume 8) | 이 저장소 자체 보안 프로파일 |
+|---|---|---|
+| 정체 | TLS(TCP)/DTLS(UDP) 기반 표준 보안 | HMAC CPF 아이템 + TLS-PSK 리스너 |
+| 이름 | "Profiles" (Confidentiality, Integrity(사양서 확인 필요), Authorization, User Authentication, Resource-Constrained …) | `security_class` 0 / 1 / 2 (ODVA 프로파일 이름이 아님) |
+| 상호운용 | 표준 준수 스캐너/툴과 동작 | **이 저장소 CTT/자체 Originator 외에는 동작하지 않음** |
+| 인증 | ODVA CIP Security CT | 인증 주장 아님 |
+
+`docs/ctt_odva_matrix.md` 도 같은 표현이다. `0x00C1` 은 ODVA 가 할당한 CIP Security item 이 아니다
+(`EIP_SEC_ITEM_INTEGRITY`, `stacks/ethernetip/include/eip_sec.h`).
 
 ### 7.2 실제 ODVA CIP Security 개요 [사양 — 세부는 사양서 확인 필요]
 
@@ -1681,15 +1685,15 @@ O→T 32비트 헤더의 bit 0 이 1 이면 Run — PLC 가 RUN 모드라 출력
 - I/O 연결: Originator 가 TLS 세션 위에서 Forward Open 을 보내고, 합의된 DTLS 세션으로 Class 1 패킷을 보호한다.
 - 이후 판에서 사용자 인증(User Authentication), 권한(Authorization), 자원 제약 장치용 프로파일이 추가되었다.
 
-### 7.3 [저장소] Security Class 0/1/2 — 코드 기준 정확한 동작
+### 7.3 [저장소] 자체 보안 프로파일 — `security_class` 0/1/2
 
 설정: `protocol_params.security_class` (0/1/2), `psk_hex` (64 hex = 32바이트), `secure_tcp_port` (기본 2221).
-Class ≥1 인데 PSK 가 없으면 어댑터 init 실패 (`adapters/ethernetip/ethernetip_adapter.c:327-332`)와 스택 생성 실패
-(`stacks/ethernetip/src/eip_stack.c:89-92`) 두 겹으로 막는다.
+`security_class` ≥ 1 인데 PSK 가 없으면 어댑터 init 실패 (`adapters/ethernetip/ethernetip_adapter.c` 의 PSK 검사)와 스택 생성 실패
+(`eip_stack_create`) 두 겹으로 막는다.
 
-**Class 0 (open)**: 보안 없음. 단 Set/Reset 은 여전히 "등록된 세션" 과 `protection_mode == 0` 을 요구 (`gate_set_reset()`).
+**security_class 0 (끔)**: HMAC/TLS-PSK 없음. 단 Set/Reset 은 여전히 "등록된 세션" 과 `protection_mode == 0` 을 요구 (`gate_set_reset()`).
 
-**Class 1 (integrity)** — `eip_sec.c`:
+**security_class 1 (HMAC 무결성)** — `eip_sec.c`:
 
 1. **어떤 요청에 MAC 이 필요한가** — `eip_sec_service_needs_mac()` (`eip_sec.c:29-41`):
    Set_Attribute_Single(0x10), Reset(0x05), Forward_Open(0x54), Large_Forward_Open(0x5B), Forward_Close(0x4E).
@@ -1730,21 +1734,21 @@ C1 00 20 00  03 5B B8 1E A4 4C 25 CA FB F0 7B BD F7 A1 92 B6
 
 같은 요청을 MAC 없이 보내면 `B2 00 04 00 90 00 0F 00` (Privilege violation).
 
-**Class 2 (TLS)** — `eip_sec_tls_start()` / `eip_sec_tls_poll()` (`eip_sec.c:128-184`, `392-415`):
+**security_class 2 (TLS-PSK)** — `eip_sec_tls_start()` / `eip_sec_tls_poll()`:
 
 - OpenSSL `TLS_server_method`, 최소 TLS 1.2, cipher `PSK-AES128-CBC-SHA256:PSK-AES128-CBC-SHA` (`eip_sec.c:146-151`).
 - PSK 콜백은 **identity 를 무시** 하고 항상 같은 PSK 를 준다 (`psk_server_cb()`, `eip_sec.c:116-126`).
 - TCP `secure_tcp_port`(2221) 에서 비차단 accept/handshake, 이후 **평문 44818 과 똑같은 `eip_encap_process()`** 를 태운다.
-- **Class 1 의 HMAC 규칙이 TLS 위에서도 그대로 적용** 된다 (TLS 여부를 구분하는 코드가 없다). 즉 Class 2 에서도 mutating
+- **security_class 1 의 HMAC 규칙이 TLS 위에서도 그대로 적용** 된다 (TLS 여부를 구분하는 코드가 없다). 즉 `security_class` 2 에서도 mutating
   요청엔 0x00C1 MAC 이 필요하다.
-- **평문 44818 리스너도 계속 열려 있다** — Class 2 는 "TLS 를 추가로 제공" 할 뿐 강제하지 않는다.
+- **평문 44818 리스너도 계속 열려 있다** — `security_class` 2 는 TLS-PSK 를 추가로 열 뿐 평문 포트를 닫지 않는다. ODVA CIP Security 가 아니다.
 - UDP I/O 에는 DTLS 가 없다.
 
 ### 7.4 사양 대비 차이 요약
 
-| 항목 | ODVA CIP Security | [저장소] |
+| 항목 | ODVA CIP Security | [저장소] 자체 보안 프로파일 |
 |---|---|---|
-| explicit 보호 | TLS 세션 전체 | Class 1: 선택된 서비스만 HMAC, Get 은 평문·무인증 |
+| explicit 보호 | TLS 세션 전체 | `security_class` 1: 선택된 서비스만 HMAC, Get 은 평문·무인증 |
 | I/O 보호 | DTLS | **없음** (UDP 평문, 무인증) |
 | 메시지 포맷 변경 | 없음 (전송층에서 보호) | CPF 에 비표준 아이템 0x00C1 추가 |
 | 키 | 인증서 또는 PSK, 객체로 관리 | config 파일의 PSK 하나 (`psk_hex`) |
@@ -1759,8 +1763,8 @@ C1 00 20 00  03 5B B8 1E A4 4C 25 CA FB F0 7B BD F7 A1 92 B6
    들어가므로 실패한다(세션 결속). 그러나 **같은 TCP 연결 안** 에서는 같은 요청+MAC 이 몇 번이고 유효하다. 평문 44818 위의
    TCP 스트림에 끼어들 수 있는 위치(MITM)라면 캡처한 Set/Forward Open 을 재전송할 수 있다.
 2. **UDP I/O 스푸핑**: O→T 연결 ID 는 0x20000001 부터 순차이고, 출발지 IP 검사도 없다. 연결 ID 를 맞힌 아무 호스트가
-   출력 이미지를 덮어쓰고, **T→O 목적지를 자기 주소로 바꿀 수 있다** (`eip_io.c:57-58`). 저장소 Security Class 는 이것을 막지 않는다.
-3. **Get 은 무인증**: 입력 Assembly(센서값)·Identity 는 누구나 읽는다. Class 2 여도 평문 포트로 읽힌다.
+   출력 이미지를 덮어쓰고, **T→O 목적지를 자기 주소로 바꿀 수 있다** (`eip_io.c`). 자체 보안 프로파일은 이것을 막지 않는다.
+3. **Get 은 무인증**: 입력 Assembly(센서값)·Identity 는 누구나 읽는다. `security_class` 2 여도 평문 포트로 읽힌다.
 4. **Cipher**: PSK CBC 계열(비 PFS). PSK 가 유출되면 과거 TLS 트래픽도 복호화 가능.
 5. **PSK 관리**: config JSON 평문. 예제 PSK(`11…11`)를 제품에 두지 말 것 (`docs/ethernetip_stack.md`).
 
@@ -2009,7 +2013,9 @@ static int seq_newer(uint32_t a, uint32_t b) { return (int32_t)(a - b) > 0; }
 - 할 일: 10.6 의 EDS 구조로 파일 작성, ODVA 의 EDS 검사 도구(EZ-EDS 등, 회원용 — 사양서 확인 필요)로 문법 검사.
 - 검증: Studio 5000 / CODESYS 에 EDS 등록 → 연결 성공 → I/O 값 확인 (11.6).
 
-#### M10 (선택). Class 3, Unconnected Send 라우팅, CIP Security(TLS/DTLS)
+#### M10 (선택). Class 3, Unconnected Send 라우팅, ODVA CIP Security(TLS/DTLS)
+
+이 저장소의 TLS-PSK 는 이 항목이 아니다. 자체 보안 프로파일이다 (7장).
 
 ### 9.4 타이머/스레드 설계
 
@@ -2046,7 +2052,7 @@ Originator 는 Adapter 의 거울이다.
 | explicit Get/Set | UCMM 직접 전송(라우팅 없음) — 대상이 직접 Message Router 를 가진 장치여야 함 |
 | 태그 R/W | ⚠ Get/Set_Attribute_Single + 심볼 경로 (Logix 는 0x4C/0x4D 를 기대 → 실 PLC 에서 동작 안 할 가능성 높음) |
 | 응답 수신 | `recv` 1회 — TCP 조각 난 응답 재조립 없음 |
-| Security Class 1 대상 | MAC 아이템을 붙이지 않음 → 보안 Target 에 Set 불가 |
+| `security_class` ≥ 1 대상 | MAC 아이템을 붙이지 않음 → 자체 보안 프로파일을 켠 Target 에 Set 불가 |
 | Class 1 Originator | 없음 (헤더 주석의 "optional Class1" 은 미구현) |
 | mock/adapter 모드 태그 R/W | 자기 자신의 입력 Assembly 로 루프백 (`eip_client.c:246-262`) |
 
@@ -2163,8 +2169,8 @@ core/main.c:41  fb_run()
 | `assembly_instance` | | 옛 키 → input_assembly |
 | `input_size` / `output_size` | 256 / 256 | 이미지 바이트 (points 가 더 필요하면 자동 확장) |
 | `rpi_us` | 8000 | FO 에 RPI 0 일 때 기본 |
-| `security_class` | 0 | 0/1/2 (7장) |
-| `psk_hex` | | 64 hex. Class≥1 필수 |
+| `security_class` | 0 | 0/1/2. 자체 보안 프로파일 (7장). ODVA CIP Security 아님 |
+| `psk_hex` | | 64 hex. `security_class` ≥ 1 필수 |
 | `secure_tcp_port` | 2221 | TLS |
 | `protection_mode` | 0 | 비0 이면 Set/Reset 전부 0x0F |
 | `idle_timeout_ms` / `max_conn_per_ip` | 60000 / 4 | TCP DoS 한도 |
@@ -2259,7 +2265,7 @@ Connection1 =
 | 동작 | 위치 |
 |---|---|
 | 심볼 태그 경로(클래스 없이 0x91)는 **입력 Assembly attr 3** 으로 매핑 | `eip_cip.c:648-658` |
-| Set/Reset 은 세션 소유 + (Class≥1 이면 인증) + protection_mode 0 필요 | `eip_cip.c:213-239` |
+| Set/Reset 은 세션 소유 + (`security_class` ≥ 1 이면 HMAC) + protection_mode 0 필요 | `gate_set_reset` |
 | protection_mode ≠ 0 이면 protection_mode 자신도 Set 불가 (원격 해제 불가) | 같은 게이트 |
 | mock 모드: 소켓 없이 poll 이 워치독/생산/LLDP 만 수행 | `eip_stack.c:588-593` |
 | ACD 는 실제 ARP 감시 없이 `eip_stack_acd_conflict()` 주입으로만 | `eip_stack.c:634-654` |
@@ -2273,7 +2279,7 @@ Connection1 =
 | Input Only / Listen Only / 멀티캐스트 T→O / COS | 없음 |
 | Run/Idle 헤더 | 없음 (⚠ 상호운용 영향 큼) |
 | ListInterfaces, UDP 44818 ListIdentity | 없음 |
-| CIP Security (ODVA 표준 TLS/DTLS, 인증서, 0x5D/0x5F) | 없음 (저장소 프로파일만) |
+| ODVA CIP Security (TLS/DTLS, 인증서, 0x5D/0x5F) | 없음. 있는 것은 자체 보안 프로파일뿐 (7장) |
 | DLR (링), CIP Sync (PTP), CIP Motion, CIP Safety | 없음 |
 | LLDP 실제 송신/수신, 실제 ACD(ARP) | 없음 |
 | 공식 ODVA CT / DoC | 제품 프로세스 (13장) |
@@ -2353,7 +2359,7 @@ steps:
 
 시나리오 카탈로그(`EIP-A-*`)와 커버리지 갭은 [`docs/ctt_eip_bundle.md`](../ctt_eip_bundle.md),
 [`docs/ctt_odva_matrix.md`](../ctt_odva_matrix.md) 가 정본이다. 갭으로 명시된 것: ListInterfaces, Originator 태그 R/W,
-TLS Class 2, Ethernet Link/Port 시나리오.
+자체 보안 프로파일 TLS-PSK (`security_class` 2), Ethernet Link/Port 시나리오. ODVA CIP Security 시나리오는 없다.
 
 ### 11.4 퍼징
 
@@ -2403,7 +2409,7 @@ PR CI 는 타깃당 60초(`.github/workflows/ci.yml`), 주간 1시간 캠페인(
 | RPI | cycle_ms 의 배수 (예: 8 ms) |
 
 예상 결과: Generic Module 은 O→T 에 Run/Idle 헤더를 붙이므로 FO 가 `0x0109`(연결 크기) 로 거절될 가능성이 높다 (5.6.4).
-입력이 511바이트를 넘으면 Large FO 가 필요하다. Security Class ≥1 이면 MAC 이 없어 `0x0F`.
+입력이 511바이트를 넘으면 Large FO 가 필요하다. `security_class` ≥ 1 (자체 보안 프로파일) 이면 MAC 이 없어 `0x0F`.
 
 **CODESYS EtherNet/IP Scanner** — EDS 를 디바이스 저장소에 설치하고 스캐너 아래에 추가. 저장소 절차:
 [`docs/codesys_master_io.md`](../codesys_master_io.md) 4장, 설정 [`config/example.codesys.ethernetip.json`](../../config/example.codesys.ethernetip.json).
@@ -2467,16 +2473,17 @@ EtherNet/IP 기본 프로토콜(CIP Security 없이)은 **인증·암호화가 �
 - UDP I/O 를 위조할 수 있다.
 
 따라서 현장 방어는 **네트워크 분리(셀/존, IEC 62443 zones & conduits), 방화벽에서 44818/2222 제한** 이 기본이고,
-장치 측으로는 CIP Security 가 정석이다. 이 저장소가 제공하는 방어와 한계:
+장치 측 표준은 ODVA CIP Security 다. 이 저장소는 그것을 구현하지 않는다.
+있는 방어는 자체 보안 프로파일 (HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님, 인증 주장 아님) 과 그 한계다:
 
 | 방어 | 저장소 | 한계 |
 |---|---|---|
 | 세션 핸들 추측 방지 | XOR 난수 핸들 + TCP 결속 | |
 | DoS: 연결 수/유휴 | IP 당 4, 유휴 60 s, poll 예산 | UDP 플러딩 방어 없음 |
 | FO 슬롯 고갈 | 즉시 워치독, 경로/크기/중복 검사 | 다른 triad 로 32개 채우기는 가능 (RPI×배수 동안) |
-| 쓰기 보호 | `protection_mode`, 세션 요구, Class≥1 HMAC | Get 은 무보호 |
+| 쓰기 보호 | `protection_mode`, 세션 요구, `security_class` ≥ 1 HMAC | Get 은 무보호 |
 | I/O | 없음 | 연결 ID 순차 + 출발지 무검사 → 출력 위조·T→O 탈취 (7.5) |
-| 기밀성 | Class 2 TLS-PSK (옵션) | 평문 포트 병존, UDP 평문 |
+| 기밀성 | `security_class` 2 TLS-PSK (옵션, ODVA CIP Security 아님) | 평문 포트 병존, UDP 평문 |
 
 저장소 보안 수정 이력과 62443 매핑: [`docs/reports/security_fixes_20260928.md`](../reports/security_fixes_20260928.md).
 
@@ -2487,7 +2494,7 @@ EtherNet/IP 기본 프로토콜(CIP Security 없이)은 **인증·암호화가 �
 - **ODVA Conformance Test (CT)**: ODVA 가 제공하는 시험 소프트웨어/절차로 장치를 시험한다. 공식 **Declaration of Conformity
   (DoC)** 는 ODVA 회원 가입(Vendor ID 할당) + 공인 테스트 서비스(ODVA 시험소 등)에서 CT 통과 후 발급된다.
   제품 공개 전 EDS 검사, 상호운용 테스트(plugfest)도 과정에 포함된다 (사양서/ODVA 안내 확인 필요: 현행 CT 버전·절차).
-- CIP Security 를 주장하려면 별도의 CIP Security CT 가 있다.
+- 이 저장소 프로파일로 ODVA CIP Security 를 주장하지 않는다. ODVA CIP Security 를 주장하려면 별도의 CIP Security CT 가 있다.
 - **이 저장소의 CTT green 은 인증이 아니다.** 저장소 문서가 반복해 못 박는다: "CTT green 을 ODVA 인증서 대신 제출하지 말 것"
   ([`docs/ctt_odva_matrix.md`](../ctt_odva_matrix.md)), "내부 bundle-grade 게이트 ≠ ODVA 인증"
   ([`docs/ctt_eip_bundle.md`](../ctt_eip_bundle.md)).
@@ -2564,7 +2571,7 @@ EtherNet/IP 기본 프로토콜(CIP Security 없이)은 **인증·암호화가 �
 - [ ] Wireshark 로 모든 메시지 디코드 정상
 - [ ] 퍼저 (encap, CIP, FO, I/O)
 - [ ] 상용 스캐너 2종 이상과 연결
-- [ ] (보안) CIP Security 또는 네트워크 분리 가이드
+- [ ] (보안) 네트워크 분리. ODVA CIP Security 는 이 저장소 프로파일이 아님 (7장)
 
 ---
 
@@ -2745,7 +2752,7 @@ EtherNet/IP 기본 프로토콜(CIP Security 없이)은 **인증·암호화가 �
 | D30 | QoS 적용 | 소켓 DSCP 설정 | 저장만 | (IP_TOS 없음) | I |
 | D31 | Port attr 1 | Port Type (TCP/IP = 4, 사양서 확인) | 0 | `eip_cip.c:504-507` | C |
 | D32 | 0x5E 보안 객체 | Vol 8 속성 | 저장소 고유 속성 | `eip_cip.c:519-546` | I, C |
-| D33 | CIP Security | TLS/DTLS 전체 세션 | HMAC CPF 0x00C1 + TLS-PSK(평문 병존), I/O 무보호, replay 방지 없음 | `eip_sec.c` | S, I |
+| D33 | ODVA CIP Security | TLS/DTLS 전체 세션 | 자체 보안 프로파일만 (HMAC CPF 0x00C1 + TLS-PSK, 평문 병존, I/O 무보호, replay 방지 없음). ODVA CIP Security 아님 | `eip_sec.c` | S, I |
 | D34 | Assembly Set | 길이 정확히, 소유 연결 시 거부 | 절단/부분 쓰기, 입력 Assembly 도 허용 | `eip_path_asm.c:271-283` | C, S |
 | D35 | FO 응답 API | 실제 지킬 주기 | RPI 에코 (사이클 양자화 무시) | `eip_cm.c:274-277`, 6.5 | I |
 | D36 | Encapsulation 최대 길이 | 65511 | 8192 초과 시 연결 끊음 | `eip_stack.c:498-501` | C |

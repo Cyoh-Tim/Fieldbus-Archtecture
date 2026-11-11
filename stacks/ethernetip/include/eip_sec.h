@@ -9,16 +9,21 @@
 struct eip_stack;
 
 /*
- * Fieldbus EIP Security profiles (repository profiles — not a claim of
- * completed ODVA Declaration of Conformity by themselves).
+ * 자체 보안 프로파일 (HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님, 인증 주장 아님).
  *
- * 0 = open / lab
- * 1 = Integrity (HMAC-SHA256 PSK on mutating UCMM / Forward Open)
- * 2 = Confidentiality path: Integrity + TLS listener on secure port 2221
- *     (CIP Security–oriented transport; full CT still needs ODVA lab)
+ * security_class (config key, unchanged):
+ * 0 = off / lab
+ * 1 = HMAC-SHA256 PSK on mutating UCMM / Forward Open
+ * 2 = 1 + TLS-PSK listener on TCP 2221 (plaintext 44818 stays up; no DTLS)
+ *
+ * EIP_SECURITY_CLASS_* and the security_class config key keep their names.
  */
 
-#define EIP_SEC_ITEM_INTEGRITY  0x00C1 /* CPF vendor-profile integrity item */
+/* Log and comment name. Not a certification claim. */
+#define EIP_OWN_SECURITY_PROFILE \
+    "자체 보안 프로파일 (HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님, 인증 주장 아님)"
+
+#define EIP_SEC_ITEM_INTEGRITY  0x00C1 /* repository CPF item, not an ODVA-assigned CIP Security item */
 
 int eip_sec_required(const struct eip_stack *s);
 int eip_sec_confidentiality(const struct eip_stack *s);

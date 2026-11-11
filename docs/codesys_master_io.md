@@ -181,7 +181,7 @@ Application-based 라이선스에서는 EtherNet/IP 가 **Complex Fieldbus Insta
 | Input assembly | 150, 64 bytes: `[0..31]` barcode, float32 LE 온도 @32 |
 | Output assembly | 101, 16 bytes |
 | RPI | 8000 µs (8 ms). 비-RT SoftPLC 는 RPI 를 20–50 ms 로 늘려도 됨 |
-| CIP Security HMAC | **끔** (`security_class: 0`). 우리 기본 예제는 class 1 이라 Scanner 가 FO 를 거절할 수 있음 |
+| 자체 보안 프로파일 HMAC | **끔** (`security_class: 0`). ODVA CIP Security 아님. 기본 예제는 `security_class` 1 이라 Scanner 가 FO 를 거절할 수 있음 |
 | LLDP TX | live JSON 에서 off. `CAP_NET_RAW` 없음 |
 
 ```

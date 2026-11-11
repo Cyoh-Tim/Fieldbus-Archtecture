@@ -146,16 +146,21 @@ eip_lldp_poll();    /* 주기 도래 시에만 프레임 생성 */
 
 ---
 
-## 5. 보안 (Security Class)
+## 5. 보안
 
-| Class | 의미 | 설정 |
-|-------|------|------|
-| 0 | 랩/개발 open | 기본 비권장 |
-| 1 | Integrity — FO/Set 등에 HMAC | `psk_hex` 필수 |
-| 2 | 1 + TLS(TCP 2221) | CIP Security 방향 기밀성 |
+자체 보안 프로파일 (HMAC 무결성 / TLS-PSK, ODVA CIP Security 아님, 인증 주장 아님).
 
-Class 1에서 MAC이 없으면 Forward Open이 거부됩니다 (`eip_sec_check_ucmm`).
-공식 CIP Security CT 전체(인증서 수명주기·DTLS I/O)는 제품 랩에서 이어서 합니다.
+config 키 이름은 `security_class` 입니다. ODVA Vol 8 CIP Security 가 아니고, 인증을 주장하지 않습니다.
+
+| `security_class` | 의미 | 설정 |
+|------------------|------|------|
+| 0 | 끔 (랩) | |
+| 1 | HMAC 무결성 — Forward Open/Set 등 | `psk_hex` 필수 |
+| 2 | 1 + TLS-PSK (TCP 2221) | 평문 44818 은 그대로. DTLS 없음 |
+
+`security_class` 1에서 MAC이 없으면 Forward Open이 거부됩니다 (`eip_sec_check_ucmm`).
+그래서 표준 Originator 는 이 프로파일을 켠 장치에 Forward Open 을 열지 못합니다.
+ODVA CIP Security CT(인증서 수명주기·DTLS I/O)는 이 스택의 범위가 아닙니다.
 
 ---
 
@@ -170,7 +175,7 @@ Class 1에서 MAC이 없으면 Forward Open이 거부됩니다 (`eip_sec_check_u
 | LLDP TX + Management Object 0x109 | `eip_lldp.c`, EDS |
 | Class 1 timeout | `eip_io_watchdog` |
 | EDS / SOC 초안 | `stacks/ethernetip/eds/`, `docs/ethernetip_soc.md` |
-| Security Class 1/2 | `eip_sec.c` |
+| 자체 보안 프로파일 (`security_class` 1/2) | `eip_sec.c` |
 
 **공식 ODVA Declaration of Conformity** 는 멤버십 + 공인 랩 CT 후에 나옵니다.
 스택만으로 인증서가 나오지는 않습니다. PROFINET의 “PI 인증은 제품 프로세스”와 같은 위치입니다.
@@ -191,6 +196,6 @@ cmake .. && make
 1. `mock` 끄기  
 2. `vendor_id` 를 ODVA 할당 값으로  
 3. Assembly 번호/크기를 PLC 가이드에 맞추기  
-4. Security Class 1이면 스캐너/툴이 integrity MAC item(`0x00C1`)을 붙이는지 확인  
+4. `security_class` 1이면 스캐너가 자체 CPF item `0x00C1` 을 붙이는지 확인 (표준 스캐너는 붙이지 않음)  
 
 더 짧은 범위 표는 [`ethernetip_stack.md`](ethernetip_stack.md), SOC 초안은 [`ethernetip_soc.md`](ethernetip_soc.md).
