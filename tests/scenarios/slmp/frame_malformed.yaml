@@ -1,4 +1,6 @@
-# Internal TC SLMP-3E-NEG-002 — truncated 3E / short write must fail closed.
+# Internal TC SLMP-3E-NEG-002 — truncated 3E is rejected.
+# A 21-byte batch write with no payload is an error response (C061h), not a drop.
+# The following read still sees the seeded word (the write is not applied).
 name: frame_malformed
 id: SLMP-3E-NEG-002
 suite: SLMP-3E-v1
@@ -25,10 +27,11 @@ steps:
     expect:
       result: reject
   - action: inject
-    # 21-byte 3E BATCH_WRITE qty=2 with no payload
+    # 21-byte 3E BATCH_WRITE qty=2 with no payload → C061h + 9-byte error info
     pdu_hex: "500000ffff03000c00100001140000000000a80200"
     expect:
-      result: reject
+      end_code: 0xC061
+      data_len: 9
   - action: batch_read
     device: D
     head: 0

@@ -26,11 +26,13 @@
 #define SLMP_SUB_WORD 0x0000
 #define SLMP_SUB_BIT 0x0001
 
-/* End codes (Binary 3E / QnA compatible) */
+/* End codes (Binary 3E / QnA compatible).
+ * C050h is the ASCII-to-binary conversion error and is not emitted here. */
 #define SLMP_END_OK 0x0000
-#define SLMP_END_CMD 0xC050     /* command / subcommand not supported */
-#define SLMP_END_POINTS 0xC051  /* number of points / data length */
+#define SLMP_END_CMD 0xC059     /* command / subcommand not supported */
+#define SLMP_END_POINTS 0xC051  /* number of points out of range */
 #define SLMP_END_DEVICE 0xC056  /* device designation */
+#define SLMP_END_DATA_LEN 0xC061 /* request data length does not match the count */
 
 #define SLMP_FRAME_MAX 2048
 #define SLMP_HEADER_3E_LEN 11 /* up to and including request data length field */
