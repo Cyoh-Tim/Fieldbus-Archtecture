@@ -76,6 +76,8 @@
 #define CIP_SVC_RESET               0x05
 #define CIP_SVC_GET_ATTR_SINGLE     0x0E
 #define CIP_SVC_SET_ATTR_SINGLE     0x10
+#define CIP_SVC_READ_TAG            0x4C /* Logix Read Tag (vendor service) */
+#define CIP_SVC_WRITE_TAG           0x4D /* Logix Write Tag (vendor service) */
 #define CIP_SVC_FORWARD_CLOSE       0x4E
 #define CIP_SVC_UNCONNECTED_SEND    0x52
 #define CIP_SVC_FORWARD_OPEN        0x54

@@ -367,22 +367,13 @@ static int connect_originator(eip_stack_t *s)
         s->originator_fd = -1;
         return -e;
     }
-    /* Blocking wait briefly for register reply */
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(fd, &rfds);
-    struct timeval tv = {.tv_sec = 2, .tv_usec = 0};
-    if (select(fd + 1, &rfds, NULL, NULL, &tv) <= 0) {
-        close(fd);
-        s->originator_fd = -1;
-        return -ETIMEDOUT;
-    }
+    /* RegisterSession reply may arrive in more than one TCP segment. */
     uint8_t resp[EIP_ENCAP_HDR_SIZE + 4];
-    ssize_t n = recv(fd, resp, sizeof(resp), 0);
+    int n = eip_originator_recv_encap(fd, resp, sizeof(resp), 2000);
     if (n < EIP_ENCAP_HDR_SIZE) {
         close(fd);
         s->originator_fd = -1;
-        return -EIO;
+        return n < 0 ? n : -EIO;
     }
     s->clients[0].active = 1;
     s->clients[0].fd = fd;
