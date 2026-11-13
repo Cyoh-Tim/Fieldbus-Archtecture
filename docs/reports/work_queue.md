@@ -142,6 +142,9 @@
 | 118 | A20261110-1 | EIP 자체 보안 프로파일이 표준 클래스 0x5E (EtherNet/IP Security Object) 로 응답 — attr 1 security_class UINT·attr 3 TLS 포트로 CIP Security 객체가 있는 것처럼 보임 | `stacks/ethernetip/`, `tests/` | A20261110-1 | 출처 #186 답·#195. 보고서 [audits/20261110-eip-security-object-0x5e.md](audits/20261110-eip-security-object-0x5e.md). 근거 Wireshark `packet-enip.c` 0x5E 속성 표. 벤더 클래스로 옮길지 지울지는 `[Claude 확인 요청]` 으로. CTT `sec_integrity_fo.yaml` 0x5E 단계 함께. #195 (큐 46) 이후 |
 | 119 | A20261110-2 | PN AR 없는 Read(opnum 2) 를 받아 레코드를 돌려줌 — Read Implicit 뒤 거부 (NIL ARUUID `DE 81 08 05`, AR 없음 `DE 81 40 02`) | `stacks/profinet/`, `tests/`, `tests/scenarios/profinet/`, `tools/ctt/proto/profinet/` (`record_read` 의 opnum 만) | A20261110-2 | 담당자 결정 (2026-11-10). 보고서 [audits/20261110-owner-decisions.md](audits/20261110-owner-decisions.md). 근거 p-net `pf_cmrpc_rm_read_ind`. 보안 결정 G4 의 "Read without an AR remains allowed" 를 대신한다. 큐 110 이후. CTT `record_read_*`·`record_unknown_index`·`rpc_cm_without_ar` 의 AR 없는 읽기를 opnum 5 로 |
 | 120 | A20261110-3 | PN 거부를 무응답으로 처리 — AR 없는 Control·Write, AR 중 다른 ARUUID 의 Read, 송신 IP 불일치 요청에 에러 PNIOStatus 로 답해야 (AR 유지) | `stacks/profinet/`, `tests/`, `tests/scenarios/profinet/rpc_cm_without_ar.yaml` | A20261110-3 ×2 | 담당자 결정 (2026-11-10). 같은 보고서. 근거 p-net (`DD/DF 81 40 05`, Read `DE 81 40 02`). 송신 IP 불일치 코드는 `[Claude 확인 요청]` 으로 (단위 테스트). 큐 113 이후 |
+| 121 | A20261112-1 | EIP HMAC 무결성 재료를 572 바이트에서 잘라 CIP 본문 568 바이트 뒤가 보호되지 않음 — 꼬리를 바꾼 Set 이 같은 MAC 으로 수락, 본문 전체 MAC 은 거부 | `stacks/ethernetip/`, `tests/` | 없음 | 출처 #201 "발견한 다른 문제" 3. 보고서 [audits/20261112-eip-t11-13-followups.md](audits/20261112-eip-t11-13-followups.md). v0.2.0 게이트 (b). 재료를 고정 버퍼 없이 HMAC 에 순서대로 넣는다 (검사·생성·originator). 단위 테스트 |
+| 122 | A20261112-2 | EIP LLDP Chassis ID·Port ID TLV 에 subtype 옥텟 없음 (scapy 가 Chassis subtype 을 MAC 첫 바이트로 읽음) | `stacks/ethernetip/`, `tests/`, `tests/scenarios/ethernetip/lldp_mgmt.yaml` | 없음 | 출처 #201 "발견한 다른 문제" 1. 같은 보고서. 근거 IEEE 802.1AB, scapy·Wireshark LLDP. #201 (큐 48) 이후 |
+| 123 | A20261112-3 | EIP TLS 세션의 encapsulation 수신 한도가 8192 (평문 TCP 는 #201 뒤 65511) — 큰 PDU 에서 TLS 연결을 끊음 (낮음) | `stacks/ethernetip/`, `tests/` | 없음 | 출처 #201 "발견한 다른 문제" 2. 같은 보고서. #201 이후 |
 
 ## v0.2.0 릴리스 게이트
 
@@ -167,8 +170,9 @@
 | 98 | A20261025-5 | b | EIP Originator connect 블로킹 (~130 s) |
 | 99 | A20261028-1 | b, c | EIP 짧은 send 로 응답 유실·스트림 경계 깨짐 |
 | 118 | A20261110-1 | d | EIP 자체 보안이 표준 클래스 0x5E 로 응답 |
+| 121 | A20261112-1 | b | EIP HMAC 재료 절단 — 568 바이트 뒤 변조 수락 |
 
-(2026-11-10 기준 16행. 이슈 발행 순서는 운영 규칙대로 큐 번호순이다.)
+(2026-11-12 기준 17행 — 2026-11-12 큐 121 추가. 46 은 #195 로 끝남. 이슈 발행 순서는 운영 규칙대로 큐 번호순이다.)
 
 ## 이슈 본문 템플릿
 
