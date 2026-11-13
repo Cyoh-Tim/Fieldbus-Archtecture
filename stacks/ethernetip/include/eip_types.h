@@ -18,6 +18,11 @@
 #define EIP_CPF_ITEM_HDR         4
 #define EIP_FRAME_MAX            65536
 #define EIP_TCP_BUF_MAX          8192
+/* Vol 2 encapsulation data length maximum. The TCP receive buffer holds
+ * one maximum PDU. EIP_TCP_BUF_MAX stays the size of ordinary reply
+ * scratch buffers; it is not the legal message limit. */
+#define EIP_ENCAP_LEN_MAX        65511u
+#define EIP_TCP_RX_MAX           (EIP_ENCAP_HDR_SIZE + EIP_ENCAP_LEN_MAX)
 
 /* High-capacity defaults for multi-sensor deployments */
 #define EIP_ASSEMBLY_INSTANCES_MAX  64

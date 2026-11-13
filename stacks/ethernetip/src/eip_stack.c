@@ -162,6 +162,7 @@ eip_stack_t *eip_stack_create(const eip_cfg_t *cfg)
     s->udp_fd = -1;
     s->udp_encap_fd = -1;
     s->originator_fd = -1;
+    s->lldp_fd = -1;
     s->bind_ip_host = parse_ipv4_host(s->cfg.bind_ip);
     s->tls_listen_fd = -1;
     s->device_state = 3;
@@ -463,6 +464,7 @@ void eip_stack_stop(eip_stack_t *s)
         return;
     }
     s->running = 0;
+    eip_lldp_close(s);
     eip_sec_tls_stop(s);
     if (s->listen_fd >= 0) {
         close(s->listen_fd);
@@ -604,7 +606,17 @@ static void service_tcp_client(eip_stack_t *s, eip_tcp_client_t *c)
 
         while (c->rx_len >= EIP_ENCAP_HDR_SIZE) {
             uint16_t length = eip_rd_le16(c->rx + 2);
-            size_t need = EIP_ENCAP_HDR_SIZE + length;
+            size_t need = EIP_ENCAP_HDR_SIZE + (size_t)length;
+            /* A legal PDU is at most 65511 bytes of data and fits in rx.
+             * Anything larger is not a message we can reassemble; close
+             * instead of waiting until the buffer overflows. */
+            if ((size_t)length > EIP_ENCAP_LEN_MAX || need > sizeof(c->rx)) {
+                LOG_WARN("ethernetip",
+                         "encapsulation length %u exceeds %u — closing TCP",
+                         length, (unsigned)EIP_ENCAP_LEN_MAX);
+                eip_tcp_client_drop(s, c);
+                return;
+            }
             if (c->rx_len < need) {
                 break;
             }

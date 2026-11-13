@@ -105,6 +105,7 @@ int eip_io_handle_udp(eip_stack_t *s, const uint8_t *frame, size_t len,
             LOG_WARN("ethernetip",
                      "Class1 O->T run/idle header short (%zu bytes)", dlen);
             c->last_rx_ns = eip_now_ns();
+            c->o2t_seen = 1;
             return 0;
         }
         uint32_t hdr = eip_rd_le32(data);
@@ -114,6 +115,7 @@ int eip_io_handle_udp(eip_stack_t *s, const uint8_t *frame, size_t len,
     }
     /* Watchdog refreshes even when the CIP sequence repeats. */
     c->last_rx_ns = eip_now_ns();
+    c->o2t_seen = 1;
     if (have_cip && c->o2t_cip_valid && cip_seq == c->o2t_cip_seq) {
         return 0;
     }
@@ -151,6 +153,10 @@ void eip_io_watchdog(eip_stack_t *s)
             uint32_t rpi = c->o2t_rpi_us ? c->o2t_rpi_us : s->cfg.rpi_us;
             wd = eip_class1_watchdog_us(rpi, c->timeout_multiplier);
             c->watchdog_us = wd;
+        }
+        /* First O->T has not arrived. Use max(RPI×multiplier, 10s). */
+        if (!c->o2t_seen && wd < EIP_CLASS1_FIRST_PACKET_GRACE_US) {
+            wd = EIP_CLASS1_FIRST_PACKET_GRACE_US;
         }
         if (c->last_rx_ns == 0) {
             c->last_rx_ns = now;

@@ -338,7 +338,9 @@ static int handle_sendrr(eip_stack_t *s, uint32_t session, uint32_t owner_id,
         return 0;
     }
 
-    uint8_t cip_resp[EIP_EXPLICIT_DATA_MAX + 64];
+    /* Largest Assembly attr 3 plus the Message Router header. The old
+     * 504+64 byte cap turned a 1000-byte Get into CIP status 0x02. */
+    uint8_t cip_resp[EIP_ASSEMBLY_SIZE_MAX + 64];
     size_t cip_resp_len = 0;
     /* Session ownership was checked above. Class 0 is lab-open; class ≥1
      * mutating UCMM already passed eip_sec_check_ucmm (HMAC). */

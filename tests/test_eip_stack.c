@@ -1051,7 +1051,9 @@ static void test_g2_watchdog_dup_path_size(void)
     expect(eip_stack_class1_up(s) == 1, "g2 class1 unchanged after size reject");
 
     /* Close the long-RPI conn, then FO at the minimum RPI with no IO.
-     * timeout_mult 0 → watchdog 4 * 8000 µs. A shorter RPI is 0x0112.
+     * timeout_mult 0 → RPI watchdog 4 * 8000 µs. Until the first O->T
+     * that timer is max(watchdog, 10s), so 160 ms must leave it up.
+     * A shorter RPI is 0x0112.
      */
     uint8_t fc[16];
     size_t foff = 0;
@@ -1109,9 +1111,9 @@ static void test_g2_watchdog_dup_path_size(void)
                                   &resp_len) == 0,
            "g2 tiny FO");
     expect(eip_stack_class1_up(s) == 1, "g2 class1 after minimum-RPI FO");
-    usleep(160000); /* > watchdog (4 * 8000 µs) */
+    usleep(160000); /* past the old 32 ms watchdog, inside the 10 s grace */
     eip_stack_poll(s);
-    expect(eip_stack_class1_up(s) == 0, "g2 FO without IO timed out");
+    expect(eip_stack_class1_up(s) == 1, "g2 FO without IO still inside 10s grace");
     eip_stack_destroy(s);
 }
 

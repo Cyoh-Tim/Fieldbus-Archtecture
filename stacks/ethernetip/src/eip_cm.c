@@ -632,8 +632,11 @@ int eip_cm_forward_open(eip_stack_t *s, const uint8_t *data, size_t len,
     c->timeout_multiplier = timeout_mult;
     c->exclusive_owner = 1;
     c->watchdog_us = eip_class1_watchdog_us(o2t_api, timeout_mult);
-    /* Arm watchdog at Forward Open so a connection without IO is reclaimed. */
+    /* Arm at Forward Open so a connection that never sends I/O is still
+     * reclaimed. o2t_seen stays 0: until the first O->T the timer is
+     * max(watchdog, 10s). After that packet, watchdog_us applies. */
     c->last_rx_ns = eip_now_ns();
+    c->o2t_seen = 0;
     c->last_tx_ns = 0;
     c->originator_ip = s->rr_originator_ip;
     /* Produce as soon as the connection exists. 0x8001 names the consumer

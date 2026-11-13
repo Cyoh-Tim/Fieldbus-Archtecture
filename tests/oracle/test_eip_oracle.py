@@ -1125,7 +1125,6 @@ def test_originator_reassembles_split_tcp_reply():
 
 
 # ---------------------------------------------------------------- 기타 (T11-13)
-@known_defect("T11-13", "FO 직후 워치독을 RPI×배수(80 ms)로 바로 무장해 첫 O→T 전에 연결을 끊는다. 관례는 첫 패킷까지 10 s 여유")
 def test_first_o2t_grace_after_forward_open(sess, eip_dut):
     u = io_socket()
     try:
@@ -1139,13 +1138,11 @@ def test_first_o2t_grace_after_forward_open(sess, eip_dut):
         u.close()
 
 
-@known_defect("T11-13", "Identity Reset 의 타입 파라미터를 무시하고 성공한다. 사양은 지원하지 않는 타입(0xFF)에 0x20 Invalid parameter")
 def test_identity_reset_unsupported_type_rejected(sess):
     rsp = sess.cip(mr(Services.reset[0], 0x01, 1, data=bytes([0xFF])))
     assert rsp[0] == 0x85 and rsp[2] == 0x20, rsp.hex()
 
 
-@known_defect("T11-13", "큰 Assembly(1000B) Get 이 UCMM 응답 버퍼(568B) 때문에 0x02 로 실패한다. 사양은 전체 데이터 또는 0x11 Reply data too large")
 def test_large_assembly_get_not_truncated(adapter_dut):
     d = adapter_dut("--input-size", "1000")
     s = Session(d.port)
@@ -1159,7 +1156,6 @@ def test_large_assembly_get_not_truncated(adapter_dut):
     assert reply_data(rsp) == bytes((i + 1) & 0xFF for i in range(1000)), f"{len(reply_data(rsp))}B"
 
 
-@known_defect("T11-13", "8 KB 를 넘는 encapsulation 메시지에 TCP 연결을 끊는다. 사양은 최대 65511 바이트, 연결 유지")
 def test_large_encapsulation_keeps_session(sess):
     big = mr(Services.set_attribute_single[0], 0x04, OUT_ASM, 3, bytes(9000))
     sess.sock.sendall(encap(0x006F, send_rr(big), sess.handle))
