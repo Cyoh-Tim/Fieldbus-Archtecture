@@ -367,7 +367,7 @@ static void test_handle_qty_and_unknown(void)
            "bit 7169 decode");
     expect(end == SLMP_END_POINTS, "bit qty 7169 -> 0xC051");
 
-    /* Unknown subcommand treated as word before: now 0xC050 */
+    /* Unknown subcommand is C059h (unsupported command/subcommand). */
     n0 = build_batch_req(req0, SLMP_CMD_BATCH_READ, 0x0002, SLMP_DEV_D, 0, 1,
                          NULL, 0);
     expect(slmp_stack_handle_request(s, req0, n0, resp, sizeof(resp),
@@ -375,7 +375,7 @@ static void test_handle_qty_and_unknown(void)
            "bad sub handle");
     expect(slmp_decode_response(resp, resp_len, &end, &data, &dlen) == 0,
            "bad sub decode");
-    expect(end == SLMP_END_CMD, "unknown sub -> 0xC050");
+    expect(end == SLMP_END_CMD && end == 0xC059, "unknown sub -> 0xC059");
 
     /* Unknown device code: do not allocate a new map */
     int maps_before = slmp_device_known(0xEE) ? 1 : 0;

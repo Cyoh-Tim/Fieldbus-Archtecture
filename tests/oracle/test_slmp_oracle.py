@@ -84,7 +84,6 @@ def test_bit_device_word_access_head_is_bit_number(plc):
     assert plc.batchread_wordunits(headdevice="M0", readsize=2)[1] & 0x0001 == 1
 
 
-@known_defect("T10-5", "미지원 커맨드에 C050 을 낸다. 사양은 C059 (C050 은 ASCII 변환 오류)")
 def test_unsupported_command_end_code(slmp_dut):
     # 저장소 서버는 21바이트 미만 요청을 응답 없이 버리므로 더미 6바이트를 붙여 길이를 맞춘다.
     assert raw_3e(slmp_dut.port, 0x0619, 0x0000, bytes(6)) == 0xC059

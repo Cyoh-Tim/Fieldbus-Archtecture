@@ -27,4 +27,4 @@ steps:
     subheader: 0x0050
     cmd: 0x0403
     expect:
-      end_code: 0xC050
+      end_code: 0xC059

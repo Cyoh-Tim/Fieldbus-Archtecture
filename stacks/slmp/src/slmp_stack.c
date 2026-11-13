@@ -966,11 +966,24 @@ int slmp_stack_client_batch_write(slmp_stack_t *s, const slmp_range_t *range,
     return 0;
 }
 
+/* Abnormal 3E response error information (slmp.md 5.9, 9 bytes):
+ * network, PC, request-destination I/O, multidrop, command, subcommand.
+ * The 5.9 / B-7s example copies the request route and the request
+ * command/subcommand. req is a parsed 3E request (handle_request
+ * requires 21 bytes, so offsets 2..6 and 11..14 are present). */
+static void fill_error_info(const uint8_t *req, uint8_t *dst)
+{
+    memcpy(dst, req + 2, 5);
+    memcpy(dst + 5, req + 11, 4);
+}
+
 static int build_response(const uint8_t *req, uint16_t end_code,
                           const uint8_t *payload, size_t payload_len,
                           uint8_t *resp, size_t resp_cap, size_t *resp_len)
 {
-    uint16_t data_len = (uint16_t)(2 + payload_len);
+    int abnormal = (end_code != SLMP_END_OK);
+    size_t tail = abnormal ? 9u : payload_len;
+    uint16_t data_len = (uint16_t)(2u + tail);
     size_t total = 9u + data_len;
     if (total > resp_cap) {
         return -ENOSPC;
@@ -983,7 +996,9 @@ static int build_response(const uint8_t *req, uint16_t end_code,
     resp[6] = req[6];
     wr_le16(resp + 7, data_len);
     wr_le16(resp + 9, end_code);
-    if (payload_len && payload) {
+    if (abnormal) {
+        fill_error_info(req, resp + 11);
+    } else if (payload_len && payload) {
         memcpy(resp + 11, payload, payload_len);
     }
     *resp_len = total;
@@ -1065,9 +1080,14 @@ int slmp_stack_handle_request(slmp_stack_t *s, const uint8_t *req,
     }
 
     const uint8_t *data = req + 21;
+    size_t have = req_len - 21u;
     size_t need = bit_unit ? bit_wire_len(qty) : (size_t)qty * 2u;
-    if (req_len < 21 + need) {
-        return -EBADMSG;
+    /* C061h: the declared write data (length field, already sliced into
+     * req_len by the server) is not the point count times the unit size.
+     * Too short used to return -EBADMSG and the server sent nothing. */
+    if (have != need) {
+        return build_response(req, SLMP_END_DATA_LEN, NULL, 0, resp, resp_cap,
+                              resp_len);
     }
     int rc;
     if (bit_unit) {

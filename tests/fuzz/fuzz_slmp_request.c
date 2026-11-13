@@ -228,7 +228,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         } else {
             uint8_t one = 0x12;
             feed_3e(SLMP_CMD_BATCH_WRITE, SLMP_SUB_WORD, head, SLMP_DEV_D, 4,
-                    &one, 1); /* short data → -EBADMSG */
+                    &one, 1); /* short data → C061h error response */
         }
         break;
     }
