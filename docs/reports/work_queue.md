@@ -145,6 +145,8 @@
 | 121 | A20261112-1 | EIP HMAC 무결성 재료를 572 바이트에서 잘라 CIP 본문 568 바이트 뒤가 보호되지 않음 — 꼬리를 바꾼 Set 이 같은 MAC 으로 수락, 본문 전체 MAC 은 거부 | `stacks/ethernetip/`, `tests/` | 없음 | 출처 #201 "발견한 다른 문제" 3. 보고서 [audits/20261112-eip-t11-13-followups.md](audits/20261112-eip-t11-13-followups.md). v0.2.0 게이트 (b). 재료를 고정 버퍼 없이 HMAC 에 순서대로 넣는다 (검사·생성·originator). 단위 테스트 |
 | 122 | A20261112-2 | EIP LLDP Chassis ID·Port ID TLV 에 subtype 옥텟 없음 (scapy 가 Chassis subtype 을 MAC 첫 바이트로 읽음) | `stacks/ethernetip/`, `tests/`, `tests/scenarios/ethernetip/lldp_mgmt.yaml` | 없음 | 출처 #201 "발견한 다른 문제" 1. 같은 보고서. 근거 IEEE 802.1AB, scapy·Wireshark LLDP. #201 (큐 48) 이후 |
 | 123 | A20261112-3 | EIP TLS 세션의 encapsulation 수신 한도가 8192 (평문 TCP 는 #201 뒤 65511) — 큰 PDU 에서 TLS 연결을 끊음 (낮음) | `stacks/ethernetip/`, `tests/` | 없음 | 출처 #201 "발견한 다른 문제" 2. 같은 보고서. #201 이후 |
+| 124 | A20261113-1 | EIP 단위 테스트 `reserve_port` 가 bind 뒤 바로 닫아 같은 포트를 다시 내줄 수 있음 — `test_eip_t11_11` `distinct ports` 가끔 실패 (6개 파일에 같은 helper) | `tests/` | 없음 | 출처 #204 검증 (sanitizers job 1회 실패, 단독 재실행 PASS). 보고서 [audits/20261113-eip-test-port-flake-slmp-docs.md](audits/20261113-eip-test-port-flake-slmp-docs.md). 완료: `ctest -R test_eip -j8 --repeat until-fail:20` |
+| 125 | A20261113-2 | SLMP 문서·CTT 매트릭스가 T10-5 이전 동작 (`C050h`, 이상 응답 길이 2, 짧은 쓰기 무응답) 을 적음 | `docs/` | 없음 | 출처 #204 "발견한 다른 문제". 같은 보고서에 위치 목록. 보드 JSON 은 `tools/ctt/gen_board_data.py` 로 |
 
 ## v0.2.0 릴리스 게이트
 
