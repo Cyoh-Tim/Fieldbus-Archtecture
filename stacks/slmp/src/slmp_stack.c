@@ -326,6 +326,56 @@ int slmp_stack_connected(const slmp_stack_t *s)
     return s ? s->connected : 0;
 }
 
+/* Bit devices are packed 16 points per storage word, LSB = the lowest number.
+ * A word-unit head on the server simulator is that bit number: M16 is
+ * M16..M31, and bit0 of the returned word is M16 (slmp.md 4.5, 8.6). The
+ * span is head .. head+16*quantity-1, so a head that is not a multiple of
+ * 16 straddles two storage words. The client cache still stores the same
+ * head it put on the wire as a word slot (appendix D-5: that cache is
+ * self-consistent; refusing heads past the slot is A20261011-3). */
+static int server_bit_word_span(const slmp_dev_slot_t *slot, uint32_t head,
+                                uint16_t quantity)
+{
+    uint64_t end = (uint64_t)head + (uint64_t)quantity * 16u;
+    if (end > (uint64_t)slot->bit_capacity) {
+        return -ERANGE;
+    }
+    return 0;
+}
+
+static uint16_t load_bit_word(const uint16_t *words, uint32_t bit)
+{
+    uint32_t wi = bit >> 4;
+    unsigned sh = bit & 15u;
+    if (sh == 0) {
+        return words[wi];
+    }
+    uint32_t lo = (uint32_t)words[wi] >> sh;
+    uint32_t hi = (uint32_t)words[wi + 1u] & ((1u << sh) - 1u);
+    return (uint16_t)(lo | (hi << (16u - sh)));
+}
+
+static void store_bit_word(uint16_t *words, uint32_t bit, uint16_t value)
+{
+    uint32_t wi = bit >> 4;
+    unsigned sh = bit & 15u;
+    if (sh == 0) {
+        words[wi] = value;
+        return;
+    }
+    uint32_t lo_keep = (1u << sh) - 1u;
+    words[wi] = (uint16_t)((words[wi] & lo_keep) | ((uint32_t)value << sh));
+    uint32_t hi_mask = (1u << sh) - 1u;
+    uint32_t hi_src = (uint32_t)value >> (16u - sh);
+    words[wi + 1u] =
+        (uint16_t)((words[wi + 1u] & (uint16_t)~hi_mask) | hi_src);
+}
+
+static int use_bit_number_head(const slmp_stack_t *s, const slmp_dev_slot_t *slot)
+{
+    return slot->is_bit && s->cfg.role == SLMP_ROLE_SERVER;
+}
+
 int slmp_stack_read_words(slmp_stack_t *s, uint8_t device_code, uint32_t head,
                           uint16_t *dst, uint16_t quantity)
 {
@@ -337,11 +387,18 @@ int slmp_stack_read_words(slmp_stack_t *s, uint8_t device_code, uint32_t head,
         return -ENOMEM;
     }
     slmp_dev_slot_t *slot = find_slot(s, device_code);
-    if (!slot || slot->is_bit) {
-        /* Allow reading bit device in word units from packed storage */
-        if (!slot) {
-            return -ENOENT;
+    if (!slot) {
+        return -ENOENT;
+    }
+    if (use_bit_number_head(s, slot)) {
+        int rc = server_bit_word_span(slot, head, quantity);
+        if (rc != 0) {
+            return rc;
         }
+        for (uint16_t i = 0; i < quantity; i++) {
+            dst[i] = load_bit_word(slot->words, head + (uint32_t)i * 16u);
+        }
+        return 0;
     }
     if (head + quantity > slot->capacity) {
         return -ERANGE;
@@ -363,6 +420,16 @@ int slmp_stack_write_words(slmp_stack_t *s, uint8_t device_code, uint32_t head,
     slmp_dev_slot_t *slot = find_slot(s, device_code);
     if (!slot) {
         return -ENOENT;
+    }
+    if (use_bit_number_head(s, slot)) {
+        int rc = server_bit_word_span(slot, head, quantity);
+        if (rc != 0) {
+            return rc;
+        }
+        for (uint16_t i = 0; i < quantity; i++) {
+            store_bit_word(slot->words, head + (uint32_t)i * 16u, src[i]);
+        }
+        return 0;
     }
     if (head + quantity > slot->capacity) {
         return -ERANGE;

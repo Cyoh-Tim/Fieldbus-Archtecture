@@ -77,7 +77,6 @@ def test_single_bit_read_format(plc):
     assert plc.batchread_bitunits(headdevice="M1", readsize=1) == [1]
 
 
-@known_defect("T10-6", "비트 디바이스를 워드 단위로 접근할 때 선두 번호를 워드 인덱스로 해석한다 (M16 → M256~)")
 def test_bit_device_word_access_head_is_bit_number(plc):
     plc.batchwrite_wordunits(headdevice="M16", values=[0x0001])
     # M16..M31 워드의 bit0 = M16. 같은 영역을 M0 부터 2워드로 읽으면 두 번째 워드의 bit0 이다.
