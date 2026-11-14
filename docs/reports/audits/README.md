@@ -62,3 +62,4 @@
 | 2026-11-10 | 담당자 결정 (릴리스 게이트, PN 거부 동작) | [20261110-owner-decisions.md](20261110-owner-decisions.md) | 119–120 (A20261110-2, -3), 게이트 절 | v0.2.0 = 게이트 16행 (치명·높음·보안·조용한 데이터 오류·잘못된 주장). AR 없는 opnum 2 Read 는 Read Implicit 뒤 거부. 거부는 무응답 대신 에러 PNIOStatus |
 | 2026-11-12 | EtherNet/IP 스택 (11단계 제안 선별, #201 검증) | [20261112-eip-t11-13-followups.md](20261112-eip-t11-13-followups.md) | 121–123 (A20261112-1 ~ -3), 게이트 1행 | HMAC 재료 572 바이트 절단 → 꼬리 변조 수락 (하네스 재현, 게이트 b), LLDP subtype 없음 (scapy), TLS 수신 8192 |
 | 2026-11-13 | 테스트 기반·SLMP 문서 (#204 검증·선별) | [20261113-eip-test-port-flake-slmp-docs.md](20261113-eip-test-port-flake-slmp-docs.md) | 124–125 (A20261113-1, -2) | EIP 단위 테스트 포트 예약 경합 (로컬 CI 1회 실패), SLMP 문서 T10-5 반영 |
+| 2026-11-14 | SLMP 스택 (11단계 제안 선별, #208 검증) | [20261114-slmp-word-range-overflow.md](20261114-slmp-word-range-overflow.md) | 126 (A20261114-1), 71 비고 | 워드 슬롯 범위 검사 32비트 넘침 → 맵 밖 memcpy (ASan 재현, API·config 경로). 클라이언트 캐시 비트 번호 해석은 큐 71 에 |
