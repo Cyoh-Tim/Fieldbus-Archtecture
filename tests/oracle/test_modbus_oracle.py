@@ -130,7 +130,6 @@ def _recv_exact(s, n):
     return buf
 
 
-@known_defect("T9-7", "서버 소켓에 TCP_NODELAY 가 없어 파이프라인 두 번째 응답이 Nagle+지연 ACK 로 ~40ms 늦다")
 def test_pipelined_responses_not_delayed_by_nagle(mb_dut):
     """파이프라인한 두 요청의 두 번째 응답이 상대의 지연 ACK(리눅스 최소 40ms)를 기다리지 않고 온다.
 

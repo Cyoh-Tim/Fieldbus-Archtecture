@@ -716,6 +716,9 @@ static void accept_clients(mb_stack_t *s)
         if (fd < 0) {
             break;
         }
+        /* T9-7: Nagle plus the peer's delayed ACK holds a second small response. */
+        int one = 1;
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
         set_nonblock(fd);
         uint32_t ip = ntohl(peer.sin_addr.s_addr);
         if (mb_count_ip(s, ip) >= s->cfg.max_conn_per_ip) {
