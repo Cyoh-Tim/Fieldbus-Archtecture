@@ -1601,3 +1601,204 @@ def test_read_other_ar_uuid_during_ar_error_response(pn_dut):
     assert status == 0xDE814002, f"PNIOStatus {status:08x}"
     out = pn_dut.cmd("POLL 60")
     assert [f for f in tx_frames(out) if is_rtc1(f)], "거부 뒤 기존 AR 의 RTC1 이 멈췄다"
+
+
+
+
+# ---------------------------------------------------------------- 감사 2026-11-15 PROFINET RT·알람 (A20261115-1 ~ -5)
+# 근거: p-net master 1c3b0b4 src/common/pf_cpm_driver_sw.c pf_cpm_c_data_ind (O→T 수신 검사), src/common/pf_cpm.c
+# (pf_cpm_check_cycle / pf_cpm_check_src_addr / buffer_length), src/common/pf_alarm.c (APMR 수신 검사, 중복 DATA 재ACK,
+# ERR-RTA → AR abort), Wireshark master f07cf797 plugins/epan/profinet/packet-pn-rt.c (DataStatus·TransferStatus),
+# packet-dcerpc-pn-io.c dissect_PNIO_RTA (RTA-PDU 형식).
+# O→T 프레임: [FrameID 0x8000] C_SDU(40) [CycleCounter(2) DataStatus(1) TransferStatus(1)], 출력 (1,1) 데이터 @0..31.
+from scapy.packet import Raw  # noqa: E402
+
+A1115_HOLD = 10  # WatchdogFactor·DataHoldFactor 10 → 10 × 16 ms = 160 ms (ETH 명령 하나가 약 50 ms 걸린다)
+A1115_CTRL_ALARM_REF = 0x0007  # 컨트롤러 LocalAlarmReference (장치 알람의 AlarmDstEndpoint)
+A1115_OUT_POINT = {"name": "out0", "access": "write", "data_type": "uint16", "length": 2,
+                   "address": {"profinet": {"slot": 1, "subslot": 1, "index": 1, "byte_offset": 0, "length": 2}}}
+
+
+def a1115_oto(dev_mac, cycle, data, ds=0x35, ts=0, src=CONTROLLER_MAC, csdu_len=C_SDU_LEN):
+    """컨트롤러 → 장치 RTC1 (출력 IOCR FrameID 0x8000, 802.1Q 우선순위 6)."""
+    sdu = bytearray(csdu_len)
+    sdu[0:len(data)] = data
+    if csdu_len >= 37:
+        sdu[32] = 0x80             # IOPS (1,1) Good
+        sdu[33:37] = b"\x80" * 4   # 입력 쪽 서브모듈 4개의 IOCS
+    apdu = struct.pack(">H", 0x8000) + bytes(sdu) + struct.pack(">HBB", cycle, ds, ts)
+    return raw(Ether(dst=dev_mac, src=src) / Dot1Q(prio=6, vlan=0, type=0x8892) / Raw(apdu))
+
+
+def a1115_rta(dev_mac, dst_ep, src_ep, pdu_type, add_flags, send_seq, ack_seq, var=b"",
+              frame_id=ALARM_LOW_FID, src=CONTROLLER_MAC):
+    """RTA-PDU (Wireshark dissect_PNIO_RTA 순서): Dst(2) Src(2) PDUType(1) AddFlags(1) SendSeq(2) AckSeq(2) VarPartLen(2)."""
+    rta = struct.pack(">HHBBHHH", dst_ep, src_ep, pdu_type, add_flags, send_seq, ack_seq, len(var)) + var
+    prio = 5 if frame_id == ALARM_LOW_FID else 6
+    return raw(Ether(dst=dev_mac, src=src) / Dot1Q(prio=prio, vlan=0, type=0x8892)
+               / Raw(struct.pack(">H", frame_id) + rta))
+
+
+def a1115_connect(pn, **kw):
+    """Connect 후 (장치 LocalAlarmReference, 장치 MAC). MAC 은 장치가 보낸 RTC1 의 송신 주소."""
+    rsp = rpc_response(pn.rpc(raw(connect_pdu(**kw))))
+    assert rsp is not None, "Connect 응답 없음"
+    status, blocks = ndr_response(rsp)
+    assert status == 0, f"Connect PNIOStatus {status:08x}"
+    alarm = [AlarmCRBlockRes(b) for t, b in split_blocks(blocks) if t == 0x8103]
+    assert alarm, "AlarmCRBlockRes 없음"
+    frames = [f for f in tx_frames(pn.cmd("POLL 40")) if is_rtc1(f)]
+    assert frames, "Connect 뒤 RTC1 없음"
+    return alarm[0].LocalAlarmReference, frames[-1].src
+
+
+def a1115_rta_frames(lines, frame_id=ALARM_LOW_FID):
+    """장치가 보낸 RTA-PDU 목록 (FrameID 뒤 바이트)."""
+    return [raw(f[ProfinetIO])[2:] for f in tx_frames(lines)
+            if f.haslayer(ProfinetIO) and f[ProfinetIO].frameID == frame_id]
+
+
+def a1115_out0(app):
+    vals = [x for tag, x in app.cmd("RF32 out0") if tag == "F32"]
+    assert vals, "fb_read_f32(out0) 실패"
+    return int(struct.unpack(">f", vals[0])[0])
+
+
+def a1115_app_after_good_frame(pn_app):
+    """어댑터 DUT 에 Connect 하고 정상 O→T (CycleCounter 0x0100, out0 = 0x1234) 하나를 넣는다."""
+    app = pn_app(dict(APP_BASE_PARAMS, security_class=0), [A1115_OUT_POINT])
+    assert app.opened(), f"fb_open 실패: {app.startup}"
+    _, dev_mac = a1115_connect(app, hold=A1115_HOLD)
+    app.eth(a1115_oto(dev_mac, 0x0100, b"\x12\x34"))
+    assert a1115_out0(app) == 0x1234, "정상 O→T 의 출력이 출력 이미지에 들어가지 않았다 (전제 실패)"
+    return app, dev_mac
+
+
+# ---------------------------------------------------------------- A20261115-1 O→T DataValid·CycleCounter
+# p-net pf_cpm_driver_sw.c:330-386: update_data = frame_structure && c_sdu_structure && data_valid && (primary||backup),
+# dht_reload = frame_structure && c_sdu_structure && (data_valid || backup). c_sdu_structure 는 pf_cpm.c:181-193
+# pf_cpm_check_cycle — CycleCounter 차이가 1..61440 일 때만 새 프레임. DataStatus bit 2 DataValid (Wireshark packet-pn-rt.c:188, :226).
+A1115_BAD_C_SDU = [
+    (dict(cycle=0x0100), "stale-cycle"),          # 직전과 같은 CycleCounter (중복·재전송 프레임)
+    (dict(cycle=0x0200, ds=0x31), "data-invalid"),  # DataStatus 0x31: Primary·Run·OK, DataValid=0
+]
+
+
+@known_defect("A20261115-1", "O→T RTC1 의 DataStatus.DataValid=0 프레임과 CycleCounter 가 늘지 않은 프레임도 출력 이미지에 쓴다. "
+              "p-net pf_cpm_c_data_ind: DataValid=1 이고 CycleCounter 가 새 값일 때만 갱신")
+@pytest.mark.parametrize("kw,desc", A1115_BAD_C_SDU, ids=[d for _, d in A1115_BAD_C_SDU])
+def test_oto_invalid_c_sdu_not_applied(pn_app, kw, desc):
+    app, dev_mac = a1115_app_after_good_frame(pn_app)
+    app.eth(a1115_oto(dev_mac, data=b"\x56\x78", **kw))
+    got = a1115_out0(app)
+    assert got == 0x1234, f"{desc}: 출력 이미지가 0x{got:04x} 로 바뀌었다 (0x1234 유지 기대)"
+
+
+@known_defect("A20261115-1", "CycleCounter 가 멈춘 O→T 나 DataValid=0 O→T 가 data-hold 타이머를 계속 되살려 AR 이 끊기지 않는다. "
+              "p-net: 이런 프레임은 DHT 를 리로드하지 않아 DataHoldFactor × 주기 뒤 CONSUMER_DHT_EXPIRED(0x05) 로 abort")
+@pytest.mark.parametrize("kw,desc", A1115_BAD_C_SDU, ids=[d for _, d in A1115_BAD_C_SDU])
+def test_oto_invalid_c_sdu_does_not_hold_ar(pn_dut, kw, desc):
+    _, dev_mac = a1115_connect(pn_dut, hold=A1115_HOLD)
+    # 1단계 (대조): CycleCounter 가 늘어나는 정상 프레임 4개 (약 200 ms > 160 ms) 동안 AR 이 유지되어야 한다.
+    for i in range(4):
+        out = pn_dut.eth(a1115_oto(dev_mac, 0x0100 + 0x200 * i, b"\x12\x34"))
+    assert [f for f in tx_frames(out) if is_rtc1(f)], "정상 O→T 를 받는 동안 AR 이 끊겼다 (전제 실패)"
+    last = 0x0100 + 0x200 * 3
+    # 2단계: 나쁜 프레임만 약 300 ms (data-hold 160 ms 의 2배 가까이). 장치는 data-hold 만료로 AR 을 끊어야 한다.
+    seen = []
+    for i in range(6):
+        cyc = last if desc == "stale-cycle" else last + 0x200 * (i + 1)
+        seen += pn_dut.eth(a1115_oto(dev_mac, cyc, b"\x56\x78", ds=kw.get("ds", 0x35)))
+    tail = pn_dut.cmd("POLL 60")
+    errs = [r for r in a1115_rta_frames(seen + tail) if r[4] == 0x14]  # ERR-RTA v1
+    assert errs, f"{desc}: 나쁜 O→T 만 받는데 data-hold 만료 abort (ERR-RTA) 가 없다"
+    assert errs[0][12:16] == bytes([0xCF, 0x81, 0xFD, 0x05]), f"ERR-RTA PNIOStatus {errs[0][12:16].hex()}"
+    assert not [f for f in tx_frames(tail) if is_rtc1(f)], f"{desc}: abort 뒤에도 RTC1 이 나간다"
+
+
+# ---------------------------------------------------------------- A20261115-2 O→T 프레임 구조 (송신 MAC, TransferStatus, 길이)
+# p-net pf_cpm_driver_sw.c:337-341 frame_structure = TransferStatus == 0 && 송신 MAC == CMInitiatorMacAdd
+# (pf_cpm.c:195-210, :251-256) && 길이 == 헤더 + C_SDU(IOCR DataLength) + 4 (pf_cpm.c:262-268). 아니면 갱신·DHT 리로드 없음.
+# Wireshark packet-pn-rt.c:1121-1124 TransferStatus != 0 → "ignore this frame".
+A1115_BAD_FRAME = [
+    (dict(src=OTHER_CONTROLLER_MAC), "other-src-mac"),  # AR 의 CMInitiatorMacAdd 가 아닌 송신자
+    (dict(ts=0x01), "transfer-status"),                # TransferStatus != 0
+    (dict(csdu_len=20), "short-c-sdu"),                # C_SDU 20 (IOCR DataLength 40)
+]
+
+
+@known_defect("A20261115-2", "O→T RTC1 의 송신 MAC·TransferStatus·길이를 보지 않는다. 다른 스테이션의 프레임이나 길이가 틀린 "
+              "프레임도 출력 이미지에 쓰고 data-hold 를 리로드한다. p-net pf_cpm_c_data_ind frame_structure")
+@pytest.mark.parametrize("kw,desc", A1115_BAD_FRAME, ids=[d for _, d in A1115_BAD_FRAME])
+def test_oto_bad_frame_structure_not_applied(pn_app, kw, desc):
+    app, dev_mac = a1115_app_after_good_frame(pn_app)
+    app.eth(a1115_oto(dev_mac, 0x0200, b"\x56\x78", **kw))
+    got = a1115_out0(app)
+    assert got == 0x1234, f"{desc}: 출력 이미지가 0x{got:04x} 로 바뀌었다 (0x1234 유지 기대)"
+
+
+# ---------------------------------------------------------------- A20261115-3 컨트롤러 ERR-RTA
+# p-net pf_alarm.c:2235-2275 ERR-RTA-PDU (VarPartLen 4) 수신 → pf_alarm_error_ind (:330-350) → pf_cmsu_alarm_error_ind
+# (src/device/pf_cmsu.c:309-318) → pf_cmdev_state_ind(PNET_EVENT_ABORT). Wireshark dissect_PNIO_RTA case 4 ERR-RTA + PNIOStatus.
+@known_defect("A20261115-3", "컨트롤러가 보낸 ERR-RTA-PDU 를 무시해 AR 을 유지한다 (RTC1 계속 송신). "
+              "p-net pf_alarm.c: ERR-RTA 수신 → AR abort")
+def test_alarm_err_rta_from_controller_aborts_ar(pn_dut):
+    dev_ref, dev_mac = a1115_connect(pn_dut, alarm_ref=A1115_CTRL_ALARM_REF)
+    err = a1115_rta(dev_mac, dev_ref, A1115_CTRL_ALARM_REF, 0x14, 0x01, 0xFFFF, 0xFFFE,
+                    var=bytes([0xCF, 0x81, 0xFD, 0x0D]))  # RTA error / PNIO / RTA_ERR_CLS_PROTOCOL / ABORT_AR_ABORT_REQ
+    pn_dut.eth(err)
+    out = pn_dut.cmd("POLL 60")
+    assert not [f for f in tx_frames(out) if is_rtc1(f)], "ERR-RTA 를 받은 뒤에도 RTC1 이 나간다 (AR 유지)"
+
+
+# ---------------------------------------------------------------- A20261115-4 중복 DATA-RTA 재ACK
+# p-net pf_alarm.c:1972-1979: SendSeqNum == exp_seq_count_o (이미 받은 DATA 의 재전송, 장치 ACK 유실) 이면 같은 ACK 를 다시 보낸다
+# (pf_alarm_apmr_send_ack :1721-1740 — SendSeq = send_seq_count_o, AckSeq = exp_seq_count_o).
+def a1115_alarm_ack_low():
+    """AlarmAck-Low 블록 (0x8002): AlarmType(2) API(4) Slot(2) Subslot(2) AlarmSpecifier(2) PNIOStatus(4)."""
+    body = struct.pack(">HIHHHI", 0x0001, 0, 0, 1, 0, 0)
+    return struct.pack(">HHBB", 0x8002, 2 + len(body), 1, 0) + body
+
+
+@known_defect("A20261115-4", "컨트롤러가 같은 DATA-RTA 를 다시 보내면 (장치 ACK 유실) ACK 를 다시 보내지 않는다. "
+              "컨트롤러는 재전송 끝에 AR 을 끊는다. p-net pf_alarm.c: exp_seq_count_o 와 같으면 ACK 재송신")
+def test_alarm_duplicate_data_rta_re_acked(pn_dut):
+    dev_ref, dev_mac = a1115_connect(pn_dut, alarm_ref=A1115_CTRL_ALARM_REF)
+    pn_dut.cmd(f"ALARM {ALARM_LOW_FID:04x}")  # 장치 DATA SendSeq 0xFFFF
+    pn_dut.eth(a1115_rta(dev_mac, dev_ref, A1115_CTRL_ALARM_REF, 0x13, 0x01, 0xFFFE, 0xFFFF))  # 컨트롤러 TACK
+    data = a1115_rta(dev_mac, dev_ref, A1115_CTRL_ALARM_REF, 0x11, 0x11, 0xFFFF, 0xFFFF, var=a1115_alarm_ack_low())
+
+    def acks(lines):
+        return [r for r in a1115_rta_frames(lines) if r[4] == 0x13]
+
+    first = acks(pn_dut.eth(data))
+    assert first, "첫 AlarmAck DATA-RTA 에 ACK-RTA 가 없다 (전제 실패)"
+    assert struct.unpack(">H", first[0][8:10])[0] == 0xFFFF, f"ACK AckSeqNum {first[0][8:10].hex()}"
+    again = acks(pn_dut.eth(data))  # 같은 SendSeqNum 0xFFFF 재전송
+    assert again, "재전송된 DATA-RTA (SendSeqNum 0xFFFF) 에 ACK-RTA 를 다시 보내지 않는다"
+    assert again[0][:12] == first[0][:12], f"재ACK {again[0][:12].hex()} != 첫 ACK {first[0][:12].hex()}"
+
+
+# ---------------------------------------------------------------- A20261115-5 알람 수신 송신자 검사
+# p-net pf_alarm.c:786-806: 알람 프레임은 AR 의 CMInitiatorMacAdd (apmx.da, :1030-1033) 에서, AlarmSrcEndpoint 가 컨트롤러
+# LocalAlarmReference (apmx.dst_ref, :1036) 일 때만 받는다. 아니면 버린다 → 장치의 대기 중 DATA 는 ACK 되지 않고 재전송된다.
+# 주의: 이 테스트는 장치의 ACK 타이머·재전송이 돌아야 판정된다. tests/oracle/dut/pn_oracle_pipe.c 의 mock_send 가 바이트 수를
+# 돌려주면 pn_sec.c 가 송신 실패로 보고 타이머를 켜지 않으므로, mock_send 는 성공 = 0 을 돌려줘야 한다 (감사 보고서 "오라클 하네스").
+A1115_SPOOF_ACK = [
+    (dict(src=OTHER_CONTROLLER_MAC), A1115_CTRL_ALARM_REF, "other-src-mac"),
+    (dict(), 0x0005, "other-src-endpoint"),
+]
+
+
+@known_defect("A20261115-5", "알람 프레임의 송신 MAC·AlarmSrcEndpoint 를 보지 않는다. 다른 스테이션(또는 다른 endpoint)의 ACK-RTA 가 "
+              "장치의 대기 중 알람을 확인 처리해 재전송이 멈춘다. p-net pf_alarm_apmr_frame_handler")
+@pytest.mark.parametrize("kw,src_ep,desc", A1115_SPOOF_ACK, ids=[d for *_, d in A1115_SPOOF_ACK])
+def test_alarm_ack_from_wrong_source_ignored(pn_dut, kw, src_ep, desc):
+    dev_ref, dev_mac = a1115_connect(pn_dut, alarm_ref=A1115_CTRL_ALARM_REF)
+    sent = [r for r in a1115_rta_frames(pn_dut.cmd(f"ALARM {ALARM_LOW_FID:04x}")) if r[4] == 0x11]
+    assert sent, "알람 DATA-RTA 없음 (전제 실패)"
+    seq = struct.unpack(">H", sent[0][6:8])[0]
+    out = pn_dut.eth(a1115_rta(dev_mac, dev_ref, src_ep, 0x13, 0x01, 0xFFFE, seq, **kw))
+    out += pn_dut.cmd("POLL 150")  # RTATimeoutFactor 1 = 100 ms 뒤 재전송
+    retx = [r for r in a1115_rta_frames(out) if r[4] == 0x11 and struct.unpack(">H", r[6:8])[0] == seq]
+    assert retx, f"{desc}: AR 컨트롤러가 아닌 ACK-RTA 로 대기 중 알람(SendSeq 0x{seq:04x})의 재전송이 멈췄다"

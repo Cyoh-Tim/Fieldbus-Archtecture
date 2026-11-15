@@ -148,6 +148,12 @@
 | 124 | A20261113-1 | EIP 단위 테스트 `reserve_port` 가 bind 뒤 바로 닫아 같은 포트를 다시 내줄 수 있음 — `test_eip_t11_11` `distinct ports` 가끔 실패 (6개 파일에 같은 helper) | `tests/` | 없음 | 출처 #204 검증 (sanitizers job 1회 실패, 단독 재실행 PASS). 보고서 [audits/20261113-eip-test-port-flake-slmp-docs.md](audits/20261113-eip-test-port-flake-slmp-docs.md). 완료: `ctest -R test_eip -j8 --repeat until-fail:20` |
 | 125 | A20261113-2 | SLMP 문서·CTT 매트릭스가 T10-5 이전 동작 (`C050h`, 이상 응답 길이 2, 짧은 쓰기 무응답) 을 적음 | `docs/` | 없음 | 출처 #204 "발견한 다른 문제". 같은 보고서에 위치 목록. 보드 JSON 은 `tools/ctt/gen_board_data.py` 로 |
 | 126 | A20261114-1 | SLMP `slmp_stack_read_words`/`write_words` 워드 슬롯 범위 검사 `head + quantity > capacity` 가 `uint32_t` 넘침으로 통과 → 맵 밖 memcpy (API·config 경로, ASan SEGV) | `stacks/slmp/`, `tests/` | 없음 | 출처 #208 "발견한 다른 문제". 보고서 [audits/20261114-slmp-word-range-overflow.md](audits/20261114-slmp-word-range-overflow.md). 와이어 선두 3바이트라 원격 요청으로는 닿지 않음. 단위 테스트 |
+| 127 | A20261115-1 | PN O→T RTC1 의 DataValid=0·CycleCounter 정지 프레임을 출력 이미지에 쓰고 data-hold 를 되살림 (무효 데이터가 출력으로, AR 이 안 끊김) | `stacks/profinet/`, `tests/`, `tools/ctt/proto/profinet/pn_plugin.c` (O→T 주입만) | A20261115-1 ×4 | 2026-11-15 감사. 보고서 [audits/20261115-pn-rt-alarm.md](audits/20261115-pn-rt-alarm.md). v0.2.0 게이트 (c). 근거 p-net `pf_cpm_driver_sw.c` (`dht_reload`·`update_data`), `pf_cpm_check_cycle`. `tests/test_pn_t12_4.c` 의 DataStatus 0 프레임·CTT `inject_ot_rtc1` CycleCounter 도 함께 |
+| 128 | A20261115-2 | PN O→T RTC1 의 송신 MAC·TransferStatus·길이 미검사 — 다른 스테이션 프레임·잘린 프레임이 출력을 바꾸고 AR 을 붙잡음 | `stacks/profinet/`, `tests/` | A20261115-2 ×3 | 같은 보고서. v0.2.0 게이트 (b). 근거 p-net `frame_structure` (`pf_cpm_check_src_addr`·`buffer_length`·`transfer_status`), Wireshark `packet-pn-rt.c` |
+| 129 | A20261115-3 | PN 컨트롤러가 보낸 ERR-RTA-PDU 를 무시해 AR 유지 | `stacks/profinet/`, `tests/` | A20261115-3 | 같은 보고서. 근거 p-net `pf_alarm.c` → `pf_cmsu.c` AR abort. 2026-10-25 확인 필요 2 확정 |
+| 130 | A20261115-4 | PN 같은 DATA-RTA 재수신 (장치 ACK 유실) 시 ACK 를 다시 보내지 않음 — ACK 하나 유실로 컨트롤러 재전송이 끝나 AR 끊김 | `stacks/profinet/`, `tests/` | A20261115-4 | 같은 보고서. 근거 p-net `pf_alarm.c` "Re-send the ACK". 2026-10-25 확인 필요 1 확정. NACK (확인 필요 2) 은 같은 PR 에서 해도 됨 |
+| 131 | A20261115-5 | PN 알람 프레임의 송신 MAC·AlarmSrcEndpoint 미검사 — 다른 스테이션·endpoint 의 ACK-RTA 가 대기 중 알람을 지워 재전송이 멈춤 | `stacks/profinet/`, `tests/` | A20261115-5 ×2 | 같은 보고서. 근거 p-net `pf_alarm_apmr_frame_handler` (source MAC·dst_ref). 큐 129 와 같은 함수 — 함께 해도 됨 |
+| 132 | A20261115-6 | Modbus 클라이언트 연결 소켓에 `TCP_NODELAY` 없음 (서버만 #211 로 켬) (낮음) | `stacks/modbus/`, `tests/` | 없음 | 출처 #211 "발견한 다른 문제" 1. 보고서 [audits/20261115-modbus-client-nodelay.md](audits/20261115-modbus-client-nodelay.md). `docs/protocols/modbus.md` 6.3 |
 
 ## v0.2.0 릴리스 게이트
 
@@ -174,8 +180,10 @@
 | 99 | A20261028-1 | b, c | EIP 짧은 send 로 응답 유실·스트림 경계 깨짐 |
 | 118 | A20261110-1 | d | EIP 자체 보안이 표준 클래스 0x5E 로 응답 |
 | 121 | A20261112-1 | b | EIP HMAC 재료 절단 — 568 바이트 뒤 변조 수락 |
+| 127 | A20261115-1 | c | PN O→T 무효·정지 프레임을 출력에 씀 |
+| 128 | A20261115-2 | b | PN O→T 송신자·TransferStatus·길이 미검사 |
 
-(2026-11-12 기준 17행 — 2026-11-12 큐 121 추가. 46 은 #195 로 끝남. 이슈 발행 순서는 운영 규칙대로 큐 번호순이다.)
+(2026-11-15 기준 19행 — 11-12 큐 121, 11-15 큐 127·128 추가. 46 은 #195 로 끝남. 이슈 발행 순서는 운영 규칙대로 큐 번호순이다.)
 
 ## 이슈 본문 템플릿
 
