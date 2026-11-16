@@ -160,7 +160,6 @@ def test_pipelined_responses_not_delayed_by_nagle(mb_dut):
     assert delays[2] < 20, f"두 번째 응답까지 ms (정렬): {[round(d, 1) for d in delays]}"
 
 
-@known_defect("T9-8", "non-blocking send 가 EAGAIN 이면 마스터 연결을 끊는다. 남은 응답은 다음 poll 에서 보내야 한다")
 def test_slow_reader_keeps_connection(mb_dut):
     """마스터가 잠시 읽지 않아 서버 송신 버퍼가 차도 연결을 유지하고 모든 응답을 순서대로 보낸다.
 

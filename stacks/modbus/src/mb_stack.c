@@ -29,6 +29,11 @@ struct mb_client {
     uint64_t last_rx_ns;
     uint8_t rx[MB_RX_CAP];
     size_t rx_len;
+    /* Unsent response tail. One ADU is enough: serve_client stops reading
+     * until the next poll drains it, so responses stay in order. */
+    uint8_t tx[MB_ADU_MAX];
+    size_t tx_len;
+    size_t tx_off;
 };
 
 struct mb_stack {
@@ -464,6 +469,8 @@ mb_stack_t *mb_stack_create(const mb_cfg_t *cfg)
         s->clients[i].peer_ip = 0;
         s->clients[i].last_rx_ns = 0;
         s->clients[i].rx_len = 0;
+        s->clients[i].tx_len = 0;
+        s->clients[i].tx_off = 0;
     }
     if (!s->holding || !s->input || !s->coils || !s->discrete) {
         mb_stack_destroy(s);
@@ -670,6 +677,8 @@ void mb_stack_stop(mb_stack_t *s)
             close(s->clients[i].fd);
             s->clients[i].fd = -1;
             s->clients[i].rx_len = 0;
+            s->clients[i].tx_len = 0;
+            s->clients[i].tx_off = 0;
             s->clients[i].peer_ip = 0;
             s->clients[i].last_rx_ns = 0;
         }
@@ -692,6 +701,8 @@ static void close_client(struct mb_client *c)
     }
     c->fd = -1;
     c->rx_len = 0;
+    c->tx_len = 0;
+    c->tx_off = 0;
     c->peer_ip = 0;
     c->last_rx_ns = 0;
 }
@@ -741,15 +752,109 @@ static void accept_clients(mb_stack_t *s)
         }
         s->clients[slot].fd = fd;
         s->clients[slot].rx_len = 0;
+        s->clients[slot].tx_len = 0;
+        s->clients[slot].tx_off = 0;
         s->clients[slot].peer_ip = ip;
         s->clients[slot].last_rx_ns = mb_now_ns();
         LOG_INFO("modbus-stack", "master connected (slot %d)", slot);
     }
 }
 
+/* Push a queued tail. EAGAIN leaves the remainder in place for the next poll. */
+static int flush_tx(struct mb_client *c)
+{
+    while (c->tx_off < c->tx_len) {
+        ssize_t n = send(c->fd, c->tx + c->tx_off, c->tx_len - c->tx_off,
+                         MSG_NOSIGNAL);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            /* T9-8: a full kernel buffer is backpressure, not a dead master. */
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                return 0;
+            }
+            return -1;
+        }
+        if (n == 0) {
+            return -1;
+        }
+        c->tx_off += (size_t)n;
+    }
+    c->tx_len = 0;
+    c->tx_off = 0;
+    return 0;
+}
+
+/* Send one response. A short write keeps the unsent tail in c->tx.
+ * Caller must not queue another response until flush_tx clears it. */
+static int send_response(struct mb_client *c, const uint8_t *buf, size_t len)
+{
+    size_t off = 0;
+    if (c->tx_len != 0 || len == 0 || len > MB_ADU_MAX) {
+        return -1;
+    }
+    while (off < len) {
+        ssize_t n = send(c->fd, buf + off, len - off, MSG_NOSIGNAL);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;
+            }
+            return -1;
+        }
+        if (n == 0) {
+            return -1;
+        }
+        off += (size_t)n;
+    }
+    if (off < len) {
+        size_t left = len - off;
+        memcpy(c->tx, buf + off, left);
+        c->tx_len = left;
+        c->tx_off = 0;
+    }
+    return 0;
+}
+
 static void serve_client(mb_stack_t *s, struct mb_client *c)
 {
+    if (flush_tx(c) != 0) {
+        close_client(c);
+        return;
+    }
+
     for (;;) {
+        while (c->tx_len == 0 && c->rx_len >= MB_MBAP_LEN) {
+            uint16_t len = rd_be16(c->rx + 4);
+            size_t need = (size_t)(MB_MBAP_LEN - 1) + (size_t)len;
+            if (len < 2 || need > MB_ADU_MAX) {
+                close_client(c);
+                return;
+            }
+            if (c->rx_len < need) {
+                break;
+            }
+            uint8_t resp[MB_ADU_MAX];
+            size_t resp_len = 0;
+            if (mb_stack_handle_adu(s, c->rx, need, resp, sizeof(resp),
+                                    &resp_len) == 0 &&
+                resp_len > 0) {
+                if (send_response(c, resp, resp_len) != 0) {
+                    close_client(c);
+                    return;
+                }
+            }
+            memmove(c->rx, c->rx + need, c->rx_len - need);
+            c->rx_len -= need;
+        }
+        if (c->tx_len > 0) {
+            /* Kernel receive buffer holds the rest. One ADU of tx is enough
+             * to resume in order on the next poll. */
+            return;
+        }
         if (c->rx_len >= MB_RX_CAP) {
             close_client(c);
             return;
@@ -768,30 +873,6 @@ static void serve_client(mb_stack_t *s, struct mb_client *c)
         }
         c->rx_len += (size_t)n;
         c->last_rx_ns = mb_now_ns();
-
-        while (c->rx_len >= MB_MBAP_LEN) {
-            uint16_t len = rd_be16(c->rx + 4);
-            size_t need = (size_t)(MB_MBAP_LEN - 1) + (size_t)len;
-            if (len < 2 || need > MB_ADU_MAX) {
-                close_client(c);
-                return;
-            }
-            if (c->rx_len < need) {
-                break;
-            }
-            uint8_t resp[MB_ADU_MAX];
-            size_t resp_len = 0;
-            if (mb_stack_handle_adu(s, c->rx, need, resp, sizeof(resp),
-                                    &resp_len) == 0 &&
-                resp_len > 0) {
-                if (send_all(c->fd, resp, resp_len) != 0) {
-                    close_client(c);
-                    return;
-                }
-            }
-            memmove(c->rx, c->rx + need, c->rx_len - need);
-            c->rx_len -= need;
-        }
     }
 }
 
