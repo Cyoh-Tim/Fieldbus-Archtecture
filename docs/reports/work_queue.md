@@ -199,7 +199,7 @@ main 최신 기준으로 새 브랜치를 만들어 작업한다. 이 이슈 하
 
 1. `CLAUDE.md` 를 먼저 읽고 규칙을 지킨다. 작업 범위: <작업 범위>. 그 밖의 디렉토리는 건드리지 않는다.
    새 단위 테스트는 `tests/test_<proto>_t<번호>.c` (예: `tests/test_eip_t11_13.c`, `tests/test_slmp_t10_5.c`) 파일로 둔다.
-   스택 라이브러리만 링크하는 이 형태는 CMake 가 자동으로 빌드·등록한다 (`fb_add_item_tests`, 프로토콜 라벨 포함). 시간을 재는 테스트는
+   스택 라이브러리만 링크하는 이 형태는 CMake 가 자동으로 빌드·등록한다 (`fb_add_item_tests`). 시간을 재는 테스트는
    이름을 `…_timing.c` 로 끝내면 `timing` 라벨이 붙어 CI 에서 부하 없이 따로 돈다. **`CMakeLists.txt` 는 고치지 않는다**
    (PR 마다 같은 자리에 `add_test` 를 넣어 서로 충돌하던 것을 막는다). 어댑터 링크·compile definition 이 꼭 필요한 테스트만
    `CMakeLists.txt` 에 테스트 타깃(`add_executable`/`add_test`)을 직접 추가하고 PR 설명에 이유를 적는다.
