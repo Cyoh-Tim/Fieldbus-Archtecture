@@ -469,8 +469,10 @@ endif()
 # (담당자 결정 2026-11-11). 새 항목 테스트는 파일만 추가하면 된다 — CMakeLists.txt 를 고치지 않는다.
 # 어댑터·fieldbus 링크, --wrap, compile definition 이 필요한 테스트는 위에서 직접 정의한다.
 # 이미 TARGET 이거나 EXCLUDE 에 있으면 건너뛴다 (BUILD_DAEMON=OFF 에서 정의되지 않는 특별 테스트는 EXCLUDE).
+# 라벨 (담당자 결정 2026-11-16): 프로토콜 라벨 (LABEL, CTT 시나리오와 같은 이름) 을 붙이고, 파일 이름이 `_timing.c` 로
+# 끝나면 `timing` 도 붙인다 — 시간을 재는 테스트는 CI 에서 부하 없이 따로 (`-L timing --repeat until-pass:3`) 돈다.
 function(fb_add_item_tests proto stack_lib stack_inc)
-    cmake_parse_arguments(_it "" "" "EXCLUDE;LIBS" ${ARGN})
+    cmake_parse_arguments(_it "" "LABEL" "EXCLUDE;LIBS" ${ARGN})
     file(GLOB _srcs CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tests/test_${proto}_t*.c")
     list(SORT _srcs)
     foreach(_src IN LISTS _srcs)
@@ -482,20 +484,27 @@ function(fb_add_item_tests proto stack_lib stack_inc)
         target_include_directories(${_name} PRIVATE ${stack_inc} include core)
         target_link_libraries(${_name} PRIVATE ${stack_lib} ${_it_LIBS})
         add_test(NAME ${_name} COMMAND ${_name})
+        set(_labels ${_it_LABEL})
+        if(_name MATCHES "_timing$")
+            list(APPEND _labels timing)
+        endif()
+        if(_labels)
+            set_tests_properties(${_name} PROPERTIES LABELS "${_labels}")
+        endif()
     endforeach()
 endfunction()
 
 if(ENABLE_PN_TESTS)
-    fb_add_item_tests(pn pn_stack stacks/profinet/include EXCLUDE test_pn_t12_9 test_pn_t12_21)
+    fb_add_item_tests(pn pn_stack stacks/profinet/include LABEL profinet EXCLUDE test_pn_t12_9 test_pn_t12_21)
 endif()
 if(ENABLE_EIP_TESTS)
-    fb_add_item_tests(eip eip_stack stacks/ethernetip/include)
+    fb_add_item_tests(eip eip_stack stacks/ethernetip/include LABEL ethernetip)
 endif()
 if(ENABLE_MB_TESTS)
-    fb_add_item_tests(mb mb_stack stacks/modbus/include)
+    fb_add_item_tests(mb mb_stack stacks/modbus/include LABEL modbus)
 endif()
 if(ENABLE_SLMP_TESTS)
-    fb_add_item_tests(slmp slmp_stack stacks/slmp/include EXCLUDE test_slmp_t10_3 test_slmp_t10_4
+    fb_add_item_tests(slmp slmp_stack stacks/slmp/include LABEL slmp EXCLUDE test_slmp_t10_3 test_slmp_t10_4
                       LIBS Threads::Threads)
 endif()
 

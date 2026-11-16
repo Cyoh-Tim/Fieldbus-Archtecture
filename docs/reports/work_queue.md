@@ -77,7 +77,7 @@
 | 53 | T9-9 | Modbus TID 카운터 인스턴스 필드로 | `stacks/modbus/` | T9-9 | |
 | 54 | T9-10 | Modbus 스키마 `chars_per_word` 통일 | `adapters/modbus/` 또는 `config/` | T9-10 | |
 | 55 | T8 | `config_loader.c` 를 `LOG_*` 로 | `core/config_loader.c` | 없음 | 패치가 인수인계 문서에 있음 |
-| 56 | T6 | `core/scheduler.c` 중복 정리 | `core/`, `CLAUDE.md`, `CMakeLists.txt` | 없음 | |
+| 56 | T6 | `core/scheduler.c` 중복 정리 | `core/`, `CLAUDE.md`, `CMakeLists.txt` | 없음 | 담당자 결정 (2026-11-16): 이슈 범위 (`core/`, `CLAUDE.md` 스케줄러 위치 문구, `CMakeLists.txt` 의 `core/scheduler.c` 소스 목록, `tests/`) 안이면 검증 담당이 병합 ([audits/20261116-owner-decisions.md](audits/20261116-owner-decisions.md)) |
 | 57 | T7 | 사이클 지연 µs 측정 | `core/`, `include/fb_api.h` | 없음 | T6 이후 |
 | 58 | T0 | 스케일·바이트 순서 규칙 문구 통일 (A안) | `CLAUDE.md`, `docs/`, `include/fb_api.h` 주석 | 없음 | T1·T2 이후 |
 | 59 | A20261002-1 | PN 다른 컨트롤러 Connect 거부 PNIOStatus `DB 81 40 04` (현재 `81 00 00 00` = ErrorCode 0) | `stacks/profinet/`, `tests/` | A20261002-1 | 출처 #74 제안, 보고서 [audits/20261002-pn-rpc-reject.md](audits/20261002-pn-rpc-reject.md). T12-1 이후 |
@@ -199,7 +199,8 @@ main 최신 기준으로 새 브랜치를 만들어 작업한다. 이 이슈 하
 
 1. `CLAUDE.md` 를 먼저 읽고 규칙을 지킨다. 작업 범위: <작업 범위>. 그 밖의 디렉토리는 건드리지 않는다.
    새 단위 테스트는 `tests/test_<proto>_t<번호>.c` (예: `tests/test_eip_t11_13.c`, `tests/test_slmp_t10_5.c`) 파일로 둔다.
-   스택 라이브러리만 링크하는 이 형태는 CMake 가 자동으로 빌드·등록한다 (`fb_add_item_tests`). **`CMakeLists.txt` 는 고치지 않는다**
+   스택 라이브러리만 링크하는 이 형태는 CMake 가 자동으로 빌드·등록한다 (`fb_add_item_tests`, 프로토콜 라벨 포함). 시간을 재는 테스트는
+   이름을 `…_timing.c` 로 끝내면 `timing` 라벨이 붙어 CI 에서 부하 없이 따로 돈다. **`CMakeLists.txt` 는 고치지 않는다**
    (PR 마다 같은 자리에 `add_test` 를 넣어 서로 충돌하던 것을 막는다). 어댑터 링크·compile definition 이 꼭 필요한 테스트만
    `CMakeLists.txt` 에 테스트 타깃(`add_executable`/`add_test`)을 직접 추가하고 PR 설명에 이유를 적는다.
 2. `docs/reports/structure_handoff_20260930.md` 의 "공통 규칙" 과 "<T 항목>" 만 읽고 그 작업만 한다.
