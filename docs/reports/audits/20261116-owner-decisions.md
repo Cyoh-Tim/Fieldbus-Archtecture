@@ -20,3 +20,11 @@ T6 은 `CLAUDE.md` 의 스케줄러 위치 문구와 `CMakeLists.txt` 의 `core/
   CTT 대상만 빌드하고 `ctest -L <프로토콜>` 로 돌리므로, 그 라벨에 들어간 단위 테스트가 빌드되지 않아 "Not Run" 이 된다
   (`test_mb_t9_4`·`t9_5`·`t9_6`·`t9_8`). ctest `-L` 은 정규식이라 `modbus_unit` 같은 이름도 같이 잡힌다. 프로토콜 라벨을 쓰려면
   `examples/run_mock_flow.sh` 를 함께 고쳐야 하므로 (검증 담당 범위 밖) 따로 제안한다.
+
+### 후속 (담당자 결정 2026-11-16 "하고 싶으면 하자 그건" → 큐 134)
+
+프로토콜 라벨을 다시 넣는다. 원인은 mock-flow 가 프로토콜 라벨만으로 테스트를 고르는 것이므로 둘을 함께 고친다:
+- `examples/run_mock_flow.sh` 의 ctest 호출 (`ctest -LE soak_ci -L <label>`, `-LE 'soak_ci|timing' -L <label>`, timing 재시도) 이 빌드한
+  CTT 테스트만 고르게 한다 (예: `-R '^ctt_'` 를 더하거나, CTT 등록 쪽에 `ctt` 라벨을 두고 `-L ctt`). 단위 테스트를 빌드 대상에 넣는 방법도 된다.
+- `fb_add_item_tests` 에 프로토콜 라벨 (`profinet`·`ethernetip`·`modbus`·`slmp`) 을 붙인다 (`c07716c` 에서 시험한 형태).
+- 완료 조건: 로컬 CI mock-flow 를 포함한 전체 PASS, `ctest -N -L modbus` 에 `test_mb_t9_*` 단위 테스트가 잡힘.

@@ -155,6 +155,7 @@
 | 131 | A20261115-5 | PN 알람 프레임의 송신 MAC·AlarmSrcEndpoint 미검사 — 다른 스테이션·endpoint 의 ACK-RTA 가 대기 중 알람을 지워 재전송이 멈춤 | `stacks/profinet/`, `tests/` | A20261115-5 ×2 | 같은 보고서. 근거 p-net `pf_alarm_apmr_frame_handler` (source MAC·dst_ref). 큐 129 와 같은 함수 — 함께 해도 됨 |
 | 132 | A20261115-6 | Modbus 클라이언트 연결 소켓에 `TCP_NODELAY` 없음 (서버만 #211 로 켬) (낮음) | `stacks/modbus/`, `tests/` | 없음 | 출처 #211 "발견한 다른 문제" 1. 보고서 [audits/20261115-modbus-client-nodelay.md](audits/20261115-modbus-client-nodelay.md). `docs/protocols/modbus.md` 6.3 |
 | 133 | A20261116-1 | Modbus 클라이언트 요청 송신 `send_all` 이 `EAGAIN` 이면 연결을 버림 (non-blocking 소켓) (낮음) | `stacks/modbus/`, `tests/` | 없음 | 출처 #214 "발견한 다른 문제". 보고서 [audits/20261116-modbus-client-send-eagain.md](audits/20261116-modbus-client-send-eagain.md). 큐 132 (클라이언트 TCP_NODELAY) 와 같은 PR 로 해도 됨 |
+| 134 | A20261116-2 | 자동 등록 단위 테스트에 프로토콜 라벨 (`modbus` 등) 이 없어 `ctest -L <프로토콜>` 에 안 잡힘. 붙이려면 mock-flow 가 그 라벨로 CTT 만 고르는 방식을 함께 고쳐야 함 (낮음) | `examples/run_mock_flow.sh`, `CMakeLists.txt` (`fb_add_item_tests` 라벨만) | 없음 | 담당자 결정 (2026-11-16). 보고서 [audits/20261116-owner-decisions.md](audits/20261116-owner-decisions.md) "후속". `CMakeLists.txt` 의 이 부분 변경은 담당자 승인 범위 |
 
 ## v0.2.0 릴리스 게이트
 
