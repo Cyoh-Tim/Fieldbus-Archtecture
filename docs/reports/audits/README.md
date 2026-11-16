@@ -63,3 +63,5 @@
 | 2026-11-12 | EtherNet/IP 스택 (11단계 제안 선별, #201 검증) | [20261112-eip-t11-13-followups.md](20261112-eip-t11-13-followups.md) | 121–123 (A20261112-1 ~ -3), 게이트 1행 | HMAC 재료 572 바이트 절단 → 꼬리 변조 수락 (하네스 재현, 게이트 b), LLDP subtype 없음 (scapy), TLS 수신 8192 |
 | 2026-11-13 | 테스트 기반·SLMP 문서 (#204 검증·선별) | [20261113-eip-test-port-flake-slmp-docs.md](20261113-eip-test-port-flake-slmp-docs.md) | 124–125 (A20261113-1, -2) | EIP 단위 테스트 포트 예약 경합 (로컬 CI 1회 실패), SLMP 문서 T10-5 반영 |
 | 2026-11-14 | SLMP 스택 (11단계 제안 선별, #208 검증) | [20261114-slmp-word-range-overflow.md](20261114-slmp-word-range-overflow.md) | 126 (A20261114-1), 71 비고 | 워드 슬롯 범위 검사 32비트 넘침 → 맵 밖 memcpy (ASan 재현, API·config 경로). 클라이언트 캐시 비트 번호 해석은 큐 71 에 |
+| 2026-11-15 | PROFINET RT·알람 (12단계 일요일 감사, opus) | [20261115-pn-rt-alarm.md](20261115-pn-rt-alarm.md) | 127–131 (A20261115-1 ~ -5), 게이트 2행 | O→T 수신 검사 없음 (DataValid·CycleCounter·송신 MAC·TransferStatus·길이), 컨트롤러 ERR-RTA 무시, 중복 DATA-RTA 재ACK 없음, 알람 송신자 미검사. 오라클 DUT mock_send 반환값 정정. 확인 필요 5건 |
+| 2026-11-15 | Modbus 스택 (11단계 제안 선별, #211 검증) | [20261115-modbus-client-nodelay.md](20261115-modbus-client-nodelay.md) | 132 (A20261115-6) | 클라이언트 소켓 TCP_NODELAY 없음 (낮음) |

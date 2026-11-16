@@ -45,7 +45,7 @@ static int mock_send(void *ctx, const uint8_t *frame, size_t len)
         printf("%02x", frame[i]);
     }
     printf("\n");
-    return (int)len;
+    return 0; /* pn_eth_send 와 같은 계약: 성공 0 (AF_PACKET 경로 pn_eth.c 와 같음) */
 }
 
 static int mock_recv(void *ctx, uint8_t *frame, size_t cap, int timeout_ms)
