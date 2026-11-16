@@ -415,7 +415,6 @@ def test_client_connect_to_silent_host_is_bounded(mb_client_dut):
     assert all(float(p[2]) <= 3000 for p in polls), polls
 
 
-@known_defect("T9-9", "TID 카운터가 함수별 static 3개(인스턴스 간 공유)라 함수마다 TID 가 겹치고 새 인스턴스의 첫 TID 가 달라진다")
 def test_client_tid_counter_per_instance(mb_client_dut):
     """TID 는 스택 인스턴스마다 하나의 카운터에서 나온다 (인수인계 T9-9).
 

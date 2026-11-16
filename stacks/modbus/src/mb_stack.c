@@ -55,6 +55,11 @@ struct mb_stack {
     uint16_t n_input;
     uint16_t n_coil;
     uint16_t n_discrete;
+
+    /* Client MBAP transaction id. Read and both write paths share it.
+     * calloc starts each instance at 0, so the first TID is 1.
+     * TID 0 is skipped when the counter wraps. */
+    uint16_t client_tid;
 };
 
 static uint16_t rd_be16(const uint8_t *p)
@@ -1060,6 +1065,16 @@ static int client_recv_adu(mb_stack_t *s, uint16_t expect_tid, uint8_t *resp,
     return 0;
 }
 
+/* Next MBAP transaction id for this stack instance. */
+static uint16_t next_client_tid(mb_stack_t *s)
+{
+    uint16_t tid = ++s->client_tid;
+    if (tid == 0) {
+        tid = ++s->client_tid;
+    }
+    return tid;
+}
+
 /* Client-role: issue one FC03/04/01/02 into local cache. Used by adapter. */
 static int client_txn(mb_stack_t *s, uint8_t fc, uint16_t addr, uint16_t qty,
                       uint8_t *data_out, size_t *data_len)
@@ -1076,11 +1091,7 @@ static int client_txn(mb_stack_t *s, uint8_t fc, uint16_t addr, uint16_t qty,
     if (conn != 0) {
         return conn;
     }
-    static uint16_t tid_seq;
-    uint16_t tid = ++tid_seq;
-    if (tid == 0) {
-        tid = ++tid_seq;
-    }
+    uint16_t tid = next_client_tid(s);
     uint8_t req[12];
     wr_be16(req, tid);
     wr_be16(req + 2, 0);
@@ -1189,11 +1200,7 @@ int mb_stack_client_write_regs(mb_stack_t *s, uint16_t addr,
     if (conn != 0) {
         return conn;
     }
-    static uint16_t tid_seq;
-    uint16_t tid = ++tid_seq;
-    if (tid == 0) {
-        tid = ++tid_seq;
-    }
+    uint16_t tid = next_client_tid(s);
     uint8_t req[MB_ADU_MAX];
     size_t total;
     if (quantity == 1) {
@@ -1260,11 +1267,7 @@ int mb_stack_client_write_bits(mb_stack_t *s, uint16_t addr, const uint8_t *src,
     if (conn != 0) {
         return conn;
     }
-    static uint16_t tid_seq;
-    uint16_t tid = ++tid_seq;
-    if (tid == 0) {
-        tid = ++tid_seq;
-    }
+    uint16_t tid = next_client_tid(s);
     uint8_t req[MB_ADU_MAX];
     size_t total;
     if (quantity == 1) {
