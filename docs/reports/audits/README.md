@@ -65,3 +65,5 @@
 | 2026-11-14 | SLMP 스택 (11단계 제안 선별, #208 검증) | [20261114-slmp-word-range-overflow.md](20261114-slmp-word-range-overflow.md) | 126 (A20261114-1), 71 비고 | 워드 슬롯 범위 검사 32비트 넘침 → 맵 밖 memcpy (ASan 재현, API·config 경로). 클라이언트 캐시 비트 번호 해석은 큐 71 에 |
 | 2026-11-15 | PROFINET RT·알람 (12단계 일요일 감사, opus) | [20261115-pn-rt-alarm.md](20261115-pn-rt-alarm.md) | 127–131 (A20261115-1 ~ -5), 게이트 2행 | O→T 수신 검사 없음 (DataValid·CycleCounter·송신 MAC·TransferStatus·길이), 컨트롤러 ERR-RTA 무시, 중복 DATA-RTA 재ACK 없음, 알람 송신자 미검사. 오라클 DUT mock_send 반환값 정정. 확인 필요 5건 |
 | 2026-11-15 | Modbus 스택 (11단계 제안 선별, #211 검증) | [20261115-modbus-client-nodelay.md](20261115-modbus-client-nodelay.md) | 132 (A20261115-6) | 클라이언트 소켓 TCP_NODELAY 없음 (낮음) |
+| 2026-11-16 | Modbus 스택 (11단계 제안 선별, #214 검증) | [20261116-modbus-client-send-eagain.md](20261116-modbus-client-send-eagain.md) | 133 (A20261116-1) | 클라이언트 요청 송신 EAGAIN 에 연결을 버림 (낮음) |
+| 2026-11-16 | 담당자 결정 (T6 병합 범위, 테스트 라벨) | [20261116-owner-decisions.md](20261116-owner-decisions.md) | 큐 56 비고 | T6 은 이슈 범위 안이면 병합. 자동 등록 테스트에 `timing` 라벨 (`test_mb_t9_7` → `_timing`). 프로토콜 라벨은 mock-flow 와 충돌해 보류 |

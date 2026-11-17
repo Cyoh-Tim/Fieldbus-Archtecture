@@ -469,6 +469,9 @@ endif()
 # (담당자 결정 2026-11-11). 새 항목 테스트는 파일만 추가하면 된다 — CMakeLists.txt 를 고치지 않는다.
 # 어댑터·fieldbus 링크, --wrap, compile definition 이 필요한 테스트는 위에서 직접 정의한다.
 # 이미 TARGET 이거나 EXCLUDE 에 있으면 건너뛴다 (BUILD_DAEMON=OFF 에서 정의되지 않는 특별 테스트는 EXCLUDE).
+# 라벨 (담당자 결정 2026-11-16): 파일 이름이 `_timing.c` 로 끝나면 `timing` 라벨을 붙인다 — 시간을 재는 테스트는 CI 에서
+# 부하 없이 따로 (`-L timing --repeat until-pass:3`) 돈다. 프로토콜 라벨 (`modbus` 등) 은 붙이지 않는다: mock-flow
+# (`examples/run_mock_flow.sh`) 가 CTT 대상만 빌드하고 `ctest -L <프로토콜>` 로 돌리므로, 단위 테스트가 그 라벨에 들어가면 "Not Run" 이 된다.
 function(fb_add_item_tests proto stack_lib stack_inc)
     cmake_parse_arguments(_it "" "" "EXCLUDE;LIBS" ${ARGN})
     file(GLOB _srcs CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tests/test_${proto}_t*.c")
@@ -482,6 +485,9 @@ function(fb_add_item_tests proto stack_lib stack_inc)
         target_include_directories(${_name} PRIVATE ${stack_inc} include core)
         target_link_libraries(${_name} PRIVATE ${stack_lib} ${_it_LIBS})
         add_test(NAME ${_name} COMMAND ${_name})
+        if(_name MATCHES "_timing$")
+            set_tests_properties(${_name} PROPERTIES LABELS "timing")
+        endif()
     endforeach()
 endfunction()
 
