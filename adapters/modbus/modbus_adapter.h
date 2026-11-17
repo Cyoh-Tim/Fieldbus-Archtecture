@@ -13,7 +13,7 @@
  * point:
  *   data_type (uint8..float64, bool, string, raw, bcd16/32 + 별칭)
  *   length, scale|gain, offset, byte_order, word_order, endian(ABCD|BADC|CDAB|DCBA)
- *   chars_per_register, string_swap, trim_null
+ *   chars_per_register|chars_per_word (also under address.modbus), string_swap, trim_null
  *
  * address.modbus:
  *   register_type|type (holding|hr|4x|input|ir|3x|coil|0x|discrete|1x …)

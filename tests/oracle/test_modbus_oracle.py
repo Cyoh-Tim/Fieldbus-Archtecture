@@ -652,7 +652,6 @@ def _schema_chars_keys():
     return [k for k in props if k.startswith(("chars_per_", "char_per_"))]
 
 
-@known_defect("T9-10", "스키마의 chars_per_word 를 Modbus 어댑터가 읽지 않는다 (chars_per_register 계열만)")
 def test_adapter_honours_schema_chars_keys(mb_app_factory):
     """config.schema.json 이 문서화한 '레지스터당 문자 수' 키는 모두 Modbus 어댑터에서 효과가 있어야 한다.
 

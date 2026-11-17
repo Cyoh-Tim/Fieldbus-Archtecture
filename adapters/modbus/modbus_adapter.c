@@ -344,12 +344,22 @@ static int parse_points(modbus_ctx_t *ctx, const char *points_json)
         }
         pt->endian = mb_parse_endian(bo, wo, en);
 
+        /* chars_per_word is the schema alias of chars_per_register (T9-10).
+         * Point keys win over address.modbus. Register names stay ahead of
+         * chars_per_word so an existing chars_per_register is unchanged
+         * when both are set. */
         int found = 0;
         int cpr = json_get_int(p, "chars_per_register", "chars_per_reg",
                                "char_per_register", 2, &found);
         if (!found) {
+            cpr = json_get_int(p, "chars_per_word", NULL, NULL, 2, &found);
+        }
+        if (!found) {
             cpr = json_get_int(mb, "chars_per_register", "chars_per_reg", NULL,
                                2, &found);
+        }
+        if (!found) {
+            cpr = json_get_int(mb, "chars_per_word", NULL, NULL, 2, &found);
         }
         pt->chars_per_reg = (cpr == 1) ? 1 : 2;
 
