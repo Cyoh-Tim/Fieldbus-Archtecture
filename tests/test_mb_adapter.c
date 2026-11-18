@@ -346,6 +346,115 @@ static void test_leading_zero_address_is_decimal(void)
     a->destroy(a);
 }
 
+/* T9-10: config.schema.json documents chars_per_word (1 or 2) next to
+ * chars_per_register. Value 1 is one character per register, low byte,
+ * in order (mb_pack_string). The adapter used to read only
+ * chars_per_register / chars_per_reg / char_per_register, so the schema
+ * key was ignored and "ABCD" was packed two characters per register
+ * (0x4142, 0x4344) and the next two registers stayed 0. */
+static void expect_one_char_regs(protocol_adapter_t *a, const char *prefix,
+                                 const char *msg)
+{
+    static const uint8_t exp[4][2] = {
+        {0x00, 'A'}, {0x00, 'B'}, {0x00, 'C'}, {0x00, 'D'}};
+    uint8_t got[4][2];
+    int bad = 0;
+    memset(got, 0xFF, sizeof(got));
+    for (int i = 0; i < 4; i++) {
+        char name[8];
+        snprintf(name, sizeof(name), "%s%d", prefix, i);
+        if (read_bytes(a, name, got[i], 2) != 0 ||
+            memcmp(got[i], exp[i], 2) != 0) {
+            bad = 1;
+        }
+    }
+    if (!bad) {
+        return;
+    }
+    fprintf(stderr, "FAIL: %s\n", msg);
+    for (int i = 0; i < 4; i++) {
+        fprintf(stderr, "  %s%d = %02X %02X (expected %02X %02X)\n", prefix, i,
+                got[i][0], got[i][1], exp[i][0], exp[i][1]);
+    }
+    g_fail = 1;
+}
+
+static void test_schema_chars_per_word(void)
+{
+    const char *params =
+        "{\"role\":\"server\",\"ip\":\"127.0.0.1\",\"port\":15754,"
+        "\"unit_id\":1,\"max_clients\":2,\"client_timeout_ms\":100}";
+    const char *points =
+        "["
+        "{\"name\":\"s_point\",\"access\":\"readwrite\",\"data_type\":\"string\","
+        "\"length\":4,\"chars_per_word\":1,"
+        "\"address\":{\"modbus\":{\"register_type\":\"holding\",\"start\":100,"
+        "\"zero_based\":true}}},"
+        "{\"name\":\"p0\",\"data_type\":\"uint16\","
+        "\"address\":{\"modbus\":{\"register_type\":\"holding\",\"start\":100,"
+        "\"zero_based\":true}}},"
+        "{\"name\":\"p1\",\"data_type\":\"uint16\","
+        "\"address\":{\"modbus\":{\"register_type\":\"holding\",\"start\":101,"
+        "\"zero_based\":true}}},"
+        "{\"name\":\"p2\",\"data_type\":\"uint16\","
+        "\"address\":{\"modbus\":{\"register_type\":\"holding\",\"start\":102,"
+        "\"zero_based\":true}}},"
+        "{\"name\":\"p3\",\"data_type\":\"uint16\","
+        "\"address\":{\"modbus\":{\"register_type\":\"holding\",\"start\":103,"
+        "\"zero_based\":true}}},"
+        "{\"name\":\"s_addr\",\"access\":\"readwrite\",\"data_type\":\"string\","
+        "\"length\":4,"
+        "\"address\":{\"modbus\":{\"register_type\":\"holding\",\"start\":200,"
+        "\"zero_based\":true,\"chars_per_word\":1}}},"
+        "{\"name\":\"a0\",\"data_type\":\"uint16\","
+        "\"address\":{\"modbus\":{\"register_type\":\"holding\",\"start\":200,"
+        "\"zero_based\":true}}},"
+        "{\"name\":\"a1\",\"data_type\":\"uint16\","
+        "\"address\":{\"modbus\":{\"register_type\":\"holding\",\"start\":201,"
+        "\"zero_based\":true}}},"
+        "{\"name\":\"a2\",\"data_type\":\"uint16\","
+        "\"address\":{\"modbus\":{\"register_type\":\"holding\",\"start\":202,"
+        "\"zero_based\":true}}},"
+        "{\"name\":\"a3\",\"data_type\":\"uint16\","
+        "\"address\":{\"modbus\":{\"register_type\":\"holding\",\"start\":203,"
+        "\"zero_based\":true}}}"
+        "]";
+
+    protocol_adapter_t *a = modbus_adapter_create();
+    if (!a) {
+        expect(0, "T9-10 create");
+        return;
+    }
+    int irc = a->init(a, params, points);
+    expect(irc == 0, "T9-10 init");
+    if (irc != 0) {
+        a->destroy(a);
+        return;
+    }
+    expect(a->connect(a) == 0, "T9-10 connect");
+
+    uint8_t tag[4] = {'A', 'B', 'C', 'D'};
+    point_value_t tw = {.data = tag, .len = 4};
+    expect(a->write_point(a, "s_point", &tw) == 0, "T9-10 write point key");
+    expect_one_char_regs(
+        a, "p",
+        "chars_per_word=1 on the point is one character per register");
+
+    point_value_t tr = {0};
+    expect(a->read_point(a, "s_point", &tr) == 0, "T9-10 read point key");
+    expect(tr.len == 4 && tr.data && memcmp(tr.data, "ABCD", 4) == 0,
+           "chars_per_word=1 string roundtrip");
+    free(tr.data);
+
+    expect(a->write_point(a, "s_addr", &tw) == 0, "T9-10 write address key");
+    expect_one_char_regs(
+        a, "a",
+        "chars_per_word=1 under address.modbus is one character per register");
+
+    a->disconnect(a);
+    a->destroy(a);
+}
+
 static void test_endian_helpers(void)
 {
     uint8_t b[4] = {0x12, 0x34, 0x56, 0x78};
@@ -363,6 +472,7 @@ int main(void)
     test_offset_scale_endian_aliases();
     test_u16_bitfield_roundtrip();
     test_leading_zero_address_is_decimal();
+    test_schema_chars_per_word();
     if (g_fail) {
         fprintf(stderr, "test_mb_adapter: FAILED\n");
         return 1;
