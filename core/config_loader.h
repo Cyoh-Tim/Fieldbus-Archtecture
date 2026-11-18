@@ -14,7 +14,8 @@ typedef struct daemon_config {
     char *points_json;
 } daemon_config_t;
 
-/* 성공 0, 실패 시 음수. 실패 시 stderr 에 원인(누락 필드 등) 로그 출력 */
+/* 성공 0, 실패 시 음수. 실패 시 LOG_ERROR("config", ...) 로
+ * stderr 에 [timestamp][ERROR][config] 원인 로그를 출력한다. */
 int config_load(const char *path, daemon_config_t *out);
 void config_free(daemon_config_t *cfg);
 
