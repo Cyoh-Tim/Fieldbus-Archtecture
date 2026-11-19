@@ -61,7 +61,7 @@
 
 ## 테스트 관련 메모
 - 8ms 사이클 기준 에이징 테스트(1~2시간, PREEMPT_RT 미적용) 결과 최대 지연
-  편차 0.1ms 확인됨 (주기 구동 프로토콜 기준). 스케줄러(`core/scheduler.c`) 관련 변경 시 이 여유 폭을
+  편차 0.1ms 확인됨 (주기 구동 프로토콜 기준). 스케줄러(`core/fb_api.c`의 `run_cycle_loop`) 관련 변경 시 이 여유 폭을
   참고해 회귀 여부를 판단할 것.
 - CTT: `cmake -S . -B build -DBUILD_DAEMON=OFF -DBUILD_CTT=ON` 후
   `ctest --test-dir build --output-on-failure -LE soak_ci`.

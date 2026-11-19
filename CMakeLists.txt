@@ -122,7 +122,6 @@ if(BUILD_DAEMON)
     # ---- 코어 ----
     add_library(core STATIC
         core/config_loader.c
-        core/scheduler.c
         core/adapter_registry.c
         core/fb_api.c
     )
