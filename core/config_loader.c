@@ -1,12 +1,14 @@
-#include "config_loader.h"
+#define _POSIX_C_SOURCE 200809L /* 파일 맨 위로 이동 */
 
-#define _POSIX_C_SOURCE 200809L
+#include "config_loader.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <cJSON.h>
+
+#include "logger.h"
 
 static char *read_whole_file(const char *path)
 {
@@ -39,14 +41,14 @@ int config_load(const char *path, daemon_config_t *out)
 
     char *raw = read_whole_file(path);
     if (!raw) {
-        fprintf(stderr, "[config] 파일을 열 수 없음: %s\n", path);
+        LOG_ERROR("config", "파일을 열 수 없음: %s", path);
         return -1;
     }
 
     cJSON *root = cJSON_Parse(raw);
     if (!root) {
         const char *ep = cJSON_GetErrorPtr();
-        fprintf(stderr, "[config] JSON 파싱 실패: %s\n", ep ? ep : "(unknown)");
+        LOG_ERROR("config", "JSON 파싱 실패: %s", ep ? ep : "(unknown)");
         free(raw);
         return -1;
     }
@@ -54,7 +56,7 @@ int config_load(const char *path, daemon_config_t *out)
 
     cJSON *protocol = cJSON_GetObjectItemCaseSensitive(root, "protocol");
     if (!cJSON_IsString(protocol) || !protocol->valuestring[0]) {
-        fprintf(stderr, "[config] \"protocol\" 필드가 없거나 문자열이 아님\n");
+        LOG_ERROR("config", "\"protocol\" 필드가 없거나 문자열이 아님");
         cJSON_Delete(root);
         return -1;
     }

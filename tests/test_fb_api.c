@@ -1,5 +1,9 @@
 #include "fb_api.h"
 
+/* core/ 는 fieldbus 공개 include 가 아니다. T8 은 CMakeLists.txt 를 바꾸지
+ * 않으므로 테스트에서만 상대 경로로 config_load 를 호출한다. */
+#include "../core/config_loader.h"
+
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -9,12 +13,146 @@
 
 static int g_fail;
 
+static int write_file(const char *path, const char *body);
+
 static void expect(int cond, const char *msg)
 {
     if (!cond) {
         fprintf(stderr, "FAIL: %s\n", msg);
         g_fail = 1;
     }
+}
+
+/* [YYYY-MM-DD HH:MM:SS][ERROR][config] <message> */
+static int is_config_error_log(const char *buf, const char *message)
+{
+    int y, mo, d, h, mi, s;
+    char level[16];
+    char component[16];
+    int n = 0;
+
+    if (!buf || !message) {
+        return 0;
+    }
+    if (sscanf(buf, "[%d-%d-%d %d:%d:%d][%15[^]]][%15[^]]] %n", &y, &mo, &d, &h,
+               &mi, &s, level, component, &n) < 8 ||
+        n <= 0) {
+        return 0;
+    }
+    if (y < 1970 || mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 23 ||
+        mi < 0 || mi > 59 || s < 0 || s > 60) {
+        return 0;
+    }
+    if (strcmp(level, "ERROR") != 0 || strcmp(component, "config") != 0) {
+        return 0;
+    }
+    return strncmp(buf + n, message, strlen(message)) == 0;
+}
+
+/* config_load 가 남기는 stderr 만 임시 파일로 받는다. 호출 후 stderr 는 복구된다. */
+static int load_and_capture(const char *dir, const char *path, char *out,
+                            size_t outlen, int *rc_out)
+{
+    char tmpl[64];
+    int nw = snprintf(tmpl, sizeof(tmpl), "%s/cap_XXXXXX", dir);
+    if (nw < 0 || (size_t)nw >= sizeof(tmpl)) {
+        return -1;
+    }
+    int fd = mkstemp(tmpl);
+    if (fd < 0) {
+        return -1;
+    }
+    int saved = dup(fileno(stderr));
+    if (saved < 0) {
+        close(fd);
+        unlink(tmpl);
+        return -1;
+    }
+    fflush(stderr);
+    if (dup2(fd, fileno(stderr)) < 0) {
+        close(saved);
+        close(fd);
+        unlink(tmpl);
+        return -1;
+    }
+
+    daemon_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    int rc = config_load(path, &cfg);
+    if (rc == 0) {
+        config_free(&cfg);
+    }
+    fflush(stderr);
+    if (dup2(saved, fileno(stderr)) < 0) {
+        close(saved);
+        close(fd);
+        unlink(tmpl);
+        return -1;
+    }
+    close(saved);
+
+    if (lseek(fd, 0, SEEK_SET) < 0) {
+        close(fd);
+        unlink(tmpl);
+        return -1;
+    }
+    size_t got = 0;
+    while (got + 1 < outlen) {
+        ssize_t nread = read(fd, out + got, outlen - 1 - got);
+        if (nread < 0) {
+            close(fd);
+            unlink(tmpl);
+            return -1;
+        }
+        if (nread == 0) {
+            break;
+        }
+        got += (size_t)nread;
+    }
+    out[got] = '\0';
+    close(fd);
+    unlink(tmpl);
+    *rc_out = rc;
+    return 0;
+}
+
+static void expect_config_error(const char *dir, const char *path,
+                                const char *message, const char *what)
+{
+    char logbuf[512];
+    int rc = 0;
+    if (load_and_capture(dir, path, logbuf, sizeof(logbuf), &rc) != 0) {
+        fprintf(stderr, "FAIL: %s (stderr capture failed)\n", what);
+        g_fail = 1;
+        return;
+    }
+    if (rc >= 0 || !is_config_error_log(logbuf, message)) {
+        fprintf(stderr, "FAIL: %s (rc=%d) captured stderr:\n%s\n", what, rc,
+                logbuf);
+        g_fail = 1;
+    }
+}
+
+/* T8: 파일 없음 / JSON 파싱 실패 / protocol 필드 없음. */
+static void test_config_load_error_logs(const char *dir)
+{
+    char missing[256];
+    char badjson[256];
+    char noproto[256];
+    snprintf(missing, sizeof(missing), "%s/missing.json", dir);
+    snprintf(badjson, sizeof(badjson), "%s/badjson.json", dir);
+    snprintf(noproto, sizeof(noproto), "%s/noproto.json", dir);
+
+    expect(write_file(badjson, "ad") == 0, "write badjson");
+    expect(write_file(noproto, "{\"device\":{\"name\":\"x\"}}\n") == 0,
+           "write noproto");
+
+    char open_msg[320];
+    snprintf(open_msg, sizeof(open_msg), "파일을 열 수 없음: %s", missing);
+    expect_config_error(dir, missing, open_msg, "config log: missing file");
+    expect_config_error(dir, badjson, "JSON 파싱 실패: ", "config log: bad json");
+    expect_config_error(dir, noproto, "\"protocol\" 필드가 없거나 문자열이 아님",
+                        "config log: no protocol");
 }
 
 static int write_file(const char *path, const char *body)
@@ -99,6 +237,7 @@ int main(void)
     expect(write_file(path, k_cfg) == 0, "write cfg");
     expect(write_file(path2, k_cfg2) == 0, "write cfg2");
     expect(write_file(bad, "{not json") == 0, "write bad");
+    test_config_load_error_logs(dir);
 
     fb_runtime_t *rt = NULL;
     int rc = fb_open(path, &rt);
