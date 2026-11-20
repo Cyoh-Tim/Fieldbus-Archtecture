@@ -4,11 +4,15 @@
  * 않으므로 테스트에서만 상대 경로로 config_load 를 호출한다. */
 #include "../core/config_loader.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <math.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 static int g_fail;
@@ -213,6 +217,261 @@ static const char *k_cfg2 =
     "  ]\n"
     "}\n";
 
+/* stderr 를 임시 파일로 돌렸다가 복구한다. 성공 시 *out 에 캡처 내용. */
+static int capture_stderr_begin(const char *dir, char *tmpl, size_t tmplen,
+                                int *saved_out, int *fd_out)
+{
+    int nw = snprintf(tmpl, tmplen, "%s/cap_XXXXXX", dir);
+    if (nw < 0 || (size_t)nw >= tmplen) {
+        return -1;
+    }
+    int fd = mkstemp(tmpl);
+    if (fd < 0) {
+        return -1;
+    }
+    int saved = dup(fileno(stderr));
+    if (saved < 0) {
+        close(fd);
+        unlink(tmpl);
+        return -1;
+    }
+    fflush(stderr);
+    if (dup2(fd, fileno(stderr)) < 0) {
+        close(saved);
+        close(fd);
+        unlink(tmpl);
+        return -1;
+    }
+    *saved_out = saved;
+    *fd_out = fd;
+    return 0;
+}
+
+static int capture_stderr_end(char *tmpl, int saved, int fd, char *out,
+                              size_t outlen)
+{
+    fflush(stderr);
+    if (dup2(saved, fileno(stderr)) < 0) {
+        close(saved);
+        close(fd);
+        unlink(tmpl);
+        return -1;
+    }
+    close(saved);
+    if (lseek(fd, 0, SEEK_SET) < 0) {
+        close(fd);
+        unlink(tmpl);
+        return -1;
+    }
+    size_t got = 0;
+    while (got + 1 < outlen) {
+        ssize_t nread = read(fd, out + got, outlen - 1 - got);
+        if (nread < 0) {
+            close(fd);
+            unlink(tmpl);
+            return -1;
+        }
+        if (nread == 0) {
+            break;
+        }
+        got += (size_t)nread;
+    }
+    out[got] = '\0';
+    close(fd);
+    unlink(tmpl);
+    return 0;
+}
+
+static int listen_loopback(int *port_out)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+    int on = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(0);
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+        listen(fd, 4) != 0) {
+        close(fd);
+        return -1;
+    }
+    socklen_t sl = sizeof(addr);
+    if (getsockname(fd, (struct sockaddr *)&addr, &sl) != 0) {
+        close(fd);
+        return -1;
+    }
+    *port_out = (int)ntohs(addr.sin_port);
+    return fd;
+}
+
+static int log_has_cycle_warn(const char *log)
+{
+    return log && strstr(log, "[WARN][fb_api]") && strstr(log, "cycle 초과");
+}
+
+/*
+ * T7 완료 조건: 인위적인 9ms poll_cycle 이면 경고가 나고, fb_health 로
+ * 최대 지연을 µs 로 읽을 수 있다.
+ *
+ * poll_cycle 을 9ms 로 만드는 방법: Modbus 클라이언트 client_timeout_ms=9,
+ * 응답하지 않는 루프백 listen. 읽기 한 번이 select 9ms 후 타임아웃한다.
+ * cycle_ms=8 이므로 편차는 약 1ms(1000µs) 이상이다.
+ *
+ * fb_health_t.reserved[]:
+ *   FB_HEALTH_MAX_ELAPSED_US  9ms 폴링의 경과 (9000µs 이상)
+ *   FB_HEALTH_MAX_DELAY_US    8ms 사이클을 넘긴 편차 (1000µs 이상)
+ *   FB_HEALTH_OVERRUN_COUNT   cycle_warn_us 를 넘긴 횟수
+ *   FB_HEALTH_WARN_US         config cycle_warn_us
+ * cycle_warn_us 가 편차보다 크면 같은 9ms 폴링이어도 경고와 초과 횟수가 없다.
+ */
+static void test_cycle_delay_us(const char *dir, int warn_us, int expect_warn,
+                                const char *what)
+{
+    int port = 0;
+    int lfd = listen_loopback(&port);
+    if (lfd < 0 || port <= 0) {
+        fprintf(stderr, "FAIL: %s (listen: %s)\n", what, strerror(errno));
+        g_fail = 1;
+        return;
+    }
+
+    char path[256];
+    snprintf(path, sizeof(path), "%s/t7_%d.json", dir, warn_us);
+    char body[1024];
+    int nb = snprintf(
+        body, sizeof(body),
+        "{\n"
+        "  \"protocol\": \"modbus_tcp\",\n"
+        "  \"device\": {\"name\": \"t7\", \"role\": \"client\"},\n"
+        "  \"cycle_ms\": 8,\n"
+        "  \"cycle_warn_us\": %d,\n"
+        "  \"protocol_params\": {\n"
+        "    \"role\": \"client\", \"ip\": \"127.0.0.1\", \"port\": %d,\n"
+        "    \"unit_id\": 1, \"client_timeout_ms\": 9\n"
+        "  },\n"
+        "  \"points\": [\n"
+        "    {\"name\": \"count\", \"access\": \"read\",\n"
+        "     \"data_type\": \"uint16\",\n"
+        "     \"address\": {\"modbus\": {\"type\": \"holding\", \"start\": 40001}}}\n"
+        "  ]\n"
+        "}\n",
+        warn_us, port);
+    if (nb < 0 || (size_t)nb >= sizeof(body) || write_file(path, body) != 0) {
+        fprintf(stderr, "FAIL: %s (config write)\n", what);
+        g_fail = 1;
+        close(lfd);
+        return;
+    }
+
+    fb_runtime_t *rt = NULL;
+    int rc = fb_open(path, &rt);
+    if (rc != FB_OK || !rt) {
+        fprintf(stderr, "FAIL: %s (fb_open %s)\n", what, fb_strerror(rc));
+        g_fail = 1;
+        close(lfd);
+        return;
+    }
+
+    char tmpl[64];
+    int saved = -1;
+    int fd = -1;
+    char logbuf[8192];
+    logbuf[0] = '\0';
+    if (capture_stderr_begin(dir, tmpl, sizeof(tmpl), &saved, &fd) != 0) {
+        fprintf(stderr, "FAIL: %s (stderr capture)\n", what);
+        g_fail = 1;
+        fb_close(rt);
+        close(lfd);
+        return;
+    }
+
+    rc = fb_start(rt);
+    if (rc != FB_OK) {
+        capture_stderr_end(tmpl, saved, fd, logbuf, sizeof(logbuf));
+        fprintf(stderr, "FAIL: %s (fb_start %s)\n", what, fb_strerror(rc));
+        g_fail = 1;
+        fb_close(rt);
+        close(lfd);
+        return;
+    }
+    struct timespec pause = {0, 80 * 1000 * 1000L};
+    nanosleep(&pause, NULL);
+    expect(fb_stop(rt) == FB_OK, "t7 stop");
+
+    if (capture_stderr_end(tmpl, saved, fd, logbuf, sizeof(logbuf)) != 0) {
+        fprintf(stderr, "FAIL: %s (stderr restore)\n", what);
+        g_fail = 1;
+        fb_close(rt);
+        close(lfd);
+        return;
+    }
+
+    int warned = log_has_cycle_warn(logbuf);
+    if (expect_warn) {
+        if (!warned) {
+            fprintf(stderr, "FAIL: %s (no cycle warning) stderr:\n%s\n", what,
+                    logbuf);
+            g_fail = 1;
+        }
+    } else if (warned) {
+        fprintf(stderr, "FAIL: %s (unexpected cycle warning) stderr:\n%s\n",
+                what, logbuf);
+        g_fail = 1;
+    }
+
+    fb_health_t h;
+    memset(&h, 0, sizeof(h));
+    expect(fb_health(rt, &h) == FB_OK, "t7 health");
+    uint32_t max_elapsed = h.reserved[FB_HEALTH_MAX_ELAPSED_US];
+    uint32_t avg_elapsed = h.reserved[FB_HEALTH_AVG_ELAPSED_US];
+    uint32_t max_delay = h.reserved[FB_HEALTH_MAX_DELAY_US];
+    uint32_t overruns = h.reserved[FB_HEALTH_OVERRUN_COUNT];
+    uint32_t got_warn = h.reserved[FB_HEALTH_WARN_US];
+    if (max_elapsed < 9000u || max_elapsed >= 2000000u) {
+        fprintf(stderr,
+                "FAIL: %s max elapsed us=%u (want 9000..1999999, µs of the "
+                "9ms poll)\n",
+                what, max_elapsed);
+        g_fail = 1;
+    }
+    if (avg_elapsed == 0u || avg_elapsed > max_elapsed) {
+        fprintf(stderr, "FAIL: %s avg elapsed us=%u (max %u)\n", what,
+                avg_elapsed, max_elapsed);
+        g_fail = 1;
+    }
+    if (expect_warn) {
+        if (max_delay < 1000u || max_delay >= 2000000u) {
+            fprintf(stderr,
+                    "FAIL: %s max delay us=%u (want >=1000, µs past the 8ms "
+                    "cycle)\n",
+                    what, max_delay);
+            g_fail = 1;
+        }
+        if (overruns < 1u) {
+            fprintf(stderr, "FAIL: %s overrun count=%u (want >=1)\n", what,
+                    overruns);
+            g_fail = 1;
+        }
+    } else if (overruns != 0u) {
+        fprintf(stderr, "FAIL: %s overrun count=%u (warn_us=%d, want 0)\n",
+                what, overruns, warn_us);
+        g_fail = 1;
+    }
+    if (got_warn != (uint32_t)warn_us) {
+        fprintf(stderr, "FAIL: %s warn threshold us=%u (want %d)\n", what,
+                got_warn, warn_us);
+        g_fail = 1;
+    }
+
+    fb_close(rt);
+    close(lfd);
+}
+
 int main(void)
 {
     expect(fb_api_version() == FB_API_VERSION, "version macro/fn");
@@ -323,6 +582,16 @@ int main(void)
     expect(fb_stop(rt) == FB_OK, "stop thread");
 
     fb_close(rt);
+
+    /* T7: 9ms poll_cycle → 경고 + fb_health 최대 지연 µs.
+     * 기준 100µs 는 경고, 1s 로 올리면 같은 9ms 초과여도 경고가 없다. */
+    if (FB_API_VERSION_MINOR < 1) {
+        fprintf(stderr, "FAIL: FB_API_VERSION_MINOR=%d (want >=1)\n",
+                FB_API_VERSION_MINOR);
+        g_fail = 1;
+    }
+    test_cycle_delay_us(dir, 100, 1, "t7 warn at 100us");
+    test_cycle_delay_us(dir, 1000000, 0, "t7 silent above 1s threshold");
 
     if (g_fail) {
         fprintf(stderr, "test_fb_api: FAILED\n");
