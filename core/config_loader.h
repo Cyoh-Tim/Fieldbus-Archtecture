@@ -6,6 +6,10 @@ typedef struct daemon_config {
     char device_name[128];
     char role[32];       /* "server" | "client" 등, 어댑터가 해석 */
     int cycle_ms;
+    /* 지터 편차가 이 값(µs)보다 크면 초과로 센다. 키를 생략하면 100.
+     * 음수는 0. 지터 로그는 1초에 한 번 요약한다. 마감 놓침
+     * (wake + elapsed > cycle) 은 이 값과 상관없이 사이클마다 경고한다. */
+    int cycle_warn_us;
 
     /* 아래 두 필드는 cJSON_PrintUnformatted 로 직렬화된 원본 JSON 문자열.
      * 코어는 내용을 해석하지 않고 그대로 adapter->init() 에 전달한다.

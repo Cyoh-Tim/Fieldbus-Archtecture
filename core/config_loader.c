@@ -38,6 +38,7 @@ int config_load(const char *path, daemon_config_t *out)
 {
     memset(out, 0, sizeof(*out));
     out->cycle_ms = 8; /* 기본값 */
+    out->cycle_warn_us = 100; /* 편차 > 100µs 이면 경고 */
 
     char *raw = read_whole_file(path);
     if (!raw) {
@@ -78,6 +79,13 @@ int config_load(const char *path, daemon_config_t *out)
     cJSON *cycle_ms = cJSON_GetObjectItemCaseSensitive(root, "cycle_ms");
     if (cJSON_IsNumber(cycle_ms)) {
         out->cycle_ms = cycle_ms->valueint;
+    }
+
+    cJSON *cycle_warn_us =
+        cJSON_GetObjectItemCaseSensitive(root, "cycle_warn_us");
+    if (cJSON_IsNumber(cycle_warn_us)) {
+        out->cycle_warn_us =
+            cycle_warn_us->valueint < 0 ? 0 : cycle_warn_us->valueint;
     }
 
     cJSON *protocol_params =
