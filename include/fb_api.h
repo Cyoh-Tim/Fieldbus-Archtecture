@@ -129,7 +129,9 @@ typedef struct fb_health {
  * MAX_DELAY is the max, over cycles, of
  * max(wake delay, max(0, poll elapsed − cycle)).
  * OVERRUN_COUNT increments when that per-cycle deviation exceeds
- * the configured cycle_warn_us (default 100). */
+ * the configured cycle_warn_us (default 100).
+ * Counters accumulate for the life of the runtime and are not cleared
+ * on reload. */
 #define FB_HEALTH_MAX_ELAPSED_US 0u
 #define FB_HEALTH_AVG_ELAPSED_US 1u
 #define FB_HEALTH_MAX_WAKE_US 2u
