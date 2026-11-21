@@ -56,8 +56,7 @@
 - 에러는 음수 errno 스타일로 반환하고, 실패 원인은 `LOG_ERROR`/`LOG_WARN`
   (core/logger.h)으로 남긴다. `printf` 직접 호출 금지.
 - config의 `protocol_params`/`points`는 어댑터가 cJSON으로 직접 파싱한다.
-  코어는 이 내용을 해석하지 않는다 — 이 원칙을 어기는 변경(코어가 특정
-  포인트 필드를 미리 해석하는 것)은 하지 않는다.
+  앱↔어댑터 경계의 숫자는 canonical big-endian 이고, 스케일이 걸린 포인트는 float32(BE) 이며, 스케일과 wire 바이트 순서는 어댑터 책임이다(코어의 `parse_points_meta` 는 `points` 메타를 읽지만 스케일과 wire 바이트 순서는 적용하지 않는다).
 
 ## 테스트 관련 메모
 - 8ms 사이클 기준 에이징 테스트(1~2시간, PREEMPT_RT 미적용) 결과 최대 지연

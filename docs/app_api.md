@@ -38,7 +38,7 @@ fb_write_string(rt, "barcode_value", "ABC123");
 fb_read_string(rt, "barcode_value", barcode, sizeof(barcode));
 
 float t;
-fb_write_f32(rt, "temperature", 25.5f); /* scale/offset 은 어댑터가 적용 */
+fb_write_f32(rt, "temperature", 25.5f);
 fb_read_f32(rt, "temperature", &t);
 
 fb_health_t h;
@@ -50,6 +50,8 @@ fb_list_points(rt, NULL, 0, &n); /* UI/툴용 메타데이터 */
 fb_poll(rt);   /* 임베디드: 앱 루프에서 한 사이클 */
 fb_close(rt);
 ```
+
+앱↔어댑터 경계의 숫자는 canonical big-endian 이고, 스케일이 걸린 포인트는 float32(BE) 이며, 스케일과 wire 바이트 순서는 어댑터 책임이다(코어의 `parse_points_meta` 는 `points` 메타를 읽지만 스케일과 wire 바이트 순서는 적용하지 않는다).
 
 링크: CMake 타깃 `fieldbus` (데몬과 동일한 코어+어댑터). 공개 헤더는
 `include/fb_api.h` 만 설치한다. `protocol_adapter.h` / `stacks/` 는 앱 API가 아니다.
