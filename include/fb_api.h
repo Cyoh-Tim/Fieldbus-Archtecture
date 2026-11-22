@@ -20,7 +20,7 @@ extern "C" {
  */
 
 #define FB_API_VERSION_MAJOR 1
-#define FB_API_VERSION_MINOR 0
+#define FB_API_VERSION_MINOR 1
 #define FB_API_VERSION_PATCH 0
 #define FB_API_VERSION                                                 \
     ((uint32_t)(((FB_API_VERSION_MAJOR) << 16) |                       \
@@ -117,8 +117,30 @@ typedef struct fb_health {
     char protocol[FB_PROTOCOL_MAX];
     char device_name[FB_DEVICE_NAME_MAX];
     char last_error[FB_ERROR_MSG_MAX];
+    /*
+     * Cycle-loop timing since FB_API_VERSION_MINOR 1. Indices are
+     * FB_HEALTH_* below. Time fields are microseconds. The struct size
+     * is unchanged.
+     */
     uint32_t reserved[8];
 } fb_health_t;
+
+/* fb_health_t.reserved[] (MINOR >= 1). Unused slot 7 stays 0.
+ * MAX_DELAY is the max, over cycles, of
+ * max(wake delay, max(0, poll elapsed − cycle)).
+ * OVERRUN_COUNT increments when that per-cycle deviation exceeds
+ * the configured cycle_warn_us (default 100). That jitter is logged at
+ * most once per second. A deadline miss (wake + elapsed > cycle) is a
+ * separate warning on every such cycle.
+ * Counters accumulate for the life of the runtime and are not cleared
+ * on reload. */
+#define FB_HEALTH_MAX_ELAPSED_US 0u
+#define FB_HEALTH_AVG_ELAPSED_US 1u
+#define FB_HEALTH_MAX_WAKE_US 2u
+#define FB_HEALTH_AVG_WAKE_US 3u
+#define FB_HEALTH_OVERRUN_COUNT 4u
+#define FB_HEALTH_WARN_US 5u
+#define FB_HEALTH_MAX_DELAY_US 6u
 
 uint32_t fb_api_version(void);
 const char *fb_strerror(int err);
