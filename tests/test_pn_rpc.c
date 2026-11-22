@@ -725,10 +725,11 @@ static void test_connect_response_ndr_pniostatus(void)
     pn_stack_destroy(s);
 }
 
-/* T12-1: a rejected Connect still answers. The first NDR word is the
- * PNIOStatus and there are no blocks. Other-controller rejection is still
- * the legacy value 0x81000000 (queue 59 owns DB 81 40 04). The integer is
- * little-endian on the wire, so the bytes are 00 00 00 81. */
+/* T12-1 / A20261002-1: a rejected Connect still answers. The first NDR
+ * word is the PNIOStatus and there are no blocks. Another controller
+ * while an AR is up is DB 81 40 04 (IODConnectRes / PNIO / CMRPC /
+ * Out of AR resources). The integer is little-endian on the wire, so
+ * the bytes are 04 40 81 DB. */
 static void test_connect_error_ndr_pniostatus(void)
 {
     pn_stack_t *s = make_stack();
@@ -750,7 +751,7 @@ static void test_connect_error_ndr_pniostatus(void)
     expect(s->ar.owner_ip == 0x0a000001, "ndr-err owner kept");
     expect(rlen == 100, "error rsp is 80-byte RPC + 20-byte NDR");
     const uint8_t *stub = resp + 80;
-    expect_u32(pn_rd_le32(stub), 0x81u << 24, "error PNIOStatus LE 0x81000000");
+    expect_u32(pn_rd_le32(stub), 0xDB814004u, "error PNIOStatus LE 0xDB814004");
     expect_u32(pn_rd_le32(stub + 4), 0, "error ArgsLength");
     expect_u32(pn_rd_le32(stub + 8), 0, "error MaxCount");
     expect_u32(pn_rd_le32(stub + 12), 0, "error Offset");

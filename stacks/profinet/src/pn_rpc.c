@@ -1340,11 +1340,14 @@ static void queue_app_ready(pn_stack_t *s)
 
 /* PNIOStatus as ErrorCode<<24 | ErrorDecode<<16 | ErrorCode1<<8 | ErrorCode2.
  * Written as a drep integer. Little-endian DB 81 02 0B is bytes 0B 02 81 DB.
+ * Little-endian DB 81 40 04 is bytes 04 40 81 DB.
  *
- * Cycle rejects use the IOCR codes below. Other rejects still pass
- * PN_PNIO_ERR_LEGACY (0x81000000). Queue 59 owns the other-controller
- * status DB 81 40 04 and must stay xfail after this change. */
+ * A second controller while an AR is up uses PN_PNIO_ERR_NO_AR_RESOURCES
+ * (IODConnectRes / PNIO / CMRPC / Out of AR resources). Security
+ * verification failure and block-parse failure still pass
+ * PN_PNIO_ERR_LEGACY (0x81000000). Cycle rejects use the IOCR codes below. */
 #define PN_PNIO_ERR_LEGACY  (0x81u << 24)
+#define PN_PNIO_ERR_NO_AR_RESOURCES 0xDB814004u
 /* ErrorCode2 10 = GatingCycle / SendClockFactor (Wireshark pn_io_error_code2_pnio_2). */
 #define PN_PNIO_ERR_IOCR_SCF 0xDB81020Au
 /* ErrorCode2 11 = ReductionRatio, including a period below cycle_us. */
@@ -1588,9 +1591,11 @@ int pn_rpc_handle(pn_stack_t *s, const uint8_t *pdu, size_t len, uint8_t *resp,
             memcpy(ident.initiator_uuid, parsed.initiator_uuid, PN_UUID_LEN);
         }
         if (s->ar.established && !ar_same_controller(s, src_ip, &ident)) {
-            LOG_WARN("pn_rpc", "Connect rejected: AR already established");
+            LOG_WARN("pn_rpc",
+                     "Connect rejected: AR already established "
+                     "PNIOStatus DB 81 40 04");
             return reply_pnio_err(pdu, resp, cap, out_len, stub_out,
-                                  PN_PNIO_ERR_LEGACY, be);
+                                  PN_PNIO_ERR_NO_AR_RESOURCES, be);
         }
         if (parsed.in_frame_id == 0) {
             parsed.in_frame_id = 0x8001;
