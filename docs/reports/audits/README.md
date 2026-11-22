@@ -67,3 +67,5 @@
 | 2026-11-15 | Modbus 스택 (11단계 제안 선별, #211 검증) | [20261115-modbus-client-nodelay.md](20261115-modbus-client-nodelay.md) | 132 (A20261115-6) | 클라이언트 소켓 TCP_NODELAY 없음 (낮음) |
 | 2026-11-16 | Modbus 스택 (11단계 제안 선별, #214 검증) | [20261116-modbus-client-send-eagain.md](20261116-modbus-client-send-eagain.md) | 133 (A20261116-1) | 클라이언트 요청 송신 EAGAIN 에 연결을 버림 (낮음) |
 | 2026-11-16 | 담당자 결정 (T6 병합 범위, 테스트 라벨) | [20261116-owner-decisions.md](20261116-owner-decisions.md) | 큐 56 비고 | T6 은 이슈 범위 안이면 병합. 자동 등록 테스트에 `timing` 라벨 (`test_mb_t9_7` → `_timing`). 프로토콜 라벨은 mock-flow 와 충돌해 보류 |
+| 2026-11-21 | 담당자 결정 (T7 사이클 경고) | [20261121-owner-decisions.md](20261121-owner-decisions.md) | 큐 57 비고 | 경고를 마감 놓침 (사이클마다) 과 지터 (100µs 유지, `fb_health` 누적 + 1초 요약) 로 나눈다 (D안) |
+| 2026-11-21 | 주기 지터 측정 절차 (담당자 결정) | [20261121-cycle-jitter-procedure.md](20261121-cycle-jitter-procedure.md) | 큐 135 | PREEMPT_RT 없는 A코어 판단을 다시 돌릴 수 있게: 부하 6종 × 1~2시간, wire 프레임 간격 분포, 판정선 (상호운용 필수·100µs 회귀 감지선) |
