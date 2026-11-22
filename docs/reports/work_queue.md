@@ -78,7 +78,7 @@
 | 54 | T9-10 | Modbus 스키마 `chars_per_word` 통일 | `adapters/modbus/` 또는 `config/` | T9-10 | |
 | 55 | T8 | `config_loader.c` 를 `LOG_*` 로 | `core/config_loader.c` | 없음 | 패치가 인수인계 문서에 있음 |
 | 56 | T6 | `core/scheduler.c` 중복 정리 | `core/`, `CLAUDE.md`, `CMakeLists.txt` | 없음 | 담당자 결정 (2026-11-16): 이슈 범위 (`core/`, `CLAUDE.md` 스케줄러 위치 문구, `CMakeLists.txt` 의 `core/scheduler.c` 소스 목록, `tests/`) 안이면 검증 담당이 병합 ([audits/20261116-owner-decisions.md](audits/20261116-owner-decisions.md)) |
-| 57 | T7 | 사이클 지연 µs 측정 | `core/`, `include/fb_api.h` | 없음 | T6 이후 |
+| 57 | T7 | 사이클 지연 µs 측정 | `core/`, `include/fb_api.h` | 없음 | T6 이후. 담당자 결정 (2026-11-21): 경고를 마감 놓침 (wake+elapsed > cycle, 사이클마다 WARN) 과 지터 (편차 > `cycle_warn_us` 기본 100µs, `fb_health` 누적 + 1초 요약 WARN) 로 나눈다 ([audits/20261121-owner-decisions.md](audits/20261121-owner-decisions.md)) |
 | 58 | T0 | 스케일·바이트 순서 규칙 문구 통일 (A안) | `CLAUDE.md`, `docs/`, `include/fb_api.h` 주석 | 없음 | T1·T2 이후. 담당자 결정 (2026-11-17): 이슈 범위 (`CLAUDE.md` 규칙 문장 하나, `docs/design.md` 3.2, `docs/app_api.md`, `include/fb_api.h` 주석) 안이면 검증 담당이 병합 (#218 코멘트) |
 | 59 | A20261002-1 | PN 다른 컨트롤러 Connect 거부 PNIOStatus `DB 81 40 04` (현재 `81 00 00 00` = ErrorCode 0) | `stacks/profinet/`, `tests/` | A20261002-1 | 출처 #74 제안, 보고서 [audits/20261002-pn-rpc-reject.md](audits/20261002-pn-rpc-reject.md). T12-1 이후 |
 | 60 | A20261003-1 | scale 이 있는 uint32/int32 읽기가 float32 공학값 비트를 정수로 해석 (6553.6 → 1171050701) | `core/`, `tests/` | A20261003-1 ×2 | 출처 #80 제안, 보고서 [audits/20261003-core-scaled-decode.md](audits/20261003-core-scaled-decode.md) |
@@ -156,6 +156,7 @@
 | 132 | A20261115-6 | Modbus 클라이언트 연결 소켓에 `TCP_NODELAY` 없음 (서버만 #211 로 켬) (낮음) | `stacks/modbus/`, `tests/` | 없음 | 출처 #211 "발견한 다른 문제" 1. 보고서 [audits/20261115-modbus-client-nodelay.md](audits/20261115-modbus-client-nodelay.md). `docs/protocols/modbus.md` 6.3 |
 | 133 | A20261116-1 | Modbus 클라이언트 요청 송신 `send_all` 이 `EAGAIN` 이면 연결을 버림 (non-blocking 소켓) (낮음) | `stacks/modbus/`, `tests/` | 없음 | 출처 #214 "발견한 다른 문제". 보고서 [audits/20261116-modbus-client-send-eagain.md](audits/20261116-modbus-client-send-eagain.md). 큐 132 (클라이언트 TCP_NODELAY) 와 같은 PR 로 해도 됨 |
 | 134 | A20261116-2 | 자동 등록 단위 테스트에 프로토콜 라벨 (`modbus` 등) 이 없어 `ctest -L <프로토콜>` 에 안 잡힘. 붙이려면 mock-flow 가 그 라벨로 CTT 만 고르는 방식을 함께 고쳐야 함 (낮음) | `examples/run_mock_flow.sh`, `CMakeLists.txt` (`fb_add_item_tests` 라벨만) | 없음 | 담당자 결정 (2026-11-16). 보고서 [audits/20261116-owner-decisions.md](audits/20261116-owner-decisions.md) "후속". `CMakeLists.txt` 의 이 부분 변경은 담당자 승인 범위 |
+| 135 | A20261121-1 | 주기 지터 장시간 측정 스크립트 — 부하 시나리오(idle·cpu·net·io·vm·mix) 실행기 + pcap 프레임 간격 분석기 (PREEMPT_RT 없는 A코어 근거 기록) | `tools/jitter/` | 없음 | 담당자 결정 (2026-11-21). 절차·범위 [audits/20261121-cycle-jitter-procedure.md](audits/20261121-cycle-jitter-procedure.md) 7장. 마감 놓침·지터 요약 로그 집계는 T7 (큐 57) 이후. 새 C 실행 파일·`CMakeLists.txt` 변경 없음. 우선순위: 다음 릴리스 (v0.2.0 게이트 밖, 담당자 결정 2026-11-21). 그 릴리스의 `CHANGELOG.md` 에 측정 결과 표를 넣는다 (절차 문서 8장 양식, 담당자 결정 2026-11-21) |
 
 ## v0.2.0 릴리스 게이트
 
