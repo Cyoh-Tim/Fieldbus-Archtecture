@@ -65,6 +65,22 @@ struct fb_runtime {
     volatile int thread_stop;
     char last_error[FB_ERROR_MSG_MAX];
     char config_path[FB_PATH_MAX];
+    /* 사이클 루프가 누적. fb_health 가 reserved[] 로 복사한다. */
+    uint32_t max_elapsed_us;
+    uint32_t max_wake_us;
+    uint32_t max_delay_us;
+    uint64_t sum_elapsed_us;
+    uint64_t sum_wake_us;
+    uint64_t cycle_samples;
+    uint32_t overrun_count;
+    /* 지터 요약은 사이클 스레드만 갱신한다. 1초 창. */
+    struct timespec jitter_window_start;
+    int jitter_window_on;
+    uint32_t jitter_window_count;
+    int64_t jitter_window_max_dev;
+    int jitter_window_warn_us;
+    /* tests/test_fb_api.c 전용. 측정된 기상 지연에 더한다. */
+    uint32_t test_extra_wake_us;
 };
 
 static int eqi(const char *a, const char *b)
@@ -709,11 +725,121 @@ static int store_numeric(fb_value_t *v, fb_type_t want, double x)
     }
 }
 
-static long timespec_diff_ms(const struct timespec *a, const struct timespec *b)
+/* a - b in microseconds. Truncates toward zero (sub-µs is dropped). */
+static int64_t timespec_diff_us(const struct timespec *a, const struct timespec *b)
 {
-    long sec_diff = a->tv_sec - b->tv_sec;
-    long nsec_diff = a->tv_nsec - b->tv_nsec;
-    return sec_diff * 1000 + nsec_diff / 1000000;
+    int64_t sec = (int64_t)a->tv_sec - (int64_t)b->tv_sec;
+    int64_t nsec = (int64_t)a->tv_nsec - (int64_t)b->tv_nsec;
+    return (sec * 1000000000LL + nsec) / 1000;
+}
+
+static int timespec_cmp(const struct timespec *a, const struct timespec *b)
+{
+    if (a->tv_sec != b->tv_sec) {
+        return (a->tv_sec > b->tv_sec) ? 1 : -1;
+    }
+    if (a->tv_nsec != b->tv_nsec) {
+        return (a->tv_nsec > b->tv_nsec) ? 1 : -1;
+    }
+    return 0;
+}
+
+static uint32_t u32_from_us(int64_t us)
+{
+    if (us <= 0) {
+        return 0;
+    }
+    if (us >= (int64_t)UINT32_MAX) {
+        return UINT32_MAX;
+    }
+    return (uint32_t)us;
+}
+
+static void bump_max_u32(uint32_t *slot, uint32_t sample)
+{
+    if (sample > *slot) {
+        *slot = sample;
+    }
+}
+
+static uint32_t avg_u32(uint64_t sum, uint64_t n)
+{
+    if (n == 0) {
+        return 0;
+    }
+    uint64_t v = sum / n;
+    if (v > UINT32_MAX) {
+        return UINT32_MAX;
+    }
+    return (uint32_t)v;
+}
+
+/* tests/test_fb_api.c 전용. 앱 API 가 아니다. */
+void fb_test_set_extra_wake_us(fb_runtime_t *rt, uint32_t us)
+{
+    if (!rt) {
+        return;
+    }
+    pthread_mutex_lock(&rt->mu);
+    rt->test_extra_wake_us = us;
+    pthread_mutex_unlock(&rt->mu);
+}
+
+/* 호출 시 rt->mu 를 잡지 않는다. */
+static void note_cycle_sample(fb_runtime_t *rt, int64_t elapsed_us,
+                              int64_t wake_us, int64_t deviation_us, int overrun)
+{
+    uint32_t elapsed = u32_from_us(elapsed_us);
+    uint32_t wake = u32_from_us(wake_us);
+    uint32_t delay = u32_from_us(deviation_us);
+    pthread_mutex_lock(&rt->mu);
+    bump_max_u32(&rt->max_elapsed_us, elapsed);
+    bump_max_u32(&rt->max_wake_us, wake);
+    bump_max_u32(&rt->max_delay_us, delay);
+    rt->sum_elapsed_us += elapsed;
+    rt->sum_wake_us += wake;
+    if (rt->cycle_samples < UINT64_MAX) {
+        rt->cycle_samples++;
+    }
+    if (overrun && rt->overrun_count < UINT32_MAX) {
+        rt->overrun_count++;
+    }
+    pthread_mutex_unlock(&rt->mu);
+}
+
+/* 지터 초과를 1초 창에 모았다가, 초과가 있을 때만 한 줄로 남긴다.
+ * 사이클 스레드만 호출한다. */
+static void note_jitter_window(fb_runtime_t *rt, const struct timespec *now,
+                               int64_t deviation_us, int overrun, int warn_us)
+{
+    if (!rt->jitter_window_on) {
+        rt->jitter_window_start = *now;
+        rt->jitter_window_on = 1;
+    }
+    if (overrun) {
+        if (rt->jitter_window_count == 0) {
+            rt->jitter_window_warn_us = warn_us;
+        }
+        if (rt->jitter_window_count < UINT32_MAX) {
+            rt->jitter_window_count++;
+        }
+        if (deviation_us > rt->jitter_window_max_dev) {
+            rt->jitter_window_max_dev = deviation_us;
+        }
+    }
+    int64_t window_us = timespec_diff_us(now, &rt->jitter_window_start);
+    if (window_us < 1000000) {
+        return;
+    }
+    if (rt->jitter_window_count > 0) {
+        LOG_WARN("fb_api", "지터 요약: 최근 1초 %u회 > %dus, 최대 %lldus",
+                 rt->jitter_window_count, rt->jitter_window_warn_us,
+                 (long long)rt->jitter_window_max_dev);
+    }
+    rt->jitter_window_start = *now;
+    rt->jitter_window_count = 0;
+    rt->jitter_window_max_dev = 0;
+    rt->jitter_window_warn_us = warn_us;
 }
 
 static void timespec_add_ms(struct timespec *t, long ms)
@@ -745,31 +871,65 @@ static int run_cycle_loop(fb_runtime_t *rt, volatile int *stop_flag)
             break;
         }
         int cycle_ms;
+        int warn_us;
+        uint32_t extra_wake_us;
         struct timespec before;
         clock_gettime(CLOCK_MONOTONIC, &before);
+        /* 기상 지연: 이번 사이클을 시작한 시각 − 직전 루프가 잡아 둔 목표 시각. */
+        int64_t wake_us = timespec_diff_us(&before, &next);
+        if (wake_us < 0) {
+            wake_us = 0;
+        }
         pthread_mutex_lock(&rt->mu);
         cycle_ms = rt->session.cfg.cycle_ms;
         if (cycle_ms <= 0) {
             cycle_ms = 8;
         }
+        warn_us = rt->session.cfg.cycle_warn_us;
+        if (warn_us < 0) {
+            warn_us = 0;
+        }
+        extra_wake_us = rt->test_extra_wake_us;
         int prc = poll_locked(rt);
         pthread_mutex_unlock(&rt->mu);
         if (prc != FB_OK) {
             return prc;
         }
+        if (extra_wake_us > 0 &&
+            wake_us < INT64_MAX - (int64_t)extra_wake_us) {
+            wake_us += (int64_t)extra_wake_us;
+        }
 
         struct timespec after;
         clock_gettime(CLOCK_MONOTONIC, &after);
-        long elapsed_ms = timespec_diff_ms(&after, &before);
-        if (elapsed_ms > cycle_ms) {
-            LOG_WARN("fb_api", "cycle 초과: elapsed=%ldms > cycle_ms=%d",
-                     elapsed_ms, cycle_ms);
+        int64_t elapsed_us = timespec_diff_us(&after, &before);
+        if (elapsed_us < 0) {
+            elapsed_us = 0;
         }
+        int64_t cycle_us = (int64_t)cycle_ms * 1000;
+        /* 마감 놓침은 기준값과 무관하다. 사이클마다 한 줄. */
+        int deadline_miss = elapsed_us > cycle_us ||
+                            wake_us > cycle_us - elapsed_us;
+        if (deadline_miss) {
+            LOG_WARN("fb_api",
+                     "사이클 마감 놓침: wake=%lldus elapsed=%lldus > cycle=%lldus",
+                     (long long)wake_us, (long long)elapsed_us,
+                     (long long)cycle_us);
+        }
+        int64_t over_us = elapsed_us - cycle_us;
+        if (over_us < 0) {
+            over_us = 0;
+        }
+        int64_t deviation_us = over_us > wake_us ? over_us : wake_us;
+        int overrun = deviation_us > (int64_t)warn_us;
+        note_cycle_sample(rt, elapsed_us, wake_us, deviation_us, overrun);
+        note_jitter_window(rt, &after, deviation_us, overrun, warn_us);
 
         timespec_add_ms(&next, cycle_ms);
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
-        if (timespec_diff_ms(&next, &now) > 0) {
+        /* ms 로 자르면 1ms 미만이 남아도 잠을 건너뛴다. 목표 시각과 ns 로 비교한다. */
+        if (timespec_cmp(&now, &next) < 0) {
             struct timespec rem;
             int rc;
             do {
@@ -1353,6 +1513,21 @@ int fb_health(fb_runtime_t *rt, fb_health_t *out)
     if (errbuf[0] && !out->last_error[0]) {
         snprintf(out->last_error, sizeof(out->last_error), "%s", errbuf);
     }
+    out->reserved[FB_HEALTH_MAX_ELAPSED_US] = rt->max_elapsed_us;
+    out->reserved[FB_HEALTH_AVG_ELAPSED_US] =
+        avg_u32(rt->sum_elapsed_us, rt->cycle_samples);
+    out->reserved[FB_HEALTH_MAX_WAKE_US] = rt->max_wake_us;
+    out->reserved[FB_HEALTH_AVG_WAKE_US] =
+        avg_u32(rt->sum_wake_us, rt->cycle_samples);
+    out->reserved[FB_HEALTH_OVERRUN_COUNT] = rt->overrun_count;
+    {
+        int warn = rt->session.cfg.cycle_warn_us;
+        if (warn < 0) {
+            warn = 0;
+        }
+        out->reserved[FB_HEALTH_WARN_US] = (uint32_t)warn;
+    }
+    out->reserved[FB_HEALTH_MAX_DELAY_US] = rt->max_delay_us;
     pthread_mutex_unlock(&rt->mu);
     return FB_OK;
 }
