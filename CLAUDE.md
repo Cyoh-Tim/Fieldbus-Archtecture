@@ -57,6 +57,7 @@
   (core/logger.h)으로 남긴다. `printf` 직접 호출 금지.
 - config의 `protocol_params`/`points`는 어댑터가 cJSON으로 직접 파싱한다.
   앱↔어댑터 경계의 숫자는 canonical big-endian 이고, 스케일이 걸린 포인트는 float32(BE) 이며, 스케일과 wire 바이트 순서는 어댑터 책임이다(코어의 `parse_points_meta` 는 `points` 메타를 읽지만 스케일과 wire 바이트 순서는 적용하지 않는다).
+  코어가 스케일·wire 바이트 순서 변환이나 그 밖의 포인트 필드 해석을 새로 떠맡는 변경은 하지 않는다.
 
 ## 테스트 관련 메모
 - 8ms 사이클 기준 에이징 테스트(1~2시간, PREEMPT_RT 미적용) 결과 최대 지연
