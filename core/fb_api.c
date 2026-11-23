@@ -571,8 +571,8 @@ static int decode_numeric(const fb_point_meta_t *m, const uint8_t *raw,
         *out = 0;
         return FB_OK;
     }
-    /* Adapter-applied scale: native size != 4 but payload is BE float32. */
-    if (m->scaled && n == 4 && m->native_size != 4) {
+    /* Adapter-applied scale: 4-byte payload is BE float32, any native size. */
+    if (m->scaled && n == 4) {
         *out = (double)be_load_f32(raw);
         return FB_OK;
     }

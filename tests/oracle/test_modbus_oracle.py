@@ -771,7 +771,6 @@ def test_adapter_scaled_uint16_read(mb_app_factory):
     assert r[:2] == ["R", "0"] and abs(float(r[2]) - 123.4) < 1e-3, r
 
 
-@known_defect("A20261003-1", "scale 이 있는 uint32/int32 읽기에서 core decode_numeric 이 BE float32 공학값을 정수 비트로 해석한다 (6553.6 → 1.17e9)")
 @pytest.mark.parametrize("data_type,regs", [("uint32", [0x0001, 0x0000]), ("int32", [0x0001, 0x0000])])
 def test_adapter_scaled_32bit_read(mb_app_factory, data_type, regs):
     """scale 0.1 uint32/int32, raw 0x00010000 (65536) → 공학값 6553.6. 16비트 포인트(위)와 같은 규칙.

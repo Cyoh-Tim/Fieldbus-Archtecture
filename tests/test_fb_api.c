@@ -603,6 +603,90 @@ static void test_jitter_summary_rate(const char *dir)
     fb_close(rt);
 }
 
+/*
+ * A20261003-1: scale 이 있는 uint32/int32 는 native_size 가 4 다.
+ * 어댑터가 돌려주는 4바이트 페이로드는 BE float32 공학값이고, 읽기는
+ * native 크기와 무관하게 그 비트를 float32 로 해석해야 한다.
+ */
+static const char *k_scaled32 =
+    "{\n"
+    "  \"protocol\": \"modbus_tcp\",\n"
+    "  \"device\": {\"name\": \"fb_api_scaled32\", \"role\": \"server\"},\n"
+    "  \"cycle_ms\": 8,\n"
+    "  \"protocol_params\": {\n"
+    "    \"role\": \"server\", \"ip\": \"127.0.0.1\", \"port\": 15570,\n"
+    "    \"unit_id\": 1, \"max_clients\": 2, \"client_timeout_ms\": 100\n"
+    "  },\n"
+    "  \"points\": [\n"
+    "    {\"name\": \"s_u32\", \"access\": \"read\",\n"
+    "     \"data_type\": \"uint32\", \"scale\": 0.1,\n"
+    "     \"address\": {\"modbus\": {\"type\": \"holding\", \"start\": 40040,\n"
+    "       \"byte_order\": \"big\", \"word_order\": \"abcd\"}}},\n"
+    "    {\"name\": \"s_i32\", \"access\": \"read\",\n"
+    "     \"data_type\": \"int32\", \"scale\": 0.1,\n"
+    "     \"address\": {\"modbus\": {\"type\": \"holding\", \"start\": 40042,\n"
+    "       \"byte_order\": \"big\", \"word_order\": \"abcd\"}}}\n"
+    "  ]\n"
+    "}\n";
+
+static void expect_scaled_f32_read(fb_runtime_t *rt, const char *name,
+                                   const char *data_type)
+{
+    fb_point_info_t infos[4];
+    size_t npts = 0;
+    const fb_point_info_t *info = NULL;
+    memset(infos, 0, sizeof(infos));
+    expect(fb_list_points(rt, infos, 4, &npts) == FB_OK, "scaled32 list");
+    for (size_t i = 0; i < npts; i++) {
+        if (strcmp(infos[i].name, name) == 0) {
+            info = &infos[i];
+        }
+    }
+    if (!info) {
+        fprintf(stderr, "FAIL: scaled %s point missing\n", data_type);
+        g_fail = 1;
+        return;
+    }
+    expect(strcmp(info->data_type, data_type) == 0, "scaled32 data_type");
+    expect(info->native_type == FB_TYPE_F32, "scaled32 native_type");
+    expect((info->flags & FB_POINT_F_SCALED) != 0, "scaled32 flag");
+    expect(info->wire_size == 4, "scaled32 wire_size");
+
+    int rc = fb_write_f32(rt, name, 6553.6f);
+    if (rc != FB_OK) {
+        fprintf(stderr, "FAIL: scaled %s write rc=%d (%s)\n", data_type, rc,
+                fb_strerror(rc));
+        g_fail = 1;
+        return;
+    }
+    float got = 0.f;
+    rc = fb_read_f32(rt, name, &got);
+    if (rc != FB_OK || fabsf(got - 6553.6f) >= 0.01f) {
+        fprintf(stderr, "FAIL: scaled %s read rc=%d got %.9g (want 6553.6)\n",
+                data_type, rc, (double)got);
+        g_fail = 1;
+    }
+}
+
+static void test_scaled_32bit_read(const char *dir)
+{
+    char path[256];
+    snprintf(path, sizeof(path), "%s/scaled32.json", dir);
+    expect(write_file(path, k_scaled32) == 0, "write scaled32 cfg");
+
+    fb_runtime_t *rt = NULL;
+    int rc = fb_open(path, &rt);
+    if (rc != FB_OK || !rt) {
+        fprintf(stderr, "FAIL: scaled32 open rc=%d (%s)\n", rc,
+                fb_strerror(rc));
+        g_fail = 1;
+        return;
+    }
+    expect_scaled_f32_read(rt, "s_u32", "uint32");
+    expect_scaled_f32_read(rt, "s_i32", "int32");
+    fb_close(rt);
+}
+
 int main(void)
 {
     expect(fb_api_version() == FB_API_VERSION, "version macro/fn");
@@ -713,6 +797,9 @@ int main(void)
     expect(fb_stop(rt) == FB_OK, "stop thread");
 
     fb_close(rt);
+
+    /* A20261003-1: scale uint32/int32 의 4바이트 BE float32 읽기. */
+    test_scaled_32bit_read(dir);
 
     /* T7: 9ms poll_cycle → 마감 놓침 경고 + fb_health 최대 지연 µs.
      * 지터 기준을 1s 로 올려도 마감 놓침은 남고, 지터 초과 횟수는 0 이다. */
