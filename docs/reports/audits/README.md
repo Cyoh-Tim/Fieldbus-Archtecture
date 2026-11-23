@@ -69,3 +69,5 @@
 | 2026-11-16 | 담당자 결정 (T6 병합 범위, 테스트 라벨) | [20261116-owner-decisions.md](20261116-owner-decisions.md) | 큐 56 비고 | T6 은 이슈 범위 안이면 병합. 자동 등록 테스트에 `timing` 라벨 (`test_mb_t9_7` → `_timing`). 프로토콜 라벨은 mock-flow 와 충돌해 보류 |
 | 2026-11-21 | 담당자 결정 (T7 사이클 경고) | [20261121-owner-decisions.md](20261121-owner-decisions.md) | 큐 57 비고 | 경고를 마감 놓침 (사이클마다) 과 지터 (100µs 유지, `fb_health` 누적 + 1초 요약) 로 나눈다 (D안) |
 | 2026-11-21 | 주기 지터 측정 절차 (담당자 결정) | [20261121-cycle-jitter-procedure.md](20261121-cycle-jitter-procedure.md) | 큐 135 | PREEMPT_RT 없는 A코어 판단을 다시 돌릴 수 있게: 부하 6종 × 1~2시간, wire 프레임 간격 분포, 판정선 (상호운용 필수·100µs 회귀 감지선) |
+| 2026-11-22 | 코어 (일요일 감사, opus) | [20261122-core.md](20261122-core.md) | 136–141 (A20261122-1 ~ -6) | uint64/int64 double 경유 값 변형, 포인트 256개·이름 63자 무음 절단, bind 실패 FB_ERR_PERM, fb_reload 로그 레이스(TSan), cycle_ms 검증 없음. 제안 1건(스키마 `cycle_warn_us`), 문서 제안은 큐 70 비고 |
+| 2026-11-22 | 담당자 결정 (큐 137·140) | [20261122-owner-decisions.md](20261122-owner-decisions.md) | 큐 137·140 비고 | "문제 없는 방향으로": 포인트 256개 초과는 동적 배열로 받음, 잘못된 `cycle_ms` 는 경고 후 8 |
