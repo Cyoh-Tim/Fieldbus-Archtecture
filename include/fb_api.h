@@ -51,8 +51,10 @@ typedef enum fb_err {
 
 /*
  * Logical type used at the API boundary (not a protocol wire type).
- * Numeric payloads from Modbus/SLMP adapters are canonical big-endian
- * (and engineering float32 when the adapter applied scale/offset).
+ * Numbers at the app-adapter boundary are canonical big-endian, scaled
+ * points are float32 (BE), and scale and wire byte order are the
+ * adapter's responsibility (the core's parse_points_meta reads points
+ * metadata but does not apply scale or wire byte order).
  */
 typedef enum fb_type {
     FB_TYPE_AUTO = 0, /* read: fill native type from config */
