@@ -136,7 +136,9 @@ static void feed_rpc(pn_stack_t *s, const uint8_t *pdu, size_t n)
     }
 }
 
-/* Rejected Connect: 80-byte RPC + 20-byte NDR, PNIOStatus = 81 00 00 00. */
+/* Rejected Connect: 80-byte RPC + 20-byte NDR. PNIOStatus is a drep-order
+ * integer; ErrorCode is its high byte. Non-zero ErrorCode is a rejection
+ * (any cause). The harness drep byte is 0x10, so integers are little-endian. */
 static int last_connect_rejected(void)
 {
     if (g_rpc_rc != 0) {
@@ -145,7 +147,10 @@ static int last_connect_rejected(void)
     if (g_rpc_rlen != 100) {
         return 0;
     }
-    return pn_rd_be32(g_rpc_head + 80) == (0x81u << 24);
+    int be = (g_rpc_head[4] >> 4) != 1;
+    uint32_t status = be ? pn_rd_be32(g_rpc_head + 80)
+                         : pn_rd_le32(g_rpc_head + 80);
+    return (status >> 24) != 0;
 }
 
 static void do_connect(pn_stack_t *s, int hmac, int hmac_bad,

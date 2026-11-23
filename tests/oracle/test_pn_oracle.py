@@ -435,9 +435,6 @@ OTHER_CM_INITIATOR_OBJECT_UUID = "dea00000-6c97-11d1-8271-00640002abcd"
 OTHER_CONTROLLER_MAC = "00:11:22:33:44:66"
 
 
-@known_defect("A20261002-1", "AR 이 있는 동안 다른 컨트롤러의 Connect 를 PNIOStatus 바이트 81 00 00 00 "
-              "(LE drep 정수 0x00000081, ErrorCode=0x00 'OK') 로 거부한다. "
-              "사양: DB 81 40 04 (IODConnectRes, PNIO, CMRPC, Out of AR resources)")
 def test_connect_second_controller_out_of_ar_resources(pn_dut):
     first = rpc_response(pn_dut.rpc(raw(connect_pdu())))
     assert first is not None and ndr_response(first)[0] == 0, "첫 Connect 가 수립되지 않음"
