@@ -517,6 +517,7 @@ static void append_dev_id(const pn_stack_t *s, wr_t *w)
 
 static void append_dev_role(const pn_stack_t *s, wr_t *w)
 {
+    (void)s;
     /* RoleDetails bit0 = IO-Device. Reserved byte stays 0. */
     uint8_t role[2] = {PN_DCP_ROLE_IO_DEVICE, 0x00};
     wr_block(w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ROLE, PN_DCP_BLOCKINFO_NONE, role,
