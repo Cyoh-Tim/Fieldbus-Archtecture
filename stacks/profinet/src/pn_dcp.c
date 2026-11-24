@@ -494,41 +494,129 @@ static int ident_filters_match(const pn_stack_t *s, const uint8_t *blocks,
     return 1;
 }
 
-static size_t build_identify_blocks(const pn_stack_t *s, uint8_t *out,
-                                    size_t cap)
+static void append_dev_type(const pn_stack_t *s, wr_t *w)
 {
-    wr_t w = {out, cap, 0};
-    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_TYPE, PN_DCP_BLOCKINFO_NONE,
+    wr_block(w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_TYPE, PN_DCP_BLOCKINFO_NONE,
              s->cfg.device_type, strlen(s->cfg.device_type));
-    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, PN_DCP_BLOCKINFO_NONE,
+}
+
+static void append_dev_name(const pn_stack_t *s, wr_t *w)
+{
+    wr_block(w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, PN_DCP_BLOCKINFO_NONE,
              s->cfg.station_name, strlen(s->cfg.station_name));
+}
+
+static void append_dev_id(const pn_stack_t *s, wr_t *w)
+{
     uint8_t devid[4];
     pn_wr_be16(devid, s->cfg.vendor_id);
     pn_wr_be16(devid + 2, s->cfg.device_id);
-    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ID, PN_DCP_BLOCKINFO_NONE, devid,
+    wr_block(w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ID, PN_DCP_BLOCKINFO_NONE, devid,
              4);
+}
+
+static void append_dev_role(const pn_stack_t *s, wr_t *w)
+{
     /* RoleDetails bit0 = IO-Device. Reserved byte stays 0. */
     uint8_t role[2] = {PN_DCP_ROLE_IO_DEVICE, 0x00};
-    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ROLE, PN_DCP_BLOCKINFO_NONE,
-             role, sizeof(role));
+    wr_block(w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_ROLE, PN_DCP_BLOCKINFO_NONE, role,
+             sizeof(role));
+}
+
+static void append_ip_param(const pn_stack_t *s, wr_t *w)
+{
     uint8_t ipb[12];
     pn_wr_be32(ipb, s->cfg.ip);
     pn_wr_be32(ipb + 4, s->cfg.netmask);
     pn_wr_be32(ipb + 8, s->cfg.gateway);
     uint16_t ip_info =
         s->cfg.ip != 0 ? PN_DCP_BLOCKINFO_IP_SET : PN_DCP_BLOCKINFO_NONE;
-    wr_block(&w, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ip_info, ipb, 12);
-    wr_block(&w, PN_DCP_OPT_IP, PN_DCP_SUB_IP_MAC, PN_DCP_BLOCKINFO_NONE,
+    wr_block(w, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, ip_info, ipb, 12);
+}
+
+static void append_ip_mac(const pn_stack_t *s, wr_t *w)
+{
+    wr_block(w, PN_DCP_OPT_IP, PN_DCP_SUB_IP_MAC, PN_DCP_BLOCKINFO_NONE,
              s->cfg.mac, 6);
+}
+
+static void append_dev_opts(const pn_stack_t *s, wr_t *w)
+{
+    (void)s;
     /* DeviceOptions: IP, Device */
     uint8_t opts[] = {PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, PN_DCP_OPT_DEV,
                       PN_DCP_SUB_DEV_NAME};
-    wr_block(&w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_OPTS, PN_DCP_BLOCKINFO_NONE,
-             opts, sizeof(opts));
+    wr_block(w, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_OPTS, PN_DCP_BLOCKINFO_NONE, opts,
+             sizeof(opts));
+}
+
+/* Identify.res / Hello.req / Get All-selector payload, in that order. */
+static void append_all_readable_blocks(const pn_stack_t *s, wr_t *w)
+{
+    append_dev_type(s, w);
+    append_dev_name(s, w);
+    append_dev_id(s, w);
+    append_dev_role(s, w);
+    append_ip_param(s, w);
+    append_ip_mac(s, w);
+    append_dev_opts(s, w);
+}
+
+static size_t build_identify_blocks(const pn_stack_t *s, uint8_t *out,
+                                    size_t cap)
+{
+    wr_t w = {out, cap, 0};
+    append_all_readable_blocks(s, &w);
     if (w.n > cap) {
         return 0;
     }
     return w.n;
+}
+
+/* One Get.req selector (Option, Suboption; no length). Readable pairs share
+ * the Identify block writers. Anything else is a GetNegResBlock:
+ * Control/Response, DCPBlockLength 3, the requested pair, BlockError.
+ * Option 0xFF suboption 0xFF is the All selector and expands to every
+ * readable block. ServiceType stays Success either way. */
+static void append_get_selector(const pn_stack_t *s, wr_t *w, uint8_t opt,
+                                uint8_t sub)
+{
+    if (opt == PN_DCP_OPT_ALL && sub == 0xFFu) {
+        append_all_readable_blocks(s, w);
+        return;
+    }
+    if (opt == PN_DCP_OPT_IP && sub == PN_DCP_SUB_IP_MAC) {
+        append_ip_mac(s, w);
+        return;
+    }
+    if (opt == PN_DCP_OPT_IP && sub == PN_DCP_SUB_IP_PARAM) {
+        append_ip_param(s, w);
+        return;
+    }
+    if (opt == PN_DCP_OPT_DEV && sub == PN_DCP_SUB_DEV_TYPE) {
+        append_dev_type(s, w);
+        return;
+    }
+    if (opt == PN_DCP_OPT_DEV && sub == PN_DCP_SUB_DEV_NAME) {
+        append_dev_name(s, w);
+        return;
+    }
+    if (opt == PN_DCP_OPT_DEV && sub == PN_DCP_SUB_DEV_ID) {
+        append_dev_id(s, w);
+        return;
+    }
+    if (opt == PN_DCP_OPT_DEV && sub == PN_DCP_SUB_DEV_ROLE) {
+        append_dev_role(s, w);
+        return;
+    }
+    if (opt == PN_DCP_OPT_DEV && sub == PN_DCP_SUB_DEV_OPTS) {
+        append_dev_opts(s, w);
+        return;
+    }
+    uint8_t err = (opt == PN_DCP_OPT_IP || opt == PN_DCP_OPT_DEV)
+                      ? PN_DCP_BLOCK_ERR_SUB_UNSUP
+                      : PN_DCP_BLOCK_ERR_OPT_UNSUP;
+    wr_set_response(w, opt, sub, err);
 }
 
 static void send_dcp(pn_stack_t *s, const uint8_t dst[6], uint16_t fid,
@@ -686,10 +774,20 @@ void pn_dcp_on_frame(pn_stack_t *s, const uint8_t *src, const uint8_t *payload,
     }
 
     if (sid == PN_DCP_GET) {
+        /* Selectors are 2-byte pairs. A trailing odd byte is not a pair. */
         uint8_t b[512];
-        size_t n = build_identify_blocks(s, b, sizeof(b));
+        wr_t w = {b, sizeof(b), 0};
+        size_t off = 0;
+        while (off + 2 <= dlen) {
+            append_get_selector(s, &w, blocks[off], blocks[off + 1]);
+            off += 2;
+        }
+        if (w.n > sizeof(b)) {
+            LOG_ERROR("pn_dcp", "Get.res blocks exceed buffer");
+            return;
+        }
         send_dcp(s, src, PN_FRAMEID_DCP_GETSET, PN_DCP_GET,
-                 PN_DCP_RESP_SUCCESS, xid, 0, b, n);
+                 PN_DCP_RESP_SUCCESS, xid, 0, b, w.n);
         return;
     }
 

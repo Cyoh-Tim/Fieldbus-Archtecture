@@ -197,6 +197,25 @@ static size_t dcp_get_frame(uint8_t *out, const uint8_t *dst, const uint8_t *src
     return pn_eth_build(out, PN_FRAME_MAX, dst, src, PN_ETHTYPE_PN, pay, 16);
 }
 
+/* Get.req body is Option/Suboption pairs with no length field. */
+static size_t dcp_get_sel_frame(uint8_t *out, const uint8_t *dst,
+                                const uint8_t *src, uint32_t xid,
+                                const uint8_t *pairs, size_t nbytes)
+{
+    uint8_t pay[128];
+    pn_wr_be16(pay, PN_FRAMEID_DCP_GETSET);
+    pay[2] = PN_DCP_GET;
+    pay[3] = PN_DCP_REQ;
+    pn_wr_be32(pay + 4, xid);
+    pn_wr_be16(pay + 8, 0);
+    pn_wr_be16(pay + 10, (uint16_t)nbytes);
+    if (nbytes && pairs) {
+        memcpy(pay + 12, pairs, nbytes);
+    }
+    return pn_eth_build(out, PN_FRAME_MAX, dst, src, PN_ETHTYPE_PN, pay,
+                        12 + nbytes);
+}
+
 static size_t dcp_set_ip_frame(uint8_t *out, const uint8_t *dst,
                                const uint8_t *src, uint32_t ip, uint32_t nm,
                                uint32_t gw)
@@ -2419,12 +2438,224 @@ static void test_t12_22_ident_fifth_ignored(void)
     pn_stack_destroy(s);
 }
 
+/* Walk Get/Identify-style blocks. Returns the count, or -1 if the
+ * length does not close on a block boundary. */
+static int dcp_block_ids(const uint8_t *blocks, uint16_t dlen, uint8_t *opts,
+                         uint8_t *subs, int cap)
+{
+    int n = 0;
+    size_t off = 0;
+    while (off + 4 <= dlen) {
+        uint16_t bl = pn_rd_be16(blocks + off + 2);
+        size_t total = 4u + bl + (bl & 1u);
+        if (off + total > dlen) {
+            return -1;
+        }
+        if (n < cap) {
+            opts[n] = blocks[off];
+            subs[n] = blocks[off + 1];
+        }
+        n++;
+        off += total;
+    }
+    if (off != dlen) {
+        return -1;
+    }
+    return n;
+}
+
+static void expect_get_selectors(pn_stack_t *s, const uint8_t *dst,
+                                 const uint8_t *src, uint32_t xid,
+                                 const uint8_t *pairs, size_t nbytes,
+                                 const uint8_t *want_opt, const uint8_t *want_sub,
+                                 int nwant, const char *what)
+{
+    uint8_t frame[PN_FRAME_MAX];
+    tx_reset();
+    size_t flen = dcp_get_sel_frame(frame, dst, src, xid, pairs, nbytes);
+    expect(pn_stack_handle_eth(s, frame, flen) == 0, what);
+    size_t rlen = 0;
+    const uint8_t *rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+    if (!rsp || rlen < 26) {
+        fprintf(stderr, "FAIL: %s Get.res missing\n", what);
+        g_fail = 1;
+        return;
+    }
+    if (pn_rd_be16(rsp + 14) != PN_FRAMEID_DCP_GETSET || rsp[16] != PN_DCP_GET ||
+        rsp[17] != PN_DCP_RESP_SUCCESS || pn_rd_be32(rsp + 18) != xid) {
+        fprintf(stderr,
+                "FAIL: %s header fid=0x%04x sid=%u st=%u xid=0x%08x "
+                "(want Get success xid=0x%08x)\n",
+                what, pn_rd_be16(rsp + 14), rsp[16], rsp[17],
+                pn_rd_be32(rsp + 18), xid);
+        g_fail = 1;
+    }
+    uint16_t dlen = 0;
+    const uint8_t *blocks = dcp_blocks_of(rsp, rlen, &dlen);
+    uint8_t opts[16];
+    uint8_t subs[16];
+    int n = blocks ? dcp_block_ids(blocks, dlen, opts, subs, 16) : -1;
+    if (n != nwant) {
+        fprintf(stderr, "FAIL: %s block count %d want %d dlen=%u ids:", what, n,
+                nwant, dlen);
+        int show = n > 0 ? n : 0;
+        if (show > 16) {
+            show = 16;
+        }
+        for (int i = 0; i < show; i++) {
+            fprintf(stderr, " (%u,%u)", opts[i], subs[i]);
+        }
+        fprintf(stderr, "\n");
+        g_fail = 1;
+        return;
+    }
+    for (int i = 0; i < nwant; i++) {
+        if (opts[i] != want_opt[i] || subs[i] != want_sub[i]) {
+            fprintf(stderr, "FAIL: %s block[%d]=(%u,%u) want (%u,%u)\n", what, i,
+                    opts[i], subs[i], want_opt[i], want_sub[i]);
+            g_fail = 1;
+        }
+    }
+}
+
+/* A20261003-2: Get.res is one block per requested Option/Suboption.
+ * An unsupported option is a Control/Response block (no BlockInfo) with
+ * BlockError 0x01. An unsupported suboption of a supported option is 0x02.
+ * ServiceType stays Success. */
+static void test_dcp_get_requested_blocks(void)
+{
+    pn_stack_t *s = make_dcp_stack();
+    expect(s != NULL, "get selectors stack");
+    if (!s) {
+        return;
+    }
+    uint8_t src[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const char *name = "sensor-line1";
+    uint8_t ip_zero[12];
+    memset(ip_zero, 0, sizeof(ip_zero));
+
+    uint8_t name_sel[2] = {PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME};
+    uint8_t name_opt[1] = {PN_DCP_OPT_DEV};
+    uint8_t name_sub[1] = {PN_DCP_SUB_DEV_NAME};
+    expect_get_selectors(s, s->cfg.mac, src, 0x6001, name_sel, sizeof(name_sel),
+                         name_opt, name_sub, 1, "Get NameOfStation only");
+    {
+        size_t rlen = 0;
+        const uint8_t *rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+        uint16_t dlen = 0;
+        const uint8_t *blocks = rsp ? dcp_blocks_of(rsp, rlen, &dlen) : NULL;
+        if (blocks) {
+            expect_blockinfo(blocks, dlen, PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, 0,
+                             name, strlen(name), "Get NameOfStation value");
+        }
+    }
+
+    uint8_t ip_sel[2] = {PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM};
+    uint8_t ip_opt[1] = {PN_DCP_OPT_IP};
+    uint8_t ip_sub[1] = {PN_DCP_SUB_IP_PARAM};
+    expect_get_selectors(s, s->cfg.mac, src, 0x6002, ip_sel, sizeof(ip_sel),
+                         ip_opt, ip_sub, 1, "Get IP Parameter only");
+    {
+        size_t rlen = 0;
+        const uint8_t *rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+        uint16_t dlen = 0;
+        const uint8_t *blocks = rsp ? dcp_blocks_of(rsp, rlen, &dlen) : NULL;
+        if (blocks) {
+            expect_blockinfo(blocks, dlen, PN_DCP_OPT_IP, PN_DCP_SUB_IP_PARAM, 0,
+                             ip_zero, sizeof(ip_zero), "Get IP Parameter value");
+        }
+    }
+
+    uint8_t both_sel[4] = {PN_DCP_OPT_DEV, PN_DCP_SUB_DEV_NAME, PN_DCP_OPT_IP,
+                           PN_DCP_SUB_IP_PARAM};
+    uint8_t both_opt[2] = {PN_DCP_OPT_DEV, PN_DCP_OPT_IP};
+    uint8_t both_sub[2] = {PN_DCP_SUB_DEV_NAME, PN_DCP_SUB_IP_PARAM};
+    expect_get_selectors(s, s->cfg.mac, src, 0x6003, both_sel, sizeof(both_sel),
+                         both_opt, both_sub, 2, "Get Name and IP");
+
+    uint8_t bad_sel[2] = {0x04, 0x01};
+    uint8_t neg_opt[1] = {PN_DCP_OPT_CTRL};
+    uint8_t neg_sub[1] = {PN_DCP_SUB_CTRL_RESPONSE};
+    expect_get_selectors(s, s->cfg.mac, src, 0x6011, bad_sel, sizeof(bad_sel),
+                         neg_opt, neg_sub, 1, "Get unsupported option");
+    {
+        size_t rlen = 0;
+        const uint8_t *rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+        uint16_t dlen = 0;
+        const uint8_t *blocks = rsp ? dcp_blocks_of(rsp, rlen, &dlen) : NULL;
+        uint16_t bl = 0;
+        const uint8_t *b =
+            blocks ? find_dcp_block(blocks, dlen, PN_DCP_OPT_CTRL,
+                                    PN_DCP_SUB_CTRL_RESPONSE, &bl)
+                   : NULL;
+        uint8_t want[3] = {0x04, 0x01, PN_DCP_BLOCK_ERR_OPT_UNSUP};
+        int ok = b && bl == 3 && memcmp(b + 4, want, 3) == 0 && dlen == 8;
+        if (!ok) {
+            fprintf(stderr,
+                    "FAIL: Get unsupported option NegRes want "
+                    "05 04 0003 04 01 01 (pad), dlen=%u bl=%u\n",
+                    dlen, bl);
+            if (b) {
+                fprintf(stderr, "  bytes:");
+                dump_prefix(b, 4u + bl + (bl & 1u));
+            }
+            g_fail = 1;
+        }
+    }
+
+    /* CTT dcp_get encodes All as FF FF 00 00. That is two selectors:
+     * (0xFF,0xFF) expands to the Identify block set, then (0x00,0x00)
+     * is an unsupported option. */
+    uint8_t all_sel[4] = {PN_DCP_OPT_ALL, 0xFF, 0x00, 0x00};
+    uint8_t all_opt[8] = {PN_DCP_OPT_DEV, PN_DCP_OPT_DEV, PN_DCP_OPT_DEV,
+                          PN_DCP_OPT_DEV, PN_DCP_OPT_IP,  PN_DCP_OPT_IP,
+                          PN_DCP_OPT_DEV, PN_DCP_OPT_CTRL};
+    uint8_t all_sub[8] = {PN_DCP_SUB_DEV_TYPE, PN_DCP_SUB_DEV_NAME,
+                          PN_DCP_SUB_DEV_ID,   PN_DCP_SUB_DEV_ROLE,
+                          PN_DCP_SUB_IP_PARAM, PN_DCP_SUB_IP_MAC,
+                          PN_DCP_SUB_DEV_OPTS, PN_DCP_SUB_CTRL_RESPONSE};
+    expect_get_selectors(s, s->cfg.mac, src, 0x55667788, all_sel,
+                         sizeof(all_sel), all_opt, all_sub, 8,
+                         "Get All selector plus option 0");
+
+    uint8_t bad_sub[2] = {PN_DCP_OPT_IP, 0x05};
+    expect_get_selectors(s, s->cfg.mac, src, 0x6012, bad_sub, sizeof(bad_sub),
+                         neg_opt, neg_sub, 1, "Get unsupported IP suboption");
+    {
+        size_t rlen = 0;
+        const uint8_t *rsp = tx_frame_fid(PN_FRAMEID_DCP_GETSET, &rlen);
+        uint16_t dlen = 0;
+        const uint8_t *blocks = rsp ? dcp_blocks_of(rsp, rlen, &dlen) : NULL;
+        uint16_t bl = 0;
+        const uint8_t *b =
+            blocks ? find_dcp_block(blocks, dlen, PN_DCP_OPT_CTRL,
+                                    PN_DCP_SUB_CTRL_RESPONSE, &bl)
+                   : NULL;
+        uint8_t want[3] = {PN_DCP_OPT_IP, 0x05, PN_DCP_BLOCK_ERR_SUB_UNSUP};
+        int ok = b && bl == 3 && memcmp(b + 4, want, 3) == 0;
+        if (!ok) {
+            fprintf(stderr,
+                    "FAIL: Get unsupported suboption NegRes want "
+                    "BlockError 0x02 for (1,5), bl=%u\n",
+                    bl);
+            if (b) {
+                fprintf(stderr, "  bytes:");
+                dump_prefix(b, 4u + bl + (bl & 1u));
+            }
+            g_fail = 1;
+        }
+    }
+
+    pn_stack_destroy(s);
+}
+
 int main(void)
 {
     test_name_ok();
     test_ident_filter_and_delay();
     test_set_name_and_enforce();
     test_response_blockinfo();
+    test_dcp_get_requested_blocks();
     test_t12_22_device_role();
     test_t12_22_ident_two_macs();
     test_t12_22_ident_retransmit();
