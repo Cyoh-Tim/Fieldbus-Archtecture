@@ -497,8 +497,6 @@ def test_record_read_im0(pn_dut):
     assert (im0.VendorIDHigh << 8 | im0.VendorIDLow) == 0xABCD
 
 
-@known_defect("A20261004-1", "I&M0 OrderID 20번째 바이트가 NUL 이다 (19자 리터럴 + 종단 NUL). "
-              "사양: VisibleString[20], 남는 자리는 공백 0x20")
 def test_record_read_im0_visible_strings(pn_dut):
     # I&M0 OrderID 는 VisibleString 20옥텟, IM_Serial_Number 는 16옥텟 고정 길이 (Wireshark packet-dcerpc-pn-io.c
     # dissect_IandM0_block: OrderID c8[20], IMSerialNumber c8[16]). VisibleString 은 0x20–0x7E 만 허용하고,

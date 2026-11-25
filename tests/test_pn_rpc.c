@@ -898,6 +898,24 @@ static void test_t12_3_rw_res_headers_and_write_data(void)
         expect(pn_rd_be16(rec + 2) == 56, "I&M0 block_length 56");
         expect(pn_rd_be16(rec + 6) == 0xABCD, "I&M0 VendorID 0xABCD");
         expect(memcmp(rec + 8, "FB-ARCH-PN-DEV", 14) == 0, "I&M0 OrderID");
+        /* VisibleString[20]: the 6 leftover octets are 0x20, not a C-string NUL. */
+        {
+            static const char order_id[] = "FB-ARCH-PN-DEV      ";
+            _Static_assert(sizeof(order_id) - 1 == 20,
+                           "I&M0 OrderID expectation is 20 octets");
+            if (memcmp(rec + 8, order_id, sizeof(order_id) - 1) != 0) {
+                fprintf(stderr, "FAIL: I&M0 OrderID 20 bytes got");
+                for (size_t i = 0; i < sizeof(order_id) - 1; i++) {
+                    fprintf(stderr, " %02x", rec[8 + i]);
+                }
+                fprintf(stderr, " want");
+                for (size_t i = 0; i < sizeof(order_id) - 1; i++) {
+                    fprintf(stderr, " %02x", (unsigned char)order_id[i]);
+                }
+                fprintf(stderr, "\n");
+                g_fail = 1;
+            }
+        }
     }
     pn_stack_destroy(s);
 }
