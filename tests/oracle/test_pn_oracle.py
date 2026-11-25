@@ -968,8 +968,6 @@ def dcp_ip(pn, xid):
     raise AssertionError(f"IP 블록 없음 {dcp_block_ids(d)}")
 
 
-@known_defect("A20261003-2", "Get.req 가 무엇을 요청하든 Identify 와 같은 블록 7개 전체를 돌려준다. "
-              "사양: Get.res 는 요청한 Option/Suboption 의 블록만 담는다")
 def test_dcp_get_returns_only_requested_blocks(pn_dut):
     # IEC 61158-6-10 DCP Get: 요청한 GetReqBlock(Option, Suboption) 마다 응답 블록 하나.
     # 독립 구현 p-net pf_dcp.c 도 요청 쌍마다 pf_dcp_get_req 를 한 번씩 불러 그 블록만 넣는다.
@@ -988,8 +986,6 @@ def test_dcp_get_returns_only_requested_blocks(pn_dut):
     assert bytes(d.dcp_blocks[0].name_of_station) == b"oracle-dut"
 
 
-@known_defect("A20261003-2", "지원하지 않는 옵션(0x04 reserved)을 Get 해도 Identify 블록 전체를 성공으로 돌려준다. "
-              "사양: 그 옵션에 대한 Control/Response(5/4) 블록 하나, BlockError 0x01 Option unsupp.(또는 0x02)")
 def test_dcp_get_unsupported_option_reports_block_error(pn_dut):
     # GetNegResBlock = Option Control(0x05), Suboption Response(0x04), DCPBlockLength=3,
     #   ResponseStatus = 요청 Option(1) Suboption(1) BlockError(1) — 블록 앞 BlockInfo 없음.
