@@ -71,3 +71,4 @@
 | 2026-11-21 | 주기 지터 측정 절차 (담당자 결정) | [20261121-cycle-jitter-procedure.md](20261121-cycle-jitter-procedure.md) | 큐 135 | PREEMPT_RT 없는 A코어 판단을 다시 돌릴 수 있게: 부하 6종 × 1~2시간, wire 프레임 간격 분포, 판정선 (상호운용 필수·100µs 회귀 감지선) |
 | 2026-11-22 | 코어 (일요일 감사, opus) | [20261122-core.md](20261122-core.md) | 136–141 (A20261122-1 ~ -6) | uint64/int64 double 경유 값 변형, 포인트 256개·이름 63자 무음 절단, bind 실패 FB_ERR_PERM, fb_reload 로그 레이스(TSan), cycle_ms 검증 없음. 제안 1건(스키마 `cycle_warn_us`), 문서 제안은 큐 70 비고 |
 | 2026-11-22 | 담당자 결정 (큐 137·140) | [20261122-owner-decisions.md](20261122-owner-decisions.md) | 큐 137·140 비고 | "문제 없는 방향으로": 포인트 256개 초과는 동적 배열로 받음, 잘못된 `cycle_ms` 는 경고 후 8 |
+| 2026-11-25 | PN DCP Get 후속 (11단계 제안 선별) | [20261125-pn-dcp-get-followups.md](20261125-pn-dcp-get-followups.md) | 142 (A20261125-1), 큐 68 비고 | #238 제안. CTT `dcp_get` 의 Identify 형식 Get 요청과 스택의 All selector 확장 (p-net 은 skip) 을 함께 정리 |
