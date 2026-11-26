@@ -56,10 +56,14 @@ int pn_record_read(pn_stack_t *s, uint16_t slot, uint16_t subslot,
     }
 
     if (index == PN_INDEX_IM0) {
+        /* VisibleString[20]: pad with 0x20. A 19-byte literal would copy its NUL. */
+        static const char order_id[] = "FB-ARCH-PN-DEV      ";
+        _Static_assert(sizeof(order_id) - 1 == 20,
+                       "I&M0 OrderID is VisibleString[20]");
         uint8_t im[54];
         memset(im, 0, sizeof(im));
         pn_wr_be16(im, s->cfg.vendor_id);
-        memcpy(im + 2, "FB-ARCH-PN-DEV     ", 20); /* OrderID 20 bytes */
+        memcpy(im + 2, order_id, sizeof(order_id) - 1); /* OrderID 20 bytes */
         memcpy(im + 22, "SN00000000000001", 16);
         pn_wr_be16(im + 38, 0x0001); /* HW rev */
         im[40] = 'V';
