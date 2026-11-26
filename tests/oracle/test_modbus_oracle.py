@@ -503,7 +503,6 @@ def _regs_pdu(fc, addr, n):
 # (registers 길이 = 응답 개수, 없는 값을 만들어 내지 않는다). 스택 API 는 받은 개수를 돌려줄 길이 없으므로
 # 이런 응답은 오류(rc<0)여야 한다. 현재는 rc 0 이고, 받지 못한 레지스터는 이전 캐시 값(0000),
 # 받지 못한 코일은 응답 버퍼 뒤의 초기화되지 않은 스택 메모리에서 나온다.
-@known_defect("A20261004-2", "클라이언트가 요청 수량과 Byte Count 가 다른 읽기 응답을 rc 0 으로 받는다 (없는 값은 이전 캐시·초기화 안 된 메모리). 사양 §6.1~6.4 Byte Count = 2×N / ⌈N/8⌉ → 오류여야 함")
 @pytest.mark.parametrize("cmd,pdu", [
     ("READ 0 h 5 3", _regs_pdu(0x03, 5, 1)),        # 3개 요청, 1개 응답 (Byte Count 2)
     ("READ 0 h 5 2", _regs_pdu(0x03, 5, 4)),        # 2개 요청, 4개 응답 (Byte Count 8)
