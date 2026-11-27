@@ -1120,8 +1120,26 @@ static int client_txn(mb_stack_t *s, uint8_t fc, uint16_t addr, uint16_t qty,
     if (rfc != fc || resp_len < 9) {
         return -EIO;
     }
+    /* V1.1b3 §6.1–§6.4: FC01/02 Byte Count is ceil(qty/8), FC03/04 is 2×qty,
+     * and the ADU is exactly the 9-byte prefix plus that payload. Anything
+     * else is a malformed response. client_recv_adu already consumed this
+     * ADU, so the TCP stream stays aligned and the socket is kept (T9-1
+     * drops only when unread bytes may still be sitting on it). */
     uint8_t nbytes = resp[8];
-    if ((size_t)nbytes + 9 > resp_len) {
+    if (fc == MB_FC_READ_HOLDING || fc == MB_FC_READ_INPUT ||
+        fc == MB_FC_READ_COILS || fc == MB_FC_READ_DISCRETE) {
+        size_t expect = (fc == MB_FC_READ_HOLDING || fc == MB_FC_READ_INPUT)
+                            ? (size_t)qty * 2u
+                            : ((size_t)qty + 7u) / 8u;
+        if ((size_t)nbytes != expect || (size_t)nbytes + 9u != resp_len) {
+            snprintf(s->last_error, sizeof(s->last_error),
+                     "read fc 0x%02x byte count %u want %zu (resp_len %zu "
+                     "want %zu)",
+                     fc, (unsigned)nbytes, expect, resp_len, expect + 9u);
+            LOG_WARN("modbus-stack", "%s", s->last_error);
+            return -EIO;
+        }
+    } else if ((size_t)nbytes + 9u > resp_len) {
         return -EIO;
     }
     if (data_out && data_len) {
