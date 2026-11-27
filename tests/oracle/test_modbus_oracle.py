@@ -523,7 +523,6 @@ def test_client_rejects_read_byte_count_mismatch(mb_client_dut, cmd, pdu):
 # Messaging on TCP/IP V1.0b §3.1.3 MBAP: Unit Identifier 는 서버가 요청에서 그대로 복사한다.
 # pymodbus 3.15.0 클라이언트는 Unit 이 다른 응답을 버린다 ("request ask for id=1 but got id=7, Skipping"
 # → 응답 없음 ModbusIOException). 스택 클라이언트는 TID 만 보고 받아들인다.
-@known_defect("A20261004-3", "클라이언트가 요청과 Unit ID 가 다른 응답(1 → 7)을 rc 0 으로 받는다. MBAP 사양: 서버가 Unit 을 복사, pymodbus 는 그런 응답을 버림")
 def test_client_rejects_response_from_other_unit(mb_client_dut):
     srv = ScriptedMbServer(lambda tid, unit, req: _mbap(tid, 7, _regs_pdu(0x03, 5, 1)))
     try:
