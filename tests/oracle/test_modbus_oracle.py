@@ -731,7 +731,8 @@ def test_adapter_client_failed_write_keeps_remote_value(mb_app_factory, rtype, a
         point = {"name": "p", "access": "readwrite", "data_type": "uint16",
                  "address": {"modbus": {"register_type": rtype, "start": addr, "zero_based": True}}}
         app = mb_app_factory([point], role="client", port=srv.port, timeout_ms=300)
-        assert app.cmd("START") == ["START", "0"]
+        # 사이클 스레드(START)를 띄우지 않는다: 실패한 쓰기와 되읽기 사이에 백그라운드 poll 이 끼면
+        # 미러가 서버 값으로 다시 채워져 결함이 있어도 통과할 수 있다 (2026-11-28, #247 에서 한 번 XPASS).
         assert app.cmd("POLL", timeout=15)[1] == "0"
         before = app.cmd("RU32 p")
         wrote = app.cmd("WU32 p 0x4321")
