@@ -72,3 +72,4 @@
 | 2026-11-22 | 코어 (일요일 감사, opus) | [20261122-core.md](20261122-core.md) | 136–141 (A20261122-1 ~ -6) | uint64/int64 double 경유 값 변형, 포인트 256개·이름 63자 무음 절단, bind 실패 FB_ERR_PERM, fb_reload 로그 레이스(TSan), cycle_ms 검증 없음. 제안 1건(스키마 `cycle_warn_us`), 문서 제안은 큐 70 비고 |
 | 2026-11-22 | 담당자 결정 (큐 137·140) | [20261122-owner-decisions.md](20261122-owner-decisions.md) | 큐 137·140 비고 | "문제 없는 방향으로": 포인트 256개 초과는 동적 배열로 받음, 잘못된 `cycle_ms` 는 경고 후 8 |
 | 2026-11-25 | PN DCP Get 후속 (11단계 제안 선별) | [20261125-pn-dcp-get-followups.md](20261125-pn-dcp-get-followups.md) | 142 (A20261125-1), 큐 68 비고 | #238 제안. CTT `dcp_get` 의 Identify 형식 Get 요청과 스택의 All selector 확장 (p-net 은 skip) 을 함께 정리 |
+| 2026-11-28 | 오라클 정정 (Modbus) | [20261128-oracle-mb-failed-write-race.md](20261128-oracle-mb-failed-write-race.md) | 없음 | #247 확인 요청. A20261004-4 오라클 테스트가 사이클 스레드와 경쟁해 부하 시 우연 통과(XPASS) — `START` 제거, 판정 그대로 |
