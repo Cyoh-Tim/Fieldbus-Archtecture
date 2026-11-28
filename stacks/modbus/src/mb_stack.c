@@ -1060,6 +1060,15 @@ static int client_recv_adu(mb_stack_t *s, uint16_t expect_tid, uint8_t *resp,
         client_drop(s, -EIO);
         return -EIO;
     }
+    /* Messaging on TCP/IP V1.0b §3.1.3: the server recopies Unit Identifier
+     * from the request. A different unit is not this transaction. Same
+     * recovery as a TID mismatch (the three client response paths all land
+     * here). */
+    if (resp[6] != (uint8_t)s->cfg.unit_id) {
+        snprintf(s->last_error, sizeof(s->last_error), "unit mismatch");
+        client_drop(s, -EIO);
+        return -EIO;
+    }
     *resp_len = need;
     client_note_success(s);
     return 0;
