@@ -1,10 +1,18 @@
 #include "modbus_adapter.h"
 #include "modbus_codec.h"
 
+#include <arpa/inet.h>
+#include <errno.h>
 #include <math.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 static int g_fail;
 
@@ -455,6 +463,312 @@ static void test_schema_chars_per_word(void)
     a->destroy(a);
 }
 
+/* A20261004-4. Fake PLC: FC03/04 answers reg[a] = 0xC000+a. A write whose
+ * start address is holding 9 (FC06/16) is exception 02. The client mirror
+ * must stay at the last poll value when that write fails, and when an input
+ * point is rejected locally (read-only on the wire). */
+#define A4_REJECT_ADDR 9
+
+static void a4_wr_be16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v >> 8);
+    p[1] = (uint8_t)v;
+}
+
+static uint16_t a4_rd_be16(const uint8_t *p)
+{
+    return (uint16_t)((p[0] << 8) | p[1]);
+}
+
+static int a4_write_full(int fd, const uint8_t *buf, size_t len)
+{
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = write(fd, buf + off, len - off);
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        if (n <= 0) {
+            return -1;
+        }
+        off += (size_t)n;
+    }
+    return 0;
+}
+
+static int a4_read_full(int fd, uint8_t *buf, size_t len, int timeout_ms)
+{
+    size_t off = 0;
+    while (off < len) {
+        struct pollfd pfd;
+        ssize_t n;
+        memset(&pfd, 0, sizeof(pfd));
+        pfd.fd = fd;
+        pfd.events = POLLIN;
+        int pr = poll(&pfd, 1, timeout_ms);
+        if (pr < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (pr == 0) {
+            return -1;
+        }
+        n = read(fd, buf + off, len - off);
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        if (n <= 0) {
+            return -1;
+        }
+        off += (size_t)n;
+    }
+    return 0;
+}
+
+static int a4_reply_exception(int fd, const uint8_t *hdr, uint8_t fc,
+                              uint8_t code)
+{
+    uint8_t adu[9];
+    a4_wr_be16(adu, a4_rd_be16(hdr));
+    a4_wr_be16(adu + 2, 0);
+    a4_wr_be16(adu + 4, 3);
+    adu[6] = hdr[6];
+    adu[7] = (uint8_t)(fc | 0x80);
+    adu[8] = code;
+    return a4_write_full(fd, adu, sizeof(adu));
+}
+
+static int a4_serve_adu(int fd)
+{
+    uint8_t hdr[7];
+    uint8_t pdu[253];
+    uint16_t mlen;
+    uint16_t addr;
+    uint16_t qty;
+    uint8_t fc;
+    size_t plen;
+
+    if (a4_read_full(fd, hdr, sizeof(hdr), 2000) != 0) {
+        return -1;
+    }
+    mlen = a4_rd_be16(hdr + 4);
+    if (mlen < 2 || mlen > 254) {
+        return -1;
+    }
+    plen = (size_t)mlen - 1u;
+    if (a4_read_full(fd, pdu, plen, 2000) != 0) {
+        return -1;
+    }
+    fc = pdu[0];
+    if ((fc == 0x03 || fc == 0x04) && plen >= 5) {
+        uint8_t adu[260];
+        size_t pdu_len;
+        addr = a4_rd_be16(pdu + 1);
+        qty = a4_rd_be16(pdu + 3);
+        if (qty < 1 || qty > 125) {
+            return a4_reply_exception(fd, hdr, fc, 0x03);
+        }
+        pdu_len = 2u + (size_t)qty * 2u;
+        a4_wr_be16(adu, a4_rd_be16(hdr));
+        a4_wr_be16(adu + 2, 0);
+        a4_wr_be16(adu + 4, (uint16_t)(1u + pdu_len));
+        adu[6] = hdr[6];
+        adu[7] = fc;
+        adu[8] = (uint8_t)(qty * 2u);
+        for (uint16_t i = 0; i < qty; i++) {
+            a4_wr_be16(adu + 9 + (size_t)i * 2u,
+                       (uint16_t)(0xC000u + addr + i));
+        }
+        return a4_write_full(fd, adu, 7u + pdu_len);
+    }
+    if ((fc == 0x06 || fc == 0x10) && plen >= 5) {
+        addr = a4_rd_be16(pdu + 1);
+        if (addr == A4_REJECT_ADDR) {
+            return a4_reply_exception(fd, hdr, fc, 0x02);
+        }
+        {
+            uint8_t adu[12];
+            a4_wr_be16(adu, a4_rd_be16(hdr));
+            a4_wr_be16(adu + 2, 0);
+            a4_wr_be16(adu + 4, 6);
+            adu[6] = hdr[6];
+            memcpy(adu + 7, pdu, 5);
+            return a4_write_full(fd, adu, 12);
+        }
+    }
+    return a4_reply_exception(fd, hdr, fc, 0x01);
+}
+
+static void a4_plc_child(int lfd)
+{
+    signal(SIGPIPE, SIG_IGN);
+    for (;;) {
+        int fd = accept(lfd, NULL, NULL);
+        if (fd < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+        while (a4_serve_adu(fd) == 0) {
+        }
+        close(fd);
+    }
+    close(lfd);
+    _exit(0);
+}
+
+static pid_t a4_start_plc(int *port)
+{
+    int lfd;
+    int one = 1;
+    struct sockaddr_in addr;
+    socklen_t alen;
+    pid_t pid;
+
+    *port = -1;
+    lfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (lfd < 0) {
+        return -1;
+    }
+    setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+    if (bind(lfd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+        listen(lfd, 4) != 0) {
+        close(lfd);
+        return -1;
+    }
+    alen = sizeof(addr);
+    if (getsockname(lfd, (struct sockaddr *)&addr, &alen) != 0) {
+        close(lfd);
+        return -1;
+    }
+    *port = ntohs(addr.sin_port);
+    pid = fork();
+    if (pid < 0) {
+        close(lfd);
+        return -1;
+    }
+    if (pid == 0) {
+        a4_plc_child(lfd);
+    }
+    close(lfd);
+    return pid;
+}
+
+static void a4_stop_plc(pid_t pid)
+{
+    if (pid > 0) {
+        kill(pid, SIGTERM);
+        waitpid(pid, NULL, 0);
+    }
+}
+
+static int a4_read_u16(protocol_adapter_t *a, uint16_t *out)
+{
+    point_value_t rv = {0};
+    int rc = a->read_point(a, "p", &rv);
+    if (rc != 0 || !rv.data || rv.len < 2) {
+        free(rv.data);
+        return rc != 0 ? rc : -EINVAL;
+    }
+    *out = (uint16_t)((rv.data[0] << 8) | rv.data[1]);
+    free(rv.data);
+    return 0;
+}
+
+static void test_client_failed_write_keeps_mirror(const char *rtype, int addr)
+{
+    int port = -1;
+    pid_t pid = a4_start_plc(&port);
+    char params[192];
+    char points[320];
+    protocol_adapter_t *a;
+    int irc;
+    int crc;
+    uint16_t before = 0;
+    uint16_t after = 0;
+    uint16_t expect;
+    uint8_t raw[2] = {0x43, 0x21};
+    point_value_t wv;
+    int rrc;
+    int wrc;
+    int arc;
+
+    if (pid < 0 || port < 0) {
+        fprintf(stderr, "FAIL: %s %d fake PLC start\n", rtype, addr);
+        g_fail = 1;
+        return;
+    }
+    snprintf(params, sizeof(params),
+             "{\"role\":\"client\",\"ip\":\"127.0.0.1\",\"port\":%d,"
+             "\"unit_id\":1,\"timeout_ms\":1000}",
+             port);
+    snprintf(points, sizeof(points),
+             "[{\"name\":\"p\",\"access\":\"readwrite\",\"data_type\":\"uint16\","
+             "\"address\":{\"modbus\":{\"register_type\":\"%s\",\"start\":%d,"
+             "\"zero_based\":true}}}]",
+             rtype, addr);
+
+    a = modbus_adapter_create();
+    irc = a ? a->init(a, params, points) : -1;
+    crc = (irc == 0) ? a->connect(a) : -1;
+    if (!a || irc != 0 || crc != 0) {
+        fprintf(stderr, "FAIL: %s %d client setup init=%d connect=%d\n", rtype,
+                addr, irc, crc);
+        g_fail = 1;
+        if (a) {
+            if (crc == 0) {
+                a->disconnect(a);
+            }
+            a->destroy(a);
+        }
+        a4_stop_plc(pid);
+        return;
+    }
+
+    a->poll_cycle(a);
+    rrc = a4_read_u16(a, &before);
+    expect = (uint16_t)(0xC000u + (unsigned)addr);
+    if (rrc != 0 || before != expect) {
+        fprintf(stderr,
+                "FAIL: %s %d poll mirror %u (0x%04X) rc %d, expected %u "
+                "(0x%04X)\n",
+                rtype, addr, before, before, rrc, expect, expect);
+        g_fail = 1;
+        a->disconnect(a);
+        a->destroy(a);
+        a4_stop_plc(pid);
+        return;
+    }
+
+    wv.data = raw;
+    wv.len = 2;
+    wrc = a->write_point(a, "p", &wv);
+    arc = a4_read_u16(a, &after);
+    if (wrc >= 0) {
+        fprintf(stderr, "FAIL: %s %d write should fail, rc %d\n", rtype, addr,
+                wrc);
+        g_fail = 1;
+    }
+    if (arc != 0 || after != before) {
+        fprintf(stderr,
+                "FAIL: %s %d failed write left mirror %u (0x%04X), poll %u "
+                "(0x%04X), write rc %d, read rc %d\n",
+                rtype, addr, after, after, before, before, wrc, arc);
+        g_fail = 1;
+    }
+
+    a->disconnect(a);
+    a->destroy(a);
+    a4_stop_plc(pid);
+}
+
 static void test_endian_helpers(void)
 {
     uint8_t b[4] = {0x12, 0x34, 0x56, 0x78};
@@ -473,6 +787,9 @@ int main(void)
     test_u16_bitfield_roundtrip();
     test_leading_zero_address_is_decimal();
     test_schema_chars_per_word();
+    /* A20261004-4: holding exception 02, and input rejected before the mirror. */
+    test_client_failed_write_keeps_mirror("holding", A4_REJECT_ADDR);
+    test_client_failed_write_keeps_mirror("input", 5);
     if (g_fail) {
         fprintf(stderr, "test_mb_adapter: FAILED\n");
         return 1;

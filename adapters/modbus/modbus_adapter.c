@@ -921,7 +921,29 @@ static int mb_write_point(protocol_adapter_t *self, const char *point_name,
     }
 
     if (ctx->role == MB_ROLE_CLIENT) {
-        if (pt->reg_type == MB_REG_HOLDING || pt->reg_type == MB_REG_INPUT) {
+        /* V1.1b3 §4.3: input and discrete are read-only on the wire, so
+         * reject them before any mirror update. Holding is staged in the
+         * local map (bit-field RMW and endian packing stay in
+         * write_map_window) and sent from that image. The snapshot is taken
+         * after a bit field's remote read — that fresh image is the RMW
+         * base — and restored when the remote write does not succeed
+         * (V1.1b3 §7: an exception means the server did not apply it). */
+        if (pt->reg_type == MB_REG_INPUT) {
+            LOG_WARN("modbus", "client 는 input 원격 쓰기 불가: %s",
+                     point_name);
+            return -EINVAL;
+        }
+        if (pt->reg_type == MB_REG_HOLDING) {
+            uint16_t qty = pt->quantity;
+            uint16_t *saved;
+            uint16_t *regs;
+            if (qty == 0 || qty > 123) {
+                if (qty > 123) {
+                    LOG_ERROR("modbus", "client write quantity %u > 123: %s",
+                              qty, point_name);
+                }
+                return -EINVAL;
+            }
             if (pt->bit >= 0) {
                 rc = mb_stack_client_read(ctx->stack, pt->reg_type, pt->start,
                                           pt->quantity);
@@ -929,29 +951,39 @@ static int mb_write_point(protocol_adapter_t *self, const char *point_name,
                     return rc;
                 }
             }
-            /* Always write through local map update + client holding write. */
-            rc = write_map_window(ctx->stack, pt, wire, bitfield_io_len(pt));
-            if (rc != 0) {
-                return rc;
-            }
-            if (pt->reg_type != MB_REG_HOLDING) {
-                LOG_WARN("modbus", "client 는 input 원격 쓰기 불가: %s",
-                         point_name);
-                return -EINVAL;
-            }
-            uint16_t qty = pt->quantity;
-            if (qty > 123) {
-                LOG_ERROR("modbus", "client write quantity %u > 123: %s", qty,
-                          point_name);
-                return -EINVAL;
-            }
-            uint16_t *regs = calloc(qty, sizeof(uint16_t));
-            if (!regs) {
+            saved = calloc(qty, sizeof(uint16_t));
+            regs = calloc(qty, sizeof(uint16_t));
+            if (!saved || !regs) {
+                free(saved);
+                free(regs);
                 return -ENOMEM;
             }
-            mb_stack_read_regs(ctx->stack, MB_REG_HOLDING, pt->start, regs,
-                               qty);
-            rc = mb_stack_client_write_regs(ctx->stack, pt->start, regs, qty);
+            rc = mb_stack_read_regs(ctx->stack, MB_REG_HOLDING, pt->start, saved,
+                                    qty);
+            if (rc != 0) {
+                free(saved);
+                free(regs);
+                return rc;
+            }
+            rc = write_map_window(ctx->stack, pt, wire, bitfield_io_len(pt));
+            if (rc == 0) {
+                rc = mb_stack_read_regs(ctx->stack, MB_REG_HOLDING, pt->start,
+                                        regs, qty);
+            }
+            if (rc == 0) {
+                rc = mb_stack_client_write_regs(ctx->stack, pt->start, regs,
+                                                qty);
+            }
+            if (rc != 0) {
+                int rst = mb_stack_write_regs(ctx->stack, MB_REG_HOLDING,
+                                              pt->start, saved, qty);
+                if (rst != 0) {
+                    LOG_ERROR("modbus",
+                              "client write 실패 후 미러 복원 실패: %s (%d)",
+                              point_name, rst);
+                }
+            }
+            free(saved);
             free(regs);
             return rc;
         }
