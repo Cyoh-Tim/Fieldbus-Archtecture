@@ -723,7 +723,6 @@ def _plc_rejecting_writes_at(addr):
 # 쓰기가 실패하면(사양 §7: 예외 응답 = 요청을 수행하지 않음, §4.3: Input Registers 는 읽기 전용) 서버 값은
 # 그대로이므로 미러도 그대로여야 한다. 현재는 원격 쓰기 전에 미러를 먼저 고치고 실패해도 되돌리지 않아,
 # 다음 성공한 poll 까지 PLC 가 받지 않은 값을 읽게 된다 (쓰기 후 되읽기 확인이 거짓 성공).
-@known_defect("A20261004-4", "클라이언트 모드에서 실패한 쓰기(PLC 예외 02, input 레지스터 거부)의 값이 로컬 미러에 남아 fb_read 가 PLC 가 받지 않은 값을 돌려준다")
 @pytest.mark.parametrize("rtype,addr", [("holding", 9), ("input", 5)])
 def test_adapter_client_failed_write_keeps_remote_value(mb_app_factory, rtype, addr):
     srv = ScriptedMbServer(_plc_rejecting_writes_at(9))
